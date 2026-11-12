@@ -27,6 +27,8 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       let body = {};
       if (!['GET', 'HEAD'].includes(request.method)) { try { body = await request.json(); } catch { body = {}; } }
+      if (url.pathname === '/api/trial') body.ip = request.headers.get('cf-connecting-ip') || '';
+      if (url.pathname === '/api/trial' && body && typeof body === 'object' && !body.appUrl) body.appUrl = url.origin;
       const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
       const r = await backend.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body, token });
       return new Response(JSON.stringify(r.json), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS } });
@@ -35,6 +37,11 @@ export default {
     if (url.pathname === '/proxy') return proxy(request, url);
 
     return env.ASSETS.fetch(request);
+  },
+  // Runs once a day (see wrangler.toml): low-credit alerts + expiry reminder emails.
+  async scheduled(event, env, ctx) {
+    if (!backend) backend = createBackend({ store: kvStore(env.DB), fetchFn: (u, i) => fetch(u, i), cacheMs: 30000, mode: 'server' });
+    ctx.waitUntil(backend.daily());
   },
 };
 
