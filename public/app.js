@@ -133,6 +133,14 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) appl
 
 async function boot() {
   const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.get('unsub')) {
+    $('#app').innerHTML = '<div class="boot"><div class="spinner"></div></div>';
+    let msg;
+    try { const r = await fetch('/api/unsub', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: hp.get('unsub') }) }); const d = await r.json(); msg = r.ok ? { en: `You are unsubscribed. You will not get promotion emails from ${d.app} any more.`, fr: `Vous êtes désabonné. Vous ne recevrez plus d'emails promotionnels de ${d.app}.`, ar: `تم إلغاء اشتراكك. لن تصلك رسائل العروض من ${d.app} بعد الآن.` } : null; } catch {}
+    const l = (navigator.language || 'en').slice(0, 2);
+    $('#app').innerHTML = `<div class="block-screen"><div class="ic">${msg ? '✅' : '⚠️'}</div><p>${msg ? msg[l] || msg.en : 'This link is not valid.'}</p></div>`;
+    return;
+  }
   // The browser upgraded our http:// switch back to https:// — remember it and never loop.
   if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
   if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
@@ -353,7 +361,7 @@ function oldCustomerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="customers_edit">📣 Newsletter</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -502,6 +510,19 @@ async function waLoad() {
   try { const r = await api('POST', `/api/admin/customers/${f.dataset.id}/wamsg`, waForm()); $('#wa-text').value = r.text; $('#wa-tpl-text').value = r.template;
     const acc = (state.admin.settings.orderAccounts || []).find((a) => a.id === r.payAcc); $('#wa-info').textContent = (r.type !== 'login' && acc ? `Stripe account: ${acc.name}. ` : '') + (r.isDefault ? 'Default template.' : 'Your saved template.'); }
   catch (e) { toast(e.message, true); }
+}
+const NL_GROUPS = [['all', 'All customers'], ['paying', 'Paying customers (no trials)'], ['active', 'Active subscriptions'], ['expiring', 'Expiring soon'], ['expired', 'Expired subscriptions'], ['trial', 'Trial users']];
+const NL_LANGS = [['en', '🇬🇧 English'], ['fr', '🇫🇷 Français'], ['ar', '🇲🇦 العربية']];
+const nlBlank = () => ({ split: false, lang: 'en', content: { all: {}, en: {}, fr: {}, ar: {} }, badge: '', image: '', coupon: '', link: 'site', group: 'all' });
+const nlFields = (k, c = {}) => `<div class="nl-c" data-k="${k}">${field('Email subject', 'subject_' + k, c.subject || '', { ph: 'e.g. 🎉 Black Friday: 50% off all packages' })}${field('Big title', 'title_' + k, c.title || '', { ph: 'e.g. Black Friday deal 🔥' })}${field('Message', 'body_' + k, c.body || '', { type: 'textarea', rows: 7, ph: 'Write your message. {name} = customer first name. *text* = bold. Empty line = new paragraph.' })}${field('Button text', 'button_' + k, c.button || '', { ph: 'e.g. Get the offer →' })}</div>`;
+function nlRead() {
+  const f = $('[data-form=nl]'); if (!f) return null; const g = (n) => f.elements[n]?.value ?? '';
+  const camp = { id: f.dataset.cid || undefined, split: g('split') === '1', lang: g('lang'), badge: g('badge'), image: g('image').trim(), coupon: g('coupon').trim(), group: g('group'), content: {} };
+  camp.link = g('link') === 'url' ? g('linkUrl').trim() : g('link');
+  for (const k of ['all', 'en', 'fr', 'ar']) camp.content[k] = { subject: g('subject_' + k), title: g('title_' + k), body: g('body_' + k), button: g('button_' + k) };
+  if (!camp.split) camp.content = { all: camp.content.all }; else delete camp.content.all;
+  try { localStorage.setItem('tvp_nl_draft', JSON.stringify(camp)); } catch {}
+  return camp;
 }
 const orderTargets = (grp) => (state.admin.customers || []).filter((c) => c.email && (grp === 'all' || (grp === 'trial' ? c.isTrial : grp === 'notrecent' ? !c.orderSentAt || Date.now() - c.orderSentAt > 7 * 86400000 : c.state === grp)));
 function resellerSaleForm(s) {
@@ -1342,6 +1363,55 @@ const actions = {
     if (phone.startsWith('0')) return toast('Add the country code instead of the first 0 (Thailand 66…, Morocco 212…).', true);
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
     api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
+  },
+  'nl-open': async () => {
+    const st = await api('GET', '/api/admin/newsletter'); const s = state.admin.settings;
+    let d; try { d = JSON.parse(localStorage.getItem('tvp_nl_draft')); } catch {}
+    const running = st.camp?.id && st.groups[st.camp.group]?.left > 0 && st.groups[st.camp.group]?.left < st.groups[st.camp.group]?.total;
+    if (running) d = st.camp; d = { ...nlBlank(), ...(d || {}), content: { ...nlBlank().content, ...(d?.content || {}) } };
+    const link = String(d.link || ''); const linkSel = ['', 'site', 'app'].includes(link) || link.startsWith('pkg:') ? link : 'url';
+    const body = modal('📣 Newsletter / promotion email', `<form data-form="nl" onsubmit="return false" ${running ? `data-cid="${esc(d.id)}"` : ''}>
+      ${running ? `<div class="notice info">⏸ Your last campaign stopped with <b>${st.groups[d.group].left}</b> customers still waiting. Press <b>Send</b> to continue it, or <a data-act="nl-new" style="cursor:pointer;text-decoration:underline">start a new one</a>.</div>` : ''}
+      <div class="grid2">${field('Send to', 'group', d.group, { type: 'select', options: NL_GROUPS.map(([k, l]) => [k, `${l} (${st.groups[k].total})`]) })}${field('Languages', 'split', d.split ? '1' : '0', { type: 'select', options: [['0', 'One message for everyone'], ['1', 'Different message per language (EN / FR / AR)']] })}</div>
+      <div id="nl-one">${field('Email language (greeting & footer)', 'lang', d.lang || 'en', { type: 'select', options: NL_LANGS })}${nlFields('all', d.content.all)}</div>
+      <div id="nl-split"><p class="small muted" style="margin:0 0 6px">Each customer gets the version in their language. If one language is empty, they get English.</p><div class="row" style="gap:6px;margin-bottom:8px">${NL_LANGS.map(([k, l], i) => `<button type="button" class="btn sm ${i ? '' : 'primary'}" data-act="nl-tab" data-k="${k}">${l}</button>`).join('')}</div>${['en', 'fr', 'ar'].map((k) => nlFields(k, d.content[k])).join('')}</div>
+      <div class="grid3">${field('Top badge (optional)', 'badge', d.badge, { ph: '🔥 Limited offer' })}${field('Coupon code (optional)', 'coupon', d.coupon, { ph: 'LION001' })}${field('Image URL (optional)', 'image', d.image, { attrs: 'autocapitalize="none"', ph: 'https://…/banner.jpg' })}</div>
+      <div class="grid2">${field('Button opens', 'link', linkSel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['app', 'The INTPROTO-TV app'], ...s.orderPackages.map((p) => ['pkg:' + p.id, `Pay: ${p.title} (random Stripe link)`]), ['url', 'Other link…']] })}${field('Other link', 'linkUrl', linkSel === 'url' ? link : '', { attrs: 'autocapitalize="none"', ph: 'https://…' })}</div>
+      <div class="row"><select id="nl-pvlang" style="width:auto">${NL_LANGS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button type="button" class="btn" data-act="nl-preview">👁 Preview</button><input id="nl-test" value="${esc(s.email.adminEmail || '')}" placeholder="test@email.com" style="flex:1;min-width:150px" autocapitalize="none"><button type="button" class="btn" data-act="nl-test">Send test</button></div>
+      <iframe id="nl-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe>
+      <div class="row" style="margin-top:12px"><span class="small muted" style="flex:1">Every email has an "Unsubscribe" link; unsubscribed customers are skipped${st.unsubscribed ? ` (${st.unsubscribed} so far)` : ''}. Sent 100 at a time. If Resend's daily limit stops it, open this again tomorrow and press Send to continue — nobody gets it twice.</span><button type="button" class="btn primary" data-act="nl-send">📨 Send</button></div>
+      <div id="nl-out"></div></form>`, { wide: true });
+    const f = $('[data-form=nl]', body);
+    const sync = () => { const sp = f.split.value === '1'; $('#nl-one').style.display = sp ? 'none' : ''; $('#nl-split').style.display = sp ? '' : 'none'; f.linkUrl.closest('.field').style.display = f.link.value === 'url' ? '' : 'none'; };
+    f.addEventListener('change', () => { sync(); nlRead(); }); f.addEventListener('input', () => nlRead());
+    sync(); actions['nl-tab']({ dataset: { k: 'en' } });
+  },
+  'nl-tab': (el) => { document.querySelectorAll('#nl-split .nl-c').forEach((x) => (x.style.display = x.dataset.k === el.dataset.k ? '' : 'none')); document.querySelectorAll('[data-act=nl-tab]').forEach((b) => b.classList.toggle('primary', b.dataset.k === el.dataset.k)); },
+  'nl-new': async () => { await api('POST', '/api/admin/newsletter/new', {}); try { localStorage.removeItem('tvp_nl_draft'); } catch {} closeModal(); actions['nl-open'](); },
+  'nl-preview': async () => {
+    const camp = nlRead(); const lang = $('#nl-pvlang').value;
+    const pv = await api('POST', '/api/admin/newsletter/preview', { camp, lang, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') });
+    const fr = $('#nl-pv'); fr.style.display = ''; fr.srcdoc = pv.html; fr.scrollIntoView({ behavior: 'smooth' }); toast('Subject: ' + pv.subject);
+  },
+  'nl-test': async (el) => {
+    el.disabled = true;
+    try { await api('POST', '/api/admin/newsletter/send', { camp: nlRead(), test: $('#nl-test').value, lang: $('#nl-pvlang').value, appUrl: location.origin }); toast('Test sent ✓'); } catch (e) { toast(e.message, true); }
+    el.disabled = false;
+  },
+  'nl-send': async (el) => {
+    const f = $('[data-form=nl]'); const camp = nlRead(); const grp = f.group.value; const label = f.group.selectedOptions[0].textContent;
+    if (!confirm(`Send this email to: ${label}?`)) return;
+    el.disabled = true; const out = $('#nl-out'); let total = 0;
+    try {
+      for (let i = 0; i < 100; i++) {
+        out.innerHTML = `<div class="spinner"></div><p class="small muted" style="text-align:center">Sent ${total}…</p>`;
+        if (i) await new Promise((ok) => setTimeout(ok, 700));
+        const r = await api('POST', '/api/admin/newsletter/send', { camp: { ...camp, id: f.dataset.cid || camp.id }, group: grp, appUrl: location.origin });
+        f.dataset.cid = r.id; total += r.sent;
+        if (!r.left || !r.sent) { out.innerHTML = `<div class="notice success">✅ Sent ${total} emails.${r.left ? ` ${r.left} still waiting.` : ' Everyone in this group got it.'}</div>`; break; }
+      }
+    } catch (e) { out.innerHTML = `<div class="notice danger">${esc(e.message)} — sent ${total}. Open the newsletter again later and press Send to continue.</div>`; }
+    el.disabled = false;
   },
   'order-custom': async () => {
     const s = state.admin.settings; const p0 = s.orderPackages[0] || {};

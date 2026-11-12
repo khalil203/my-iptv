@@ -175,6 +175,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/renewal/send') return 'customers_edit';
   if (path === '/api/admin/order/send') return 'customers_edit';
   if (path === '/api/admin/order/custom') return 'customers_edit';
+  if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
   if (path === '/api/admin/stripe/paylinks') return 'plans';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
@@ -382,6 +383,47 @@ ${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style
 </table></td></tr></table></body></html>`;
   return { subject: v('subject').replace(/<[^>]+>/g, ''), html, payAcc: pl?.acc || '' };
 }
+// Newsletter / promotion email. camp = { id, content: { en: { subject, title, body, button }, fr, ar }, image, badge, coupon, link: 'site' | 'pkg:<id>' | url }
+const NL = { en: { dear: 'Hello {name},', dearAny: 'Hello,', coupon: '🎁 Your coupon code', help: '📞 Need assistance?', regards: 'Warm regards,', team: 'Customer Support Team', unsub: "Don't want these emails?", unsubLink: 'Unsubscribe', btn: 'See the offer →' },
+  fr: { dear: 'Bonjour {name},', dearAny: 'Bonjour,', coupon: '🎁 Votre code promo', help: "📞 Besoin d'aide ?", regards: 'Cordialement,', team: 'Service client', unsub: 'Vous ne souhaitez plus recevoir ces emails ?', unsubLink: 'Se désabonner', btn: "Voir l'offre →" },
+  ar: { dear: 'مرحبًا {name}،', dearAny: 'مرحبًا،', coupon: '🎁 كود الخصم الخاص بك', help: '📞 تحتاج مساعدة؟', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', unsub: 'لا تريد هذه الرسائل؟', unsubLink: 'إلغاء الاشتراك', btn: 'شاهد العرض ←' } };
+export function newsletterEmail(s, c, camp, appUrl, unsubUrl) {
+  const pick = (l) => { const x = camp.content?.[l] || {}; return x.subject || x.title || x.body ? x : null; };
+  const lang = (camp.split && pick(c?.lang) ? c.lang : (camp.split ? (pick('en') ? 'en' : ['fr', 'ar'].find(pick) || 'en') : (['en', 'fr', 'ar'].includes(camp.lang) ? camp.lang : 'en')));
+  const C = (camp.split ? pick(lang) : camp.content?.all || camp.content?.[lang]) || {}; const L = NL[camp.split ? lang : (camp.lang || 'en')] || NL.en;
+  const dir = (camp.split ? lang : camp.lang) === 'ar' ? 'rtl' : 'ltr'; const al = dir === 'rtl' ? 'right' : 'left'; const e = escHtml;
+  const app = s.branding.appName || 'IPTV'; const first = (c?.name || '').split(' ')[0];
+  const fillTxt = (t) => String(t || '').replace(/\{name\}/g, first || '').replace(/\{app\}/g, app);
+  const para = (t) => e(fillTxt(t)).replace(/\*(.+?)\*/g, '<b>$1</b>').split(/\n{2,}/).map((p) => `<p dir="auto" style="margin:0 0 14px;font-size:15px;line-height:1.65">${p.replace(/\n/g, '<br>')}</p>`).join('');
+  const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
+  const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
+  const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
+  let link = ''; let payAcc = '';
+  if (camp.link === 'site') link = site;
+  else if (camp.link === 'app') link = base;
+  else if (String(camp.link || '').startsWith('pkg:')) { const pk = (s.orderPackages || []).find((p) => p.id === camp.link.slice(4)); const pl = pk && pickPayLink(s, pk); link = pl?.url || site; payAcc = pl?.acc || ''; }
+  else if (/^https?:\/\/\S+$/.test(String(camp.link || ''))) link = camp.link;
+  const html = `<!DOCTYPE html><html lang="${lang}" dir="${dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(fillTxt(C.subject || C.title))}</title>
+<style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
+@media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
+<body dir="${dir}" style="background:#f4f7fa;margin:0;padding:0"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7fa;padding:30px 10px"><tr><td align="center">
+<table border="0" cellpadding="0" cellspacing="0" width="600" class="container" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 25px rgba(0,0,0,.05)">
+<tr><td height="6" style="background:linear-gradient(90deg,#0284c7 0%,#0ea5e9 50%,#38bdf8 100%);font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:36px 40px 26px;background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);border-bottom:1px solid #f1f5f9">
+${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="90" style="display:block;border-radius:50%;border:3px solid #0ea5e9;box-shadow:0 4px 12px rgba(14,165,233,.2);margin:0 auto 16px">` : ''}
+${camp.badge ? `<div dir="auto" style="display:inline-block;background:#0369a1;color:#fff;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${e(fillTxt(camp.badge))}</div>` : ''}
+${C.title ? `<h1 class="header-title" dir="auto" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${e(fillTxt(C.title))}</h1>` : ''}</td></tr>
+${camp.image ? `<tr><td style="padding:0"><img src="${e(camp.image)}" alt="" width="600" style="display:block;width:100%;max-width:600px"></td></tr>` : ''}
+<tr><td class="mobile-pad" style="padding:30px 40px 10px;text-align:${al}"><p style="margin:0 0 14px;font-size:16px;font-weight:600;color:#0f172a">${first ? e(L.dear.replace('{name}', first)) : L.dearAny}</p>${para(C.body)}</td></tr>
+${camp.coupon ? `<tr><td class="mobile-pad" style="padding:0 40px 18px" align="center"><div style="background:#f0f9ff;border:2px dashed #38bdf8;border-radius:12px;padding:14px 20px;text-align:center"><div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:6px">${L.coupon}</div><div style="font-family:'Courier New',monospace;font-size:24px;font-weight:800;color:#0284c7;letter-spacing:2px">${e(camp.coupon)}</div></div></td></tr>` : ''}
+${link ? `<tr><td align="center" class="mobile-pad" style="padding:6px 40px 30px"><a href="${e(link)}" class="cta-btn" style="display:inline-block;background:#0284c7;color:#fff;font-size:16px;font-weight:700;text-decoration:none;padding:15px 36px;border-radius:8px;box-shadow:0 4px 14px rgba(2,132,199,.3)">${e(fillTxt(C.button) || L.btn)}</a></td></tr>` : ''}
+<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0"><tr><td style="padding:18px 22px;text-align:${al}"><div style="font-size:15px;font-weight:700;color:#166534;margin-bottom:6px">${L.help}</div><div style="font-size:14px;color:#166534">
+${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.email.supportEmail)}</a>` : ''}${s.email.supportEmail && site ? ' &nbsp;|&nbsp; ' : ''}${site ? `🌐 <a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a>` : ''}${s.branding.supportUrl ? ` &nbsp;|&nbsp; 💬 <a href="${e(s.branding.supportUrl)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.branding.supportLabel || 'WhatsApp')}</a>` : ''}</div></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 28px;border-bottom:1px solid #f1f5f9;text-align:${al}"><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:#0284c7;font-weight:600">${L.team}</span></p></td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:20px 40px;background:#f8fafc;text-align:center;font-size:12px;color:#94a3b8">${site ? `<a href="${e(site)}" style="font-size:13px;font-weight:700;color:#0284c7;text-decoration:none">${e(siteTxt)}</a><br>` : ''}${unsubUrl ? `<span style="display:inline-block;margin-top:8px">${L.unsub} <a href="${e(unsubUrl)}" style="color:#64748b">${L.unsubLink}</a></span>` : ''}</td></tr>
+</table></td></tr></table></body></html>`;
+  return { subject: fillTxt(C.subject || C.title || app), html, payAcc, lang };
+}
 // WhatsApp message templates. {placeholders} are filled per customer. Admin can override them in settings.waTemplates
 export const WA_TPL = {
   pay: {
@@ -464,6 +506,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     sCache = s; sAt = Date.now();
     return s;
   }
+  const unsubSig = async (s, id) => (await hmac(s.security.proxySecret, 'unsub:' + id)).slice(0, 16);
+  const unsubUrl = async (s, c, appUrl) => `${String(s.email.appUrl || appUrl || '').replace(/\/+$/, '')}/#unsub=${c.id}.${await unsubSig(s, c.id)}`;
+  function nlGroup(list, grp, warnDays) {
+    const now = Date.now();
+    return list.filter((c) => {
+      if (!cleanEmail(c.email) || c.unsub) return false;
+      const exp = c.expiresAt < now; const disabled = c.status === 'disabled';
+      if (grp === 'all') return true;
+      if (grp === 'paying') return !c.isTrial && !disabled;
+      if (grp === 'active') return !exp && !disabled && !c.isTrial;
+      if (grp === 'expiring') return !exp && !disabled && c.expiresAt - now <= (warnDays || 7) * DAYMS;
+      if (grp === 'expired') return exp && !c.isTrial;
+      if (grp === 'trial') return !!c.isTrial;
+      return false;
+    });
+  }
   async function saveSettings(s) { await store.put('settings', s); sCache = s; sAt = Date.now(); }
   const getCustomers = async () => (await store.get('customers')) || [];
   const saveCustomers = (c) => store.put('customers', c);
@@ -532,7 +590,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Who can get a renewal email right now
   function renewalTargets(list, onlyRecentDays) {
     const now = Date.now();
-    return list.filter((c) => cleanEmail(c.email) && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
+    return list.filter((c) => cleanEmail(c.email) && !c.unsub && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
   }
   async function sentToday() { const k = 'renewsent:' + new Date().toISOString().slice(0, 10); return { k, n: (await store.get(k)) || 0 }; }
   function loginMail(s, c, password, kind) {
@@ -758,6 +816,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('trial', `Free trial ${username} for ${name} <${email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}`);
         const showOnScreen = !sent.ok || s.trial.showCredentialsOnScreen;
         return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, ...(showOnScreen ? { username, password } : {}) });
+      }
+      if (R('POST', '/api/unsub')) { // public: link from newsletter footer
+        const [id, sig] = String(body.t || '').split('.');
+        if (!id || !sig || sig !== (await unsubSig(s, id))) return err(400, 'Invalid link');
+        const list = await getCustomers(); const c = list.find((x) => x.id === id); if (!c) return err(404, 'Not found');
+        if (!c.unsub) { c.unsub = Date.now(); await saveCustomers(list); await log('customer', `${c.username} unsubscribed from emails`); }
+        return ok({ ok: true, app: s.branding.appName });
       }
       if (R('GET', '/api/relay-check')) { // used by the stream relay to check a customer's playback token
         const okTok = await verifyProxyToken(s.security.proxySecret, query.t);
@@ -1267,7 +1332,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const want = new Set((body.ids || []).slice(0, 100));
         const pick = (c) => (body.pkg === 'random' ? pk[Math.floor(Math.random() * pk.length)] : pk.find((p) => p.id === body.pkg));
         if (body.pkg !== 'random' && !pick()) return err(400, 'Choose a package.');
-        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email)).map((c) => { const p = pick(c); return { c, p, m: orderEmail(s, c, p, body.appUrl) }; });
+        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email) && !c.unsub).map((c) => { const p = pick(c); return { c, p, m: orderEmail(s, c, p, body.appUrl) }; });
         if (!batch.length) return ok({ sent: 0 });
         const r = await sendBatch(s, batch.map(({ c, m }) => ({ to: c.email, subject: m.subject, html: m.html })));
         if (!r.ok) return err(502, r.error);
@@ -1276,6 +1341,27 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('customer', `Package emails sent to ${batch.length} customers (${body.pkg === 'random' ? 'random packages' : batch[0].p.title})`);
         return ok({ sent: batch.length });
       }
+      if (R('GET', '/api/admin/newsletter')) { // groups and saved draft
+        const list = await getCustomers(); const w = Number(s.userDashboard.expiryWarningDays) || 7; const camp = (await store.get('newsletter')) || null;
+        const groups = Object.fromEntries(['all', 'paying', 'active', 'expiring', 'expired', 'trial'].map((g) => { const t = nlGroup(list, g, w); return [g, { total: t.length, left: camp?.id ? t.filter((c) => c.nlLast !== camp.id).length : t.length }]; }));
+        return ok({ groups, camp, unsubscribed: list.filter((c) => c.unsub).length });
+      }
+      if (R('POST', '/api/admin/newsletter/preview')) { const m = newsletterEmail(s, { name: body.name ?? 'Linko', lang: body.lang || 'en' }, body.camp || {}, body.appUrl, '#'); return ok(m); }
+      if (R('POST', '/api/admin/newsletter/send')) { // body: { camp, group, test }
+        const camp = body.camp || {}; if (!Object.values(camp.content || {}).some((x) => x?.subject || x?.title)) return err(400, 'Write a subject or a title first.');
+        if (body.test) { const to = cleanEmail(body.test); if (!to) return err(400, 'Enter a valid test email.'); const m = newsletterEmail(s, { name: 'Linko', lang: body.lang || 'en' }, camp, body.appUrl, '#'); const r = await sendEmail(s, to, '[TEST] ' + m.subject, m.html); return r.ok ? ok({ sent: 1 }) : err(502, r.error); }
+        if (!camp.id) camp.id = 'nl' + uid(4);
+        await store.put('newsletter', { ...camp, group: body.group, savedAt: Date.now() });
+        const list = await getCustomers(); const targets = nlGroup(list, body.group, Number(s.userDashboard.expiryWarningDays) || 7).filter((c) => c.nlLast !== camp.id);
+        const batch = targets.slice(0, 100); if (!batch.length) return ok({ sent: 0, left: 0, id: camp.id });
+        const msgs = []; for (const c of batch) { const m = newsletterEmail(s, c, camp, body.appUrl, await unsubUrl(s, c, body.appUrl)); msgs.push({ to: c.email, subject: m.subject, html: m.html }); }
+        const r = await sendBatch(s, msgs); if (!r.ok) return err(502, r.error);
+        const now = Date.now(); for (const c of batch) { c.nlLast = camp.id; c.nlAt = now; }
+        await saveCustomers(list);
+        await log('customer', `Newsletter "${(camp.content.all || camp.content.en || Object.values(camp.content)[0])?.subject || ''}" sent to ${batch.length} (${body.group})`);
+        return ok({ sent: batch.length, left: targets.length - batch.length, id: camp.id });
+      }
+      if (R('POST', '/api/admin/newsletter/new')) { await store.del('newsletter'); return ok({ ok: true }); }
       if (R('POST', '/api/admin/order/custom')) { // manual email: any address, own details; body.preview = only build it
         const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
         const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
