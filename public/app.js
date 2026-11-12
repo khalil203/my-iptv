@@ -1233,7 +1233,8 @@ const actions = {
       <p class="small muted">Sent today: ${st.sentToday} / ${st.dailyLimit}. You can send <b>${left}</b> more today. Newest expiries go first; the rest can be sent on the next days.</p>
       <div class="row"><button class="btn primary" data-act="renewal-go" data-all="1" ${st.waiting ? '' : 'disabled'}>📨 Send to ALL ${st.waiting} now</button><button class="btn" data-act="renewal-go" ${left && st.waiting ? '' : 'disabled'}>Today's limit only (${Math.min(left, st.waiting)})</button><button class="btn" data-act="renewal-go" data-recent="1" ${left && st.recent ? '' : 'disabled'}>Only recent (${Math.min(left, st.recent)})</button></div>
       <p class="small muted">"Send to ALL" ignores the daily limit and sends in batches of 100. Your Resend plan must allow that many emails (free plan: 100/day, 3,000/month) — if Resend stops, the rest stay waiting.</p>
-      <div id="rb-out" style="margin-top:12px"></div>`);
+      <div id="rb-out" style="margin-top:12px"></div>
+      ${st.invalid.length ? `<div class="notice warning" style="margin-top:12px"><b>⚠️ ${st.invalid.length} expired customers have an invalid email</b> — they are skipped. Fix them with Edit:<div class="small" style="margin-top:6px">${st.invalid.map((c) => `<div class="row" style="justify-content:space-between;padding:3px 0"><span>${esc(c.name)} <span class="tagp">${esc(c.orderNo || c.username)}</span> <span class="muted">“${esc(c.email)}”</span></span><button class="btn sm" data-act="edit-customer" data-id="${c.id}">Edit</button></div>`).join('')}</div></div>` : ''}`);
   },
   'renewal-go': async (el) => {
     const all = !!el.dataset.all;
@@ -1310,7 +1311,7 @@ const actions = {
   'cust-filter': (el) => { state.admin.filter = el.dataset.f; state.admin.custLimit = 60; $('#admin-body').innerHTML = adminCustomers(); },
   'cust-more': () => { state.admin.custLimit = (state.admin.custLimit || 60) + 100; $('#cust-list').innerHTML = customerListHtml(); },
   'new-customer': () => { modal('Add customer', customerForm(null), { wide: true }); },
-  'edit-customer': (el) => { const c = state.admin.customers.find((x) => x.id === el.dataset.id); modal('Edit customer', customerForm(c), { wide: true }); },
+  'edit-customer': async (el) => { if (!(state.admin.customers || []).some((x) => x.id === el.dataset.id)) state.admin.customers = await api('GET', '/api/admin/customers'); const c = state.admin.customers.find((x) => x.id === el.dataset.id); modal('Edit customer', customerForm(c), { wide: true }); },
   'gen-login': () => {
     const f = $('form[data-form=customer]');
     const rnd = (n, chars) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => chars[x % chars.length]).join('');

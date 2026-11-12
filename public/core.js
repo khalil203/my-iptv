@@ -172,6 +172,11 @@ function permFor(method, path, body) {
   return 'owner';
 }
 
+// Returns a clean, valid email address, or '' if the text isn't one ("name@site.com," -> "name@site.com")
+export function cleanEmail(x) {
+  const m = String(x || '').toLowerCase().match(/[a-z0-9._%+\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}/);
+  return m ? m[0] : '';
+}
 export const toUsd = (amount, cur, rates) => (Number(amount) || 0) / (Number((rates || {})[cur]) || 1);
 export const fromUsd = (usd, cur, rates) => (Number(usd) || 0) * (Number((rates || {})[cur]) || 1);
 const DAYMS = 86400000;
@@ -400,6 +405,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
   async function sendEmail(s, to, subject, html) {
     const e = s.email;
+    to = cleanEmail(to);
+    if (!to) return { ok: false, error: 'This is not a valid email address.' };
     if (!e.resendKey || !e.from || !to) return { ok: false, skipped: true, error: 'Email is not set up (Resend key / sender missing).' };
     try {
       const res = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: e.from, to: [to], subject, html }) });
@@ -414,6 +421,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (!e.resendKey || !e.from) return { ok: false, error: 'Email is not set up (Resend key / sender missing).' };
     if (!msgs.length) return { ok: true, sent: 0 };
     try {
+      msgs = msgs.map((m) => ({ ...m, to: cleanEmail(m.to) })).filter((m) => m.to);
+      if (!msgs.length) return { ok: true, sent: 0 };
       const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: e.from, to: [m.to], subject: m.subject, html: m.html }))) });
       const d = await r.json().catch(() => ({}));
       return r.ok ? { ok: true, sent: msgs.length } : { ok: false, error: d.message || 'Resend error ' + r.status };
@@ -422,7 +431,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Who can get a renewal email right now
   function renewalTargets(list, onlyRecentDays) {
     const now = Date.now();
-    return list.filter((c) => c.email && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
+    return list.filter((c) => cleanEmail(c.email) && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
   }
   async function sentToday() { const k = 'renewsent:' + new Date().toISOString().slice(0, 10); return { k, n: (await store.get(k)) || 0 }; }
   function loginMail(s, c, password, kind) {
@@ -834,7 +843,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const salt = uid(8);
         const c = {
           id: uid(8), name: String(body.name || username), phone: String(body.phone || ''), note: String(body.note || ''),
-          email: String(body.email || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
+          email: cleanEmail(body.email) || String(body.email || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
           username, salt, passwordHash: await hashPassword(body.password, salt), loginPassword: String(body.password),
           lineUsername: body.lineSame !== false ? username : String(body.lineUsername || ''),
           linePassword: body.lineSame !== false ? String(body.password) : String(body.linePassword || ''),
@@ -869,6 +878,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
         if (method === 'PUT' && !sub) {
           for (const k of ['name', 'phone', 'note', 'lineUsername', 'linePassword', 'lineId', 'planId', 'email', 'whatsapp', 'lang']) if (body[k] !== undefined) c[k] = String(body[k]);
+          if (body.email !== undefined) c.email = cleanEmail(body.email) || String(body.email).trim();
           if (body.connections !== undefined) c.connections = Number(body.connections) || 1;
           if (body.username && body.username !== c.username) {
             const u = String(body.username).trim();
@@ -1095,6 +1105,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(r);
       }
 
+      if (R('POST', '/api/admin/clean-emails')) {
+        const list = await getCustomers(); let fixed = 0;
+        for (const c of list) { if (!c.email) continue; const e = cleanEmail(c.email); if (e && e !== c.email) { c.email = e; fixed++; } }
+        if (fixed) await saveCustomers(list);
+        await log('customer', `Cleaned ${fixed} email addresses`);
+        return ok({ fixed });
+      }
       // ----- duplicates -----
       if (R('GET', '/api/admin/duplicates')) {
         const list = await getCustomers();
@@ -1120,7 +1137,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       // ----- renewal emails (bulk) -----
       if (R('GET', '/api/admin/renewal/status')) {
         const list = await getCustomers(); const t = await sentToday();
-        return ok({ waiting: renewalTargets(list).length, recent: renewalTargets(list, s.renewalOffer.autoDays || 3).length, sentToday: t.n, dailyLimit: Number(s.renewalOffer.dailyLimit) || 90 });
+        const invalid = list.filter((c) => c.email && !cleanEmail(c.email) && c.expiresAt < Date.now()).map((c) => ({ id: c.id, name: c.name, username: c.username, orderNo: c.orderNo, email: c.email }));
+        return ok({ waiting: renewalTargets(list).length, recent: renewalTargets(list, s.renewalOffer.autoDays || 3).length, sentToday: t.n, dailyLimit: Number(s.renewalOffer.dailyLimit) || 90, invalid });
       }
       if (R('POST', '/api/admin/renewal/send')) { // sends the next batch (max 50 per call, within today's limit)
         const list = await getCustomers(); const t = await sentToday();
