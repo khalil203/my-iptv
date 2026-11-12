@@ -296,8 +296,21 @@ function custActions(c) {
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
 }
 function customerListHtml() {
+  const all = filteredCustomers();
+  if (!all.length) return `<div class="empty"><span class="ic">👥</span>No customers here yet.</div>`;
+  const lim = state.admin.custLimit || 60;
+  const list = all.slice(0, lim);
+  const more = all.length > lim ? `<div style="text-align:center;margin:14px"><button class="btn" data-act="cust-more">Show more (${all.length - lim} left)</button></div>` : '';
+  const narrow = matchMedia('(max-width: 760px)').matches;
+  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
+      <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+      <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
+    </tbody></table></div>${more}`;
+}
+function oldCustomerListHtml() {
   const list = filteredCustomers();
-  if (!list.length) return `<div class="empty"><span class="ic">👥</span>No customers here yet.</div>`;
   return `<div class="tbl-wrap cust-table"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
     ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
@@ -367,7 +380,7 @@ async function adminSubs() {
   const st = await api('GET', '/api/admin/stats');
   const a = state.admin;
   const lim = a.subDays === 'all' ? Infinity : Number(a.subDays);
-  const list = a.customers.filter((c) => c.state !== 'disabled' && c.daysLeft <= lim).sort((x, y) => x.expiresAt - y.expiresAt);
+  const list = a.customers.filter((c) => c.state !== 'disabled' && c.daysLeft <= lim && (a.subDays === 'all' || c.daysLeft >= -30)).sort((x, y) => x.expiresAt - y.expiresAt).slice(0, 150);
   const renewals = a.customers.flatMap((c) => (c.renewals || []).map((r) => ({ ...r, name: c.name, username: c.username }))).sort((x, y) => y.at - x.at).slice(0, 40);
   const max = Math.max(1, ...Object.values(st.byMonth || {}));
   return `<div class="stats">
@@ -964,7 +977,8 @@ const actions = {
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
   logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); document.body.className = ''; await refreshConfig(); route(); },
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
-  'cust-filter': (el) => { state.admin.filter = el.dataset.f; $('#admin-body').innerHTML = adminCustomers(); },
+  'cust-filter': (el) => { state.admin.filter = el.dataset.f; state.admin.custLimit = 60; $('#admin-body').innerHTML = adminCustomers(); },
+  'cust-more': () => { state.admin.custLimit = (state.admin.custLimit || 60) + 100; $('#cust-list').innerHTML = customerListHtml(); },
   'new-customer': () => { modal('Add customer', customerForm(null), { wide: true }); },
   'edit-customer': (el) => { const c = state.admin.customers.find((x) => x.id === el.dataset.id); modal('Edit customer', customerForm(c), { wide: true }); },
   'gen-login': () => {
@@ -1177,7 +1191,7 @@ document.addEventListener('submit', (e) => {
 let searchT;
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t.dataset.input === 'cust-search') { state.admin.q = t.value; $('#cust-list').innerHTML = customerListHtml(); }
+  if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
   if (t.dataset.input === 'u-search') { state.user.q = t.value; clearTimeout(searchT); searchT = setTimeout(() => { const pos = t.selectionStart; renderUserTab().then(() => { const n = $('[data-input=u-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); }, 300); }
   const pf = t.closest('form[data-preview]');
   if (pf) { const o = formToObj(pf).branding; applyBranding(o); $('#login-preview').innerHTML = loginCard(o, { preview: true }); }
