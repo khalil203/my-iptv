@@ -93,7 +93,7 @@ function render() {
     card('tv', '📺', L.androidTV, L.tvSteps, apkBtn),
     card('ios', '📱', L.iphone, L.iSteps, ''),
     card('win', '🪟', L.windows, L.wSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Windows-Setup.exe">${L.winDl}</a>`),
-    card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac.dmg">${L.macDl}</a>`),
+    card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${L.macDl} · Apple M1–M4</a><a class="btn block" style="margin-top:8px" href="${REL}INTPROTO-TV-Mac-x64.dmg">${L.macDl} · Intel</a>`),
   ].join('');
 }
 document.addEventListener('click', (e) => { const a = e.target.closest('[data-l]'); if (a) { lang = a.dataset.l; localStorage.setItem('tvp_lang', lang); render(); } });

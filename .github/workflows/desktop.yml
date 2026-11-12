@@ -34,7 +34,7 @@ jobs:
           body: |
             Install INTPROTO-TV on your computer. The app updates itself automatically — install it only once.
             • Windows: download INTPROTO-TV-Windows-Setup.exe and open it (if Windows warns, click "More info" → "Run anyway").
-            • Mac: download INTPROTO-TV-Mac.dmg, drag the app to Applications, then right-click it → Open (or System Settings → Privacy & Security → Open Anyway).
+            • Mac: download INTPROTO-TV-Mac-arm64.dmg (Apple chip) or INTPROTO-TV-Mac-x64.dmg (Intel), drag the app to Applications, then right-click it → Open (or System Settings → Privacy & Security → Open Anyway).
           files: |
             desktop/dist/*.exe
             desktop/dist/*.dmg
