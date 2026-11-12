@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS = () => ({
     announcement: '', announcementType: 'info',
     maintenance: false, maintenanceMessage: 'We are updating the service. Please come back soon.',
   },
-  player: { serverUrl: '', useProxy: true, userAgent: 'IPTVSmartersPro' },
+  player: { serverUrl: '', useProxy: true, userAgent: 'IPTVSmartersPro', mode: 'proxy' },
   reseller: {
     enabled: false, autoSync: true,
     baseUrl: '', apiKey: '', username: '', password: '',
@@ -577,6 +577,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             stream: canWatch && s.player.serverUrl ? {
               server: trimSlash(s.player.serverUrl), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
+              mode: s.player.mode === 'direct' ? 'direct' : 'proxy', userAgent: s.player.userAgent || 'IPTVSmartersPro',
+              dns: String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, ''),
             } : null,
           });
         }

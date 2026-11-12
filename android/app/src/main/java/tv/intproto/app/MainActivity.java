@@ -16,7 +16,13 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
 import android.widget.FrameLayout;
+import org.json.JSONObject;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 /**
  * INTPROTO-TV: a thin app around the live web app.
@@ -81,11 +87,49 @@ public class MainActivity extends Activity {
             @Override
             public void onHideCustomView() { exitFullscreen(); }
         });
+        web.addJavascriptInterface(new Bridge(), "IPTVBridge");
         web.setDownloadListener((url, ua, cd, mime, len) -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))));
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl(appUrl);
         web.requestFocus();
+    }
+
+    /** Lets the web app talk to the IPTV server directly from the device (and play with the native player). */
+    private class Bridge {
+        @JavascriptInterface public String version() { return "2"; }
+
+        @JavascriptInterface public void fetch(final String id, final String url, final String ua) {
+            new Thread(() -> {
+                int status = 0; String body = "";
+                try {
+                    String target = url;
+                    for (int i = 0; i < 5; i++) { // follow redirects, including http <-> https
+                        HttpURLConnection c = (HttpURLConnection) new URL(target).openConnection();
+                        c.setInstanceFollowRedirects(false);
+                        c.setConnectTimeout(15000); c.setReadTimeout(60000);
+                        c.setRequestProperty("User-Agent", ua == null || ua.isEmpty() ? "IPTVSmartersPro" : ua);
+                        status = c.getResponseCode();
+                        if (status >= 300 && status < 400 && c.getHeaderField("Location") != null) { target = new URL(new URL(target), c.getHeaderField("Location")).toString(); c.disconnect(); continue; }
+                        InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+                        if (in != null) {
+                            ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buf = new byte[16384]; int n;
+                            while ((n = in.read(buf)) > 0 && out.size() < 40_000_000) out.write(buf, 0, n);
+                            body = out.toString("UTF-8"); in.close();
+                        }
+                        c.disconnect(); break;
+                    }
+                } catch (Exception e) { status = -1; body = String.valueOf(e.getMessage()); }
+                final String js = "window.__bridgeCb && window.__bridgeCb(" + JSONObject.quote(id) + "," + status + "," + JSONObject.quote(body) + ")";
+                runOnUiThread(() -> web.evaluateJavascript(js, null));
+            }).start();
+        }
+
+        @JavascriptInterface public void play(String url, String title, String ua) {
+            Intent i = new Intent(MainActivity.this, PlayerActivity.class);
+            i.putExtra("url", url); i.putExtra("title", title); i.putExtra("ua", ua);
+            startActivity(i);
+        }
     }
 
     private boolean openOutside(Uri uri) {

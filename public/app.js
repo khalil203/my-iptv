@@ -433,6 +433,7 @@ function adminApi(s) {
   <div class="card"><h3>1 · Streaming server (customers watch from here)</h3>
     <p class="small muted">The Xtream-style DNS/URL from TVplus, the same one you'd type into IPTV Smarters.</p>
     ${field('Server URL', 'player.serverUrl', s.player.serverUrl, { ph: 'http://your-dns.com:8080', attrs: 'autocapitalize="none"' })}
+    ${field('Playback mode', 'player.mode', s.player.mode || 'proxy', { type: 'select', options: [['proxy', 'Through the app server (works in every browser)'], ['direct', 'Direct from each device (for servers that block Cloudflare)']], help: 'Direct: the Android / Android TV app connects to your IPTV server itself and plays with its built-in player. iPhone, iPad and computers get an "Open in VLC" button and the IPTV Smarters details.' })}
     ${toggle('Play through the built-in secure proxy (recommended)', 'player.useProxy', s.player.useProxy, 'Fixes "http" streams on iPhone/HTTPS and hides the server from customers. Note: Cloudflare only connects to ports 80, 8080, 8880, 2052, 2082, 2086, 2095 (http) or 443, 8443, 2053, 2083, 2087, 2096 (https).')}
     ${field('Player identity (User-Agent)', 'player.userAgent', s.player.userAgent, { help: 'Some IPTV servers only accept known players. Default: IPTVSmartersPro.' })}
     <div class="grid3" style="margin-top:12px">${field('Test line username', 'tu', '', { attrs: 'data-skip id="test-u" autocapitalize="none"' })}${field('Test line password', 'tp', '', { attrs: 'data-skip id="test-p" autocapitalize="none"' })}<div class="field"><span>&nbsp;</span><button type="button" class="btn" data-act="test-player">Test server</button></div></div>
@@ -783,15 +784,38 @@ async function renderUserTab() {
       <div class="chips"><a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
       <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
-  } catch (e) { el.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
+  } catch (e) { el.innerHTML = e.direct ? externalCard() : `<div class="err-box">${esc(e.message)}</div>`; }
 }
 
+// Direct mode: the device itself talks to the IPTV server (Android app bridge).
+const bridge = () => window.IPTVBridge;
+const isDirect = () => state.user.me?.stream?.mode === 'direct';
+window.__bcb = {};
+window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(new Error(status === 403 ? 'The server refused the connection (403).' : 'Server error ' + status)); };
+const bridgeFetch = (url, ua) => new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); window.__bcb[id] = { res, rej }; bridge().fetch(id, url, ua); });
 async function xt(action, params = {}) {
   const key = action + JSON.stringify(params);
   const c = state.user.cache;
   if (c[key]) return c[key];
   const q = new URLSearchParams({ action, ...params });
+  if (isDirect()) {
+    const st = state.user.me.stream;
+    if (!bridge()) throw Object.assign(new Error('direct'), { direct: true });
+    const url = `${st.server}/player_api.php?${new URLSearchParams({ username: st.u, password: st.p, ...Object.fromEntries(q) })}`;
+    const txt = await bridgeFetch(url, st.userAgent);
+    try { return (c[key] = JSON.parse(txt)); } catch { throw new Error('The IPTV server returned an unexpected answer.'); }
+  }
   return (c[key] = await api('GET', '/api/xtream?' + q));
+}
+function externalCard() {
+  const st = state.user.me.stream; const dns = st.dns || st.server;
+  const m3u = `${dns}/get.php?username=${encodeURIComponent(st.u)}&password=${encodeURIComponent(st.p)}&type=m3u_plus&output=ts`;
+  const txt = `${t('dns')}: ${dns}\n${t('username')}: ${st.u}\n${t('password')}: ${st.p}\nM3U: ${m3u}`;
+  state.user.extText = txt;
+  return `<div class="card"><h3>📺 ${t('ext_title')}</h3><p class="muted">${t('ext_text')}</p>
+    <div class="row" style="margin-bottom:14px"><a class="btn primary" href="download.html">${t('ext_android')}</a><a class="btn" href="vlc://${esc(m3u)}">${t('ext_vlc')}</a></div>
+    <h3>${t('ext_details')}</h3><div class="code" dir="ltr">${esc(txt)}</div>
+    <button class="btn" data-act="copy-ext" style="margin-top:10px">${t('copyAll')}</button></div>`;
 }
 
 function itemsGrid(items) {
@@ -813,6 +837,13 @@ function streamUrl(kind, id, ext) {
 
 function play(title, kind, id, ext, extraHtml = '') {
   if (blockedScreen()) return toast(t('notAvailable'), true);
+  if (isDirect()) {
+    const st = state.user.me.stream;
+    const raw = kind === 'live' ? `${st.server}/live/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.ts`
+      : `${st.server}/${kind}/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${ext || 'mp4'}`;
+    if (bridge()) return bridge().play(raw, title, st.userAgent);
+    return modal(esc(title), externalCard(), { wide: true });
+  }
   const url = streamUrl(kind, id, ext);
   const isHls = kind === 'live' || ext === 'm3u8';
   let hls = null;
@@ -861,6 +892,7 @@ async function openItem(i) {
 
 // ---------------- events ----------------
 const actions = {
+  'copy-ext': async () => { try { await navigator.clipboard.writeText(state.user.extText); toast(t('copied')); } catch { prompt('', state.user.extText); } },
   'email-login': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
