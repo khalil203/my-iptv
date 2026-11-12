@@ -335,22 +335,26 @@ const OM = {
 const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 // Random pay link for a package: from enabled Stripe accounts, in the email currency
 export function pickPayLink(s, pkg) {
-  const cur = s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR';
+  const cur = s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR'; const all = cur === 'ALL';
   const on = new Set((s.orderAccounts || []).filter((a) => a.enabled !== false).map((a) => a.id));
-  const pool = (pkg.links || []).filter((l) => l.cur === cur && l.url && (!l.acc || on.has(l.acc)));
+  let pool = (pkg.links || []).filter((l) => (all || l.cur === cur) && l.url && (!l.acc || on.has(l.acc)));
+  if (all && pool.length) { // first a random account, then one of its links, so every account gets the same share
+    const accs = [...new Set(pool.map((l) => l.acc))]; const a = accs[Math.floor(Math.random() * accs.length)]; pool = pool.filter((l) => l.acc === a);
+  }
   if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
   return pkg.link ? { url: pkg.link, acc: '' } : null;
 }
 export function orderEmail(s, c, pkg, appUrl, chosen) {
   const lang = OM[c?.lang] ? c.lang : 'en'; const L = OM[lang]; const e = escHtml;
-  const app = s.branding.appName || 'IPTV'; const cur = s.orderCurrency || 'EUR';
+  const app = s.branding.appName || 'IPTV'; const pl = chosen || pickPayLink(s, pkg);
+  const cur = s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR';
   const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
   const n = Math.max(1, Number(pkg.devices) || 1);
   const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, m) => (m === 'app' ? e(app) : m === 'pkg' ? e(pkg.title) : m === 'price' ? e(price) : m === 'n' ? n : m === 'd' ? pkg.days : e(x[m] ?? '')));
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
   const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
-  const pl = chosen || pickPayLink(s, pkg); const link = pl?.url || site; const al = L.dir === 'rtl' ? 'right' : 'left';
+  const link = pl?.url || site; const al = L.dir === 'rtl' ? 'right' : 'left';
   const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v('subject')}</title>
 <style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
 @media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
@@ -1211,7 +1215,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
         const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
         const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)), badge: body.badge != null ? String(body.badge) : base.badge };
-        const st = body.currency && ['EUR', 'USD', 'USDT'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
+        const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
         const fixed = /^https:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
         const who = { name: String(body.name || '').trim(), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: String(body.note || '').trim().slice(0, 2000) };
         const m = orderEmail(st, who, pk, body.appUrl, fixed || undefined);
@@ -1226,7 +1230,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/stripe/paylinks')) { // creates a Stripe Payment Link for every package without one
         const key = s.finance.stripeKey; if (!key) return err(400, 'Add your Stripe secret key in Finance first.');
         const st = async (path, form) => { const r = await fetchFn('https://api.stripe.com/v1/' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form).toString() }); const d = await r.json(); if (!r.ok) throw new Error(d.error?.message || 'Stripe error ' + r.status); return d; };
-        const cur = (s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR').toLowerCase(); let made = 0;
+        const cur = (s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR').toLowerCase(); let made = 0;
         try {
           for (const p of s.orderPackages) {
             if (p.link || (p.links || []).length) continue;
