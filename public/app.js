@@ -1339,6 +1339,7 @@ const actions = {
   'wa-open': async (el) => {
     const f = $('[data-form=wa]'); const phone = f.phone.value.replace(/\D/g, ''); const text = $('#wa-text').value;
     if (!phone) return toast('Enter the WhatsApp number with country code.', true);
+    if (phone.startsWith('0')) return toast('Add the country code instead of the first 0 (Thailand 66…, Morocco 212…).', true);
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
     api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
   },
