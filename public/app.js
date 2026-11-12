@@ -87,6 +87,7 @@ async function api(method, path, body) {
     const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(state.token ? { authorization: 'Bearer ' + state.token } : {}) }, body: body ? JSON.stringify(body) : undefined });
     status = res.status; json = await res.json().catch(() => ({ error: 'Unexpected server response' }));
   }
+  if (status === 409 && path.includes('/api/xtream')) { location.reload(); }
   if (status >= 400) {
     if (status === 401 && state.token && !path.includes('/login')) { setSession(null); route(); }
     throw Object.assign(new Error(json.error || 'Error'), { status });
@@ -713,7 +714,7 @@ function toggleFav(item) {
 
 async function renderUser() {
   const u = state.user;
-  if (u.me && Date.now() - (u.meAt || 0) > 60000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify(u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); } catch { return; } }
+  if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify(u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
     try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); } catch { return; }

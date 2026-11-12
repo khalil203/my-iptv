@@ -172,8 +172,13 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); web.saveState(out); }
+    private long pausedAt = 0;
     @Override
-    protected void onPause() { super.onPause(); web.onPause(); }
+    protected void onPause() { super.onPause(); web.onPause(); pausedAt = System.currentTimeMillis(); }
     @Override
-    protected void onResume() { super.onResume(); web.onResume(); }
+    protected void onResume() {
+        super.onResume(); web.onResume();
+        // After 10 minutes in the background, reload so the newest version of the app is used.
+        if (pausedAt > 0 && System.currentTimeMillis() - pausedAt > 10 * 60 * 1000 && fullView == null) web.reload();
+    }
 }

@@ -586,6 +586,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           });
         }
         if (R('GET', '/api/xtream')) {
+          // In direct mode devices talk to the IPTV server themselves; an old copy of the app ends up here.
+          if (s.player.mode === 'direct') return err(409, 'The app was updated. Please close it completely and open it again (or pull down to refresh).');
           if (!canWatch) return err(403, s.userDashboard.maintenance ? 'Service under maintenance.' : 'Your subscription has expired.');
           const { action, ...rest } = query;
           if (!XTREAM_ACTIONS.has(action)) return err(400, 'Action not allowed.');
