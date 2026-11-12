@@ -942,11 +942,22 @@ function appsCard() {
     <a class="btn primary" href="download.html">${t('getApp')}</a></div>`;
 }
 
-window.__deadLogo = new Set(JSON.parse(sessionStorage.getItem('tvp_deadlogo') || '[]'));
-window.__logoFail = (img) => { try { const h = new URL(img.dataset.src).host; window.__deadLogo.add(h); sessionStorage.setItem('tvp_deadlogo', JSON.stringify([...window.__deadLogo])); } catch {} img.replaceWith(img.nextElementSibling.content.cloneNode(true)); };
+// Logo loading: direct first (apps), then through the relay, then the initials tile.
+// A logo server is only skipped after 4 failures with no success at all.
+window.__logoStat = {}; window.__deadLogo = new Set();
+const logoHost = (u) => { try { return new URL(u).host; } catch { return ''; } };
+window.__logoOk = (img) => { const h = logoHost(img.dataset.src); (window.__logoStat[h] ||= { ok: 0, bad: 0 }).ok++; };
+window.__logoFail = (img) => {
+  const alt = img.dataset.alt;
+  if (alt && img.src !== alt && !img.dataset.tried) { img.dataset.tried = '1'; img.src = alt; return; }
+  const h = logoHost(img.dataset.src); const st = (window.__logoStat[h] ||= { ok: 0, bad: 0 }); st.bad++;
+  if (st.bad >= 4 && !st.ok) window.__deadLogo.add(h);
+  img.replaceWith(img.nextElementSibling.content.cloneNode(true));
+};
+function relayImg(u) { const st = state.user.me?.stream; return st?.relay && /^http:/.test(u) ? `${st.relay}/x?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}` : ''; }
 function imgSrc(u) {
   if (!u || !/^https?:/.test(u)) return '';
-  try { if (window.__deadLogo.has(new URL(u).host)) return ''; } catch { return ''; }
+  if (window.__deadLogo.has(logoHost(u))) return '';
   const st = state.user.me?.stream;
   if (u.startsWith('https:') || location.protocol === 'http:') return u;      // already loadable
   if (bridge()) return u;                                                     // Android / TV / desktop apps load http images directly
@@ -965,8 +976,8 @@ function itemsGrid(items) {
   const live = items.filter((i) => i.kind === 'live');
   const vod = items.filter((i) => i.kind !== 'live');
   const favBtn = (i) => d.favorites ? `<button class="fav ${isFav(i.kind, i.id) ? 'on' : ''}" data-act="fav" data-item="${esc(JSON.stringify(i))}">★</button>` : '';
-  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" loading="lazy" decoding="async" alt="" onerror="__logoFail(this)"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
-    ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" loading="lazy" decoding="async" alt="" onerror="__logoFail(this)"><template>${initialsTile(i.name, true)}</template>` : initialsTile(i.name, true)}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
+  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" data-alt="${esc(relayImg(i.icon))}" loading="lazy" decoding="async" alt="" onload="__logoOk(this)" onerror="__logoFail(this)"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
+    ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" data-alt="${esc(relayImg(i.icon))}" loading="lazy" decoding="async" alt="" onload="__logoOk(this)" onerror="__logoFail(this)"><template>${initialsTile(i.name, true)}</template>` : initialsTile(i.name, true)}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
 }
 
 function streamUrl(kind, id, ext) {

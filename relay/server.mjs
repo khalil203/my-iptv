@@ -9,6 +9,7 @@ const APP_URL = (process.env.APP_URL || 'https://my-iptv.mrkhalil-ben-salah.work
 const tokenCache = new Map(); // token -> { ok, ua, until }
 const imgCache = new Map();   // logo url -> { type, buf, at }  (small in-memory cache)
 const deadHosts = new Map();  // host -> until  (logo servers that are down)
+const failCount = new Map();  // host -> consecutive failures
 const isImg = (u) => /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(u);
 
 async function checkToken(t) {
@@ -70,13 +71,14 @@ http.createServer(async (req, res) => {
     if (hit) { res.writeHead(200, { 'content-type': hit.type, 'cache-control': 'public, max-age=604800', ...CORS }); return res.end(hit.buf); }
     if ((deadHosts.get(host) || 0) > Date.now()) { res.writeHead(504, CORS); return res.end(); }
     try {
-      const up = await get(target, { 'User-Agent': 'Mozilla/5.0', Accept: 'image/*' }, 0, 6000);
+      const up = await get(target, { 'User-Agent': 'Mozilla/5.0', Accept: 'image/*' }, 0, 9000);
       const chunks = []; for await (const ch of up) chunks.push(ch);
       const buf = Buffer.concat(chunks); const type = String(up.headers['content-type'] || 'image/png');
       if (up.statusCode >= 400 || !type.startsWith('image')) { res.writeHead(404, CORS); return res.end(); }
+      failCount.set(host, 0);
       if (buf.length < 400000) { imgCache.set(target, { type, buf }); if (imgCache.size > 3000) imgCache.delete(imgCache.keys().next().value); }
       res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=604800', ...CORS }); return res.end(buf);
-    } catch { deadHosts.set(host, Date.now() + 10 * 60000); res.writeHead(504, CORS); return res.end(); }
+    } catch { const f = (failCount.get(host) || 0) + 1; failCount.set(host, f); if (f >= 5) { deadHosts.set(host, Date.now() + 3 * 60000); failCount.set(host, 0); } res.writeHead(504, CORS); return res.end(); }
   }
   let up;
   try { up = await get(target, headers); } catch (e) { res.writeHead(502, CORS); return res.end('upstream error: ' + e.message); }
