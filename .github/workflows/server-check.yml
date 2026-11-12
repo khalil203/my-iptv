@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test IPTV server
         run: |
-          read SERVER USER PASS < .github/server-check.txt
+          set +e; read SERVER USER PASS X < .github/server-check.txt
           echo "== player_api headers"; curl -s -D - -o /tmp/b -m 20 -A "IPTVSmartersPro" -H "Origin: https://example.com" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_live_streams" | grep -i -E "^HTTP|access-control|content-type|server"
           ID=$(python3 -c "import json;d=json.load(open('/tmp/b'));print(d[0]['stream_id'])" 2>/dev/null); echo "first stream id: $ID"
           echo "== live m3u8"; curl -s -D - -o /tmp/m -m 20 -L -A "IPTVSmartersPro" -H "Origin: https://example.com" "$SERVER/live/$USER/$PASS/$ID.m3u8" | grep -i -E "^HTTP|access-control|content-type|location"; head -c 300 /tmp/m; echo
