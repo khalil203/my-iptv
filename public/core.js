@@ -172,6 +172,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/reseller-sale') return 'customers_edit';
   if (path === '/api/admin/renewal/send') return 'customers_edit';
   if (path === '/api/admin/order/send') return 'customers_edit';
+  if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path === '/api/admin/stripe/paylinks') return 'plans';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
@@ -360,7 +361,7 @@ export function orderEmail(s, c, pkg, appUrl, chosen) {
 ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="95" style="display:block;border-radius:50%;border:3px solid #0ea5e9;box-shadow:0 4px 12px rgba(14,165,233,.2);margin:0 auto 18px">` : ''}
 <div dir="auto" style="display:inline-block;background:${pkg.badge ? '#0369a1' : '#e0f2fe'};border:1px solid #bae6fd;color:${pkg.badge ? '#fff' : '#0369a1'};font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${pkg.badge ? e(pkg.badge) : v('badge')}</div>
 <h1 class="header-title" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${v('title')}</h1><p style="margin:8px 0 0;font-size:15px;color:#64748b">${L.sub}</p></td></tr>
-<tr><td class="mobile-pad" style="padding:32px 40px 20px;text-align:${al}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${c?.name ? v('dear', { name: c.name }) : L.dearAny}</p><p style="margin:0;font-size:15px;line-height:1.65">${v(n > 1 ? 'introMulti' : 'intro')}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:32px 40px 20px;text-align:${al}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${c?.name ? v('dear', { name: c.name }) : L.dearAny}</p><p style="margin:0;font-size:15px;line-height:1.65">${v(n > 1 ? 'introMulti' : 'intro')}</p>${c?.note ? `<p dir="auto" style="margin:14px 0 0;font-size:15px;line-height:1.65;background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;color:#713f12">${e(c.note).replace(/\n/g, '<br>')}</p>` : ''}</td></tr>
 <tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:2px solid #7dd3fc;border-radius:14px;overflow:hidden"><tr><td align="center" style="padding:28px 24px;text-align:center">
 <div style="display:inline-block;background:#fff;border:1px solid #bae6fd;color:#0369a1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:4px 12px;border-radius:50px;margin-bottom:10px">${v('access')}</div>
 <div dir="auto" style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:6px">${e(pkg.title)}</div>
@@ -1205,6 +1206,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await saveCustomers(list);
         await log('customer', `Package emails sent to ${batch.length} customers (${body.pkg === 'random' ? 'random packages' : batch[0].p.title})`);
         return ok({ sent: batch.length });
+      }
+      if (R('POST', '/api/admin/order/custom')) { // manual email: any address, own details; body.preview = only build it
+        const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
+        const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
+        const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)), badge: body.badge != null ? String(body.badge) : base.badge };
+        const st = body.currency && ['EUR', 'USD', 'USDT'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
+        const fixed = /^https:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
+        const who = { name: String(body.name || '').trim(), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: String(body.note || '').trim().slice(0, 2000) };
+        const m = orderEmail(st, who, pk, body.appUrl, fixed || undefined);
+        if (body.subject) m.subject = String(body.subject).slice(0, 200);
+        if (body.preview) return ok(m);
+        const to = cleanEmail(body.to); if (!to) return err(400, 'Enter a valid email address.');
+        const r = await sendEmail(s, to, m.subject, m.html);
+        await log('customer', `Custom package email "${pk.title}" to <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
+        if (body.saveCustomer && r.ok) { const list = await getCustomers(); const c = list.find((x) => cleanEmail(x.email) === to); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = base.id; c.orderSentAcc = m.payAcc; await saveCustomers(list); } }
+        return r.ok ? ok({ ...r, payAcc: m.payAcc }) : err(502, r.error || 'Email failed');
       }
       if (R('POST', '/api/admin/stripe/paylinks')) { // creates a Stripe Payment Link for every package without one
         const key = s.finance.stripeKey; if (!key) return err(400, 'Add your Stripe secret key in Finance first.');

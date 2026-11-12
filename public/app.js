@@ -352,7 +352,7 @@ function oldCustomerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -481,7 +481,7 @@ function adminOrderSection(s) {
   const nLinks = (p) => (p.links || []).filter((l) => l.cur === lc && (!l.acc || on.has(l.acc))).length || (p.link ? 1 : 0);
   const missing = op.filter((p) => !nLinks(p)).length;
   const accs = s.orderAccounts || [];
-  return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
+  return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
     <p class="small muted">Your 8 order templates. Each email shows the package and a <b>Stripe pay button</b>. It is sent in the customer's language (English, French, Arabic). Send one from a customer's 💳 button, or many at once here.</p>
     <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><div class="small ${nLinks(p) ? 'pos' : 'neg'}">${nLinks(p) ? `✓ ${nLinks(p)} Stripe link${nLinks(p) > 1 ? 's · random' : ''}` : '⚠️ no pay link'}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
     ${missing ? `<div class="notice warning">${missing} package${missing > 1 ? 's have' : ' has'} no Stripe payment link yet, so the button opens your website instead. ${s.finance.stripeKey ? 'Tap below to create them in your Stripe account.' : 'Paste the links below, or add your Stripe secret key in Finance and let the app create them.'}</div>` : ''}
@@ -1274,6 +1274,35 @@ const actions = {
   'order-send': async (el) => {
     el.disabled = true;
     try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, appUrl: location.origin }); toast('Package email sent ✓'); closeModal(); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; } }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'order-custom': async () => {
+    const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
+    const body = modal('✍️ Custom package email', `<form data-form="order-custom" onsubmit="return false">
+      <div class="grid2">${field('Email address', 'to', '', { type: 'email', attrs: 'required autocapitalize="none"', ph: 'customer@gmail.com' })}${field('Customer name', 'name', '', { ph: 'Leave empty for "Dear Valued Customer"' })}</div>
+      <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('Package', 'pkg', p0.id, { type: 'select', options: s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]) })}</div>
+      <details><summary class="small muted" style="cursor:pointer;margin:6px 0">Change the details (optional)</summary>
+        <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
+        <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"', ph: String(p0.days ?? '') })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"', ph: String(p0.devices ?? '') })}${field('Top badge', 'badge', '', { ph: 'e.g. 🎁 Special offer' })}</div>
+        ${field('Pay link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'Empty = random Stripe link of this package', help: 'Paste a special Stripe link here for a custom price.' })}
+        ${field('Email subject', 'subject', '', { ph: 'Empty = automatic' })}
+      </details>
+      ${field('Personal message', 'note', '', { type: 'textarea', ph: 'Optional — shown in the email under the greeting' })}
+      <div class="row"><button type="button" class="btn" data-act="oc-preview">👁 Preview</button><span class="spacer"></span><button type="button" class="btn primary" data-act="oc-send">📨 Send email</button></div>
+      <p class="small muted" id="oc-subj"></p><iframe id="oc-pv" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none"></iframe></form>`, { wide: true });
+    const f = $('[data-form=order-custom]', body);
+    f.pkg.addEventListener('change', () => { const p = s.orderPackages.find((x) => x.id === f.pkg.value) || {}; f.title.placeholder = p.title || ''; f.price.placeholder = p.price ?? ''; f.days.placeholder = p.days ?? ''; f.devices.placeholder = p.devices ?? ''; });
+  },
+  'oc-preview': async () => {
+    const f = $('[data-form=order-custom]'); const d = Object.fromEntries(new FormData(f));
+    try { const pv = await api('POST', '/api/admin/order/custom', { ...d, preview: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); $('#oc-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; const fr = $('#oc-pv'); fr.style.display = ''; fr.srcdoc = pv.html; fr.scrollIntoView({ behavior: 'smooth' }); }
+    catch (e) { toast(e.message, true); }
+  },
+  'oc-send': async (el) => {
+    const f = $('[data-form=order-custom]'); const d = Object.fromEntries(new FormData(f));
+    if (!f.to.reportValidity()) return;
+    el.disabled = true;
+    try { const r = await api('POST', '/api/admin/order/custom', { ...d, saveCustomer: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); const acc = (state.admin.settings.orderAccounts || []).find((a) => a.id === r.payAcc); toast(`Sent to ${d.to} ✓${acc ? ' · Stripe: ' + acc.name : ''}`); closeModal(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'order-bulk': async () => {
