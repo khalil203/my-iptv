@@ -30,5 +30,6 @@ jobs:
                       r=urllib.request.urlopen(urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'}),timeout=8); ok+= r.status==200 and r.headers.get('content-type','').startswith('image')
                   except Exception: pass
               print(f'   sample of {len(sample)} logo links: {ok} load OK, {len(sample)-ok} broken')
+              print('   SAMPLE_URLS', [i for i in have if '103.176.90' in i][:3])
               print('   examples without logo:', [x.get('name') for x in d if not (x.get('stream_icon') or '').strip()][:5])
           PY
