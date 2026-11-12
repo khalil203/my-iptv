@@ -91,6 +91,18 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'r50', name: 'VIP', credits: 50, price: 999.99 },
   ],
   resellerCurrency: 'EUR',
+  // Package order emails (each one has its own Stripe payment link)
+  orderPackages: [
+    { id: 'o1m', title: '1 Month', days: 30, devices: 1, price: 29.99, badge: '', link: '' },
+    { id: 'o3m', title: '3 Months', days: 90, devices: 1, price: 49.99, badge: '', link: '' },
+    { id: 'o6m', title: '6 Months', days: 180, devices: 1, price: 59.99, badge: '', link: '' },
+    { id: 'o1y', title: '1 Year', days: 365, devices: 1, price: 69.99, badge: '', link: '' },
+    { id: 'o2y', title: '2 Years', days: 730, devices: 1, price: 99.99, badge: '⭐ Best Value • 2-Year Plan', link: '' },
+    { id: 'o1y2d', title: '2 Devices · 1 Year', days: 365, devices: 2, price: 109.99, badge: 'Multi-Device Plan • 2 Connections', link: '' },
+    { id: 'o1y3d', title: '3 Devices · 1 Year', days: 365, devices: 3, price: 129.99, badge: 'Family Plan • 3 Connections', link: '' },
+    { id: 'o1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 139.99, badge: '🔥 Ultimate Plan • 4 Connections', link: '' },
+  ],
+  orderCurrency: 'EUR',
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
   email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
@@ -151,13 +163,15 @@ function permFor(method, path, body) {
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
-    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer'].includes(x))) return 'plans';
+    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency'].includes(x))) return 'plans';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
   }
   if (path === '/api/admin/reseller-sale') return 'customers_edit';
   if (path === '/api/admin/renewal/send') return 'customers_edit';
+  if (path === '/api/admin/order/send') return 'customers_edit';
+  if (path === '/api/admin/stripe/paylinks') return 'plans';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
@@ -299,6 +313,59 @@ const RM = {
     how: 'طريقة التجديد', h1: '🌐 زر موقع {site}', h2: '📺 تصفح الباقات واختر ما يناسبك.', h3: '🎁 أدخل {coupon} عند الدفع إن أمكن.', h4: '🔒 أكمل الدفع عبر صفحة الدفع الآمنة.', h5: '🔄 بعد تأكيد الطلب، تواصل مع الدعم إذا احتجت مساعدة في التفعيل.',
     help: 'إذا كان لديك أي سؤال أو تحتاج مساعدة في التجديد، فريق الدعم جاهز لمساعدتك.', thanks: 'شكرًا لاختيارك <b>{app}</b>. نتطلع لخدمتك مرة أخرى.', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: 'جدّد اشتراكك في {app} — عرض خاص 🎉' },
 };
+const OM = {
+  en: { dir: 'ltr', badge: '{app} Order Checkout', title: 'Thank You for Choosing {app} 🎉', sub: 'Please place your order for your selected package below.', dear: 'Dear {name},', dearAny: 'Dear Valued Customer,',
+    intro: 'Your <strong>{pkg}</strong> subscription package is ready for checkout. Click the secure Stripe payment button below to complete your order and receive instant activation.',
+    introMulti: 'Your <strong>{pkg}</strong> subscription package is ready for checkout. Stream simultaneously on {n} devices. Click below to complete your order via Stripe.',
+    access: '{d} Days Access', dev1: '📺 1 Device Connection', devN: '📺 {n} Devices Simultaneous Connection', cta: '🔒 Order {pkg} ({price}) →', secure: '100% Secure Stripe Payment • Instant Email Delivery',
+    help: '📞 Need Assistance?', regards: 'Warm regards,', team: 'Customer Support Team', subject: '{pkg} — {price} | {app} order' },
+  fr: { dir: 'ltr', badge: 'Commande {app}', title: "Merci d'avoir choisi {app} 🎉", sub: 'Passez votre commande pour la formule choisie ci-dessous.', dear: 'Bonjour {name},', dearAny: 'Cher client,',
+    intro: 'Votre abonnement <strong>{pkg}</strong> est prêt. Cliquez sur le bouton de paiement sécurisé Stripe ci-dessous pour finaliser votre commande et recevoir une activation immédiate.',
+    introMulti: 'Votre abonnement <strong>{pkg}</strong> est prêt. Regardez en même temps sur {n} appareils. Cliquez ci-dessous pour payer via Stripe.',
+    access: 'Accès {d} jours', dev1: '📺 1 appareil', devN: '📺 {n} appareils en même temps', cta: '🔒 Commander {pkg} ({price}) →', secure: 'Paiement Stripe 100 % sécurisé • Livraison immédiate par email',
+    help: "📞 Besoin d'aide ?", regards: 'Cordialement,', team: 'Service client', subject: '{pkg} — {price} | commande {app}' },
+  ar: { dir: 'rtl', badge: 'طلب {app}', title: 'شكرًا لاختيارك {app} 🎉', sub: 'أكمل طلب الباقة التي اخترتها أدناه.', dear: 'عزيزي/عزيزتي {name}،', dearAny: 'عزيزي العميل،',
+    intro: 'باقة اشتراكك <strong>{pkg}</strong> جاهزة للدفع. اضغط على زر الدفع الآمن عبر Stripe لإتمام طلبك والحصول على تفعيل فوري.',
+    introMulti: 'باقة اشتراكك <strong>{pkg}</strong> جاهزة للدفع. شاهد على {n} أجهزة في نفس الوقت. اضغط أدناه للدفع عبر Stripe.',
+    access: 'وصول لمدة {d} يومًا', dev1: '📺 جهاز واحد', devN: '📺 {n} أجهزة في نفس الوقت', cta: '🔒 اطلب {pkg} ({price}) ←', secure: 'دفع آمن 100% عبر Stripe • تسليم فوري بالبريد',
+    help: '📞 تحتاج مساعدة؟', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: '{pkg} — {price} | طلب {app}' },
+};
+const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
+export function orderEmail(s, c, pkg, appUrl) {
+  const lang = OM[c?.lang] ? c.lang : 'en'; const L = OM[lang]; const e = escHtml;
+  const app = s.branding.appName || 'IPTV'; const cur = s.orderCurrency || 'EUR';
+  const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
+  const n = Math.max(1, Number(pkg.devices) || 1);
+  const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, m) => (m === 'app' ? e(app) : m === 'pkg' ? e(pkg.title) : m === 'price' ? e(price) : m === 'n' ? n : m === 'd' ? pkg.days : e(x[m] ?? '')));
+  const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
+  const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
+  const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
+  const link = pkg.link || site; const al = L.dir === 'rtl' ? 'right' : 'left';
+  const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v('subject')}</title>
+<style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
+@media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
+<body dir="${L.dir}" style="background:#f4f7fa;margin:0;padding:0"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7fa;padding:30px 10px"><tr><td align="center">
+<table border="0" cellpadding="0" cellspacing="0" width="600" class="container" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 25px rgba(0,0,0,.05)">
+<tr><td height="6" style="background:linear-gradient(90deg,#0284c7 0%,#0ea5e9 50%,#38bdf8 100%);font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:40px 40px 30px;background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);border-bottom:1px solid #f1f5f9">
+${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="95" style="display:block;border-radius:50%;border:3px solid #0ea5e9;box-shadow:0 4px 12px rgba(14,165,233,.2);margin:0 auto 18px">` : ''}
+<div dir="auto" style="display:inline-block;background:${pkg.badge ? '#0369a1' : '#e0f2fe'};border:1px solid #bae6fd;color:${pkg.badge ? '#fff' : '#0369a1'};font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${pkg.badge ? e(pkg.badge) : v('badge')}</div>
+<h1 class="header-title" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${v('title')}</h1><p style="margin:8px 0 0;font-size:15px;color:#64748b">${L.sub}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:32px 40px 20px;text-align:${al}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${c?.name ? v('dear', { name: c.name }) : L.dearAny}</p><p style="margin:0;font-size:15px;line-height:1.65">${v(n > 1 ? 'introMulti' : 'intro')}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:2px solid #7dd3fc;border-radius:14px;overflow:hidden"><tr><td align="center" style="padding:28px 24px;text-align:center">
+<div style="display:inline-block;background:#fff;border:1px solid #bae6fd;color:#0369a1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:4px 12px;border-radius:50px;margin-bottom:10px">${v('access')}</div>
+<div dir="auto" style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:6px">${e(pkg.title)}</div>
+<div style="font-size:14px;font-weight:600;color:#475569;margin-bottom:14px">${v(n > 1 ? 'devN' : 'dev1')}</div>
+<div dir="ltr" style="font-size:36px;font-weight:900;color:#0284c7;margin-bottom:18px">${e(price)} <span style="font-size:14px;font-weight:600;color:#64748b">${e(cur)}</span></div>
+${link ? `<a href="${e(link)}" class="cta-btn" style="display:inline-block;background:#0284c7;color:#fff;font-size:16px;font-weight:700;text-decoration:none;padding:15px 36px;border-radius:8px;box-shadow:0 4px 14px rgba(2,132,199,.3)">${v('cta')}</a>` : ''}
+<div style="margin-top:12px;font-size:12px;color:#64748b">${L.secure}</div></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 32px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0"><tr><td style="padding:20px 24px;text-align:${al}"><div style="font-size:15px;font-weight:700;color:#166534;margin-bottom:6px">${L.help}</div><div style="font-size:14px;color:#166534">
+${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.email.supportEmail)}</a>` : ''}${s.email.supportEmail && site ? ' &nbsp;|&nbsp; ' : ''}${site ? `🌐 <a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a>` : ''}${s.branding.supportUrl ? ` &nbsp;|&nbsp; 💬 <a href="${e(s.branding.supportUrl)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.branding.supportLabel || 'WhatsApp')}</a>` : ''}</div></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 32px;border-bottom:1px solid #f1f5f9;text-align:${al}"><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:#0284c7;font-weight:600">${L.team}</span></p></td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:22px 40px;background:#f8fafc;text-align:center">${site ? `<a href="${e(site)}" style="font-size:13px;font-weight:700;color:#0284c7;text-decoration:none">${e(siteTxt)}</a>` : ''}</td></tr>
+</table></td></tr></table></body></html>`;
+  return { subject: v('subject').replace(/<[^>]+>/g, ''), html };
+}
 export function renewalEmail(s, c, appUrl) {
   const lang = RM[c.lang] ? c.lang : 'en'; const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
   const app = s.branding.appName || 'IPTV';
@@ -820,6 +887,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           price: Number(p.price) || 0, connections: Math.max(1, Number(p.connections) || 1), package: String(p.package || ''),
           credits: p.credits === '' || p.credits == null ? Math.max(1, Math.round((Number(p.days) || 30) / 30)) : Number(p.credits),
         }));
+        if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: String(p.link || '').trim() }));
         if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
         await saveSettings(next);
@@ -931,6 +999,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const m = accessEmail(s, c, c.linePassword, c.isTrial ? 'trial' : 'sub', body.appUrl);
           const r = await sendEmail(s, to, m.subject, m.html);
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
+          return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
+        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); return ok(orderEmail(s, c, pk, query.appUrl)); }
+        if (method === 'POST' && sub === 'order') {
+          const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
+          const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
+          const m = orderEmail(s, c, pk, body.appUrl); const r = await sendEmail(s, to, m.subject, m.html);
+          if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; await saveCustomers(list); }
+          await log('customer', `Package email "${pk.title}" to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
         if (method === 'GET' && sub === 'renewalpreview') return ok(renewalEmail(s, c, query.appUrl));
@@ -1105,6 +1182,35 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(r);
       }
 
+      if (R('POST', '/api/admin/order/send')) { // body: { ids:[...<=100], pkg: id | 'random' }
+        const list = await getCustomers(); const pk = s.orderPackages; if (!pk.length) return err(400, 'No packages');
+        const want = new Set((body.ids || []).slice(0, 100));
+        const pick = (c) => (body.pkg === 'random' ? pk[Math.floor(Math.random() * pk.length)] : pk.find((p) => p.id === body.pkg));
+        if (body.pkg !== 'random' && !pick()) return err(400, 'Choose a package.');
+        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email)).map((c) => ({ c, p: pick(c) }));
+        if (!batch.length) return ok({ sent: 0 });
+        const r = await sendBatch(s, batch.map(({ c, p }) => ({ to: c.email, ...orderEmail(s, c, p, body.appUrl) })));
+        if (!r.ok) return err(502, r.error);
+        const now = Date.now(); for (const { c, p } of batch) { c.orderSentAt = now; c.orderSentPkg = p.id; }
+        await saveCustomers(list);
+        await log('customer', `Package emails sent to ${batch.length} customers (${body.pkg === 'random' ? 'random packages' : batch[0].p.title})`);
+        return ok({ sent: batch.length });
+      }
+      if (R('POST', '/api/admin/stripe/paylinks')) { // creates a Stripe Payment Link for every package without one
+        const key = s.finance.stripeKey; if (!key) return err(400, 'Add your Stripe secret key in Finance first.');
+        const st = async (path, form) => { const r = await fetchFn('https://api.stripe.com/v1/' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form).toString() }); const d = await r.json(); if (!r.ok) throw new Error(d.error?.message || 'Stripe error ' + r.status); return d; };
+        const cur = (s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR').toLowerCase(); let made = 0;
+        try {
+          for (const p of s.orderPackages) {
+            if (p.link) continue;
+            const price = await st('prices', { currency: cur, unit_amount: String(Math.round(p.price * 100)), 'product_data[name]': `${s.branding.appName || 'IPTV'} — ${p.title}` });
+            const pl = await st('payment_links', { 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1', 'phone_number_collection[enabled]': 'true', 'metadata[package]': p.id });
+            p.link = pl.url; made++;
+          }
+        } catch (e) { if (made) await saveSettings(s); return err(502, `Stripe: ${e.message}${made ? ` (${made} links were created)` : ''}`); }
+        await saveSettings(s); await log('settings', `Created ${made} Stripe payment links`);
+        return ok({ made, packages: s.orderPackages });
+      }
       if (R('POST', '/api/admin/clean-emails')) {
         const list = await getCustomers(); let fixed = 0;
         for (const c of list) { if (!c.email) continue; const e = cleanEmail(c.email); if (e && e !== c.email) { c.email = e; fixed++; } }

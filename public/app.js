@@ -256,7 +256,7 @@ async function renderAdmin() {
     if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
-    else if (t === 'plans') body.innerHTML = adminPlans(s) + await adminResellerSection(s);
+    else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
     else if (t === 'finance') { body.innerHTML = await adminFinance(s); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
@@ -321,6 +321,7 @@ function custActions(c) {
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     ${c.whatsapp || c.phone ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp || c.phone).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
     ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
+    ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}">💳</button>` : ''}
     ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
@@ -351,7 +352,7 @@ function oldCustomerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -469,6 +470,23 @@ async function adminResellerSection(s) {
     ${sales.length ? `<h3 style="margin-top:16px">Reseller sales</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Reseller</th><th>Package</th><th>Paid</th><th>Profit</th></tr></thead><tbody>${sales.slice(0, 50).map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.name)}</b><div class="small muted">${esc([x.email, x.phone].filter(Boolean).join(' · '))}</div></td><td>${esc(x.planName)}</td><td>${num(x.amount, x.currency)}</td><td class="${x.amountUsd - x.costUsd < 0 ? 'neg' : 'pos'}">${usd(x.amountUsd - x.costUsd)}</td></tr>`).join('')}</tbody></table></div>` : ''}
   </div>`;
 }
+const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮' };
+const orderPrice = (s, p) => (ORDER_CUR[s.orderCurrency || 'EUR'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[s.orderCurrency || 'EUR'] ? '' : ' ' + s.orderCurrency);
+const opRow = (p = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
+  <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><button class="btn sm danger" data-act="del-op">✕ Remove</button></div>
+  <input data-k="link" style="margin-top:6px" value="${esc(p.link || '')}" placeholder="Stripe payment link https://buy.stripe.com/…" autocapitalize="none"></div>`;
+function adminOrderSection(s) {
+  const op = s.orderPackages || []; const cur = s.orderCurrency || 'EUR'; const missing = op.filter((p) => !p.link).length;
+  return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
+    <p class="small muted">Your 8 order templates. Each email shows the package and a <b>Stripe pay button</b>. It is sent in the customer's language (English, French, Arabic). Send one from a customer's 💳 button, or many at once here.</p>
+    <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><div class="small ${p.link ? 'pos' : 'neg'}">${p.link ? '✓ Stripe link' : '⚠️ no pay link'}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
+    ${missing ? `<div class="notice warning">${missing} package${missing > 1 ? 's have' : ' has'} no Stripe payment link yet, so the button opens your website instead. ${s.finance.stripeKey ? 'Tap below to create them in your Stripe account.' : 'Paste the links below, or add your Stripe secret key in Finance and let the app create them.'}</div>` : ''}
+    <div class="row">${s.finance.stripeKey && missing ? `<button class="btn" data-act="order-stripe-links">⚡ Create ${missing} Stripe links automatically</button>` : ''}</div>
+    <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages, prices & Stripe links</summary><div style="margin-top:10px">
+      <div id="ops">${op.map(opRow).join('')}</div>
+      <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${['EUR', 'USD', 'USDT'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
+}
+const orderTargets = (grp) => (state.admin.customers || []).filter((c) => c.email && (grp === 'all' || (grp === 'trial' ? c.isTrial : grp === 'notrecent' ? !c.orderSentAt || Date.now() - c.orderSentAt > 7 * 86400000 : c.state === grp)));
 function resellerSaleForm(s) {
   const rp = s.resellerPackages || []; const cur = s.resellerCurrency || 'EUR';
   return `<form data-form="rp-sale">
@@ -1213,6 +1231,63 @@ const actions = {
   retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
   'dup-type': async (el) => { state.admin.dupType = el.dataset.t; state.admin.dupLimit = 30; $('#admin-body').innerHTML = await adminDups(); },
   'dup-more': async () => { state.admin.dupLimit += 30; $('#admin-body').innerHTML = await adminDups(); },
+  'add-op': () => $('#ops').insertAdjacentHTML('beforeend', opRow()),
+  'del-op': (el) => el.closest('.op-row').remove(),
+  'save-op': async () => {
+    const orderPackages = [...document.querySelectorAll('#ops .op-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.op || undefined, title: g('title'), days: Number(g('days')), devices: Number(g('devices')), price: Number(g('price')), badge: g('badge'), link: g('link') }; }).filter((p) => p.title);
+    await saveSettings({ orderPackages, orderCurrency: $('#op-cur').value }); renderAdmin();
+  },
+  'order-stripe-links': async (el) => {
+    el.disabled = true; el.textContent = 'Creating…';
+    try { const r = await api('POST', '/api/admin/stripe/paylinks', {}); state.admin.settings.orderPackages = r.packages; toast(`Created ${r.made} Stripe payment links ✓`); renderAdmin(); }
+    catch (e) { toast(e.message, true); el.disabled = false; el.textContent = 'Try again'; }
+  },
+  'order-preview': async (el) => {
+    const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
+    if (!state.admin.customers) state.admin.customers = await api('GET', '/api/admin/customers');
+    const c = state.admin.customers.find((x) => x.email) || state.admin.customers[0];
+    if (!c) return toast('Add a customer first to preview.', true);
+    const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${el.dataset.pkg}&appUrl=${encodeURIComponent(appUrl)}`);
+    const body = modal('👁 ' + pv.subject, `<iframe id="mail-pv" style="width:100%;height:65vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>`, { wide: true });
+    $('#mail-pv', body).srcdoc = pv.html;
+  },
+  'order-one': async (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings;
+    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${s.orderPackages.map((p) => `<option value="${esc(p.id)}" ${p.id === c.orderSentPkg ? 'selected' : ''}>${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select></div>
+      <p class="muted small" id="op-subj"></p><iframe id="mail-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+      <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
+      ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}</p>` : ''}`, { wide: true });
+    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
+    $('#op-pick').addEventListener('change', load); load();
+  },
+  'order-send': async (el) => {
+    el.disabled = true;
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, appUrl: location.origin }); toast('Package email sent ✓'); closeModal(); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; } }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'order-bulk': async () => {
+    if (!state.admin.customers) state.admin.customers = await api('GET', '/api/admin/customers');
+    const s = state.admin.settings; const n = (g) => orderTargets(g).length;
+    modal('💳 Package emails to many customers', `<label class="small muted">Package</label><select id="ob-pkg"><option value="random">🎲 Random package for each customer</option>${s.orderPackages.map((p) => `<option value="${esc(p.id)}">${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select>
+      <label class="small muted" style="margin-top:10px;display:block">Send to</label><select id="ob-grp">${[['expired', 'Expired customers'], ['expiring', 'Expiring soon'], ['active', 'Active customers'], ['trial', 'Trial users'], ['notrecent', 'Everyone not emailed in the last 7 days'], ['all', 'All customers']].map(([k, l]) => `<option value="${k}">${l} (${n(k)})</option>`).join('')}</select>
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-act="order-go">📨 Send now</button></div>
+      <p class="small muted">Sent in batches of 100. Customers with a broken email address are skipped. Your Resend plan must allow that many emails (free plan: 100/day, 3,000/month).</p><div id="ob-out"></div>`);
+  },
+  'order-go': async (el) => {
+    const grp = $('#ob-grp').value; const pkg = $('#ob-pkg').value; const ids = orderTargets(grp).map((c) => c.id);
+    if (!ids.length) return toast('Nobody in this group has an email.', true);
+    if (!confirm(`Send ${pkg === 'random' ? 'a random package email' : 'this package email'} to ${ids.length} customers?`)) return;
+    el.disabled = true; const out = $('#ob-out'); let total = 0;
+    try {
+      for (let i = 0; i < ids.length; i += 100) {
+        out.innerHTML = `<div class="spinner"></div><p class="small muted" style="text-align:center">Sent ${total} of ${ids.length}…</p>`;
+        if (i) await new Promise((ok) => setTimeout(ok, 700));
+        const r = await api('POST', '/api/admin/order/send', { ids: ids.slice(i, i + 100), pkg, appUrl: location.origin }); total += r.sent;
+      }
+      out.innerHTML = `<div class="notice success">✅ Sent ${total} package emails.${ids.length - total ? ` ${ids.length - total} skipped (invalid email).` : ''}</div>`;
+      state.admin.customers = await api('GET', '/api/admin/customers');
+    } catch (e) { out.innerHTML = `<div class="notice danger">${esc(e.message)} (sent ${total})</div>`; el.disabled = false; }
+  },
   'renewal-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
