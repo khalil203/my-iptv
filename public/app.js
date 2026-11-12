@@ -113,6 +113,8 @@ function applyBranding(b) {
 
 async function boot() {
   const hp = new URLSearchParams(location.hash.slice(1));
+  // The browser upgraded our http:// switch back to https:// — remember it and never loop.
+  if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
   if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
   setLang(detectLang());
   try {
@@ -860,7 +862,7 @@ async function renderUserTab() {
 
 // Browser direct: on the http:// address the browser itself loads the IPTV server (it allows CORS).
 const httpOK = () => location.protocol === 'http:';
-const canSwitchHttp = () => location.protocol === 'https:' && !/github\.io$|localhost|127\.0\.0\.1/.test(location.hostname);
+const canSwitchHttp = () => location.protocol === 'https:' && !/github\.io$|localhost|127\.0\.0\.1/.test(location.hostname) && !localStorage.getItem('tvp_nohttp');
 function goHttp(tab) {
   const el = $('#ubody'); if (el) el.innerHTML = `<div class="block-screen"><div class="spinner"></div><p class="muted">${t('openingPlayer')}</p></div>`;
   location.href = `http://${location.host}${location.pathname}#s=${encodeURIComponent(state.token)}&tab=${tab || state.user.tab}&lang=${getLang()}`;
