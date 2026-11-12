@@ -105,7 +105,9 @@ export const DEFAULT_SETTINGS = () => ({
       { id: 'relay', name: 'Relay', currency: 'USD', opening: 0, color: '#22c55e' },
       { id: 'wise', name: 'Wise', currency: 'USD', opening: 0, color: '#9fe870' },
       { id: 'redotpay', name: 'RedotPay', currency: 'USDT', opening: 0, color: '#ef4444' },
+      { id: 'stripe', name: 'Stripe', currency: 'USD', opening: 0, color: '#635bff' },
     ],
+    stripeKey: '', stripeAccountId: 'stripe',
   },
   stock: { packCredits: 120, packPrice: 90, lowCreditsAlert: 20 },
   security: { sessionHours: 72, proxySecret: '' },
@@ -157,7 +159,8 @@ function permFor(method, path, body) {
   if (path === '/api/admin/reseller-sales') return 'customers_view';
   if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
-  if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh') return 'finance_edit';
+  if (path === '/api/admin/stripe/balance') return 'finance_view';
+  if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh' || path === '/api/admin/stripe/match') return 'finance_edit';
   if (path.startsWith('/api/admin/stock')) return 'stock';
   if (path === '/api/admin/profits') return 'profits';
   if (path === '/api/admin/log') return 'activity';
@@ -683,9 +686,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('GET', '/api/admin/settings')) {
         if (can('settings')) return ok(s);
-        return ok({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, security: { sessionHours: s.security.sessionHours } });
+        return ok({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } });
       }
       if (R('PUT', '/api/admin/settings')) {
+        if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
         const next = deepMerge(s, body || {});
         next.security.proxySecret = s.security.proxySecret;
         if (Array.isArray(body.plans)) next.plans = body.plans.map((p) => ({
@@ -848,6 +852,32 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const totalUsd = accs.reduce((x, a) => x + a.usd, 0);
         return ok({ accounts: accs, totalUsd, totalMad: fromUsd(totalUsd, 'MAD', s.finance.rates), rates: s.finance.rates, ratesUpdatedAt: s.finance.ratesUpdatedAt, points, history, totalHistoryUsd });
       }
+      if (R('GET', '/api/admin/stripe/balance')) { // live balance from Stripe, compared with the app
+        const key = s.finance.stripeKey;
+        if (!key) return ok({ connected: false });
+        let d;
+        try { const r = await fetchFn('https://api.stripe.com/v1/balance', { headers: { Authorization: 'Bearer ' + key } }); d = await r.json(); if (!r.ok) return ok({ connected: true, error: d.error?.message || 'Stripe error ' + r.status }); }
+        catch (e) { return ok({ connected: true, error: e.message }); }
+        const acc = s.finance.accounts.find((a) => a.id === (s.finance.stripeAccountId || 'stripe'));
+        const cur = (acc?.currency || 'USD').toLowerCase();
+        const sum = (arr) => (arr || []).filter((x) => x.currency === cur).reduce((a, x) => a + x.amount, 0) / 100;
+        const other = (arr) => (arr || []).filter((x) => x.currency !== cur).map((x) => `${x.amount / 100} ${x.currency.toUpperCase()}`);
+        const appBal = acc ? balances(s, await getTx()).find((b) => b.id === acc.id).balance : 0;
+        return ok({ connected: true, accountId: acc?.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending), otherCurrencies: [...other(d.available), ...other(d.pending)], app: appBal });
+      }
+      if (R('POST', '/api/admin/stripe/match')) { // add one adjustment so the app equals Stripe
+        const acc = s.finance.accounts.find((a) => a.id === (s.finance.stripeAccountId || 'stripe'));
+        if (!acc) return err(400, 'Stripe account not found in Banks.');
+        const target = Number(body.target);
+        if (!isFinite(target)) return err(400, 'Missing Stripe balance.');
+        const tx = await getTx(); const cur = balances(s, tx).find((b) => b.id === acc.id).balance;
+        const diff = Math.round((target - cur) * 100) / 100;
+        if (!diff) return ok({ ok: true, diff: 0 });
+        tx.push({ id: uid(6), by: actorName, at: Date.now(), type: diff > 0 ? 'income' : 'expense', accountId: acc.id, amount: Math.abs(diff), category: 'Stripe sync', note: `Matched to Stripe balance ${target} ${acc.currency}` });
+        await store.put('tx', tx);
+        await log('finance', `Stripe synced: ${diff > 0 ? '+' : ''}${diff} ${acc.currency}`);
+        return ok({ ok: true, diff });
+      }
       if (R('POST', '/api/admin/rates/refresh')) { const n = await refreshRates(s, true); return ok({ rates: n.finance.rates, ratesUpdatedAt: n.finance.ratesUpdatedAt }); }
       if (R('GET', '/api/admin/tx')) {
         const tx = await getTx();
@@ -874,6 +904,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const tx = await getTx(); const t = tx.find((x) => x.id === txm[1]);
         if (!t) return err(404, 'Not found');
         await store.put('tx', tx.filter((x) => x !== t));
+        // keep everything in sync: remove the sale / credit purchase this payment belongs to
+        if (t.saleId) { const sales = await getSales(); await store.put('sales', sales.filter((x) => x.id !== t.saleId)); }
+        if (t.stockId) { const st = await getStock(); await store.put('stock', st.filter((x) => x.id !== t.stockId)); }
         await log('finance', `Deleted transaction ${t.type} ${t.amount}`);
         return ok({ ok: true });
       }
@@ -967,11 +1000,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         for (const k in byMonth) byMonth[k] = Math.round(byMonth[k] * 100) / 100;
         const stock = await stockInfo(s);
+        const bal = can('finance_view') ? balances(s, await getTx()) : null;
+        const totalBalUsd = bal ? bal.reduce((a, x) => a + x.usd, 0) : null;
         const count = (st) => cs.filter((c) => c.state === st).length;
         return ok({
           total: cs.length, active: count('active'), expiring: count('expiring'), expired: count('expired'), disabled: count('disabled'),
           ...(can('profits') ? { revenueTotal: Math.round(total * 100) / 100, revenueMonth: byMonth[months[5]], byMonth } : { revenueTotal: null, revenueMonth: null, byMonth: null }), renewalsCount, trials: cs.filter((c) => c.isTrial).length,
-          stock: { available: stock.available, low: stock.low }, lowCreditsAlert: s.stock.lowCreditsAlert, madRate: s.finance.rates.MAD,
+          stock: { available: stock.available, low: stock.low }, totalBalanceUsd: totalBalUsd, lowCreditsAlert: s.stock.lowCreditsAlert, madRate: s.finance.rates.MAD,
           expiringSoon: cs.filter((c) => c.state === 'expiring').sort((a, b) => a.expiresAt - b.expiresAt).slice(0, 8),
           recentlyExpired: cs.filter((c) => c.state === 'expired').sort((a, b) => b.expiresAt - a.expiresAt).slice(0, 8),
         });

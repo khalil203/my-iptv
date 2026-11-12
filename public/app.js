@@ -230,7 +230,7 @@ async function renderAdmin() {
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + await adminResellerSection(s);
-    else if (t === 'finance') body.innerHTML = await adminFinance(s);
+    else if (t === 'finance') { body.innerHTML = await adminFinance(s); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
     else if (t === 'trial') body.innerHTML = adminTrial(s);
@@ -269,6 +269,7 @@ async function adminOverview() {
     <div class="stat"><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
     <div class="stat ${panelLow ? 'c-bad' : ''}"><span>Panel credits (API)</span><b>${cr.enabled ? (cr.ok ? esc(cr.credits ?? '—') : '⚠️') : 'off'}</b></div>
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
+    ${st.totalBalanceUsd !== null && st.totalBalanceUsd !== undefined ? `<div class="stat c-ok" data-act="atab" data-tab="finance" style="cursor:pointer"><span>All banks (total)</span><b>${usd(st.totalBalanceUsd)}</b><span>${mad(st.totalBalanceUsd * st.madRate)}</span></div>` : ''}
   </div>
   <div class="grid2 ${can('customers_view') ? '' : 'hidden'}" style="gap:16px">
     <div class="card"><div class="row"><h3>Expiring soon</h3><span class="spacer"></span><a class="small" data-act="atab" data-tab="subs" style="cursor:pointer">Tracker →</a></div>${st.expiringSoon.length ? st.expiringSoon.map(row).join('') : '<p class="muted">Nobody is expiring soon.</p>'}</div>
@@ -618,6 +619,7 @@ async function adminFinance(s) {
       <div class="stat c-ok"><span>Total balance (MAD)</span><b>${mad(f.totalMad)}</b></div>
       <div class="stat"><span>1 USD =</span><b>${num(f.rates.MAD, 'MAD')}</b><span>${f.ratesUpdatedAt ? 'updated ' + fmtDT(f.ratesUpdatedAt) : 'manual rate'} · <a data-act="refresh-rates" data-perm="finance_edit" style="cursor:pointer">refresh</a></span></div>
     </div>
+    <div id="stripe-box"></div>
     <div class="row" style="margin-bottom:14px"><button class="btn primary" data-act="new-tx" data-perm="finance_edit" data-type="income">＋ Income</button><button class="btn" data-act="new-tx" data-perm="finance_edit" data-type="expense">− Expense</button><button class="btn" data-act="new-tx" data-perm="finance_edit" data-type="transfer">⇄ Transfer</button></div>
     <div class="grid2" style="gap:16px;align-items:start">
       <div class="card"><h3>Balance by bank (USD)</h3>${hBars(f.accounts.map((a) => ({ label: a.name, value: a.usd, color: a.color })), usd)}</div>
@@ -643,12 +645,24 @@ async function adminFinance(s) {
       <button class="btn sm" data-act="add-acc">＋ Add bank / wallet</button>
       <h3 style="margin-top:16px">Exchange rates (units per 1 USD)</h3>
       <div class="grid3" id="rates">${Object.entries(s.finance.rates).map(([k, v]) => field(k, 'rate-' + k, v, { type: 'number', attrs: `step="any" data-rate="${k}" ${k === 'USD' ? 'readonly' : ''}` })).join('')}</div>
+      <h3 style="margin-top:16px">Stripe connection (optional)</h3>
+      ${field('Stripe secret or restricted key', 'stripe-key', s.finance.stripeKey || '', { type: 'password', attrs: 'id="stripe-key" autocomplete="off" data-skip', help: 'Stripe Dashboard → Developers → API keys → Create restricted key with <b>Balance: Read</b>. The app then shows your real Stripe balance and can match the Stripe bank to it.' })}
       <label class="toggle"><input type="checkbox" id="auto-rates" ${s.finance.autoRates ? 'checked' : ''}><i></i><span>Update rates automatically every day<small>MAD, EUR, THB from a free rates service. USDT stays 1:1 with USD.</small></span></label>
       <button class="btn primary" data-act="save-accounts" style="margin-top:10px">Save banks & rates</button></div>
     </details>`;
 }
 const accRow = (a) => `<div class="acc-row" data-acc="${esc(a.id || '')}"><input data-k="name" value="${esc(a.name)}" placeholder="Name"><select data-k="currency">${['MAD', 'USD', 'USDT', 'EUR', 'THB'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select><input data-k="opening" type="number" step="any" value="${a.opening || 0}"><input data-k="color" type="color" value="${esc(a.color || '#7c5cff')}"><button class="btn sm danger" data-act="del-acc">✕</button></div>`;
 
+async function loadStripe() {
+  const box = $('#stripe-box'); if (!box) return;
+  const r = await api('GET', '/api/admin/stripe/balance').catch(() => null);
+  if (!r || !r.connected) return;
+  if (r.error) { box.innerHTML = `<div class="notice danger">Stripe: ${esc(r.error)}</div>`; return; }
+  const diff = Math.round((r.available + r.pending - r.app) * 100) / 100;
+  box.innerHTML = `<div class="card" style="border-color:#635bff55"><div class="row"><h3 style="margin:0">💳 Stripe (live)</h3><span class="spacer"></span>${diff ? `<button class="btn sm primary" data-act="stripe-match" data-target="${r.available + r.pending}" data-perm="finance_edit">Sync app to Stripe</button>` : '<span class="pill st-active">in sync</span>'}</div>
+    <div class="row small" style="margin-top:8px;gap:18px"><span>Available: <b>${num(r.available, r.currency)}</b></span><span>Pending: <b>${num(r.pending, r.currency)}</b></span><span>In the app: <b>${num(r.app, r.currency)}</b></span>${diff ? `<span class="${diff > 0 ? 'pos' : 'neg'}">Difference: ${num(diff, r.currency)}</span>` : ''}</div>
+    ${r.otherCurrencies.length ? `<div class="small muted" style="margin-top:6px">Other currencies in Stripe: ${esc(r.otherCurrencies.join(', '))}</div>` : ''}</div>`;
+}
 function txForm(type, accId) {
   const s = state.admin.settings;
   const accs = s.finance.accounts;
@@ -973,15 +987,16 @@ const actions = {
   lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else renderLogin(); },
   trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
   'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
-  'del-tx': async (el) => { if (!confirm('Delete this transaction?')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast('Deleted'); renderAdmin(); },
+  'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast('Deleted'); renderAdmin(); },
   'tx-filter': (el) => { state.admin.txAccount = el.dataset.acc; renderAdmin(); },
+  'stripe-match': async (el) => { if (!confirm('Add one adjustment so the Stripe bank in the app equals your real Stripe balance?')) return; const r = await api('POST', '/api/admin/stripe/match', { target: Number(el.dataset.target) }); toast(`Stripe synced (${r.diff > 0 ? '+' : ''}${r.diff}) ✓`); renderAdmin(); },
   'refresh-rates': async () => { await api('POST', '/api/admin/rates/refresh'); toast('Rates updated ✓'); renderAdmin(); },
   'add-acc': () => $('#acc-rows').insertAdjacentHTML('beforeend', accRow({ name: '', currency: 'USD', opening: 0, color: '#7c5cff' })),
   'del-acc': (el) => { if (confirm('Remove this bank? Its transactions stay but will not count in balances.')) el.closest('.acc-row').remove(); },
   'save-accounts': async () => {
     const accounts = [...document.querySelectorAll('#acc-rows .acc-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.acc || undefined, name: g('name'), currency: g('currency'), opening: Number(g('opening')), color: g('color') }; }).filter((a) => a.name);
     const rates = {}; document.querySelectorAll('[data-rate]').forEach((i) => { rates[i.dataset.rate] = Number(i.value) || 1; });
-    await saveSettings({ finance: { accounts, rates, autoRates: $('#auto-rates').checked } }); renderAdmin();
+    await saveSettings({ finance: { accounts, rates, autoRates: $('#auto-rates').checked, stripeKey: $('#stripe-key').value.trim() } }); renderAdmin();
   },
   'export-tx': async () => {
     const f = state.admin.finance; const tx = await api('GET', '/api/admin/tx?limit=100000');
@@ -1239,6 +1254,13 @@ document.addEventListener('change', async (e) => {
   if (t.name === 'same' && t.form?.dataset.form === 'trial') $('#wa-field').style.display = t.checked ? 'none' : '';
   if (t.hasAttribute('data-tx-type')) { const acc = t.form.accountId.value; closeModal(); modal(t.value === 'income' ? 'Add income' : t.value === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(t.value, acc)); }
   if (t.dataset.input === 'sub-days') { state.admin.subDays = t.value; $('#admin-body').innerHTML = await adminSubs(); }
+  if ((t.form?.dataset.form === 'customer' && !t.form.dataset.id && (t.name === 'planId' || t.name === 'accountId')) || (t.form?.dataset.form === 'renew' && (t.name === 'planId' || t.name === 'accountId'))) {
+    const st = state.admin.settings; const f = t.form;
+    const p = st.plans.find((x) => x.id === f.planId.value);
+    const acc = st.finance.accounts.find((a) => a.id === f.accountId?.value);
+    if (p) { const r = st.finance.rates; const from = st.currency || 'USD'; const to = acc ? acc.currency : from;
+      f.price.value = Math.round((p.price / (r[from] || 1)) * (r[to] || 1) * 100) / 100; }
+  }
   if (t.form?.dataset.form === 'rp-sale' && (t.name === 'packageId' || t.name === 'accountId')) {
     const st = state.admin.settings; const f = t.form;
     const p = st.resellerPackages.find((x) => x.id === f.packageId.value);
@@ -1248,11 +1270,11 @@ document.addEventListener('change', async (e) => {
   }
   if (t.hasAttribute('data-renew-plan')) {
     const p = state.admin.settings.plans.find((x) => x.id === t.value);
-    const f = t.form; if (p) { f.days.value = p.days; f.price.value = p.price; f.credits.value = p.credits ?? ''; } updateRenewPreview();
+    const f = t.form; if (p) { f.days.value = p.days; f.credits.value = p.credits ?? ''; } updateRenewPreview();
   }
   if (t.name === 'planId' && t.form?.dataset.form === 'customer' && !t.form.dataset.id) {
     const p = state.admin.settings.plans.find((x) => x.id === t.value);
-    if (p) { t.form.price.value = p.price; t.form.connections.value = p.connections; }
+    if (p) { t.form.connections.value = p.connections; }
   }
   if (t.dataset.input === 'restore' && t.files[0]) {
     try {
