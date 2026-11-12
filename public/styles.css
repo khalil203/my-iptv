@@ -337,3 +337,35 @@ img, video, iframe, svg { max-width: 100%; }
 .poster .img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .poster .img .noimg.big { width: 100%; height: 100%; display: grid; place-items: center; font-family: Montserrat, sans-serif; font-weight: 900; font-size: 30px; color: #fff; }
 .ch.sk .noimg, .ch.sk span { background: linear-gradient(90deg, var(--panel) 0%, var(--panel2) 50%, var(--panel) 100%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; border-radius: 10px; }
+
+/* ---- advanced player ---- */
+.vp { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 16/9; max-height: 72vh; width: 100%; outline: none; }
+.vp:fullscreen { border-radius: 0; max-height: none; aspect-ratio: auto; }
+.vp video { width: 100%; height: 100%; display: block; background: #000; object-fit: contain; }
+.vp video::cue { background: rgba(0,0,0,.65); font-size: 1.05em; }
+.vp-spin { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.vp-msg { position: absolute; left: 0; right: 0; top: 40%; text-align: center; padding: 0 16px; color: #fff; text-shadow: 0 2px 8px #000; }
+.vp-msg:empty { display: none; }
+.vp-big { position: absolute; inset: 0; margin: auto; width: 76px; height: 76px; border-radius: 50%; border: 0; font-size: 30px; color: #fff; background: color-mix(in srgb, var(--primary) 80%, transparent); display: none; place-items: center; cursor: pointer; box-shadow: 0 0 30px var(--primary); }
+.vp-bar { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 10px 8px; background: linear-gradient(transparent, rgba(0,0,0,.85)); opacity: 0; transform: translateY(8px); transition: .25s var(--ease); pointer-events: none; }
+.vp.show .vp-bar { opacity: 1; transform: none; pointer-events: auto; }
+.vp-row { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.vp-b { background: transparent; border: 0; color: #fff; font-size: 17px; min-width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-weight: 800; font-family: Inter, sans-serif; flex: 0 0 auto; }
+.vp-b:hover, .vp-b:focus-visible { background: rgba(255,255,255,.15); outline: none; }
+.vp-live { color: #f87171; font-weight: 800; font-size: .8rem; margin-left: 4px; letter-spacing: .05em; }
+.vp-time { color: #e2e8f0; font-size: .8rem; margin-left: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vp input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; padding: 0; border: 0; height: 22px; cursor: pointer; box-shadow: none; }
+.vp input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: rgba(255,255,255,.3); }
+.vp input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); margin-top: -5px; box-shadow: 0 0 10px var(--primary); }
+.vp input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: rgba(255,255,255,.3); }
+.vp input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 0; }
+.vp-seek { width: 100%; display: block; margin-bottom: 2px; }
+.vp-vol { width: 90px; flex: 0 0 auto; }
+.vp-menu { position: absolute; right: 10px; bottom: 62px; min-width: 190px; max-height: 60%; overflow: auto; background: rgba(10,16,26,.96); border: 1px solid var(--line); border-radius: 12px; padding: 6px; display: none; z-index: 3; }
+.vp-menu.open { display: block; animation: pop .2s var(--ease); }
+.vp-mi { display: block; width: 100%; text-align: start; background: transparent; border: 0; color: #fff; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: .9rem; }
+.vp-mi:hover, .vp-mi:focus { background: rgba(255,255,255,.1); outline: none; }
+.vp-mi.on { color: var(--accent); font-weight: 700; }
+.vp-mi[disabled] { color: var(--muted); cursor: default; }
+.vp-mh { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; padding: 8px 12px 4px; }
+@media (max-width: 560px) { .vp-vol { display: none; } .vp-b { min-width: 34px; font-size: 15px; } .vp-time { font-size: .72rem; } }

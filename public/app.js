@@ -855,7 +855,7 @@ async function renderUserTab() {
       : kind === 'movies' ? { kind: 'movie', id: i.stream_id, name: i.name, icon: i.stream_icon, ext: i.container_extension }
       : { kind: 'series', id: i.series_id, name: i.name, icon: i.cover });
     el.innerHTML = `${d.search ? `<input placeholder="${t('search')}" value="${esc(u.q)}" data-input="u-search" style="margin-bottom:12px">` : ''}
-      <div class="chips"><a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
+      <div class="chips">${kind === 'live' ? `<a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>` : ''}${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
       <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
   } catch (e) { if (e.switching) return; el.innerHTML = e.direct ? appsCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
@@ -942,8 +942,11 @@ function appsCard() {
     <a class="btn primary" href="download.html">${t('getApp')}</a></div>`;
 }
 
+window.__deadLogo = new Set(JSON.parse(sessionStorage.getItem('tvp_deadlogo') || '[]'));
+window.__logoFail = (img) => { try { const h = new URL(img.dataset.src).host; window.__deadLogo.add(h); sessionStorage.setItem('tvp_deadlogo', JSON.stringify([...window.__deadLogo])); } catch {} img.replaceWith(img.nextElementSibling.content.cloneNode(true)); };
 function imgSrc(u) {
   if (!u || !/^https?:/.test(u)) return '';
+  try { if (window.__deadLogo.has(new URL(u).host)) return ''; } catch { return ''; }
   const st = state.user.me?.stream;
   if (u.startsWith('https:') || location.protocol === 'http:') return u;      // already loadable
   if (bridge()) return u;                                                     // Android / TV / desktop apps load http images directly
@@ -952,7 +955,7 @@ function imgSrc(u) {
   return u;
 }
 function initialsTile(name, big) {
-  const n = String(name || '?').replace(/^[\W_]*([A-Z]{2,3}[:|\-]\s*)/i, '').trim();
+  const n = String(name || '?').replace(/#+/g, ' ').replace(/^\s*[|[(]?[A-Z]{2,3}[|\])]?\s*[-:|]\s*/i, '').replace(/^\s*\|[^|]*\|\s*/, '').trim() || String(name || '?');
   const ini = (n.match(/[\p{L}\p{N}]+/gu) || ['?']).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return `<div class="noimg${big ? ' big' : ''}" style="background:linear-gradient(135deg,hsl(${h} 70% 40%),hsl(${(h + 40) % 360} 70% 25%))">${esc(ini)}</div>`;
@@ -962,8 +965,8 @@ function itemsGrid(items) {
   const live = items.filter((i) => i.kind === 'live');
   const vod = items.filter((i) => i.kind !== 'live');
   const favBtn = (i) => d.favorites ? `<button class="fav ${isFav(i.kind, i.id) ? 'on' : ''}" data-act="fav" data-item="${esc(JSON.stringify(i))}">★</button>` : '';
-  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" loading="lazy" decoding="async" alt="" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
-    ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" loading="lazy" decoding="async" alt="" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${initialsTile(i.name, true)}</template>` : initialsTile(i.name, true)}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
+  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" loading="lazy" decoding="async" alt="" onerror="__logoFail(this)"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
+    ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" loading="lazy" decoding="async" alt="" onerror="__logoFail(this)"><template>${initialsTile(i.name, true)}</template>` : initialsTile(i.name, true)}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
 }
 
 function streamUrl(kind, id, ext) {
@@ -990,22 +993,130 @@ function play(title, kind, id, ext, extraHtml = '') {
     else return modal(esc(title), appsCard(), { wide: true });
     isHls = kind === 'live' || ext === 'm3u8';
   } else { url = streamUrl(kind, id, ext); isHls = kind === 'live' || ext === 'm3u8'; }
-  let hls = null;
-  const body = modal(esc(title), `<div class="player"><video id="vid" controls playsinline autoplay></video></div><div id="pl-msg" class="small muted" style="margin-top:8px"></div>${extraHtml}`, { wide: true, onClose: () => { if (hls) hls.destroy(); const v = $('#vid'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } } });
-  const v = $('#vid', body);
-  const fail = () => { $('#pl-msg').innerHTML = t('streamFail'); };
-  if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && !window.Hls) {
-    $('#pl-msg').textContent = '…';
-    loadHls().then(() => { if ($('#vid') === v) { v.remove(); closeModal(); play(title, kind, id, ext, extraHtml); } }).catch(fail);
-    return;
+  openPlayer({ title, url, isHls, kind, id, extraHtml });
+}
+
+// ---------------- advanced player ----------------
+const fmtT = (x) => { if (!isFinite(x)) return '0:00'; x = Math.max(0, Math.floor(x)); const h = Math.floor(x / 3600), m = Math.floor((x % 3600) / 60), sec = String(x % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`; };
+function openPlayer({ title, url, isHls, kind, id, extraHtml }) {
+  const live = kind === 'live';
+  let hls = null, hideT = null, retries = 0;
+  const body = modal(esc(title), `<div class="vp" id="vp" tabindex="0">
+      <video id="vid" playsinline autoplay preload="auto"></video>
+      <div class="vp-spin" id="vp-spin"><div class="spinner"></div></div>
+      <div class="vp-msg" id="pl-msg"></div>
+      <button class="vp-big" id="vp-big" aria-label="Play">▶</button>
+      <div class="vp-bar">
+        ${live ? '' : `<input type="range" class="vp-seek" id="vp-seek" min="0" max="1000" value="0" aria-label="Seek">`}
+        <div class="vp-row">
+          <button class="vp-b" data-vp="play" aria-label="Play/Pause">❚❚</button>
+          ${live ? '<span class="vp-live">● LIVE</span>' : `<button class="vp-b" data-vp="back" aria-label="Back 10s">⏪</button><button class="vp-b" data-vp="fwd" aria-label="Forward 10s">⏩</button><span class="vp-time" id="vp-time">0:00 / 0:00</span>`}
+          <span class="spacer"></span>
+          <button class="vp-b" data-vp="mute" id="vp-mute" aria-label="Mute">🔊</button>
+          <input type="range" class="vp-vol" id="vp-vol" min="0" max="100" aria-label="Volume">
+          <button class="vp-b" data-vp="menu" data-m="subs" aria-label="Subtitles">CC</button>
+          <button class="vp-b" data-vp="menu" data-m="audio" aria-label="Audio">🎧</button>
+          <button class="vp-b" data-vp="menu" data-m="quality" aria-label="Quality">⚙️</button>
+          ${document.pictureInPictureEnabled ? '<button class="vp-b" data-vp="pip" aria-label="Picture in picture">⧉</button>' : ''}
+          <button class="vp-b" data-vp="fs" aria-label="Fullscreen">⛶</button>
+        </div>
+      </div>
+      <div class="vp-menu" id="vp-menu"></div>
+    </div>${extraHtml}`, { wide: true, onClose: () => { clearTimeout(hideT); document.removeEventListener('keydown', onKey, true); if (hls) hls.destroy(); const v = $('#vid'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } });
+  const vp = $('#vp', body), v = $('#vid', body), spin = $('#vp-spin', body), msg = $('#pl-msg', body), big = $('#vp-big', body), menu = $('#vp-menu', body);
+  const vol = $('#vp-vol', body), muteB = $('#vp-mute', body), playB = body.querySelector('[data-vp=play]'), seek = $('#vp-seek', body), timeEl = $('#vp-time', body);
+  // remembered volume
+  const saved = JSON.parse(localStorage.getItem('tvp_vol') || '{"v":1,"m":false}');
+  v.volume = saved.v; v.muted = saved.m; vol.value = Math.round(saved.v * 100);
+  const saveVol = () => { localStorage.setItem('tvp_vol', JSON.stringify({ v: v.volume, m: v.muted })); muteB.textContent = v.muted || v.volume === 0 ? '🔇' : v.volume < .5 ? '🔉' : '🔊'; vol.value = v.muted ? 0 : Math.round(v.volume * 100); };
+  saveVol();
+  const show = () => { vp.classList.add('show'); clearTimeout(hideT); hideT = setTimeout(() => { if (!v.paused && !menu.classList.contains('open')) vp.classList.remove('show'); }, 3500); };
+  const fail = (m) => { spin.style.display = 'none'; msg.innerHTML = `${m || t('streamFail')} <button class="btn sm" data-vp="retry">⟳ ${t('retry')}</button>`; };
+  const start = () => {
+    msg.innerHTML = ''; spin.style.display = '';
+    if (hls) { hls.destroy(); hls = null; }
+    if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && window.Hls && window.Hls.isSupported()) {
+      hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: live ? 20 : 40, startFragPrefetch: true, manifestLoadingMaxRetry: 4, fragLoadingMaxRetry: 6 });
+      hls.loadSource(url); hls.attachMedia(v);
+      hls.on(window.Hls.Events.ERROR, (_, d) => {
+        if (!d.fatal) return;
+        if (d.type === window.Hls.ErrorTypes.MEDIA_ERROR) return hls.recoverMediaError();
+        if (retries++ < 3) return setTimeout(start, 1500);
+        fail();
+      });
+    } else { v.src = url; }
+    v.play().catch(() => { big.style.display = 'grid'; });
+  };
+  if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && !window.Hls) loadHls().then(start).catch(() => fail()); else start();
+  // video events
+  v.addEventListener('waiting', () => (spin.style.display = ''));
+  v.addEventListener('playing', () => { spin.style.display = 'none'; big.style.display = 'none'; msg.innerHTML = ''; retries = 0; playB.textContent = '❚❚'; show(); });
+  v.addEventListener('pause', () => { playB.textContent = '▶'; vp.classList.add('show'); });
+  v.addEventListener('canplay', () => (spin.style.display = 'none'));
+  v.addEventListener('error', () => { if (!hls) { if (retries++ < 2) setTimeout(start, 1500); else fail(); } });
+  v.addEventListener('timeupdate', () => { if (!live && seek && isFinite(v.duration)) { if (!seek.dragging) seek.value = Math.round((v.currentTime / v.duration) * 1000); timeEl.textContent = `${fmtT(v.currentTime)} / ${fmtT(v.duration)}`; } });
+  v.addEventListener('volumechange', saveVol);
+  if (seek) { seek.addEventListener('input', () => { seek.dragging = true; timeEl.textContent = `${fmtT((seek.value / 1000) * v.duration)} / ${fmtT(v.duration)}`; }); seek.addEventListener('change', () => { seek.dragging = false; if (isFinite(v.duration)) v.currentTime = (seek.value / 1000) * v.duration; }); }
+  vol.addEventListener('input', () => { v.volume = vol.value / 100; v.muted = vol.value == 0; });
+  vp.addEventListener('mousemove', show); vp.addEventListener('touchstart', show, { passive: true });
+  v.addEventListener('click', () => { if (vp.classList.contains('show')) toggle(); else show(); });
+  v.addEventListener('dblclick', () => fullscreen());
+  big.addEventListener('click', () => { v.play(); });
+  const toggle = () => (v.paused ? v.play() : v.pause());
+  const fullscreen = () => { if (document.fullscreenElement) document.exitFullscreen(); else if (vp.requestFullscreen) vp.requestFullscreen().catch(() => {}); else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen(); };
+  // menus: subtitles, audio, quality, speed
+  const openMenu = (m) => {
+    let items = [];
+    if (m === 'subs') {
+      const tracks = hls && hls.subtitleTracks?.length ? hls.subtitleTracks.map((tr, i) => ({ label: tr.name || tr.lang || `Track ${i + 1}`, on: hls.subtitleTrack === i, act: () => { hls.subtitleTrack = i; hls.subtitleDisplay = true; } }))
+        : [...v.textTracks].filter((tr) => /subtitles|captions/.test(tr.kind)).map((tr, i) => ({ label: tr.label || tr.language || `Track ${i + 1}`, on: tr.mode === 'showing', act: () => { [...v.textTracks].forEach((x) => (x.mode = 'disabled')); tr.mode = 'showing'; } }));
+      items = [{ label: t('off'), on: !tracks.some((x) => x.on), act: () => { if (hls) hls.subtitleTrack = -1; [...v.textTracks].forEach((x) => (x.mode = 'disabled')); } }, ...tracks];
+      if (!tracks.length) items.push({ label: t('noSubs'), disabled: true });
+    } else if (m === 'audio') {
+      const tracks = hls && hls.audioTracks?.length > 1 ? hls.audioTracks.map((tr, i) => ({ label: tr.name || tr.lang || `Audio ${i + 1}`, on: hls.audioTrack === i, act: () => (hls.audioTrack = i) }))
+        : v.audioTracks && v.audioTracks.length > 1 ? [...v.audioTracks].map((tr, i) => ({ label: tr.label || tr.language || `Audio ${i + 1}`, on: tr.enabled, act: () => [...v.audioTracks].forEach((x, j) => (x.enabled = j === i)) })) : [];
+      items = tracks.length ? tracks : [{ label: t('oneAudio'), disabled: true }];
+    } else if (m === 'quality') {
+      if (hls && hls.levels?.length > 1) items = [{ label: 'Auto', on: hls.autoLevelEnabled, act: () => (hls.currentLevel = -1) }, ...hls.levels.map((l, i) => ({ label: l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)} kbps`, on: !hls.autoLevelEnabled && hls.currentLevel === i, act: () => (hls.currentLevel = i) }))];
+      if (!live) items.push({ head: t('speed') }, ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => ({ label: r + '×', on: v.playbackRate === r, act: () => (v.playbackRate = r) })));
+      if (!items.length) items = [{ label: v.videoHeight ? `${v.videoHeight}p` : 'Auto', on: true }];
+    }
+    menu.innerHTML = items.map((x, i) => x.head ? `<div class="vp-mh">${esc(x.head)}</div>` : `<button class="vp-mi ${x.on ? 'on' : ''}" ${x.disabled ? 'disabled' : ''} data-vpi="${i}">${x.on ? '✓ ' : ''}${esc(x.label)}</button>`).join('');
+    menu._items = items; menu.classList.add('open'); vp.classList.add('show');
+    menu.querySelector('.vp-mi:not([disabled])')?.focus();
+  };
+  menu.addEventListener('click', (e) => { const b = e.target.closest('[data-vpi]'); if (!b) return; const it = menu._items[b.dataset.vpi]; if (it?.act) it.act(); menu.classList.remove('open'); show(); });
+  vp.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-vp]'); if (!b) { if (!e.target.closest('.vp-menu')) menu.classList.remove('open'); return; }
+    const a = b.dataset.vp; show();
+    if (a === 'play') toggle();
+    if (a === 'back') v.currentTime = Math.max(0, v.currentTime - 10);
+    if (a === 'fwd') v.currentTime = Math.min(v.duration || 1e9, v.currentTime + 10);
+    if (a === 'mute') { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = .5; }
+    if (a === 'fs') fullscreen();
+    if (a === 'pip') (document.pictureInPictureElement ? document.exitPictureInPicture() : v.requestPictureInPicture()).catch(() => {});
+    if (a === 'menu') menu.classList.contains('open') && menu.dataset.m === b.dataset.m ? menu.classList.remove('open') : (menu.dataset.m = b.dataset.m, openMenu(b.dataset.m));
+    if (a === 'retry') { retries = 0; start(); }
+  });
+  // keyboard & TV remote
+  function onKey(e) {
+    if (!$('#vp') || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) && document.activeElement.type !== 'range') return;
+    const k = e.key; let used = true;
+    if (menu.classList.contains('open') && /Arrow|Enter/.test(k)) { used = false; }
+    else if (k === ' ' || k === 'k' || k === 'MediaPlayPause') toggle();
+    else if (k === 'ArrowRight' && !live) v.currentTime += 10;
+    else if (k === 'ArrowLeft' && !live) v.currentTime = Math.max(0, v.currentTime - 10);
+    else if (k === 'ArrowUp') { v.muted = false; v.volume = Math.min(1, v.volume + 0.1); }
+    else if (k === 'ArrowDown') v.volume = Math.max(0, v.volume - 0.1);
+    else if (k === 'm' || k === 'AudioVolumeMute') v.muted = !v.muted;
+    else if (k === 'f') fullscreen();
+    else if (k === 'c') openMenu('subs');
+    else used = false;
+    if (used) { e.preventDefault(); e.stopPropagation(); show(); }
   }
-  if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && window.Hls && window.Hls.isSupported()) {
-    hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
-    hls.loadSource(url); hls.attachMedia(v);
-    hls.on(window.Hls.Events.ERROR, (_, data) => { if (data.fatal) fail(); });
-  } else { v.src = url; v.onerror = fail; }
-  v.play().catch(() => {});
-  if (kind === 'live' && state.user.me.dashboard.epg) loadEpg(id);
+  document.addEventListener('keydown', onKey, true);
+  vp.focus(); show();
+  if (live && state.user.me.dashboard.epg) loadEpg(id);
 }
 async function loadEpg(id) {
   try {

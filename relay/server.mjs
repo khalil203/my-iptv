@@ -7,6 +7,9 @@ import https from 'node:https';
 const PORT = process.env.PORT || 10000;
 const APP_URL = (process.env.APP_URL || 'https://my-iptv.mrkhalil-ben-salah.workers.dev').replace(/\/+$/, '');
 const tokenCache = new Map(); // token -> { ok, ua, until }
+const imgCache = new Map();   // logo url -> { type, buf, at }  (small in-memory cache)
+const deadHosts = new Map();  // host -> until  (logo servers that are down)
+const isImg = (u) => /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(u);
 
 async function checkToken(t) {
   const c = tokenCache.get(t);
@@ -23,13 +26,13 @@ async function checkToken(t) {
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Range, Content-Type', 'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges' };
 
-function get(url, headers, hops = 0) {
+function get(url, headers, hops = 0, timeout = 20000) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https:') ? https : http;
-    const req = lib.get(url, { headers, timeout: 20000 }, (res) => {
+    const req = lib.get(url, { headers, timeout }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && hops < 6) {
         res.resume();
-        return resolve(get(new URL(res.headers.location, url).href, headers, hops + 1));
+        return resolve(get(new URL(res.headers.location, url).href, headers, hops + 1, timeout));
       }
       res.finalUrl = url;
       resolve(res);
@@ -60,6 +63,21 @@ http.createServer(async (req, res) => {
   if (!tok.ok) { res.writeHead(403, CORS); return res.end('forbidden'); }
   const headers = { 'User-Agent': tok.ua, Accept: '*/*' };
   if (req.headers.range) headers.Range = req.headers.range;
+  // Logos: serve from memory, fail fast for logo servers that are down
+  if (isImg(target)) {
+    const host = new URL(target).host;
+    const hit = imgCache.get(target);
+    if (hit) { res.writeHead(200, { 'content-type': hit.type, 'cache-control': 'public, max-age=604800', ...CORS }); return res.end(hit.buf); }
+    if ((deadHosts.get(host) || 0) > Date.now()) { res.writeHead(504, CORS); return res.end(); }
+    try {
+      const up = await get(target, { 'User-Agent': 'Mozilla/5.0', Accept: 'image/*' }, 0, 6000);
+      const chunks = []; for await (const ch of up) chunks.push(ch);
+      const buf = Buffer.concat(chunks); const type = String(up.headers['content-type'] || 'image/png');
+      if (up.statusCode >= 400 || !type.startsWith('image')) { res.writeHead(404, CORS); return res.end(); }
+      if (buf.length < 400000) { imgCache.set(target, { type, buf }); if (imgCache.size > 3000) imgCache.delete(imgCache.keys().next().value); }
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=604800', ...CORS }); return res.end(buf);
+    } catch { deadHosts.set(host, Date.now() + 10 * 60000); res.writeHead(504, CORS); return res.end(); }
+  }
   let up;
   try { up = await get(target, headers); } catch (e) { res.writeHead(502, CORS); return res.end('upstream error: ' + e.message); }
   const ct = String(up.headers['content-type'] || '');
