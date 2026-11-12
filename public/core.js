@@ -103,6 +103,7 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'o1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 139.99, badge: '🔥 Ultimate Plan • 4 Connections', link: '' },
   ],
   orderCurrency: 'EUR',
+  orderAccounts: [], // Stripe accounts the pay links come from: { id, name, enabled }
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
   email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
@@ -163,7 +164,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
-    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency'].includes(x))) return 'plans';
+    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts'].includes(x))) return 'plans';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
@@ -331,7 +332,15 @@ const OM = {
     help: '📞 تحتاج مساعدة؟', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: '{pkg} — {price} | طلب {app}' },
 };
 const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
-export function orderEmail(s, c, pkg, appUrl) {
+// Random pay link for a package: from enabled Stripe accounts, in the email currency
+export function pickPayLink(s, pkg) {
+  const cur = s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR';
+  const on = new Set((s.orderAccounts || []).filter((a) => a.enabled !== false).map((a) => a.id));
+  const pool = (pkg.links || []).filter((l) => l.cur === cur && l.url && (!l.acc || on.has(l.acc)));
+  if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+  return pkg.link ? { url: pkg.link, acc: '' } : null;
+}
+export function orderEmail(s, c, pkg, appUrl, chosen) {
   const lang = OM[c?.lang] ? c.lang : 'en'; const L = OM[lang]; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const cur = s.orderCurrency || 'EUR';
   const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
@@ -340,7 +349,7 @@ export function orderEmail(s, c, pkg, appUrl) {
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
   const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
-  const link = pkg.link || site; const al = L.dir === 'rtl' ? 'right' : 'left';
+  const pl = chosen || pickPayLink(s, pkg); const link = pl?.url || site; const al = L.dir === 'rtl' ? 'right' : 'left';
   const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v('subject')}</title>
 <style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
 @media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
@@ -364,7 +373,7 @@ ${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style
 <tr><td class="mobile-pad" style="padding:0 40px 32px;border-bottom:1px solid #f1f5f9;text-align:${al}"><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:#0284c7;font-weight:600">${L.team}</span></p></td></tr>
 <tr><td align="center" class="mobile-pad" style="padding:22px 40px;background:#f8fafc;text-align:center">${site ? `<a href="${e(site)}" style="font-size:13px;font-weight:700;color:#0284c7;text-decoration:none">${e(siteTxt)}</a>` : ''}</td></tr>
 </table></td></tr></table></body></html>`;
-  return { subject: v('subject').replace(/<[^>]+>/g, ''), html };
+  return { subject: v('subject').replace(/<[^>]+>/g, ''), html, payAcc: pl?.acc || '' };
 }
 export function renewalEmail(s, c, appUrl) {
   const lang = RM[c.lang] ? c.lang : 'en'; const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
@@ -887,7 +896,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           price: Number(p.price) || 0, connections: Math.max(1, Number(p.connections) || 1), package: String(p.package || ''),
           credits: p.credits === '' || p.credits == null ? Math.max(1, Math.round((Number(p.days) || 30) / 30)) : Number(p.credits),
         }));
-        if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: String(p.link || '').trim() }));
+        if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: String(p.link || '').trim(), links: Array.isArray(p.links) ? p.links.filter((l) => /^https:\/\/[^\s]+$/.test(l?.url || '')).map((l) => ({ acc: String(l.acc || ''), cur: String(l.cur || 'EUR').toUpperCase(), url: String(l.url) })) : (s.orderPackages.find((x) => x.id === p.id)?.links || []) }));
+        if (Array.isArray(body.orderAccounts)) next.orderAccounts = body.orderAccounts.map((a) => ({ id: String(a.id || 'acc' + uid(3)), name: String(a.name || 'Stripe'), enabled: a.enabled !== false }));
         if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
         await saveSettings(next);
@@ -1006,7 +1016,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
           const m = orderEmail(s, c, pk, body.appUrl); const r = await sendEmail(s, to, m.subject, m.html);
-          if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; await saveCustomers(list); }
+          if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentAcc = m.payAcc; await saveCustomers(list); }
           await log('customer', `Package email "${pk.title}" to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
@@ -1187,11 +1197,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const want = new Set((body.ids || []).slice(0, 100));
         const pick = (c) => (body.pkg === 'random' ? pk[Math.floor(Math.random() * pk.length)] : pk.find((p) => p.id === body.pkg));
         if (body.pkg !== 'random' && !pick()) return err(400, 'Choose a package.');
-        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email)).map((c) => ({ c, p: pick(c) }));
+        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email)).map((c) => { const p = pick(c); return { c, p, m: orderEmail(s, c, p, body.appUrl) }; });
         if (!batch.length) return ok({ sent: 0 });
-        const r = await sendBatch(s, batch.map(({ c, p }) => ({ to: c.email, ...orderEmail(s, c, p, body.appUrl) })));
+        const r = await sendBatch(s, batch.map(({ c, m }) => ({ to: c.email, subject: m.subject, html: m.html })));
         if (!r.ok) return err(502, r.error);
-        const now = Date.now(); for (const { c, p } of batch) { c.orderSentAt = now; c.orderSentPkg = p.id; }
+        const now = Date.now(); for (const { c, p, m } of batch) { c.orderSentAt = now; c.orderSentPkg = p.id; c.orderSentAcc = m.payAcc; }
         await saveCustomers(list);
         await log('customer', `Package emails sent to ${batch.length} customers (${body.pkg === 'random' ? 'random packages' : batch[0].p.title})`);
         return ok({ sent: batch.length });
@@ -1202,7 +1212,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const cur = (s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR').toLowerCase(); let made = 0;
         try {
           for (const p of s.orderPackages) {
-            if (p.link) continue;
+            if (p.link || (p.links || []).length) continue;
             const price = await st('prices', { currency: cur, unit_amount: String(Math.round(p.price * 100)), 'product_data[name]': `${s.branding.appName || 'IPTV'} — ${p.title}` });
             const pl = await st('payment_links', { 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1', 'phone_number_collection[enabled]': 'true', 'metadata[package]': p.id });
             p.link = pl.url; made++;

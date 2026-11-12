@@ -474,13 +474,20 @@ const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮' };
 const orderPrice = (s, p) => (ORDER_CUR[s.orderCurrency || 'EUR'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[s.orderCurrency || 'EUR'] ? '' : ' ' + s.orderCurrency);
 const opRow = (p = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
   <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><button class="btn sm danger" data-act="del-op">✕ Remove</button></div>
-  <input data-k="link" style="margin-top:6px" value="${esc(p.link || '')}" placeholder="Stripe payment link https://buy.stripe.com/…" autocapitalize="none"></div>`;
+  <input data-k="link" style="margin-top:6px" value="${esc(p.link || '')}" placeholder="${(p.links || []).length ? 'Optional: one fixed link instead of the random ones' : 'Stripe payment link https://buy.stripe.com/…'}" autocapitalize="none"></div>`;
 function adminOrderSection(s) {
-  const op = s.orderPackages || []; const cur = s.orderCurrency || 'EUR'; const missing = op.filter((p) => !p.link).length;
+  const op = s.orderPackages || []; const cur = s.orderCurrency || 'EUR'; const lc = cur === 'USDT' ? 'USD' : cur;
+  const on = new Set((s.orderAccounts || []).filter((a) => a.enabled !== false).map((a) => a.id));
+  const nLinks = (p) => (p.links || []).filter((l) => l.cur === lc && (!l.acc || on.has(l.acc))).length || (p.link ? 1 : 0);
+  const missing = op.filter((p) => !nLinks(p)).length;
+  const accs = s.orderAccounts || [];
   return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
     <p class="small muted">Your 8 order templates. Each email shows the package and a <b>Stripe pay button</b>. It is sent in the customer's language (English, French, Arabic). Send one from a customer's 💳 button, or many at once here.</p>
-    <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><div class="small ${p.link ? 'pos' : 'neg'}">${p.link ? '✓ Stripe link' : '⚠️ no pay link'}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
+    <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><div class="small ${nLinks(p) ? 'pos' : 'neg'}">${nLinks(p) ? `✓ ${nLinks(p)} Stripe link${nLinks(p) > 1 ? 's · random' : ''}` : '⚠️ no pay link'}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
     ${missing ? `<div class="notice warning">${missing} package${missing > 1 ? 's have' : ' has'} no Stripe payment link yet, so the button opens your website instead. ${s.finance.stripeKey ? 'Tap below to create them in your Stripe account.' : 'Paste the links below, or add your Stripe secret key in Finance and let the app create them.'}</div>` : ''}
+    ${accs.length ? `<h3 style="margin:14px 0 6px;font-size:15px">Stripe accounts used for pay links</h3><p class="small muted" style="margin-top:0">Each email picks a random link from the accounts switched on, in ${lc}. Switch an account off if it is blocked or full.</p>
+      <div id="op-accs">${accs.map((a) => `<label class="row" style="padding:4px 0"><input type="checkbox" data-acc="${esc(a.id)}" ${a.enabled !== false ? 'checked' : ''} style="width:auto"> <b>${esc(a.name)}</b> <span class="small muted">${op.reduce((n, p) => n + (p.links || []).filter((l) => l.acc === a.id && l.cur === lc).length, 0)} links in ${lc}</span></label>`).join('')}</div>
+      <button class="btn sm" data-act="save-accs">Save accounts</button>` : ''}
     <div class="row">${s.finance.stripeKey && missing ? `<button class="btn" data-act="order-stripe-links">⚡ Create ${missing} Stripe links automatically</button>` : ''}</div>
     <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages, prices & Stripe links</summary><div style="margin-top:10px">
       <div id="ops">${op.map(opRow).join('')}</div>
@@ -1231,6 +1238,10 @@ const actions = {
   retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
   'dup-type': async (el) => { state.admin.dupType = el.dataset.t; state.admin.dupLimit = 30; $('#admin-body').innerHTML = await adminDups(); },
   'dup-more': async () => { state.admin.dupLimit += 30; $('#admin-body').innerHTML = await adminDups(); },
+  'save-accs': async () => {
+    const orderAccounts = (state.admin.settings.orderAccounts || []).map((a) => ({ ...a, enabled: !!$(`[data-acc="${a.id}"]`)?.checked }));
+    await saveSettings({ orderAccounts }); renderAdmin();
+  },
   'add-op': () => $('#ops').insertAdjacentHTML('beforeend', opRow()),
   'del-op': (el) => el.closest('.op-row').remove(),
   'save-op': async () => {
@@ -1256,7 +1267,7 @@ const actions = {
     const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${s.orderPackages.map((p) => `<option value="${esc(p.id)}" ${p.id === c.orderSentPkg ? 'selected' : ''}>${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select></div>
       <p class="muted small" id="op-subj"></p><iframe id="mail-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
-      ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}</p>` : ''}`, { wide: true });
+      ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}${c.orderSentAcc ? ' · Stripe: ' + esc((s.orderAccounts || []).find((a) => a.id === c.orderSentAcc)?.name || c.orderSentAcc) : ''}</p>` : ''}`, { wide: true });
     const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
     $('#op-pick').addEventListener('change', load); load();
   },
