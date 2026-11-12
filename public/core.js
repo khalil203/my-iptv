@@ -505,14 +505,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const salt = uid(8);
         const now = Date.now();
-        const c = { id: uid(8), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        const c = { loginPassword: password, id: uid(8), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         if (s.reseller.enabled) {
           const panel = await panelCall(s, 'trial', { username, password, line_id: '', package: s.trial.package, connections: c.connections, days: 1, months: 1, hours: s.trial.hours, name, phone, note: 'trial' });
           if (!panel.ok && !panel.skipped) { await log('trial', `Trial for ${email} failed on panel: ${panel.error}`); return err(502, 'trial_panel'); }
           if (!panel.skipped) {
             const got = applyPanelCreds(s, c, panel.data);
             if (got.u && !list.some((x) => x.username.toLowerCase() === got.u.toLowerCase())) username = c.username = got.u;
-            if (got.p) { password = got.p; c.salt = uid(8); c.passwordHash = await hashPassword(password, c.salt); }
+            if (got.p) { password = got.p; c.loginPassword = password; c.salt = uid(8); c.passwordHash = await hashPassword(password, c.salt); }
           }
         }
         list.push(c); await saveCustomers(list);
@@ -578,7 +578,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance;
 
         if (R('GET', '/api/me')) {
-          const { lineUsername, linePassword, ...pub } = v;
+          const { lineUsername, linePassword, loginPassword, ...pub } = v;
           return ok({
             user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
@@ -605,7 +605,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!s.userDashboard.allowPasswordChange) return err(403, 'Password change is turned off.');
           if ((await hashPassword(body.current || '', c.salt)) !== c.passwordHash) return err(400, 'Current password is wrong.');
           if (String(body.next || '').length < 6) return err(400, 'New password needs 6+ characters.');
-          c.salt = uid(8); c.passwordHash = await hashPassword(body.next, c.salt);
+          c.salt = uid(8); c.passwordHash = await hashPassword(body.next, c.salt); delete c.loginPassword;
           await saveCustomers(list);
           await log('customer', `${c.username} changed their password`);
           return ok({ ok: true });
@@ -707,7 +707,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const c = {
           id: uid(8), name: String(body.name || username), phone: String(body.phone || ''), note: String(body.note || ''),
           email: String(body.email || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
-          username, salt, passwordHash: await hashPassword(body.password, salt),
+          username, salt, passwordHash: await hashPassword(body.password, salt), loginPassword: String(body.password),
           lineUsername: body.lineSame !== false ? username : String(body.lineUsername || ''),
           linePassword: body.lineSame !== false ? String(body.password) : String(body.linePassword || ''),
           lineId: String(body.lineId || ''), planId: plan ? plan.id : 'custom',
@@ -745,7 +745,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             if (list.some((x) => x !== c && x.username.toLowerCase() === u.toLowerCase())) return err(400, 'This username is already used.');
             c.username = u;
           }
-          if (body.password) { c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); }
+          if (body.password) { c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); c.loginPassword = String(body.password); }
+          for (const k of ['orderNo', 'country', 'address', 'server', 'panel', 'device', 'paymentMethod']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.expiresAt) c.expiresAt = new Date(body.expiresAt).getTime() + DAY - 1000;
           if (body.startAt) c.startAt = new Date(body.startAt).getTime();
           await saveCustomers(list);
@@ -999,6 +1000,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ ok: true, username: admin.username });
       }
       if (R('GET', '/api/admin/log')) return ok((await store.get('log')) || []);
+      if (R('POST', '/api/admin/import')) { // bulk import of existing clients (owner only)
+        const list = await getCustomers();
+        const team = await getTeam(); const admin = await getAdmin();
+        const taken = new Set([...list.map((x) => x.username.toLowerCase()), ...team.map((x) => x.username.toLowerCase()), admin.username.toLowerCase()]);
+        let added = 0, skipped = 0;
+        for (const c of body.customers || []) {
+          if (!c || !c.username || !c.salt || !c.passwordHash || taken.has(String(c.username).toLowerCase())) { skipped++; continue; }
+          taken.add(String(c.username).toLowerCase());
+          list.push({ ...c, id: c.id || uid(8), status: c.status === 'disabled' ? 'disabled' : 'active', imported: true });
+          added++;
+        }
+        await saveCustomers(list);
+        if (Array.isArray(body.sales) && body.sales.length) { const sales = await getSales(); await store.put('sales', sales.concat(body.sales)); }
+        await log('customer', `Imported ${added} clients${skipped ? ` (${skipped} skipped: already exist)` : ''}`);
+        return ok({ added, skipped, total: list.length });
+      }
       if (R('GET', '/api/admin/backup')) return ok({ version: 2, exportedAt: Date.now(), settings: s, customers: await getCustomers(), sales: await getSales(), tx: await getTx(), stock: await getStock() });
       if (R('POST', '/api/admin/restore')) {
         if (!isObj(body.settings) || !Array.isArray(body.customers)) return err(400, 'This is not a valid backup file.');

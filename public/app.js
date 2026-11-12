@@ -283,14 +283,14 @@ function filteredCustomers() {
   const qq = q.trim().toLowerCase();
   return state.admin.customers
     .filter((c) => filter === 'all' || c.state === filter || (filter === 'trial' && c.isTrial))
-    .filter((c) => !qq || [c.name, c.username, c.phone, c.lineUsername, c.note, c.email, c.whatsapp].some((x) => String(x || '').toLowerCase().includes(qq)))
+    .filter((c) => !qq || [c.name, c.username, c.phone, c.lineUsername, c.note, c.email, c.whatsapp, c.orderNo, c.country].some((x) => String(x || '').toLowerCase().includes(qq)))
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
 function custActions(c) {
   return `<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
-    ${c.whatsapp ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
+    ${c.whatsapp || c.phone ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp || c.phone).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
     ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
@@ -299,7 +299,7 @@ function customerListHtml() {
   const list = filteredCustomers();
   if (!list.length) return `<div class="empty"><span class="ic">👥</span>No customers here yet.</div>`;
   return `<div class="tbl-wrap cust-table"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>
     <div class="cust-cards">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
@@ -308,7 +308,7 @@ function customerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -321,6 +321,8 @@ function customerForm(c) {
   return `<form data-form="customer" data-id="${c.id || ''}">
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
     <div class="grid3">${field('Phone', 'phone', c.phone || '', { type: 'tel' })}${field('WhatsApp', 'whatsapp', c.whatsapp || '', { type: 'tel', ph: 'same as phone' })}${field('Email language', 'lang', c.lang || 'fr', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
+    <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '')}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
+    <div class="grid3">${field('Address', 'address', c.address || '')}${field('Server', 'server', c.server || '', { ph: 'MEGA, DINO…' })}${field('Panel', 'panel', c.panel || '')}</div>
     <h3 style="margin-top:6px">App login details</h3>
     <div class="grid2">${field('Username', 'username', c.username || '', { attrs: 'required minlength="3" autocapitalize="none"' })}
       ${field(isNew ? 'Password' : 'New password (leave empty to keep)', 'password', '', { attrs: (isNew ? 'required minlength="4"' : '') + ' autocapitalize="none"', ph: isNew ? '' : '••••••' })}</div>
@@ -999,6 +1001,24 @@ const actions = {
     const b = state.config.branding;
     const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${c.username}\n📅 Expires: ${fmtDate(c.expiresAt)}\n(Password as given when the account was created)`;
     try { await navigator.clipboard.writeText(text); toast('Login details copied'); } catch { prompt('Copy:', text); }
+  },
+  'export-xlsx': async () => {
+    toast('Preparing Excel…');
+    if (!window.XLSX) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+    const list = await api('GET', '/api/admin/customers');
+    const d = (x) => (x ? isoDay(x) : '');
+    const rows = list.sort((a, b) => String(a.orderNo || a.username).localeCompare(String(b.orderNo || b.username), undefined, { numeric: true })).map((c) => ({
+      'Order number': c.orderNo || '', 'Full name': c.name, Email: c.email || '', Phone: c.phone || '', WhatsApp: c.whatsapp || c.phone || '', Country: c.country || '', Address: c.address || '',
+      'App username': c.username, 'App password': c.loginPassword || '(changed by customer)', 'IPTV line username': c.lineUsername || '', 'IPTV line password': c.linePassword || '',
+      Plan: c.planName, Devices: c.connections, 'Start date': d(c.startAt), 'Expiry date': d(c.expiresAt), 'Days left': c.daysLeft, Status: c.state,
+      Price: c.price ?? (c.renewals?.at(-1)?.price ?? ''), Currency: c.currency || '', 'Payment method': c.paymentMethod || '', Server: c.server || '', Panel: c.panel || '', Device: c.device || '',
+      Promotion: c.promotion || '', 'Order status': c.orderStatus || '', Refunded: c.refunded ? 'YES' : '', 'Free trial': c.isTrial ? 'YES' : '', Notes: c.note || '', 'Created': d(c.createdAt || c.startAt), 'Last login': d(c.lastLogin),
+    }));
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = Object.keys(rows[0] || {}).map((k) => ({ wch: Math.min(40, Math.max(10, k.length + 2, ...rows.slice(0, 200).map((r) => String(r[k] ?? '').length))) }));
+    ws['!autofilter'] = { ref: ws['!ref'] };
+    const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, 'Clients');
+    window.XLSX.writeFile(wb, `INTPROTO-TV-clients-${isoDay(Date.now())}.xlsx`);
   },
   'export-csv': () => {
     const rows = [['Name', 'Username', 'Phone', 'Plan', 'Start', 'Expires', 'Days left', 'Status', 'Line ID']]
