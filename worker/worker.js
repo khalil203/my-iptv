@@ -35,6 +35,7 @@ export default {
     }
 
     if (url.pathname === '/proxy') return proxy(request, url);
+    if (url.pathname === '/img') return image(request, url);
     // Short links for TVs (type in the "Downloader" app): /tv or /apk → Android app
     if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
 
@@ -79,4 +80,24 @@ async function proxy(request, url) {
     if (v) out.set(h, v);
   }
   return new Response(res.body, { status: res.status, headers: out });
+}
+
+// Channel logos & posters: many are on http:// (blocked in secure pages). Load them here and cache for a week.
+async function image(request, url) {
+  const target = url.searchParams.get('u') || '';
+  if (!/^https?:\/\//.test(target)) return new Response('bad url', { status: 400 });
+  const s = await backend.getSettings();
+  if (!(await verifyProxyToken(s.security.proxySecret, url.searchParams.get('t')))) return new Response('Forbidden', { status: 403 });
+  const cache = caches.default;
+  const key = new Request('https://img-cache.local/' + encodeURIComponent(target));
+  let res = await cache.match(key);
+  if (res) return res;
+  let up;
+  try { up = await fetch(target, { headers: { 'User-Agent': 'Mozilla/5.0' }, cf: { cacheTtl: 604800, cacheEverything: true } }); }
+  catch { return new Response('', { status: 502 }); }
+  const ct = up.headers.get('content-type') || '';
+  if (!up.ok || !/^image\//.test(ct)) return new Response('', { status: 404 });
+  res = new Response(up.body, { headers: { 'content-type': ct, 'cache-control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*' } });
+  await cache.put(key, res.clone());
+  return res;
 }

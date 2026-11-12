@@ -810,6 +810,7 @@ async function renderUserTab() {
   const u = state.user; const el = $('#ubody');
   const { user, dashboard: d, branding: b } = u.me;
   if (u.tab === 'home') {
+    if (!u.prefetched && !blockedScreen()) { u.prefetched = true; setTimeout(() => { const d = u.me.dashboard; [d.live && 'get_live_categories', d.movies && 'get_vod_categories', d.series && 'get_series_categories'].filter(Boolean).forEach((a) => xt(a).then((cats) => { const first = cats?.[0]?.category_id; if (first && a === 'get_live_categories') xt('get_live_streams', { category_id: first }).catch(() => {}); }).catch(() => {})); loadHls().catch(() => {}); }, 800); }
     const favs = d.favorites ? getFavs() : [];
     const renew = b.supportUrl ? `<a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${t('renewNow')}</a>` : t('contactRenew');
     const trialLeft = user.isTrial && user.state !== 'expired';
@@ -841,7 +842,7 @@ async function renderUserTab() {
   const kind = u.tab;
   const catAction = { live: 'get_live_categories', movies: 'get_vod_categories', series: 'get_series_categories' }[kind];
   const listAction = { live: 'get_live_streams', movies: 'get_vod_streams', series: 'get_series' }[kind];
-  el.innerHTML = `<div class="spinner"></div>`;
+  el.innerHTML = `<div class="chips">${'<a style="width:90px">&nbsp;</a>'.repeat(4)}</div><div class="ch-grid">${'<div class="ch sk"><div class="noimg"></div><span>&nbsp;</span></div>'.repeat(12)}</div>`;
   try {
     const cats = await xt(catAction);
     const cat = u.cat[kind] ?? (cats[0]?.category_id ?? '');
@@ -874,10 +875,35 @@ window.__bcb = {};
 window.addEventListener('message', (e) => { if (e.data && e.data.__iptv && window.__bridgeCb) window.__bridgeCb(e.data.id, e.data.status, e.data.body); });
 window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(new Error(status === 403 ? 'The server refused the connection (403).' : 'Server error ' + status)); };
 const bridgeFetch = (url, ua) => new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); window.__bcb[id] = { res, rej }; bridge().fetch(id, url, ua); });
+const XT_TTL = 6 * 3600000;
+function xtCacheGet(k) { try { const v = JSON.parse(localStorage.getItem('tvp_xt_' + k)); return v; } catch { return null; } }
+function xtCacheSet(k, data) {
+  const val = JSON.stringify({ at: Date.now(), data });
+  try { localStorage.setItem('tvp_xt_' + k, val); }
+  catch { Object.keys(localStorage).filter((x) => x.startsWith('tvp_xt_')).forEach((x) => localStorage.removeItem(x)); try { localStorage.setItem('tvp_xt_' + k, val); } catch {} }
+}
 async function xt(action, params = {}) {
   const key = action + JSON.stringify(params);
   const c = state.user.cache;
   if (c[key]) return c[key];
+  // Lists (not EPG / details) are kept on the device: shown instantly, refreshed in the background.
+  const cacheable = /^get_(live|vod|series)_(categories|streams)$|^get_series$/.test(action);
+  const dkey = (state.user.me?.stream?.u || '') + ':' + key;
+  if (cacheable) {
+    const hit = xtCacheGet(dkey);
+    if (hit && hit.data) {
+      c[key] = hit.data;
+      if (Date.now() - hit.at > 20 * 60000) xtFetch(action, params).then((d) => { c[key] = d; xtCacheSet(dkey, d); }).catch(() => {});
+      return hit.data;
+    }
+  }
+  const data = await xtFetch(action, params);
+  c[key] = data;
+  if (cacheable && Array.isArray(data)) xtCacheSet(dkey, data);
+  return data;
+}
+async function xtFetch(action, params = {}) {
+  const c = {}; const key = 'x';
   const q = new URLSearchParams({ action, ...params });
   if (isDirect()) {
     const st = state.user.me.stream;
@@ -915,13 +941,25 @@ function appsCard() {
     <a class="btn primary" href="download.html">${t('getApp')}</a></div>`;
 }
 
+function imgSrc(u) {
+  if (!u || !/^https?:/.test(u)) return '';
+  const st = state.user.me?.stream;
+  if (location.protocol === 'https:' && st?.proxyToken) return `/img?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`;
+  return u;
+}
+function initialsTile(name, big) {
+  const n = String(name || '?').replace(/^[\W_]*([A-Z]{2,3}[:|\-]\s*)/i, '').trim();
+  const ini = (n.match(/[\p{L}\p{N}]+/gu) || ['?']).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `<div class="noimg${big ? ' big' : ''}" style="background:linear-gradient(135deg,hsl(${h} 70% 40%),hsl(${(h + 40) % 360} 70% 25%))">${esc(ini)}</div>`;
+}
 function itemsGrid(items) {
   const d = state.user.me.dashboard;
   const live = items.filter((i) => i.kind === 'live');
   const vod = items.filter((i) => i.kind !== 'live');
   const favBtn = (i) => d.favorites ? `<button class="fav ${isFav(i.kind, i.id) ? 'on' : ''}" data-act="fav" data-item="${esc(JSON.stringify(i))}">★</button>` : '';
-  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${i.icon ? `<img src="${esc(i.icon)}" loading="lazy" alt="" onerror="this.outerHTML='<div class=noimg>📺</div>'">` : '<div class="noimg">📺</div>'}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
-    ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img" style="${i.icon ? `background-image:url('${esc(i.icon)}')` : ''}">${i.icon ? '' : '🎬'}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
+  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" loading="lazy" decoding="async" alt="" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
+    ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" loading="lazy" decoding="async" alt="" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${initialsTile(i.name, true)}</template>` : initialsTile(i.name, true)}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
 }
 
 function streamUrl(kind, id, ext) {
@@ -932,6 +970,7 @@ function streamUrl(kind, id, ext) {
   return raw;
 }
 
+const loadHls = () => window.Hls ? Promise.resolve() : new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
 function play(title, kind, id, ext, extraHtml = '') {
   if (blockedScreen()) return toast(t('notAvailable'), true);
   let url, isHls;
@@ -951,6 +990,11 @@ function play(title, kind, id, ext, extraHtml = '') {
   const body = modal(esc(title), `<div class="player"><video id="vid" controls playsinline autoplay></video></div><div id="pl-msg" class="small muted" style="margin-top:8px"></div>${extraHtml}`, { wide: true, onClose: () => { if (hls) hls.destroy(); const v = $('#vid'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } } });
   const v = $('#vid', body);
   const fail = () => { $('#pl-msg').innerHTML = t('streamFail'); };
+  if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && !window.Hls) {
+    $('#pl-msg').textContent = '…';
+    loadHls().then(() => { if ($('#vid') === v) { v.remove(); closeModal(); play(title, kind, id, ext, extraHtml); } }).catch(fail);
+    return;
+  }
   if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && window.Hls && window.Hls.isSupported()) {
     hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
     hls.loadSource(url); hls.attachMedia(v);
@@ -974,7 +1018,7 @@ async function openItem(i) {
     const body = modal(esc(i.name), '<div class="spinner"></div>', { wide: true });
     let info = {};
     try { info = (await xt('get_vod_info', { vod_id: i.id })).info || {}; } catch {}
-    body.innerHTML = `<div class="row" style="align-items:flex-start;flex-wrap:nowrap;gap:16px">${i.icon ? `<img src="${esc(i.icon)}" style="width:130px;border-radius:12px" alt="">` : ''}<div><p class="muted small">${esc([info.releasedate || info.year, info.genre, info.duration].filter(Boolean).join(' · '))}${info.rating ? ' · ⭐ ' + esc(info.rating) : ''}</p><p>${esc(info.plot || info.description || '')}</p><button class="btn primary" data-act="play-movie" data-item="${esc(JSON.stringify(i))}">${t('play')}</button></div></div>`;
+    body.innerHTML = `<div class="row" style="align-items:flex-start;flex-wrap:nowrap;gap:16px">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" style="width:130px;border-radius:12px" alt="">` : ''}<div><p class="muted small">${esc([info.releasedate || info.year, info.genre, info.duration].filter(Boolean).join(' · '))}${info.rating ? ' · ⭐ ' + esc(info.rating) : ''}</p><p>${esc(info.plot || info.description || '')}</p><button class="btn primary" data-act="play-movie" data-item="${esc(JSON.stringify(i))}">${t('play')}</button></div></div>`;
     return;
   }
   if (i.kind === 'series') {
