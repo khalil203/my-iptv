@@ -1,4 +1,4 @@
-# Diagnostic: channel logo check on the IPTV server
+# Diagnostic: logos of USA channels
 name: IPTV server check
 on:
   push:
@@ -9,27 +9,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check channel logos
+      - name: Check USA channel logos
         run: |
           set +e; read SERVER USER PASS X < .github/server-check.txt
-          curl -s -m 60 -A "IPTVSmartersPro" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_live_streams" -o live.json
-          curl -s -m 60 -A "IPTVSmartersPro" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_vod_streams" -o vod.json
+          curl -s -m 90 -A "IPTVSmartersPro" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_live_streams" -o live.json
           python3 - <<'PY'
-          import json, collections, urllib.parse, urllib.request, random
-          for f in ['live.json','vod.json']:
-              try: d=json.load(open(f))
-              except Exception as e: print(f,'not json',e); continue
-              icons=[x.get('stream_icon') or '' for x in d]
-              have=[i for i in icons if i.strip()]
-              print(f'== {f}: {len(d)} items, with logo: {len(have)} ({100*len(have)//max(1,len(d))}%), empty: {len(d)-len(have)}')
-              print('   http:',sum(1 for i in have if i.startswith('http:')),' https:',sum(1 for i in have if i.startswith('https:')))
-              print('   logo hosts:', collections.Counter(urllib.parse.urlparse(i).netloc for i in have).most_common(6))
-              ok=0; sample=random.sample(have, min(15,len(have)))
-              for u in sample:
+          import json, urllib.request, collections
+          d=json.load(open('live.json'))
+          usa=[x for x in d if str(x.get('name','')).startswith('USA - CW') or 'WGN9' in str(x.get('name',''))][:12]
+          for x in usa:
+              u=(x.get('stream_icon') or '').strip(); st='-'
+              if u:
                   try:
-                      r=urllib.request.urlopen(urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'}),timeout=8); ok+= r.status==200 and r.headers.get('content-type','').startswith('image')
-                  except Exception: pass
-              print(f'   sample of {len(sample)} logo links: {ok} load OK, {len(sample)-ok} broken')
-              print('   SAMPLE_URLS', [i for i in have if '103.176.90' in i][:3])
-              print('   examples without logo:', [x.get('name') for x in d if not (x.get('stream_icon') or '').strip()][:5])
+                      r=urllib.request.urlopen(urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'}),timeout=8); st=f"{r.status} {r.headers.get('content-type')}"
+                  except Exception as e: st=str(e)[:40]
+              print('LOGO', x['name'][:28], '|', u[:70] or '(none)', '|', st)
+          icons=[(x.get('stream_icon') or '').strip() for x in d]
+          print('STATS total',len(d),'empty',sum(1 for i in icons if not i))
           PY
