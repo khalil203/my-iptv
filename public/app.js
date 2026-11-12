@@ -229,7 +229,7 @@ async function renderAdmin() {
     if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
-    else if (t === 'plans') body.innerHTML = adminPlans(s);
+    else if (t === 'plans') body.innerHTML = adminPlans(s) + await adminResellerSection(s);
     else if (t === 'finance') body.innerHTML = await adminFinance(s);
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
@@ -400,6 +400,31 @@ async function adminSubs() {
     </div>`;
 }
 
+async function adminResellerSection(s) {
+  const sales = can('customers_view') ? await api('GET', '/api/admin/reseller-sales').catch(() => []) : [];
+  const rp = s.resellerPackages || [];
+  const row = (p) => `<div class="rp-row" data-rp="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="credits" type="number" value="${p.credits}" placeholder="Credits"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><button class="btn sm danger" data-act="del-rp">✕</button></div>`;
+  const cur = s.resellerCurrency || 'EUR';
+  return `<div class="card"><div class="row"><h3 style="margin:0">🤝 Reseller packages</h3><span class="spacer"></span><button class="btn primary sm" data-act="sell-rp" data-perm="customers_edit">＋ Sell a package</button></div>
+    <div class="plans-grid" style="margin:14px 0">${rp.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, cur)}</div><div class="small muted">${p.credits} credits · ${priceTxt(Math.round((p.price / p.credits) * 100) / 100, cur)} each</div></div>`).join('')}</div>
+    <details><summary class="small muted" style="cursor:pointer">Edit packages</summary><div style="margin-top:10px">
+      <div class="rp-row small muted"><span>Name</span><span>Credits</span><span>Price</span><span></span></div>
+      <div id="rps">${rp.map(row).join('')}</div>
+      <div class="row"><button class="btn sm" data-act="add-rp">＋ Add package</button><select id="rp-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-rp">Save packages</button></div></div></details>
+    ${sales.length ? `<h3 style="margin-top:16px">Reseller sales</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Reseller</th><th>Package</th><th>Paid</th><th>Profit</th></tr></thead><tbody>${sales.slice(0, 50).map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.name)}</b><div class="small muted">${esc([x.email, x.phone].filter(Boolean).join(' · '))}</div></td><td>${esc(x.planName)}</td><td>${num(x.amount, x.currency)}</td><td class="${x.amountUsd - x.costUsd < 0 ? 'neg' : 'pos'}">${usd(x.amountUsd - x.costUsd)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+  </div>`;
+}
+function resellerSaleForm(s) {
+  const rp = s.resellerPackages || []; const cur = s.resellerCurrency || 'EUR';
+  return `<form data-form="rp-sale">
+    ${field('Package', 'packageId', rp[0]?.id, { type: 'select', options: rp.map((p) => [p.id, `${p.name} · ${p.credits} credits · ${priceTxt(p.price, cur)}`]), attrs: 'data-rp-pick' })}
+    <div class="grid2">${field('Reseller name', 'name', '', { attrs: 'required' })}${field('Email', 'email', '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
+    <div class="grid2">${field('Phone / WhatsApp', 'phone', '', { type: 'tel' })}${field('Amount received', 'amount', rp[0]?.price ?? '', { type: 'number', attrs: 'step="any" min="0"', help: 'In the currency of the account below.' })}</div>
+    ${accountSelect(s, 'accountId', '')}
+    ${field('Note', 'note', '')}
+    <p class="small muted">The package credits are taken from your credits stock, and the profit shows in Profits.</p>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Record sale</button></div></form>`;
+}
 function adminPlans(s) {
   const row = (p) => `<div class="plan-row" data-plan="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="days" type="number" value="${p.days}" placeholder="Days"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><input data-k="credits" type="number" value="${p.credits ?? ''}" placeholder="Credits"><input data-k="connections" type="number" value="${p.connections}" placeholder="Devices"><input data-k="package" value="${esc(p.package)}" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan">✕</button></div>`;
   return `<div class="card"><h3>Plans & prices</h3><p class="muted small">"Credits" = how many panel credits one sale of this plan uses (for stock and profit). "Package ID" is the package number on your TVplus panel, sent as <code>{package}</code>.</p>
@@ -1040,6 +1065,13 @@ const actions = {
     const csv = rows.map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     download('subscriptions.csv', '﻿' + csv, 'text/csv');
   },
+  'sell-rp': () => modal('🤝 Sell a reseller package', resellerSaleForm(state.admin.settings)),
+  'add-rp': () => $('#rps').insertAdjacentHTML('beforeend', `<div class="rp-row" data-rp=""><input data-k="name" placeholder="Name"><input data-k="credits" type="number" value="10"><input data-k="price" type="number" step="any" value="0"><button class="btn sm danger" data-act="del-rp">✕</button></div>`),
+  'del-rp': (el) => el.closest('.rp-row').remove(),
+  'save-rp': async () => {
+    const resellerPackages = [...document.querySelectorAll('#rps .rp-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.rp || undefined, name: g('name'), credits: Number(g('credits')), price: Number(g('price')) }; }).filter((p) => p.name);
+    await saveSettings({ resellerPackages, resellerCurrency: $('#rp-cur').value }); renderAdmin();
+  },
   'add-plan': () => { $('#plans').insertAdjacentHTML('beforeend', `<div class="plan-row" data-plan=""><input data-k="name" placeholder="Name"><input data-k="days" type="number" value="30"><input data-k="price" type="number" value="0"><input data-k="credits" type="number" value="1"><input data-k="connections" type="number" value="1"><input data-k="package" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan">✕</button></div>`); },
   'del-plan': (el) => el.closest('.plan-row').remove(),
   'save-plans': async () => {
@@ -1091,6 +1123,10 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async 'rp-sale'(f) {
+    try { await api('POST', '/api/admin/reseller-sale', formToObj(f)); toast('Reseller sale recorded ✓'); closeModal(); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
   async member(f) {
     const o = formToObj(f); o.perms = [...f.querySelectorAll('[data-perm-cb]:checked')].map((x) => x.value);
     if (!o.password) delete o.password;
@@ -1203,6 +1239,13 @@ document.addEventListener('change', async (e) => {
   if (t.name === 'same' && t.form?.dataset.form === 'trial') $('#wa-field').style.display = t.checked ? 'none' : '';
   if (t.hasAttribute('data-tx-type')) { const acc = t.form.accountId.value; closeModal(); modal(t.value === 'income' ? 'Add income' : t.value === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(t.value, acc)); }
   if (t.dataset.input === 'sub-days') { state.admin.subDays = t.value; $('#admin-body').innerHTML = await adminSubs(); }
+  if (t.form?.dataset.form === 'rp-sale' && (t.name === 'packageId' || t.name === 'accountId')) {
+    const st = state.admin.settings; const f = t.form;
+    const p = st.resellerPackages.find((x) => x.id === f.packageId.value);
+    const acc = st.finance.accounts.find((a) => a.id === f.accountId.value);
+    if (p) { const r = st.finance.rates; const from = st.resellerCurrency || 'EUR'; const to = acc ? acc.currency : from;
+      f.amount.value = Math.round((p.price / (r[from] || 1)) * (r[to] || 1) * 100) / 100; }
+  }
   if (t.hasAttribute('data-renew-plan')) {
     const p = state.admin.settings.plans.find((x) => x.id === t.value);
     const f = t.form; if (p) { f.days.value = p.days; f.price.value = p.price; f.credits.value = p.credits ?? ''; } updateRenewPreview();

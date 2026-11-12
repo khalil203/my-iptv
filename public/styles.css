@@ -328,3 +328,6 @@ img, video, iframe, svg { max-width: 100%; }
 .modal { max-height: calc(100dvh - 24px); }
 @supports not (height: 100dvh) { .modal { max-height: 92vh; } }
 .bars, .bars2 { gap: 6px; } .bars > div, .bars2 > div { min-width: 0; }
+
+.rp-row { display: grid; grid-template-columns: 2fr 1fr 1fr 40px; gap: 8px; margin-bottom: 8px; align-items: center; }
+.rp-row input { padding: 8px 10px; }

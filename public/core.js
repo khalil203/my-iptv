@@ -84,6 +84,13 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'p12', name: '12 Months', days: 365, price: 80, connections: 1, package: '4', credits: 12 },
   ],
   currency: 'USD',
+  resellerPackages: [
+    { id: 'r10', name: 'Basic', credits: 10, price: 280.99 },
+    { id: 'r20', name: 'Standard', credits: 20, price: 499.99 },
+    { id: 'r30', name: 'Premium', credits: 30, price: 630.99 },
+    { id: 'r50', name: 'VIP', credits: 50, price: 999.99 },
+  ],
+  resellerCurrency: 'EUR',
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
   email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
   finance: {
@@ -141,11 +148,13 @@ function permFor(method, path, body) {
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
-    if (k.length && k.every((x) => x === 'plans' || x === 'currency')) return 'plans';
+    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency'].includes(x))) return 'plans';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
   }
+  if (path === '/api/admin/reseller-sale') return 'customers_edit';
+  if (path === '/api/admin/reseller-sales') return 'customers_view';
   if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
   if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh') return 'finance_edit';
@@ -684,6 +693,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           price: Number(p.price) || 0, connections: Math.max(1, Number(p.connections) || 1), package: String(p.package || ''),
           credits: p.credits === '' || p.credits == null ? Math.max(1, Math.round((Number(p.days) || 30) / 30)) : Number(p.credits),
         }));
+        if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
         await saveSettings(next);
         await log('settings', 'Settings updated: ' + Object.keys(body || {}).join(', '));
@@ -925,6 +935,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const r = await sendEmail(s, to, `${s.branding.appName} · test email`, mailHtml(s, 'en', [['Status', 'Email is working ✅']], 'This is a test email from your IPTV app.', 'Admin'));
         return ok(r);
       }
+
+      // ----- reseller packages -----
+      if (R('POST', '/api/admin/reseller-sale')) {
+        const pk = s.resellerPackages.find((p) => p.id === body.packageId);
+        if (!pk) return err(400, 'Choose a package.');
+        const name = String(body.name || '').trim();
+        if (!name) return err(400, 'Enter the reseller name.');
+        const buyer = { id: 'r-' + uid(5), name, username: String(body.email || body.phone || name) };
+        const sale = await recordSale(s, buyer, { type: 'reseller', plan: { id: pk.id, name: `Reseller ${pk.name} (${pk.credits} credits)` }, days: 0, credits: pk.credits, amount: body.amount === '' || body.amount == null ? pk.price : Number(body.amount), accountId: body.accountId, by: actorName });
+        const sales = await getSales(); const x = sales.find((y) => y.id === sale.id);
+        Object.assign(x, { planName: `Reseller ${pk.name} (${pk.credits} credits)`, email: String(body.email || ''), phone: String(body.phone || ''), note: String(body.note || '') });
+        await store.put('sales', sales);
+        await log('renewal', `Sold reseller package ${pk.name} (${pk.credits} credits) to ${name}`);
+        return ok(x);
+      }
+      if (R('GET', '/api/admin/reseller-sales')) return ok((await getSales()).filter((x) => x.type === 'reseller').sort((a, b) => b.at - a.at));
 
       if (R('GET', '/api/admin/stats')) {
         const cs = (await getCustomers()).map((c) => view(c, s));
