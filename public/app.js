@@ -391,7 +391,7 @@ function adminPlans(s) {
     <div class="plan-row small muted" style="margin-bottom:4px"><span>Name</span><span>Days</span><span>Price (${esc(s.currency)})</span><span>Credits</span><span>Devices</span><span>Package ID</span><span></span></div>
     <div id="plans">${s.plans.map(row).join('')}</div>
     <button class="btn sm" data-act="add-plan">＋ Add plan</button>
-    <div class="grid2" style="margin-top:16px">${field('Price currency', 'currency', s.currency, { attrs: 'id="currency"', help: 'e.g. USD or MAD. Profits are converted to USD and MAD automatically.' })}</div>
+    <div class="grid2" style="margin-top:16px">${field('Price currency', 'currency', s.currency, { type: 'select', options: [['EUR', '€ Euro (EUR)'], ['USD', '$ US Dollar (USD)'], ['USDT', '₮ Tether (USDT)'], ['MAD', 'Moroccan Dirham (MAD)']], attrs: 'id="currency"', help: 'Profits are converted to USD and MAD automatically.' })}</div>
     <button class="btn primary" data-act="save-plans">Save plans</button></div>`;
 }
 
@@ -435,6 +435,7 @@ function adminApi(s) {
     <p class="small muted">The Xtream-style DNS/URL from TVplus, the same one you'd type into IPTV Smarters.</p>
     ${field('Server URL', 'player.serverUrl', s.player.serverUrl, { ph: 'http://your-dns.com:8080', attrs: 'autocapitalize="none"' })}
     ${field('Playback mode', 'player.mode', s.player.mode || 'proxy', { type: 'select', options: [['proxy', 'Through the app server (works in every browser)'], ['direct', 'Direct from each device (for servers that block Cloudflare)']], help: 'Direct: the Android / Android TV app connects to your IPTV server itself and plays with its built-in player. iPhone, iPad and computers get an "Open in VLC" button and the IPTV Smarters details.' })}
+    ${field('Stream relay URL (iPhone, iPad & browsers)', 'player.relayUrl', s.player.relayUrl, { ph: 'https://intproto-tv-relay.onrender.com', attrs: 'autocapitalize="none"', help: 'Used in Direct mode for devices without our app. Deploy it free on Render (see README). Empty = those devices are asked to install the app.' })}
     ${toggle('Play through the built-in secure proxy (recommended)', 'player.useProxy', s.player.useProxy, 'Fixes "http" streams on iPhone/HTTPS and hides the server from customers. Note: Cloudflare only connects to ports 80, 8080, 8880, 2052, 2082, 2086, 2095 (http) or 443, 8443, 2053, 2083, 2087, 2096 (https).')}
     ${field('Player identity (User-Agent)', 'player.userAgent', s.player.userAgent, { help: 'Some IPTV servers only accept known players. Default: IPTVSmartersPro.' })}
     <div class="grid3" style="margin-top:12px">${field('Test line username', 'tu', '', { attrs: 'data-skip id="test-u" autocapitalize="none"' })}${field('Test line password', 'tp', '', { attrs: 'data-skip id="test-p" autocapitalize="none"' })}<div class="field"><span>&nbsp;</span><button type="button" class="btn" data-act="test-player">Test server</button></div></div>
@@ -753,6 +754,7 @@ async function renderUserTab() {
       ${d.showSubscription ? `<div class="sub-card"><div class="row"><span class="muted small" style="font-weight:700">${t('mySub')}</span><span class="spacer"></span>${pill(user.state)}</div>
         <div class="row" style="margin:12px 0;align-items:flex-end"><div><div class="big">${user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</div><div class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</div></div><span class="spacer"></span><div style="text-align:end"><b>${esc(user.isTrial ? t('trial') : user.planName)}</b><div class="small muted">${t('until', { date: fmtDate(user.expiresAt) })}</div><div class="small muted">${t('devices', { n: user.connections })}</div></div></div>${progress(user)}</div>` : ''}
       <div class="tiles">${d.live ? `<div class="tile" data-act="utab" data-tab="live"><span class="ic">📺</span><b>${t('liveTv')}</b></div>` : ''}${d.movies ? `<div class="tile" data-act="utab" data-tab="movies"><span class="ic">🎬</span><b>${t('movies')}</b></div>` : ''}${d.series ? `<div class="tile" data-act="utab" data-tab="series"><span class="ic">🎞</span><b>${t('series')}</b></div>` : ''}${b.supportUrl ? `<a class="tile" href="${esc(b.supportUrl)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="ic">💬</span><b>${esc(b.supportLabel || t('support'))}</b></a>` : ''}</div>
+      ${user.isTrial || user.state !== 'active' ? plansCard() : ''}
       ${favs.length ? `<h3>${t('favorites')}</h3>${itemsGrid(favs)}` : ''}`;
     return;
   }
@@ -760,6 +762,7 @@ async function renderUserTab() {
     el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div></div>
       <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div><div class="list-item"><span style="flex:1">${t('devicesL')}</span><b>${user.connections}</b></div>
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
+      ${plansCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
       <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
@@ -786,13 +789,14 @@ async function renderUserTab() {
       <div class="chips"><a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
       <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
-  } catch (e) { el.innerHTML = e.direct ? externalCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
+  } catch (e) { el.innerHTML = e.direct ? appsCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
 }
 
 // Direct mode: the device itself talks to the IPTV server (Android app bridge).
 const bridge = () => window.IPTVBridge;
 const isDirect = () => state.user.me?.stream?.mode === 'direct' || (!!bridge() && !!state.user.me?.stream);
 window.__bcb = {};
+window.addEventListener('message', (e) => { if (e.data && e.data.__iptv && window.__bridgeCb) window.__bridgeCb(e.data.id, e.data.status, e.data.body); });
 window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(new Error(status === 403 ? 'The server refused the connection (403).' : 'Server error ' + status)); };
 const bridgeFetch = (url, ua) => new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); window.__bcb[id] = { res, rej }; bridge().fetch(id, url, ua); });
 async function xt(action, params = {}) {
@@ -802,9 +806,15 @@ async function xt(action, params = {}) {
   const q = new URLSearchParams({ action, ...params });
   if (isDirect()) {
     const st = state.user.me.stream;
-    if (!bridge()) throw Object.assign(new Error('direct'), { direct: true });
     const url = `${st.server}/player_api.php?${new URLSearchParams({ username: st.u, password: st.p, ...Object.fromEntries(q) })}`;
-    const txt = await bridgeFetch(url, st.userAgent);
+    let txt;
+    if (bridge()) txt = await bridgeFetch(url, st.userAgent);
+    else if (st.relay) {
+      const r = await fetch(`${st.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(st.proxyToken)}`).catch(() => null);
+      if (!r) throw new Error(t('relayDown'));
+      if (!r.ok) throw new Error(r.status === 403 ? t('relayDown') : `Server error ${r.status}`);
+      txt = await r.text();
+    } else throw Object.assign(new Error('direct'), { direct: true });
     let data; try { data = JSON.parse(txt); } catch { throw new Error(t('lineBad')); }
     if (data && data.user_info && Number(data.user_info.auth) === 0) throw Object.assign(new Error(t('lineInactive')), { line: true });
     if (action.startsWith('get_') && action.endsWith('categories') && !Array.isArray(data)) throw Object.assign(new Error(t('lineInactive')), { line: true });
@@ -812,15 +822,16 @@ async function xt(action, params = {}) {
   }
   return (c[key] = await api('GET', '/api/xtream?' + q));
 }
-function externalCard() {
-  const st = state.user.me.stream; const dns = st.dns || st.server;
-  const m3u = `${dns}/get.php?username=${encodeURIComponent(st.u)}&password=${encodeURIComponent(st.p)}&type=m3u_plus&output=ts`;
-  const txt = `${t('dns')}: ${dns}\n${t('username')}: ${st.u}\n${t('password')}: ${st.p}\nM3U: ${m3u}`;
-  state.user.extText = txt;
-  return `<div class="card"><h3>📺 ${t('ext_title')}</h3><p class="muted">${t('ext_text')}</p>
-    <div class="row" style="margin-bottom:14px"><a class="btn primary" href="download.html">${t('ext_android')}</a><a class="btn" href="vlc://${esc(m3u)}">${t('ext_vlc')}</a></div>
-    <h3>${t('ext_details')}</h3><div class="code" dir="ltr">${esc(txt)}</div>
-    <button class="btn" data-act="copy-ext" style="margin-top:10px">${t('copyAll')}</button></div>`;
+const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
+const priceTxt = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
+function plansCard() {
+  const me = state.user.me; if (!me.plans?.length) return '';
+  const sup = me.branding.supportUrl;
+  return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
+}
+function appsCard() {
+  return `<div class="card" style="text-align:center"><div style="font-size:46px">📲</div><h3>${t('apps_title')}</h3><p class="muted">${t('apps_text')}</p>
+    <a class="btn primary" href="download.html">${t('getApp')}</a></div>`;
 }
 
 function itemsGrid(items) {
@@ -842,20 +853,21 @@ function streamUrl(kind, id, ext) {
 
 function play(title, kind, id, ext, extraHtml = '') {
   if (blockedScreen()) return toast(t('notAvailable'), true);
+  let url, isHls;
   if (isDirect()) {
-    const st = state.user.me.stream;
-    const raw = kind === 'live' ? `${st.server}/live/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.ts`
+    const st = state.user.me.stream; const b = bridge();
+    const raw = (e) => kind === 'live' ? `${st.server}/live/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${e}`
       : `${st.server}/${kind}/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${ext || 'mp4'}`;
-    if (bridge()) return bridge().play(raw, title, st.userAgent);
-    return modal(esc(title), externalCard(), { wide: true });
-  }
-  const url = streamUrl(kind, id, ext);
-  const isHls = kind === 'live' || ext === 'm3u8';
+    if (b && !b.inline) return b.play(raw('ts'), title, st.userAgent); // Android / TV: native player
+    if (b && b.inline) { url = raw('m3u8'); }                          // Windows / Mac app: plays here, direct
+    else if (st.relay) { url = `${st.relay}/x?u=${encodeURIComponent(raw('m3u8'))}&t=${encodeURIComponent(st.proxyToken)}`; } // iPhone / browsers
+    else return modal(esc(title), appsCard(), { wide: true });
+    isHls = kind === 'live' || ext === 'm3u8';
+  } else { url = streamUrl(kind, id, ext); isHls = kind === 'live' || ext === 'm3u8'; }
   let hls = null;
   const body = modal(esc(title), `<div class="player"><video id="vid" controls playsinline autoplay></video></div><div id="pl-msg" class="small muted" style="margin-top:8px"></div>${extraHtml}`, { wide: true, onClose: () => { if (hls) hls.destroy(); const v = $('#vid'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } } });
   const v = $('#vid', body);
   const fail = () => { $('#pl-msg').innerHTML = t('streamFail'); };
-  if (location.protocol === 'https:' && url.startsWith('http:')) $('#pl-msg').textContent = 'Tip: turn on the secure proxy in API settings so http streams play on HTTPS and iPhone.';
   if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && window.Hls && window.Hls.isSupported()) {
     hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
     hls.loadSource(url); hls.attachMedia(v);
@@ -898,7 +910,6 @@ async function openItem(i) {
 // ---------------- events ----------------
 const actions = {
   retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
-  'copy-ext': async () => { try { await navigator.clipboard.writeText(state.user.extText); toast(t('copied')); } catch { prompt('', state.user.extText); } },
   'email-login': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');

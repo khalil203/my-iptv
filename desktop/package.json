@@ -1,0 +1,64 @@
+{
+  "name": "intproto-tv",
+  "productName": "INTPROTO-TV",
+  "version": "1.0.0",
+  "description": "INTPROTO-TV \u2014 Live TV, Movies & Series",
+  "main": "main.js",
+  "author": "INTPROTO-TV",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "tv.intproto.desktop",
+    "productName": "INTPROTO-TV",
+    "artifactName": "INTPROTO-TV-${os}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png"
+    ],
+    "icon": "icon.png",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "artifactName": "INTPROTO-TV-Windows-Setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.entertainment",
+      "identity": null,
+      "artifactName": "INTPROTO-TV-Mac.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "artifactName": "INTPROTO-TV-Linux.${ext}"
+    },
+    "publish": null,
+    "afterPack": "afterPack.js"
+  }
+}

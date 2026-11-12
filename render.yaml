@@ -1,0 +1,13 @@
+# One-click setup on Render (free): the stream relay for iPhone, iPad and web browsers.
+services:
+  - type: web
+    name: intproto-tv-relay
+    runtime: node
+    plan: free
+    rootDir: relay
+    buildCommand: echo no build
+    startCommand: node server.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: APP_URL
+        value: https://my-iptv.mrkhalil-ben-salah.workers.dev

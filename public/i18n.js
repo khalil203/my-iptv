@@ -3,6 +3,7 @@ const D = {
   en: {
     ext_title: 'Watch with the app or your IPTV player', ext_text: 'On this device, channels open in an IPTV player. On Android phones and TVs, install our app to watch inside it.', ext_android: '📲 Get the Android / TV app', ext_vlc: '▶ Open playlist in VLC', ext_details: 'Your IPTV details (IPTV Smarters, TiviMate, XCIPTV…)', copied: 'Copied ✓', copyAll: '📋 Copy details', dns: 'DNS / Server',
     lineInactive: 'Your IPTV line is not active on the server yet. Please contact support.', lineBad: 'The IPTV server returned an unexpected answer.', retry: 'Try again',
+    apps_title: 'Watch in the INTPROTO-TV app', apps_text: 'Install the free app for your phone, TV or computer to watch here. It updates by itself.', relayDown: 'The stream relay is starting up. Please try again in a minute.', plansTitle: 'Plans & prices', choose: 'Choose',
     welcome: 'Welcome back', loginSub: 'Sign in with the login details you received.', tagline: 'Live TV · Movies · Series',
     username: 'Username', password: 'Password', signIn: 'Sign in', language: 'Language',
     startTrial: 'Start your free {hours}h trial', trialTitle: 'Free {hours}-hour trial', trialIntro: 'Enter your details. Your login will be sent to your email.',
@@ -27,6 +28,7 @@ const D = {
   fr: {
     ext_title: "Regardez avec l'application ou votre lecteur IPTV", ext_text: "Sur cet appareil, les chaînes s'ouvrent dans un lecteur IPTV. Sur Android et TV, installez notre application pour regarder directement.", ext_android: "📲 Application Android / TV", ext_vlc: '▶ Ouvrir la playlist dans VLC', ext_details: 'Vos informations IPTV (IPTV Smarters, TiviMate, XCIPTV…)', copied: 'Copié ✓', copyAll: '📋 Copier', dns: 'DNS / Serveur',
     lineInactive: "Votre ligne IPTV n'est pas encore active sur le serveur. Contactez le support.", lineBad: 'Le serveur IPTV a renvoyé une réponse inattendue.', retry: 'Réessayer',
+    apps_title: "Regardez dans l'application INTPROTO-TV", apps_text: "Installez l'application gratuite pour votre téléphone, TV ou ordinateur. Elle se met à jour toute seule.", relayDown: 'Le relais démarre. Réessayez dans une minute.', plansTitle: 'Formules & prix', choose: 'Choisir',
     welcome: 'Bon retour', loginSub: 'Connectez-vous avec les identifiants reçus.', tagline: 'TV en direct · Films · Séries',
     username: "Nom d'utilisateur", password: 'Mot de passe', signIn: 'Se connecter', language: 'Langue',
     startTrial: 'Essai gratuit de {hours}h', trialTitle: 'Essai gratuit de {hours} heures', trialIntro: 'Entrez vos informations. Vos identifiants seront envoyés par e-mail.',
@@ -51,6 +53,7 @@ const D = {
   ar: {
     ext_title: 'شاهد بالتطبيق أو بمشغّل IPTV', ext_text: 'على هذا الجهاز تُفتح القنوات في مشغّل IPTV. على هواتف وأجهزة أندرويد TV ثبّت تطبيقنا للمشاهدة مباشرة.', ext_android: '📲 تطبيق أندرويد / TV', ext_vlc: '▶ فتح القائمة في VLC', ext_details: 'معلومات IPTV الخاصة بك (IPTV Smarters، TiviMate، XCIPTV…)', copied: 'تم النسخ ✓', copyAll: '📋 نسخ المعلومات', dns: 'DNS / الخادم',
     lineInactive: 'خط IPTV الخاص بك غير مفعّل على الخادم بعد. يرجى التواصل مع الدعم.', lineBad: 'أعاد خادم IPTV ردًا غير متوقع.', retry: 'حاول مجددًا',
+    apps_title: 'شاهد في تطبيق INTPROTO-TV', apps_text: 'ثبّت التطبيق المجاني على هاتفك أو التلفاز أو الكمبيوتر للمشاهدة هنا. يتحدّث تلقائيًا.', relayDown: 'خادم البث قيد التشغيل. حاول مجددًا بعد دقيقة.', plansTitle: 'الباقات والأسعار', choose: 'اختر',
     welcome: 'مرحبًا بعودتك', loginSub: 'سجّل الدخول بالمعلومات التي وصلتك.', tagline: 'بث مباشر · أفلام · مسلسلات',
     username: 'اسم المستخدم', password: 'كلمة المرور', signIn: 'تسجيل الدخول', language: 'اللغة',
     startTrial: 'ابدأ تجربتك المجانية {hours} ساعة', trialTitle: 'تجربة مجانية لمدة {hours} ساعة', trialIntro: 'أدخل معلوماتك وسنرسل بيانات الدخول إلى بريدك الإلكتروني.',

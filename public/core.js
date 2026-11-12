@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS = () => ({
     announcement: '', announcementType: 'info',
     maintenance: false, maintenanceMessage: 'We are updating the service. Please come back soon.',
   },
-  player: { serverUrl: '', useProxy: true, userAgent: 'IPTVSmartersPro', mode: 'proxy' },
+  player: { serverUrl: '', useProxy: true, userAgent: 'IPTVSmartersPro', mode: 'proxy', relayUrl: '' },
   reseller: {
     enabled: false, autoSync: true,
     baseUrl: '', apiKey: '', username: '', password: '',
@@ -523,6 +523,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const showOnScreen = !sent.ok || s.trial.showCredentialsOnScreen;
         return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, ...(showOnScreen ? { username, password } : {}) });
       }
+      if (R('GET', '/api/relay-check')) { // used by the stream relay to check a customer's playback token
+        const okTok = await verifyProxyToken(s.security.proxySecret, query.t);
+        return ok({ ok: !!okTok, ua: s.player.userAgent || 'IPTVSmartersPro' });
+      }
       if (R('POST', '/api/setup')) {
         if (await store.get('admin')) return err(403, 'Admin already exists.');
         const username = String(body.username || '').trim();
@@ -577,10 +581,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const { lineUsername, linePassword, ...pub } = v;
           return ok({
             user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
+            plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             stream: canWatch && s.player.serverUrl ? {
               server: trimSlash(s.player.serverUrl), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
               mode: s.player.mode === 'direct' ? 'direct' : 'proxy', userAgent: s.player.userAgent || 'IPTVSmartersPro',
+              relay: String(s.player.relayUrl || '').trim().replace(/\/+$/, ''),
               dns: String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, ''),
             } : null,
           });

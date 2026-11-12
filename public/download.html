@@ -34,7 +34,7 @@
 </div>
 <script type="module">
 const T = {
-  en: { intro: 'Install the app on any device. It updates by itself — you never need to download it again.', back: '← Back',
+  en: { winDl: '⬇ Download for Windows', macDl: '⬇ Download for Mac', wSteps2: ['Click <b>Download for Windows</b> and open the file.', 'If Windows warns you, click <b>More info → Run anyway</b>.', 'INTPROTO-TV opens and gets a desktop shortcut. It updates by itself.'], mSteps2: ['Click <b>Download for Mac</b>, open the file and drag <b>INTPROTO-TV</b> into Applications.', 'The first time: right-click the app → <b>Open</b> (or System Settings → Privacy & Security → <b>Open Anyway</b>).', 'It updates by itself.'], intro: 'Install the app on any device. It updates by itself — you never need to download it again.', back: '← Back',
     android: 'Android phone & tablet', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone & iPad', windows: 'Windows PC', mac: 'Mac', you: 'Your device',
     apk: '⬇ Download for Android (APK)', install: '⬇ Install the app', open: 'Open in browser',
     aSteps: ['Tap <b>Download for Android</b>.', 'Open the downloaded file and tap <b>Install</b> (allow “Install unknown apps” if asked).', 'Or tap <b>Install the app</b> to add the web app from Chrome.'],
@@ -43,7 +43,7 @@ const T = {
     wSteps: ['Open this page in <b>Chrome</b> or <b>Edge</b>.', 'Click <b>Install the app</b> (or the install icon in the address bar).', 'It opens in its own window and appears in the Start menu.'],
     mSteps: ['In <b>Chrome</b> or <b>Edge</b>: click <b>Install the app</b> or the install icon in the address bar.', 'In <b>Safari</b>: menu <b>File → Add to Dock</b>.', 'Open it from the Dock or Launchpad.'],
     auto: '✨ All versions update automatically. New features appear the next time you open the app.' },
-  fr: { intro: "Installez l'application sur n'importe quel appareil. Elle se met à jour toute seule — plus besoin de la retélécharger.", back: '← Retour',
+  fr: { winDl: '⬇ Télécharger pour Windows', macDl: '⬇ Télécharger pour Mac', wSteps2: ['Cliquez sur <b>Télécharger pour Windows</b> et ouvrez le fichier.', 'Si Windows vous avertit : <b>Informations complémentaires → Exécuter quand même</b>.', "INTPROTO-TV s'ouvre avec un raccourci sur le bureau. Mise à jour automatique."], mSteps2: ['Cliquez sur <b>Télécharger pour Mac</b>, ouvrez le fichier et glissez <b>INTPROTO-TV</b> dans Applications.', 'La première fois : clic droit sur l’app → <b>Ouvrir</b> (ou Réglages → Confidentialité et sécurité → <b>Ouvrir quand même</b>).', 'Mise à jour automatique.'], intro: "Installez l'application sur n'importe quel appareil. Elle se met à jour toute seule — plus besoin de la retélécharger.", back: '← Retour',
     android: 'Téléphone & tablette Android', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone & iPad', windows: 'PC Windows', mac: 'Mac', you: 'Votre appareil',
     apk: '⬇ Télécharger pour Android (APK)', install: "⬇ Installer l'application", open: 'Ouvrir dans le navigateur',
     aSteps: ['Appuyez sur <b>Télécharger pour Android</b>.', 'Ouvrez le fichier et appuyez sur <b>Installer</b> (autorisez « sources inconnues » si demandé).', "Ou appuyez sur <b>Installer l'application</b> depuis Chrome."],
@@ -52,7 +52,7 @@ const T = {
     wSteps: ['Ouvrez cette page dans <b>Chrome</b> ou <b>Edge</b>.', "Cliquez sur <b>Installer l'application</b> (ou l'icône dans la barre d'adresse).", 'Elle s’ouvre dans sa propre fenêtre et apparaît dans le menu Démarrer.'],
     mSteps: ["Dans <b>Chrome</b> ou <b>Edge</b> : cliquez sur <b>Installer l'application</b>.", 'Dans <b>Safari</b> : menu <b>Fichier → Ajouter au Dock</b>.', 'Ouvrez-la depuis le Dock ou le Launchpad.'],
     auto: "✨ Toutes les versions se mettent à jour automatiquement à la prochaine ouverture." },
-  ar: { intro: 'ثبّت التطبيق على أي جهاز. يتحدّث تلقائيًا — لن تحتاج لتحميله مرة أخرى.', back: '→ رجوع',
+  ar: { winDl: '⬇ تحميل لويندوز', macDl: '⬇ تحميل لماك', wSteps2: ['اضغط <b>تحميل لويندوز</b> وافتح الملف.', 'إذا ظهر تحذير: <b>More info ← Run anyway</b>.', 'يفتح INTPROTO-TV مع اختصار على سطح المكتب. يتحدّث تلقائيًا.'], mSteps2: ['اضغط <b>تحميل لماك</b>، افتح الملف واسحب <b>INTPROTO-TV</b> إلى Applications.', 'أول مرة: انقر بالزر الأيمن على التطبيق ← <b>Open</b> (أو الإعدادات ← الخصوصية والأمان ← <b>Open Anyway</b>).', 'يتحدّث تلقائيًا.'], intro: 'ثبّت التطبيق على أي جهاز. يتحدّث تلقائيًا — لن تحتاج لتحميله مرة أخرى.', back: '→ رجوع',
     android: 'هاتف وتابلت أندرويد', androidTV: 'أندرويد TV · تي في بوكس · Fire TV', iphone: 'آيفون وآيباد', windows: 'كمبيوتر ويندوز', mac: 'ماك', you: 'جهازك',
     apk: '⬇ تحميل لأندرويد (APK)', install: '⬇ تثبيت التطبيق', open: 'فتح في المتصفح',
     aSteps: ['اضغط <b>تحميل لأندرويد</b>.', 'افتح الملف واضغط <b>تثبيت</b> (اسمح بتثبيت التطبيقات غير المعروفة إن طُلب).', 'أو اضغط <b>تثبيت التطبيق</b> من كروم.'],
@@ -71,6 +71,7 @@ const isMac = /Macintosh/.test(ua) && !isIOS;
 const isWin = /Windows/.test(ua);
 const me = isTV ? 'tv' : isAndroid ? 'android' : isIOS ? 'ios' : isMac ? 'mac' : isWin ? 'win' : '';
 const apkUrl = 'apk/INTPROTO-TV.apk';
+const REL = 'https://github.com/khalil203/my-iptv/releases/download/desktop/';
 const tvShort = location.host + '/tv';
 let deferred = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; render(); });
@@ -91,8 +92,8 @@ function render() {
     card('android', '🤖', L.android, L.aSteps, apkBtn + installBtn),
     card('tv', '📺', L.androidTV, L.tvSteps, apkBtn),
     card('ios', '📱', L.iphone, L.iSteps, ''),
-    card('win', '🪟', L.windows, L.wSteps, installBtn),
-    card('mac', '💻', L.mac, L.mSteps, installBtn),
+    card('win', '🪟', L.windows, L.wSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Windows-Setup.exe">${L.winDl}</a>`),
+    card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac.dmg">${L.macDl}</a>`),
   ].join('');
 }
 document.addEventListener('click', (e) => { const a = e.target.closest('[data-l]'); if (a) { lang = a.dataset.l; localStorage.setItem('tvp_lang', lang); render(); } });

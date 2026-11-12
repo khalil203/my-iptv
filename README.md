@@ -86,6 +86,13 @@ Open **/download.html** on any device:
 - **Windows / Mac:** Chrome or Edge → Install app (Safari on Mac: File → Add to Dock).
 All versions load the live app, so they update automatically. The APK only needs reinstalling if the Android wrapper itself changes.
 
+## Stream relay for iPhone, iPad & browsers (free, Render)
+Your IPTV server blocks Cloudflare, so these devices play through a small relay hosted elsewhere:
+1. Go to https://render.com and sign up with GitHub (free).
+2. **New → Blueprint** → choose the `my-iptv` repo → **Apply**. It reads `render.yaml` and starts `intproto-tv-relay`.
+3. Copy its address (e.g. `https://intproto-tv-relay.onrender.com`) into **API settings → Stream relay URL** and save.
+Free plan: the relay sleeps after 15 minutes without viewers, so the first channel can take ~1 minute to start. Android and Windows/Mac apps don't use the relay.
+
 ## Install on phones
 - **iPhone:** open the link in Safari → Share → *Add to Home Screen*.
 - **Android:** open the link in Chrome → ⋮ → *Install app*.
