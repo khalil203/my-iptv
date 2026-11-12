@@ -420,3 +420,9 @@ html { transition: background-color .4s; }
   [data-theme=light] .login-card { background: #fff; }
 }
 .dup-g h3 { font-size: .98rem; }
+/* WhatsApp */
+.wa-fab { position: fixed; right: 16px; bottom: calc(82px + var(--safe-b)); z-index: 9; width: 56px; height: 56px; border-radius: 50%; background: #25d366; display: grid; place-items: center; box-shadow: 0 6px 20px rgba(37,211,102,.45); animation: waPop .5s var(--ease) both; transition: transform .2s; }
+.wa-fab:active { transform: scale(.92); }
+[dir=rtl] .wa-fab { right: auto; left: 16px; }
+@keyframes waPop { from { transform: scale(0); } to { transform: scale(1); } }
+.btn.wa-btn { background: #25d366; border-color: #25d366; color: #fff; }

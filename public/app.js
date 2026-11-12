@@ -190,12 +190,12 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       ${preview ? '' : `<a class="btn block ghost" href="download.html" style="margin-top:8px">📲 ${t('getApp')}</a>`}
       ${preview ? '' : `<div class="login-foot"><a data-act="theme" style="cursor:pointer;text-decoration:none">🌗</a></div>`}
       ${preview ? '' : `<div class="login-foot lang-sw">${LANGS.map(([k, n]) => `<a data-act="lang" data-lang="${k}" class="${getLang() === k ? 'on' : ''}">${n}</a>`).join(' · ')}</div>`}
-      ${b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
+      ${waNum(b) ? `<a class="btn block wa-btn" style="margin-top:8px" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: '' })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
       ${b.footerText ? `<div class="login-foot">${esc(b.footerText)}</div>` : ''}
       ${state.mode === 'demo' && !preview ? `<div class="login-foot"><span class="badge-demo">${t('demo')}</span></div>` : ''}
     </div></div>`;
 }
-function renderLogin(error = '') { $('#app').innerHTML = loginCard(state.config.branding, { error: error ? tErr(error) : '' }); }
+function renderLogin(error = '') { $('#app').innerHTML = loginCard(state.config.branding, { error: error ? tErr(error) : '' }); setWaFab(state.config.branding, t('waMsg', { app: state.config.branding.appName, u: '' })); }
 function trialForm() {
   const h = state.config.trial.hours;
   return `<p class="muted" style="margin-top:0">${t('trialIntro')}</p><form data-form="trial">
@@ -231,6 +231,7 @@ const ADMIN_TABS = [
 ];
 
 async function renderAdmin() {
+  setWaFab(null);
   setTimeout(applyTheme);
   const b = state.config.branding;
   if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
@@ -543,6 +544,7 @@ function adminBranding(s) {
     <h3>Login page</h3>
     ${field('Title', 'branding.loginTitle', b.loginTitle)}${field('Subtitle', 'branding.loginSubtitle', b.loginSubtitle, { type: 'textarea', rows: 2 })}
     ${field('Background image URL', 'branding.loginBgUrl', b.loginBgUrl, { ph: 'https://…/background.jpg' })}
+    ${field('WhatsApp number', 'branding.whatsapp', b.whatsapp, { type: 'tel', ph: '66812345678', help: 'With country code, no + or spaces (Thailand 66…, Morocco 212…). Shows a green WhatsApp button on the login page and in every customer account.' })}
     <div class="grid2">${field('Support button text', 'branding.supportLabel', b.supportLabel)}${field('Support link', 'branding.supportUrl', b.supportUrl, { ph: 'https://line.me/ti/p/~yourid' })}</div>
     ${field('Footer text', 'branding.footerText', b.footerText, { ph: '© 2026 Your company' })}
     <button class="btn primary">Save branding</button></form>
@@ -876,12 +878,13 @@ async function renderUser() {
 function blockedScreen() {
   const { user, dashboard: d, branding: b } = state.user.me;
   if (d.maintenance) return `<div class="block-screen"><div class="ic">🛠</div><h2>${t('maintTitle')}</h2><p class="muted">${esc(d.maintenanceMessage)}</p></div>`;
-  if (user.state === 'expired') return `<div class="block-screen"><div class="ic">⏰</div><h2>${t('expiredTitle')}</h2><p class="muted">${t('expiredText', { date: fmtDate(user.expiresAt) })}</p>${b.supportUrl ? `<a class="btn primary" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a>` : ''}</div>`;
+  if (user.state === 'expired') return `<div class="block-screen"><div class="ic">⏰</div><h2>${t('expiredTitle')}</h2><p class="muted">${t('expiredText', { date: fmtDate(user.expiresAt) })}</p>${b.supportUrl ? `<a class="btn primary ${waNum(b) ? 'wa-btn' : ''}" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">${waNum(b) ? '💬 ' + t('whatsapp') : esc(b.supportLabel || t('support'))}</a>` : ''}</div>${orderCard()}`;
   if (!state.user.me.stream) return `<div class="block-screen"><div class="ic">📡</div><h2>${t('notReady')}</h2><p class="muted">${t('notReadyText')}</p></div>`;
   return '';
 }
 
 async function renderUserTab() {
+  if (state.user.me) setWaFab(state.user.me.branding, t('waMsg', { app: state.user.me.branding.appName, u: state.user.me.user.username }));
   const u = state.user; const el = $('#ubody');
   const { user, dashboard: d, branding: b } = u.me;
   if (u.tab === 'home') {
@@ -909,7 +912,7 @@ async function renderUserTab() {
       ${plansCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
-      <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
+      <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}${!waNum(b) && b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
     return;
   }
   const blocked = blockedScreen();
@@ -1007,7 +1010,24 @@ async function xtFetch(action, params = {}) {
 }
 const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 const priceTxt = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
+const WA_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" fill="#fff" aria-hidden="true"><path d="M16 3C9 3 3.3 8.6 3.3 15.6c0 2.5.7 4.8 1.9 6.8L3 29l6.8-2.2c1.9 1 4 1.6 6.2 1.6 7 0 12.7-5.7 12.7-12.7S23 3 16 3zm0 23.1c-2 0-3.9-.6-5.6-1.6l-.4-.2-4 1.3 1.3-3.9-.3-.4c-1.1-1.7-1.7-3.7-1.7-5.7C5.3 9.8 10.1 5 16 5s10.7 4.8 10.7 10.7S21.9 26.1 16 26.1zm5.9-8c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1c-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.2s0-.5.1-.6l.5-.6c.2-.2.2-.4.3-.6s0-.4 0-.6l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4s-1.2 1.1-1.2 2.7 1.2 3.2 1.4 3.4 2.4 3.6 5.7 5c.8.3 1.4.5 1.9.7.8.3 1.5.2 2.1.1.6-.1 1.9-.8 2.2-1.5s.3-1.4.2-1.5-.3-.2-.6-.4z"/></svg>';
+const waNum = (b) => String(b?.whatsapp || (/wa\.me\/(\d+)/.exec(b?.supportUrl || '') || [])[1] || '').replace(/\D/g, '');
+const waUrl = (b, text) => { const n = waNum(b); return n ? `https://wa.me/${n}${text ? '?text=' + encodeURIComponent(text) : ''}` : ''; };
+function setWaFab(b, text) {
+  let el = document.getElementById('wa-fab'); const url = b ? waUrl(b, text) : '';
+  if (!url) { el?.remove(); return; }
+  if (!el) { el = document.createElement('a'); el.id = 'wa-fab'; el.className = 'wa-fab'; el.target = '_blank'; el.rel = 'noopener'; el.setAttribute('aria-label', 'WhatsApp'); el.innerHTML = WA_SVG; document.body.appendChild(el); }
+  el.href = url;
+}
+function orderCard() {
+  const me = state.user.me; const op = me.orderPackages || []; if (!op.length) return '';
+  const u = me.user.username; const app = me.branding.appName;
+  return `<div class="card"><h3>💎 ${t('buyTitle')}</h3><div class="plans-grid">${op.map((p) => { const pr = priceTxt(p.price, p.cur); const wa = waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u })); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div><div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
+    <a class="btn sm primary block" style="margin-top:8px" href="${esc(p.url)}" target="_blank" rel="noopener" data-keep data-act="pay-click" data-pkg="${esc(p.id)}">${t('payNow')}</a>
+    <div class="row" style="margin-top:6px;gap:6px">${me.hasEmail ? `<button class="btn sm" style="flex:1" data-act="pay-email" data-pkg="${esc(p.id)}">${t('emailMe')}</button>` : ''}${wa ? `<a class="btn sm wa-btn" style="flex:1" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div></div>`; }).join('')}</div></div>`;
+}
 function plansCard() {
+  if (state.user.me.orderPackages?.length) return orderCard();
   const me = state.user.me; if (!me.plans?.length) return '';
   const sup = me.branding.supportUrl;
   return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
@@ -1277,6 +1297,13 @@ const actions = {
     el.disabled = true;
     try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, appUrl: location.origin }); toast('Package email sent ✓'); closeModal(); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; } }
     catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'pay-click': (el) => { api('POST', '/api/me/order', { pkg: el.dataset.pkg }).catch(() => {}); },
+  'pay-email': async (el) => {
+    el.disabled = true;
+    try { const r = await api('POST', '/api/me/order', { pkg: el.dataset.pkg, email: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast(t('offerSent', { email: r.email })); }
+    catch (e) { toast(e.message === 'no_email' ? t('noEmail') : e.message, true); }
+    el.disabled = false;
   },
   'order-custom': async () => {
     const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
@@ -1639,7 +1666,7 @@ document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const fn = actions[el.dataset.act];
-  if (fn) { if (el.tagName === 'A') e.preventDefault(); Promise.resolve(fn(el, e)).catch((err) => toast(err.message, true)); }
+  if (fn) { if (el.tagName === 'A' && !el.hasAttribute('data-keep')) e.preventDefault(); Promise.resolve(fn(el, e)).catch((err) => toast(err.message, true)); }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.role === 'user' && state.user.me && Date.now() - (state.user.meAt || 0) > 60000) renderUser(); });
 document.addEventListener('submit', (e) => {

@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS = () => ({
     loginBgUrl: '',
     supportLabel: 'Contact support',
     supportUrl: '',
+    whatsapp: '', // WhatsApp number with country code, digits only (shows the green WhatsApp button)
     footerText: '',
   },
   userDashboard: {
@@ -793,11 +794,26 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const v = view(c, s);
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance;
 
+        if (R('POST', '/api/me/order')) { // customer picks a package: get a pay link, and optionally the payment email
+          const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
+          const m = orderEmail(s, c, pk, body.appUrl); const url = (m.html.match(/<a href="([^"]+)" class="cta-btn"/) || [])[1]?.replace(/&amp;/g, '&') || '';
+          if (!body.email) { c.orderClickAt = Date.now(); c.orderClickPkg = pk.id; await saveCustomers(list); await log('customer', `${c.username} opened pay link "${pk.title}"${m.payAcc ? ' (' + m.payAcc + ')' : ''}`); return ok({ url }); }
+          const to = cleanEmail(c.email); if (!to) return err(400, 'no_email');
+          const k = 'ordermail:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
+          if (n >= 5) return err(429, 'Too many emails today. Please try tomorrow or contact us.');
+          const r = await sendEmail(s, to, m.subject, m.html);
+          if (!r.ok) return err(502, r.error || 'Email failed');
+          await store.put(k, n + 1, 2 * 86400); c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentAcc = m.payAcc; await saveCustomers(list);
+          await log('customer', `${c.username} asked for the "${pk.title}" payment email <${to}>`);
+          return ok({ url, email: to });
+        }
         if (R('GET', '/api/me')) {
           const { lineUsername, linePassword, loginPassword, ...pub } = v;
           return ok({
             user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
+            orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: pl.url, cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
+            orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email),
             stream: canWatch && s.player.serverUrl ? {
               server: trimSlash(s.player.serverUrl), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
@@ -896,6 +912,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
         const next = deepMerge(s, body || {});
         next.security.proxySecret = s.security.proxySecret;
+        next.branding.whatsapp = String(next.branding.whatsapp || '').replace(/\D/g, '');
+        if (next.branding.whatsapp && (!next.branding.supportUrl || /wa\.me\//.test(next.branding.supportUrl))) { next.branding.supportUrl = 'https://wa.me/' + next.branding.whatsapp; if (!next.branding.supportLabel || next.branding.supportLabel === 'Contact support') next.branding.supportLabel = 'WhatsApp'; }
         if (Array.isArray(body.plans)) next.plans = body.plans.map((p) => ({
           id: p.id || 'p' + uid(3), name: String(p.name || 'Plan'), days: Math.max(1, Number(p.days) || 30),
           price: Number(p.price) || 0, connections: Math.max(1, Number(p.connections) || 1), package: String(p.package || ''),
