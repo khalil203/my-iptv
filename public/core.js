@@ -43,12 +43,12 @@ export function rewriteM3U8(text, base, wrap) {
 
 export const DEFAULT_SETTINGS = () => ({
   branding: {
-    appName: 'My IPTV',
+    appName: 'INTPROTO-TV',
     tagline: 'Live TV · Movies · Series',
-    logoUrl: '',
-    primary: '#7c5cff',
-    accent: '#22d3ee',
-    background: '#0b0d17',
+    logoUrl: 'logo.png',
+    primary: '#12bfd8',
+    accent: '#7cf0ff',
+    background: '#060a12',
     loginTitle: 'Welcome back',
     loginSubtitle: 'Sign in with the login details you received.',
     loginBgUrl: '',
@@ -123,6 +123,39 @@ const XTREAM_ACTIONS = new Set([
   'get_series_categories', 'get_series', 'get_series_info', 'get_short_epg',
 ]);
 
+export const PERMS = [
+  ['customers_view', 'See customers & subscriptions'],
+  ['customers_edit', 'Add, edit, renew, enable/disable customers'],
+  ['customers_delete', 'Delete customers'],
+  ['finance_view', 'See banks & balances'],
+  ['finance_edit', 'Add income, expenses, transfers'],
+  ['profits', 'See revenue & profits'],
+  ['stock', 'Credits stock (see & buy)'],
+  ['plans', 'Edit plans & prices'],
+  ['settings', 'App settings (API, branding, trial, email, user dashboard)'],
+  ['activity', 'See activity log'],
+];
+const PERM_KEYS = PERMS.map((p) => p[0]);
+function permFor(method, path, body) {
+  if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path)) return null;
+  if (path === '/api/admin/settings') {
+    if (method === 'GET') return null;
+    const k = Object.keys(body || {});
+    if (k.length && k.every((x) => x === 'plans' || x === 'currency')) return 'plans';
+    if (k.length && k.every((x) => x === 'stock')) return 'stock';
+    if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
+    return 'settings';
+  }
+  if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
+  if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
+  if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh') return 'finance_edit';
+  if (path.startsWith('/api/admin/stock')) return 'stock';
+  if (path === '/api/admin/profits') return 'profits';
+  if (path === '/api/admin/log') return 'activity';
+  if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
+  return 'owner';
+}
+
 export const toUsd = (amount, cur, rates) => (Number(amount) || 0) / (Number((rates || {})[cur]) || 1);
 export const fromUsd = (usd, cur, rates) => (Number(usd) || 0) * (Number((rates || {})[cur]) || 1);
 const DAYMS = 86400000;
@@ -166,6 +199,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   async function getSettings() {
     if (sCache && Date.now() - sAt < cacheMs) return sCache;
     let s = deepMerge(DEFAULT_SETTINGS(), (await store.get('settings')) || {});
+    if (s.branding.appName === 'My IPTV' && !s.branding.logoUrl) s.branding = { ...s.branding, ...DEFAULT_SETTINGS().branding, supportUrl: s.branding.supportUrl, supportLabel: s.branding.supportLabel, footerText: s.branding.footerText };
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
     sCache = s; sAt = Date.now();
     return s;
@@ -195,17 +229,17 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return credits > 0 ? cost / credits : (Number(s.stock.packPrice) || 0) / (Number(s.stock.packCredits) || 1);
   }
   // Records one sale (and the money received) — used for new customers, renewals and trials.
-  async function recordSale(s, c, { type, plan, days, credits, amount, accountId, at }) {
+  async function recordSale(s, c, { type, plan, days, credits, amount, accountId, at, by }) {
     if (Number(amount) > 0) s = await refreshRates(s, false);
     const acc = s.finance.accounts.find((a) => a.id === accountId);
     const currency = acc ? acc.currency : s.currency;
     const amountUsd = toUsd(amount, currency, s.finance.rates);
     const costUsd = credits * (await creditCostUsd(s));
-    const sale = { id: uid(6), at: at || Date.now(), customerId: c.id, username: c.username, name: c.name, type, planId: plan ? plan.id : (type === 'trial' ? 'trial' : 'custom'), planName: type === 'trial' ? 'Trial' : plan ? plan.name : 'Custom', days, credits, amount: Number(amount) || 0, currency, amountUsd, costUsd, accountId: acc ? acc.id : '' };
+    const sale = { by: by || '', id: uid(6), at: at || Date.now(), customerId: c.id, username: c.username, name: c.name, type, planId: plan ? plan.id : (type === 'trial' ? 'trial' : 'custom'), planName: type === 'trial' ? 'Trial' : plan ? plan.name : 'Custom', days, credits, amount: Number(amount) || 0, currency, amountUsd, costUsd, accountId: acc ? acc.id : '' };
     const sales = await getSales(); sales.push(sale); await store.put('sales', sales);
     if (acc && Number(amount) > 0) {
       const tx = await getTx();
-      tx.push({ id: uid(6), at: sale.at, type: 'income', accountId: acc.id, amount: Number(amount), category: 'Sale', note: `${sale.planName} · ${c.name} (${c.username})`, saleId: sale.id });
+      tx.push({ id: uid(6), by: by || '', at: sale.at, type: 'income', accountId: acc.id, amount: Number(amount), category: 'Sale', note: `${sale.planName} · ${c.name} (${c.username})`, saleId: sale.id });
       await store.put('tx', tx);
     }
     return sale;
@@ -265,11 +299,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const used = sales.reduce((a, x) => a + (Number(x.credits) || 0), 0);
     return { purchased, used, available: purchased - used, avgCostUsd: await creditCostUsd(s), low: purchased - used <= (Number(s.stock.lowCreditsAlert) || 0), purchases: st.slice().sort((a, b) => b.at - a.at) };
   }
-  async function log(type, msg) {
+  const getTeam = async () => (await store.get('team')) || [];
+  async function baseLog(type, msg, by) {
     const l = (await store.get('log')) || [];
-    l.unshift({ at: Date.now(), type, msg });
+    l.unshift({ at: Date.now(), type, msg, by: by || '' });
     await store.put('log', l.slice(0, 300));
   }
+  const log = (type, msg) => baseLog(type, msg, 'system');
   async function newSession(role, id, s) {
     const token = uid(24);
     const hours = Math.max(1, Number(s.security.sessionHours) || 72);
@@ -342,6 +378,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
 
   async function handle({ method, path, query = {}, body = {}, token }) {
+    let actorName = '';
+    const log = (type, msg) => baseLog(type, msg, actorName);
     try {
       const s = await getSettings();
       const R = (m, p) => method === m && path === p;
@@ -352,6 +390,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours } });
       }
       if (R('POST', '/api/trial')) {
+        actorName = 'trial sign-up';
         if (!s.trial.enabled) return err(403, 'trial_off');
         const name = String(body.name || '').trim().slice(0, 80);
         const email = String(body.email || '').trim().toLowerCase().slice(0, 120);
@@ -402,6 +441,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (admin && admin.username.toLowerCase() === username) {
           if ((await hashPassword(password, admin.salt)) !== admin.hash) return err(401, 'Wrong username or password.');
           return ok({ token: await newSession('admin', 'admin', s), role: 'admin' });
+        }
+        const team = await getTeam();
+        const m = team.find((x) => x.username.toLowerCase() === username);
+        if (m) {
+          if ((await hashPassword(password, m.salt)) !== m.hash) return err(401, 'Wrong username or password.');
+          if (m.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
+          m.lastLogin = Date.now(); await store.put('team', team);
+          return ok({ token: await newSession('staff', m.id, s), role: 'staff' });
         }
         const list = await getCustomers();
         const c = list.find((x) => x.username.toLowerCase() === username);
@@ -459,9 +506,68 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       // ---------- admin ----------
-      if (ses.role !== 'admin' || !path.startsWith('/api/admin/')) return err(403, 'Not allowed.');
+      if (!['admin', 'staff'].includes(ses.role) || !path.startsWith('/api/admin/')) return err(403, 'Not allowed.');
+      let perms = PERM_KEYS, isOwner = ses.role === 'admin', member = null;
+      if (isOwner) actorName = (await getAdmin()).username + ' (owner)';
+      else {
+        const team = await getTeam();
+        member = team.find((x) => x.id === ses.id);
+        if (!member || member.status === 'disabled') return err(401, 'Please sign in again.');
+        perms = member.perms || [];
+        actorName = member.name || member.username;
+      }
+      const can = (p) => isOwner || perms.includes(p);
+      const need = permFor(method, path, body);
+      if (need === 'owner' && !isOwner) return err(403, 'Only the owner can do this.');
+      if (need && need !== 'owner' && !can(need)) return err(403, 'You do not have permission for this.');
 
-      if (R('GET', '/api/admin/settings')) return ok(s);
+      if (R('GET', '/api/admin/me')) {
+        if (isOwner) { const a = await getAdmin(); return ok({ role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, allPerms: PERMS, mode }); }
+        return ok({ role: 'staff', name: member.name, username: member.username, isDefault: false, perms, allPerms: PERMS, mode });
+      }
+      if (R('POST', '/api/admin/me/password')) {
+        if (isOwner) return err(400, 'Use Account & backup.');
+        const team = await getTeam(); const me = team.find((x) => x.id === member.id);
+        if ((await hashPassword(body.current || '', me.salt)) !== me.hash) return err(400, 'Current password is wrong.');
+        if (String(body.next || '').length < 6) return err(400, 'New password needs 6+ characters.');
+        me.salt = uid(8); me.hash = await hashPassword(body.next, me.salt); await store.put('team', team);
+        await log('team', `${me.username} changed their password`);
+        return ok({ ok: true });
+      }
+      // ----- team (owner only) -----
+      if (R('GET', '/api/admin/team')) return ok((await getTeam()).map(({ salt, hash, ...m }) => m));
+      if (R('POST', '/api/admin/team')) {
+        const team = await getTeam();
+        const username = String(body.username || '').trim();
+        if (username.length < 3 || String(body.password || '').length < 6) return err(400, 'Username needs 3+ characters and password 6+.');
+        const taken = team.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getCustomers()).some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getAdmin()).username.toLowerCase() === username.toLowerCase();
+        if (taken) return err(400, 'This username is already used.');
+        const salt = uid(8);
+        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => PERM_KEYS.includes(p)), status: 'active', createdAt: Date.now(), lastLogin: null };
+        team.push(m); await store.put('team', team);
+        await log('team', `Added team member ${m.name} (${username})`);
+        const { salt: _s, hash: _h, ...pub } = m; return ok(pub);
+      }
+      const tm = path.match(/^\/api\/admin\/team\/(\w+)$/);
+      if (tm) {
+        const team = await getTeam(); const m = team.find((x) => x.id === tm[1]);
+        if (!m) return err(404, 'Not found');
+        if (method === 'DELETE') { await store.put('team', team.filter((x) => x !== m)); await log('team', `Removed team member ${m.name}`); return ok({ ok: true }); }
+        if (method === 'PUT') {
+          if (body.name !== undefined) m.name = String(body.name);
+          if (body.role !== undefined) m.role = String(body.role);
+          if (Array.isArray(body.perms)) m.perms = body.perms.filter((p) => PERM_KEYS.includes(p));
+          if (body.status) m.status = body.status === 'disabled' ? 'disabled' : 'active';
+          if (body.password) { if (String(body.password).length < 6) return err(400, 'Password needs 6+ characters.'); m.salt = uid(8); m.hash = await hashPassword(body.password, m.salt); }
+          await store.put('team', team); await log('team', `Updated team member ${m.name}`);
+          const { salt, hash, ...pub } = m; return ok(pub);
+        }
+      }
+
+      if (R('GET', '/api/admin/settings')) {
+        if (can('settings')) return ok(s);
+        return ok({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, security: { sessionHours: s.security.sessionHours } });
+      }
       if (R('PUT', '/api/admin/settings')) {
         const next = deepMerge(s, body || {});
         next.security.proxySecret = s.security.proxySecret;
@@ -484,7 +590,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (username.length < 3) return err(400, 'Login username needs 3+ characters.');
         if (String(body.password || '').length < 4) return err(400, 'Login password needs 4+ characters.');
         const admin = await store.get('admin');
-        if (list.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (admin && admin.username.toLowerCase() === username.toLowerCase()))
+        if (list.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (admin && admin.username.toLowerCase() === username.toLowerCase()) || (await getTeam()).some((x) => x.username.toLowerCase() === username.toLowerCase()))
           return err(400, 'This username is already used.');
         const plan = s.plans.find((p) => p.id === body.planId);
         const startAt = body.startAt ? new Date(body.startAt).getTime() : Date.now();
@@ -510,7 +616,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         list.push(c);
         await saveCustomers(list);
-        await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId });
+        await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
         let mail = null;
         if (body.sendEmail && c.email) { const m = loginMail(withUrl(s, body.appUrl), c, String(body.password), 'welcome'); mail = await sendEmail(s, c.email, m.subject, m.html); }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
@@ -567,7 +673,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           c.renewals = c.renewals || [];
           c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(body.price) || 0, credits });
           await saveCustomers(list);
-          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId });
+          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${s.currency})`);
           return ok({ customer: view(c, s), panel });
         }
@@ -625,7 +731,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const acc = s.finance.accounts.find((a) => a.id === body.accountId);
         const amount = Math.abs(Number(body.amount) || 0);
         if (!type || !acc || !amount) return err(400, 'Choose a type, an account and an amount.');
-        const t = { id: uid(6), at: body.date ? new Date(body.date).getTime() + 12 * 3600000 : Date.now(), type, accountId: acc.id, amount, category: String(body.category || (type === 'transfer' ? 'Transfer' : 'Other')), note: String(body.note || '').slice(0, 200) };
+        const t = { id: uid(6), by: actorName, at: body.date ? new Date(body.date).getTime() + 12 * 3600000 : Date.now(), type, accountId: acc.id, amount, category: String(body.category || (type === 'transfer' ? 'Transfer' : 'Other')), note: String(body.note || '').slice(0, 200) };
         if (type === 'transfer') {
           const to = s.finance.accounts.find((a) => a.id === body.toAccountId);
           if (!to || to.id === acc.id) return err(400, 'Choose a different destination account.');
@@ -721,7 +827,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const count = (st) => cs.filter((c) => c.state === st).length;
         return ok({
           total: cs.length, active: count('active'), expiring: count('expiring'), expired: count('expired'), disabled: count('disabled'),
-          revenueTotal: Math.round(total * 100) / 100, revenueMonth: byMonth[months[5]], byMonth, renewalsCount, trials: cs.filter((c) => c.isTrial).length,
+          ...(can('profits') ? { revenueTotal: Math.round(total * 100) / 100, revenueMonth: byMonth[months[5]], byMonth } : { revenueTotal: null, revenueMonth: null, byMonth: null }), renewalsCount, trials: cs.filter((c) => c.isTrial).length,
           stock: { available: stock.available, low: stock.low }, lowCreditsAlert: s.stock.lowCreditsAlert, madRate: s.finance.rates.MAD,
           expiringSoon: cs.filter((c) => c.state === 'expiring').sort((a, b) => a.expiresAt - b.expiresAt).slice(0, 8),
           recentlyExpired: cs.filter((c) => c.state === 'expired').sort((a, b) => b.expiresAt - a.expiresAt).slice(0, 8),
@@ -768,7 +874,6 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('admin', 'Admin login details changed');
         return ok({ ok: true, username: admin.username });
       }
-      if (R('GET', '/api/admin/me')) { const a = await getAdmin(); return ok({ username: a.username, isDefault: !!a.isDefault, mode }); }
       if (R('GET', '/api/admin/log')) return ok((await store.get('log')) || []);
       if (R('GET', '/api/admin/backup')) return ok({ version: 2, exportedAt: Date.now(), settings: s, customers: await getCustomers(), sales: await getSales(), tx: await getTx(), stock: await getStock() });
       if (R('POST', '/api/admin/restore')) {

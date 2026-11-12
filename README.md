@@ -1,4 +1,4 @@
-# My IPTV — Admin + Customer app for TVplus panel
+# INTPROTO-TV — Admin + Customer app for TVplus panel
 
 One app for web, iPhone and Android (installs from the browser as an app).
 
@@ -10,6 +10,7 @@ One app for web, iPhone and Android (installs from the browser as an app).
 - **Credits stock:** record supplier purchases (120 credits = $90). Every sale uses credits. Shows average cost per credit and alerts when credits are low, from both your stock and the live panel API.
 - **Profits:** profit on every sale (price − credits cost), plus weekly, monthly and yearly reports in USD and MAD.
 - **Daily emails:** a low-credit alert to you, and expiry reminders to customers.
+- **Team & access:** add staff logins with permissions (presets: Sales agent, Accountant, Manager, Full access). Staff only see what you allow, and every action is logged with their name.
 - **Secure proxy:** streams play over HTTPS on iPhone and Android, and your reseller API key never leaves the server.
 
 It runs on **Cloudflare Workers + KV (free plan)**.

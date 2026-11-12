@@ -4,7 +4,7 @@ import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js'
 // ---------------- helpers ----------------
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtDate = (x) => (x ? new Date(x).toLocaleDateString(state?.role === 'admin' ? undefined : locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+const fmtDate = (x) => (x ? new Date(x).toLocaleDateString(isAdminUI() ? undefined : locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtDT = (x) => (x ? new Date(x).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const mad = (n) => `${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} MAD`;
@@ -50,14 +50,17 @@ function formToObj(form) {
   });
   return out;
 }
-const pill = (st) => `<span class="pill st-${st}">${state.role === 'admin' ? st : t('st_' + st)}</span>`;
+const pill = (st) => `<span class="pill st-${st}">${isAdminUI() ? st : t('st_' + st)}</span>`;
 function progress(c) {
   const pct = Math.max(0, Math.min(100, (c.daysLeft / (c.planDays || 30)) * 100));
   return `<div class="prog ${c.state === 'expired' ? 'bad' : c.state === 'expiring' ? 'warn' : ''}"><i style="width:${pct}%"></i></div>`;
 }
-const brandHtml = (b, sub = true) => `<div class="brand">${b.logoUrl ? `<img src="${esc(b.logoUrl)}" alt="">` : `<div class="logo-mark">${esc(initials(b.appName))}</div>`}<div><b>${esc(b.appName)}</b>${sub ? `<span>${esc(b.tagline)}</span>` : ''}</div></div>`;
+const brandHtml = (b, sub = true) => `<div class="brand">${b.logoUrl ? `<img class="brand-logo" src="${esc(b.logoUrl)}" alt="">` : `<div class="logo-mark">${esc(initials(b.appName))}</div>`}<div><b class="brand-name">${esc(b.appName)}</b>${sub ? `<span>${esc(b.tagline)}</span>` : ''}</div></div>`;
+const brandHero = (b) => `<div class="hero">${b.logoUrl ? `<div class="hero-logo"><i></i><img src="${esc(b.logoUrl)}" alt=""></div>` : `<div class="logo-mark big">${esc(initials(b.appName))}</div>`}<div class="brand-name xl">${esc(b.appName)}</div><div class="muted small hero-tag">${esc(b.tagline)}</div></div>`;
 
 // ---------------- state & API ----------------
+const isAdminUI = () => !!state.token && (state.role === 'admin' || state.role === 'staff');
+const can = (p) => { const me = state.admin.me; if (!p) return true; if (!me) return false; if (me.role === 'owner') return true; return p !== 'owner' && me.perms.includes(p); };
 const state = {
   mode: 'server', config: null, local: null,
   token: localStorage.getItem('tvp_token'), role: localStorage.getItem('tvp_role'),
@@ -95,6 +98,7 @@ function setSession(token, role) {
   if (token) { localStorage.setItem('tvp_token', token); localStorage.setItem('tvp_role', role); }
   else { localStorage.removeItem('tvp_token'); localStorage.removeItem('tvp_role'); }
   state.user = { tab: 'home', me: null, cache: {}, cat: {}, q: '', limit: 120 };
+  state.admin.me = null; state.admin.tab = 'overview';
 }
 
 function applyBranding(b) {
@@ -125,11 +129,11 @@ async function boot() {
 
 function route() {
   closeModal();
-  if (state.token && state.role === 'admin') { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
+  if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
   if (!state.token) return renderLogin();
-  if (state.role === 'admin') return renderAdmin();
+  if (isAdminUI()) return renderAdmin();
   return renderUser();
 }
 async function refreshConfig() { state.config = await api('GET', '/api/config'); applyBranding(state.config.branding); }
@@ -137,7 +141,7 @@ async function refreshConfig() { state.config = await api('GET', '/api/config');
 // ---------------- login & setup ----------------
 // Default texts follow the customer's language; texts you customise stay as you wrote them.
 function localBrand(b) {
-  if (state.role === 'admin' && state.token) return b;
+  if (isAdminUI()) return b;
   const d = { loginTitle: ['Welcome back', 'welcome'], loginSubtitle: ['Sign in with the login details you received.', 'loginSub'], tagline: ['Live TV · Movies · Series', 'tagline'] };
   const o = { ...b };
   for (const [k, [en, key]] of Object.entries(d)) if (!o[k] || o[k] === en) o[k] = t(key);
@@ -147,7 +151,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
   if (!preview) b = localBrand(b);
   return `<div class="login-wrap" style="${b.loginBgUrl ? `background-image:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.6)),url('${esc(b.loginBgUrl)}')` : ''}">
     <div class="login-card">
-      ${brandHtml(b)}
+      ${brandHero(b)}
       <h2>${esc(b.loginTitle)}</h2>
       <p class="muted" style="margin-top:0">${esc(b.loginSubtitle)}</p>
       ${error ? `<div class="err-box">${esc(error)}</div>` : ''}
@@ -191,22 +195,29 @@ function renderSetup() {
 
 // ---------------- ADMIN ----------------
 const ADMIN_TABS = [
-  ['overview', '📊', 'Overview'], ['customers', '👥', 'Customers'], ['subs', '📅', 'Subscriptions'], ['finance', '🏦', 'Banks & balances'],
-  ['profits', '📈', 'Profits'], ['stock', '🎟', 'Credits stock'], ['plans', '💳', 'Plans & prices'], ['trial', '🎁', 'Trial & email'],
-  ['userdash', '📱', 'User dashboard'], ['branding', '🎨', 'Login & branding'], ['api', '🔌', 'API settings'],
-  ['security', '🔐', 'Account & backup'], ['activity', '🧾', 'Activity'],
+  ['overview', '📊', 'Overview', null], ['customers', '👥', 'Customers', 'customers_view'], ['subs', '📅', 'Subscriptions', 'customers_view'],
+  ['finance', '🏦', 'Banks & balances', 'finance_view'], ['profits', '📈', 'Profits', 'profits'], ['stock', '🎟', 'Credits stock', 'stock'],
+  ['plans', '💳', 'Plans & prices', 'plans'], ['trial', '🎁', 'Trial & email', 'settings'], ['userdash', '📱', 'User dashboard', 'settings'],
+  ['branding', '🎨', 'Login & branding', 'settings'], ['api', '🔌', 'API settings', 'settings'], ['team', '🛡', 'Team & access', 'owner'],
+  ['security', '🔐', 'My account', null], ['activity', '🧾', 'Activity', 'activity'],
 ];
 
 async function renderAdmin() {
   const b = state.config.branding;
+  if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
+  const me = state.admin.me;
+  const tabs = ADMIN_TABS.filter((x) => can(x[3]));
+  if (!tabs.some((x) => x[0] === state.admin.tab)) state.admin.tab = tabs[0][0];
   const t = state.admin.tab;
   const title = ADMIN_TABS.find((x) => x[0] === t)?.[2] || '';
+  document.body.className = (me.allPerms || []).filter(([p]) => !can(p)).map(([p]) => 'np-' + p).join(' ');
   $('#app').innerHTML = `<div class="admin">
-    <aside class="side">${brandHtml(b, false)}<nav class="nav">${ADMIN_TABS.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}</nav></aside>
+    <aside class="side">${brandHtml(b, false)}<nav class="nav">${tabs.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}</nav>
+      <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <div class="main">
-      <div class="topbar"><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm" data-act="logout">Log out</button></div>
-      <div class="mobile-nav">${ADMIN_TABS.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
-      <div class="content" id="admin-body"><div class="spinner"></div></div>
+      <div class="topbar"><img class="tb-logo" src="${esc(b.logoUrl || 'logo.png')}" alt=""><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="mobile-nav">${tabs.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
+      <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </div></div>`;
   try {
     const s = await api('GET', '/api/admin/settings');
@@ -225,17 +236,21 @@ async function renderAdmin() {
     else if (t === 'api') body.innerHTML = adminApi(s);
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'activity') body.innerHTML = await adminActivity();
+    else if (t === 'team') body.innerHTML = await adminTeam();
+    animateIn(body);
   } catch (e) { if (state.token) $('#admin-body').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
 }
 
 async function adminOverview() {
   const [st, cr, me] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me')]);
-  const max = Math.max(1, ...Object.values(st.byMonth));
+  const max = Math.max(1, ...Object.values(st.byMonth || {}));
   const s = state.admin.settings;
   const setupTips = [];
+  if (can('settings')) {
   if (!s.player.serverUrl) setupTips.push('Add your streaming server URL in <a data-act="atab" data-tab="api">API settings</a> so customers can watch.');
   if (!s.reseller.enabled) setupTips.push('Connect the TVplus reseller API in <a data-act="atab" data-tab="api">API settings</a> to create and renew lines automatically.');
-  const row = (c) => `<div class="list-item"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'expired ' + fmtDate(c.expiresAt) : c.daysLeft + ' days left'}</div></div><button class="btn sm primary" data-act="renew" data-id="${c.id}">Renew</button></div>`;
+  }
+  const row = (c) => `<div class="list-item"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'expired ' + fmtDate(c.expiresAt) : c.daysLeft + ' days left'}</div></div><button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button></div>`;
   const lim = st.lowCreditsAlert || 0;
   const panelLow = cr.enabled && cr.ok && Number(cr.credits) <= lim;
   const creditWarn = panelLow || st.stock.low ? `<div class="notice warning">🎟 <b>Credits are low</b> — ${panelLow ? `panel has <b>${esc(cr.credits)}</b> credits` : ''}${panelLow && st.stock.low ? ' · ' : ''}${st.stock.low ? `stock has <b>${st.stock.available}</b> credits` : ''}. <a data-act="atab" data-tab="stock" style="cursor:pointer">Buy credits →</a></div>` : '';
@@ -247,17 +262,17 @@ async function adminOverview() {
     <div class="stat c-warn"><span>Expiring soon</span><b>${st.expiring}</b></div>
     <div class="stat c-bad"><span>Expired</span><b>${st.expired}</b></div>
     <div class="stat"><span>Free trials</span><b>${st.trials}</b></div>
-    <div class="stat c-acc"><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
-    <div class="stat"><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>
+    ${st.revenueTotal !== null ? `<div class="stat c-acc"><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
+    <div class="stat"><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
     <div class="stat ${panelLow ? 'c-bad' : ''}"><span>Panel credits (API)</span><b>${cr.enabled ? (cr.ok ? esc(cr.credits ?? '—') : '⚠️') : 'off'}</b></div>
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
   </div>
-  <div class="grid2" style="gap:16px">
+  <div class="grid2 ${can('customers_view') ? '' : 'hidden'}" style="gap:16px">
     <div class="card"><div class="row"><h3>Expiring soon</h3><span class="spacer"></span><a class="small" data-act="atab" data-tab="subs" style="cursor:pointer">Tracker →</a></div>${st.expiringSoon.length ? st.expiringSoon.map(row).join('') : '<p class="muted">Nobody is expiring soon.</p>'}</div>
     <div class="card"><h3>Recently expired</h3>${st.recentlyExpired.length ? st.recentlyExpired.map(row).join('') : '<p class="muted">No expired customers.</p>'}</div>
   </div>
-  <div class="card"><h3>Revenue (USD) · last 6 months</h3><div class="bars">${Object.entries(st.byMonth).map(([k, v]) => `<div><span>${v ? Number(v).toLocaleString() : ''}</span><i style="height:${(v / max) * 100}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>
-  <div class="row"><button class="btn primary" data-act="new-customer">＋ Add customer</button><button class="btn" data-act="new-tx">💸 Add transaction</button><button class="btn" data-act="atab" data-tab="finance">🏦 Balances</button></div>`;
+  ${st.byMonth ? `<div class="card"><h3>Revenue (USD) · last 6 months</h3><div class="bars">${Object.entries(st.byMonth).map(([k, v]) => `<div><span>${v ? Number(v).toLocaleString() : ''}</span><i style="height:${(v / max) * 100}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>` : ''}
+  <div class="row"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="new-tx" data-perm="finance_edit">💸 Add transaction</button><button class="btn" data-act="atab" data-tab="finance">🏦 Balances</button></div>`;
 }
 
 function filteredCustomers() {
@@ -269,13 +284,13 @@ function filteredCustomers() {
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
 function custActions(c) {
-  return `<button class="btn sm primary" data-act="renew" data-id="${c.id}">Renew</button>
-    <button class="btn sm" data-act="edit-customer" data-id="${c.id}">Edit</button>
-    <button class="btn sm" data-act="toggle-customer" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
+  return `<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+    <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
+    <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     ${c.whatsapp ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
     ${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}" title="Email">✉️</a>` : ''}
-    <button class="btn sm" data-act="copy-login" data-id="${c.id}" title="Copy login details">📋</button>
-    <button class="btn sm danger" data-act="del-customer" data-id="${c.id}">🗑</button>`;
+    <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
+    <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
 }
 function customerListHtml() {
   const list = filteredCustomers();
@@ -290,7 +305,7 @@ function customerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer">＋ Add customer</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -349,20 +364,20 @@ async function adminSubs() {
   const lim = a.subDays === 'all' ? Infinity : Number(a.subDays);
   const list = a.customers.filter((c) => c.state !== 'disabled' && c.daysLeft <= lim).sort((x, y) => x.expiresAt - y.expiresAt);
   const renewals = a.customers.flatMap((c) => (c.renewals || []).map((r) => ({ ...r, name: c.name, username: c.username }))).sort((x, y) => y.at - x.at).slice(0, 40);
-  const max = Math.max(1, ...Object.values(st.byMonth));
+  const max = Math.max(1, ...Object.values(st.byMonth || {}));
   return `<div class="stats">
       <div class="stat c-ok"><span>Active</span><b>${st.active}</b></div><div class="stat c-warn"><span>Expiring soon</span><b>${st.expiring}</b></div>
       <div class="stat c-bad"><span>Expired</span><b>${st.expired}</b></div><div class="stat"><span>Renewals recorded</span><b>${st.renewalsCount}</b></div>
-      <div class="stat c-acc"><span>This month</span><b>${usd(st.revenueMonth)}</b></div></div>
+      ${st.revenueMonth !== null ? `<div class="stat c-acc"><span>This month</span><b>${usd(st.revenueMonth)}</b></div>` : ''}</div>
     <div class="card"><div class="row" style="margin-bottom:10px"><h3 style="margin:0">Subscription tracker</h3><span class="spacer"></span>
       <select data-input="sub-days" style="width:auto">${[['7', 'Expiring in 7 days'], ['14', '14 days'], ['30', '30 days'], ['90', '90 days'], ['all', 'All subscriptions']].map(([v, t]) => `<option value="${v}" ${a.subDays === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <button class="btn sm" data-act="export-csv">⬇ CSV</button></div>
       ${list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Plan</th><th>Expires</th><th style="min-width:120px">Time left</th><th>Status</th><th></th></tr></thead><tbody>
       ${list.map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} ${c.phone ? '· ' + esc(c.phone) : ''}</div></td><td>${esc(c.planName)}</td><td>${fmtDate(c.expiresAt)}</td>
-        <td><div class="small">${c.daysLeft >= 0 ? c.daysLeft + ' days' : 'expired ' + -c.daysLeft + 'd ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><button class="btn sm primary" data-act="renew" data-id="${c.id}">Renew</button></td></tr>`).join('')}
+        <td><div class="small">${c.daysLeft >= 0 ? c.daysLeft + ' days' : 'expired ' + -c.daysLeft + 'd ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted">Nothing in this range.</p>'}</div>
     <div class="grid2" style="gap:16px">
-      <div class="card"><h3>Revenue by month (USD)</h3><div class="bars">${Object.entries(st.byMonth).map(([k, v]) => `<div><span>${v ? Number(v).toLocaleString() : ''}</span><i style="height:${(v / max) * 100}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>
+      <div class="card"><h3>Revenue by month (USD)</h3><div class="bars">${Object.entries(st.byMonth || {}).map(([k, v]) => `<div><span>${v ? Number(v).toLocaleString() : ''}</span><i style="height:${(v / max) * 100}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>
       <div class="card"><h3>Latest payments & renewals</h3>${renewals.length ? renewals.map((r) => `<div class="list-item"><span>${r.type === 'new' ? '🆕' : r.type === 'trial' ? '🎁' : '🔁'}</span><div style="flex:1;min-width:0"><b>${esc(r.name)}</b><div class="small muted">${fmtDT(r.at)} · ${r.type === 'trial' ? 'free trial' : '+' + r.days + ' days'}</div></div><b>${r.type === 'trial' ? '—' : esc(r.price)}</b></div>`).join('') : '<p class="muted">No payments yet.</p>'}</div>
     </div>`;
 }
@@ -442,7 +457,9 @@ function adminApi(s) {
 }
 
 async function adminSecurity(s) {
-  const me = await api('GET', '/api/admin/me');
+  const me = state.admin.me;
+  if (me.role !== 'owner') return `<form data-form="staff-password" class="card" style="max-width:520px"><h3>My login</h3><p class="muted small">Signed in as <b>${esc(me.username)}</b>. Permissions: ${me.perms.map((p) => `<span class="tagp">${esc((me.allPerms.find((x) => x[0] === p) || [p, p])[1])}</span>`).join(' ') || 'none'}</p>
+    ${field('Current password', 'current', '', { type: 'password', attrs: 'required' })}${field('New password', 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">Change my password</button></form>`;
   return `<div class="grid2" style="gap:16px;align-items:start">
   <form data-form="admin-account" class="card"><h3>Admin login details</h3>
     ${field('Admin username', 'username', me.username, { attrs: 'autocapitalize="none"' })}
@@ -460,12 +477,62 @@ async function adminSecurity(s) {
 
 async function adminActivity() {
   const log = await api('GET', '/api/admin/log');
-  const icon = { customer: '👤', renewal: '🔁', settings: '⚙️', admin: '🔐' };
-  return `<div class="card">${log.length ? log.map((l) => `<div class="list-item"><span>${icon[l.type] || '•'}</span><div style="flex:1">${esc(l.msg)}</div><span class="small muted">${fmtDT(l.at)}</span></div>`).join('') : '<p class="muted">No activity yet.</p>'}</div>`;
+  const icon = { customer: '👤', renewal: '🔁', settings: '⚙️', admin: '🔐', team: '🛡', finance: '🏦', stock: '🎟', trial: '🎁', daily: '⏰' };
+  return `<div class="card">${log.length ? log.map((l) => `<div class="list-item"><span>${icon[l.type] || '•'}</span><div style="flex:1">${esc(l.msg)}${l.by ? `<div class="small muted">by ${esc(l.by)}</div>` : ''}</div><span class="small muted">${fmtDT(l.at)}</span></div>`).join('') : '<p class="muted">No activity yet.</p>'}</div>`;
 }
 
 function showResult(el, r) {
   el.innerHTML = `<div class="notice ${r.ok ? 'success' : 'danger'}" style="margin-top:12px"><b>${r.ok ? '✅ Connected' : '❌ ' + esc(r.error || 'Failed')}</b>${r.credits != null ? ` · Credits: <b>${esc(r.credits)}</b>` : ''}${r.data != null ? `<div class="code" style="margin-top:8px">${esc(typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2)).slice(0, 3000)}</div>` : ''}</div>`;
+}
+
+// ---------------- animations ----------------
+function animateIn(root) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.querySelectorAll('.stat b').forEach((el) => {
+    const m = el.textContent.match(/^([^\d−-]*)([−-]?)([\d,]+(?:\.\d+)?)(.*)$/);
+    if (!m) return;
+    const target = Number(m[3].replace(/,/g, '')); if (!isFinite(target) || target === 0) return;
+    const dec = (m[3].split('.')[1] || '').length; const t0 = performance.now(); const dur = 900;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur); const e = 1 - Math.pow(1 - k, 3);
+      el.textContent = m[1] + m[2] + (target * e).toLocaleString(undefined, { minimumFractionDigits: k < 1 ? 0 : dec, maximumFractionDigits: dec }) + m[4];
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+// ---------------- team & access ----------------
+const PRESETS = {
+  'Sales agent': ['customers_view', 'customers_edit'],
+  Accountant: ['finance_view', 'finance_edit', 'profits', 'stock'],
+  Manager: ['customers_view', 'customers_edit', 'customers_delete', 'finance_view', 'finance_edit', 'profits', 'stock', 'plans', 'activity'],
+  'Full access': null,
+};
+async function adminTeam() {
+  const team = await api('GET', '/api/admin/team');
+  state.admin.team = team;
+  const all = state.admin.me.allPerms;
+  return `<div class="row" style="margin-bottom:14px"><p class="muted" style="margin:0;flex:1">Give your team their own login. They sign in on the same page, and only see what you allow. Every action is logged with their name.</p><button class="btn primary" data-act="new-member">＋ Add team member</button></div>
+  ${team.length ? `<div class="team-grid">${team.map((m) => `<div class="tm ${m.status === 'disabled' ? 'off' : ''}">
+    <div class="row"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1;min-width:0"><b>${esc(m.name)}</b><div class="small muted">${esc(m.role || 'Staff')} · @${esc(m.username)}</div></div>${pill(m.status === 'disabled' ? 'disabled' : 'active')}</div>
+    <div class="perm-tags">${(m.perms || []).map((p) => `<span class="tagp">${esc((all.find((x) => x[0] === p) || [p, p])[1])}</span>`).join('') || '<span class="small muted">No permissions</span>'}</div>
+    <div class="small muted">Last sign-in: ${m.lastLogin ? fmtDT(m.lastLogin) : 'never'}</div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="edit-member" data-id="${m.id}">Edit</button><button class="btn sm" data-act="toggle-member" data-id="${m.id}">${m.status === 'disabled' ? 'Enable' : 'Disable'}</button><button class="btn sm danger" data-act="del-member" data-id="${m.id}">🗑</button></div>
+  </div>`).join('')}</div>` : `<div class="empty card"><span class="ic">🛡</span>No team members yet.</div>`}`;
+}
+function memberForm(m) {
+  const all = state.admin.me.allPerms; const isNew = !m;
+  m = m || { perms: PRESETS['Sales agent'], role: 'Sales agent' };
+  return `<form data-form="member" data-id="${m.id || ''}">
+    <div class="grid2">${field('Name', 'name', m.name || '', { attrs: 'required' })}${field('Role / title', 'role', m.role || '', { ph: 'e.g. Sales agent' })}</div>
+    <div class="grid2">${field('Username', 'username', m.username || '', { attrs: (isNew ? 'required minlength="3"' : 'disabled') + ' autocapitalize="none"' })}${field(isNew ? 'Password' : 'New password (optional)', 'password', '', { type: 'password', attrs: isNew ? 'required minlength="6"' : '' })}</div>
+    <h3>Permissions</h3>
+    <div class="chips">${Object.keys(PRESETS).map((k) => `<a data-act="preset" data-p="${esc(k)}">${esc(k)}</a>`).join('')}</div>
+    <div class="perm-list">${all.map(([k, label]) => `<label class="toggle"><input type="checkbox" data-perm-cb value="${k}" ${m.perms.includes(k) ? 'checked' : ''}><i></i><span>${esc(label)}</span></label>`).join('')}</div>
+    <p class="small muted">Only you (the owner) can manage the team, backups and your owner login.</p>
+    <div class="row" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">${isNew ? 'Add member' : 'Save'}</button></div>
+  </form>`;
 }
 
 // ---------------- charts ----------------
@@ -502,9 +569,9 @@ async function adminFinance(s) {
   return `<div class="stats">
       <div class="stat c-acc"><span>Total balance (USD)</span><b>${usd(f.totalUsd)}</b></div>
       <div class="stat c-ok"><span>Total balance (MAD)</span><b>${mad(f.totalMad)}</b></div>
-      <div class="stat"><span>1 USD =</span><b>${num(f.rates.MAD, 'MAD')}</b><span>${f.ratesUpdatedAt ? 'updated ' + fmtDT(f.ratesUpdatedAt) : 'manual rate'} · <a data-act="refresh-rates" style="cursor:pointer">refresh</a></span></div>
+      <div class="stat"><span>1 USD =</span><b>${num(f.rates.MAD, 'MAD')}</b><span>${f.ratesUpdatedAt ? 'updated ' + fmtDT(f.ratesUpdatedAt) : 'manual rate'} · <a data-act="refresh-rates" data-perm="finance_edit" style="cursor:pointer">refresh</a></span></div>
     </div>
-    <div class="row" style="margin-bottom:14px"><button class="btn primary" data-act="new-tx" data-type="income">＋ Income</button><button class="btn" data-act="new-tx" data-type="expense">− Expense</button><button class="btn" data-act="new-tx" data-type="transfer">⇄ Transfer</button></div>
+    <div class="row" style="margin-bottom:14px"><button class="btn primary" data-act="new-tx" data-perm="finance_edit" data-type="income">＋ Income</button><button class="btn" data-act="new-tx" data-perm="finance_edit" data-type="expense">− Expense</button><button class="btn" data-act="new-tx" data-perm="finance_edit" data-type="transfer">⇄ Transfer</button></div>
     <div class="grid2" style="gap:16px;align-items:start">
       <div class="card"><h3>Balance by bank (USD)</h3>${hBars(f.accounts.map((a) => ({ label: a.name, value: a.usd, color: a.color })), usd)}</div>
       <div class="card"><h3>Total balance · last 30 days (USD)</h3>${lineChart([{ values: f.totalHistoryUsd, color: 'var(--accent)', fill: true }], { fmt: usd })}<div class="row small muted" style="justify-content:space-between"><span>${labels[0]}</span><span>${labels.at(-1)}</span></div></div>
@@ -514,16 +581,16 @@ async function adminFinance(s) {
       <div class="acc-bal ${a.balance < 0 ? 'neg' : ''}">${num(a.balance, a.currency)}</div>
       <div class="small muted">≈ ${usd(a.usd)} · ${mad(a.mad)}</div>
       ${lineChart([{ values: f.history[a.id] || [], color: a.color, fill: true }], { height: 60, fmt: (v) => num(v) })}
-      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="new-tx" data-type="income" data-acc="${a.id}">＋</button><button class="btn sm" data-act="new-tx" data-type="expense" data-acc="${a.id}">−</button><button class="btn sm" data-act="new-tx" data-type="transfer" data-acc="${a.id}">⇄</button><span class="spacer"></span><a class="small" data-act="tx-filter" data-acc="${a.id}" style="cursor:pointer">history</a></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="income" data-acc="${a.id}">＋</button><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="expense" data-acc="${a.id}">−</button><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="transfer" data-acc="${a.id}">⇄</button><span class="spacer"></span><a class="small" data-act="tx-filter" data-acc="${a.id}" style="cursor:pointer">history</a></div>
     </div>`).join('')}</div>
     <div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Transactions${state.admin.txAccount ? ' · ' + esc(accName(state.admin.txAccount)) : ''}</h3><span class="spacer"></span>${state.admin.txAccount ? '<button class="btn sm" data-act="tx-filter" data-acc="">Show all</button>' : ''}<button class="btn sm" data-act="export-tx">⬇ CSV</button></div>
       ${tx.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Category / note</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>${tx.map((x) => `<tr>
         <td class="small">${fmtDT(x.at)}</td><td>${x.type === 'income' ? '🟢 in' : x.type === 'expense' ? '🔴 out' : '🔁 transfer'}</td>
         <td>${esc(accName(x.accountId))}${x.toAccountId ? ` → ${esc(accName(x.toAccountId))}` : ''}</td><td><b>${esc(x.category)}</b><div class="small muted">${esc(x.note)}</div></td>
         <td style="text-align:right;white-space:nowrap" class="${x.type === 'income' ? 'pos' : x.type === 'expense' ? 'neg' : ''}">${x.type === 'expense' ? '−' : x.type === 'income' ? '+' : ''}${num(x.amount, accCur(x.accountId))}${x.toAccountId ? `<div class="small muted">→ ${num(x.toAmount, accCur(x.toAccountId))}</div>` : ''}</td>
-        <td><button class="btn sm ghost" data-act="del-tx" data-id="${x.id}">🗑</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No transactions yet.</p>'}
+        <td><button class="btn sm ghost" data-act="del-tx" data-perm="finance_edit" data-id="${x.id}">🗑</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No transactions yet.</p>'}
     </div>
-    <details class="card"><summary style="cursor:pointer"><b>⚙️ Banks, wallets & exchange rates</b></summary>
+    <details class="card" data-perm="finance_edit"><summary style="cursor:pointer"><b>⚙️ Banks, wallets & exchange rates</b></summary>
       <div style="margin-top:12px"><div class="acc-row small muted"><span>Name</span><span>Currency</span><span>Opening balance</span><span>Color</span><span></span></div>
       <div id="acc-rows">${s.finance.accounts.map(accRow).join('')}</div>
       <button class="btn sm" data-act="add-acc">＋ Add bank / wallet</button>
@@ -789,6 +856,11 @@ async function openItem(i) {
 // ---------------- events ----------------
 const actions = {
   'close-modal': () => closeModal(),
+  'new-member': () => modal('Add team member', memberForm(null), { wide: true }),
+  'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
+  'toggle-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); await api('PUT', '/api/admin/team/' + m.id, { status: m.status === 'disabled' ? 'active' : 'disabled' }); toast('Updated ✓'); renderAdmin(); },
+  'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast('Removed'); renderAdmin(); },
+  preset: (el) => { const p = PRESETS[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },
   'trial-login': async (el) => { closeModal(); try { const r = await api('POST', '/api/login', { username: el.dataset.u, password: el.dataset.p }); setSession(r.token, r.role); route(); } catch (e) { renderLogin(e.message); } },
   lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else renderLogin(); },
   trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
@@ -820,7 +892,7 @@ const actions = {
   },
   'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
-  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); await refreshConfig(); route(); },
+  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); document.body.className = ''; await refreshConfig(); route(); },
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
   'cust-filter': (el) => { state.admin.filter = el.dataset.f; $('#admin-body').innerHTML = adminCustomers(); },
   'new-customer': () => { modal('Add customer', customerForm(null), { wide: true }); },
@@ -917,6 +989,15 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async member(f) {
+    const o = formToObj(f); o.perms = [...f.querySelectorAll('[data-perm-cb]:checked')].map((x) => x.value);
+    if (!o.password) delete o.password;
+    try { if (f.dataset.id) await api('PUT', '/api/admin/team/' + f.dataset.id, o); else await api('POST', '/api/admin/team', o); toast('Saved ✓'); closeModal(); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
+  async 'staff-password'(f) {
+    try { await api('POST', '/api/admin/me/password', formToObj(f)); toast('Password changed ✓'); f.reset(); } catch (e) { toast(e.message, true); }
+  },
   async trial(f) {
     const o = formToObj(f);
     const body = { name: o.name, email: o.email, phone: o.phone, whatsapp: o.same ? o.phone : o.whatsapp, lang: getLang(), appUrl: location.origin + location.pathname.replace(/index\.html$/, '') };
