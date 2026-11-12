@@ -915,13 +915,14 @@ async function xtFetch(action, params = {}) {
       if (!r) throw new Error(t('lineBad'));
       if (!r.ok) throw new Error(r.status === 403 ? t('lineInactive') : `Server error ${r.status}`);
       txt = await r.text();
-    } else if (canSwitchHttp()) { goHttp(); throw Object.assign(new Error('switching'), { switching: true }); }
-    else if (st.relay) {
-      const r = await fetch(`${st.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(st.proxyToken)}`).catch(() => null);
+    } else if (st.relay) { // secure relay: works in every browser (the free relay may need ~1 min to wake up)
+      let r = null;
+      for (let i = 0; i < 3 && !r; i++) { r = await fetch(`${st.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(st.proxyToken)}`).catch(() => null); if (!r) await new Promise((ok) => setTimeout(ok, 4000)); }
       if (!r) throw new Error(t('relayDown'));
       if (!r.ok) throw new Error(r.status === 403 ? t('relayDown') : `Server error ${r.status}`);
       txt = await r.text();
-    } else throw Object.assign(new Error('direct'), { direct: true });
+    } else if (canSwitchHttp()) { goHttp(); throw Object.assign(new Error('switching'), { switching: true }); }
+    else throw Object.assign(new Error('direct'), { direct: true });
     let data; try { data = JSON.parse(txt); } catch { throw new Error(t('lineBad')); }
     if (data && data.user_info && Number(data.user_info.auth) === 0) throw Object.assign(new Error(t('lineInactive')), { line: true });
     if (action.startsWith('get_') && action.endsWith('categories') && !Array.isArray(data)) throw Object.assign(new Error(t('lineInactive')), { line: true });
@@ -946,8 +947,7 @@ function imgSrc(u) {
   const st = state.user.me?.stream;
   if (u.startsWith('https:') || location.protocol === 'http:') return u;      // already loadable
   if (bridge()) return u;                                                     // Android / TV / desktop apps load http images directly
-  const ipHost = /^http:\/\/\d{1,3}(\.\d{1,3}){3}(:\d+)?\//.test(u);
-  if (ipHost && st?.relay) return `${st.relay}/x?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`; // bare-IP logos: via the relay
+  if (st?.relay) return `${st.relay}/x?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`; // bare-IP logos: via the relay
   if (st?.proxyToken) return `/img?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`;
   return u;
 }
@@ -985,8 +985,8 @@ function play(title, kind, id, ext, extraHtml = '') {
     if (b && !b.inline) return b.play(raw('ts'), title, st.userAgent); // Android / TV: native player
     if (b && b.inline) { url = raw('m3u8'); }                          // Windows / Mac app: plays here, direct
     else if (httpOK()) { url = raw('m3u8'); }                         // any browser on the http:// address: direct
+    else if (st.relay) { url = `${st.relay}/x?u=${encodeURIComponent(raw('m3u8'))}&t=${encodeURIComponent(st.proxyToken)}`; } // iPhone / browsers: secure relay
     else if (canSwitchHttp()) { closeModal(); return goHttp(); }
-    else if (st.relay) { url = `${st.relay}/x?u=${encodeURIComponent(raw('m3u8'))}&t=${encodeURIComponent(st.proxyToken)}`; } // iPhone / browsers
     else return modal(esc(title), appsCard(), { wide: true });
     isHls = kind === 'live' || ext === 'm3u8';
   } else { url = streamUrl(kind, id, ext); isHls = kind === 'live' || ext === 'm3u8'; }
