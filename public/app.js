@@ -112,6 +112,8 @@ function applyBranding(b) {
 }
 
 async function boot() {
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
   setLang(detectLang());
   try {
     const r = await fetch('/api/config', { cache: 'no-store' });
@@ -130,6 +132,7 @@ async function boot() {
 
 function route() {
   closeModal();
+  if (isAdminUI() && location.protocol === 'http:' && !/localhost|127\.0\.0\.1/.test(location.hostname)) { location.replace('https://' + location.host + location.pathname); return; }
   if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
@@ -852,9 +855,16 @@ async function renderUserTab() {
       <div class="chips"><a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
       <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
-  } catch (e) { el.innerHTML = e.direct ? appsCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
+  } catch (e) { if (e.switching) return; el.innerHTML = e.direct ? appsCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
 }
 
+// Browser direct: on the http:// address the browser itself loads the IPTV server (it allows CORS).
+const httpOK = () => location.protocol === 'http:';
+const canSwitchHttp = () => location.protocol === 'https:' && !/github\.io$|localhost|127\.0\.0\.1/.test(location.hostname);
+function goHttp(tab) {
+  const el = $('#ubody'); if (el) el.innerHTML = `<div class="block-screen"><div class="spinner"></div><p class="muted">${t('openingPlayer')}</p></div>`;
+  location.href = `http://${location.host}${location.pathname}#s=${encodeURIComponent(state.token)}&tab=${tab || state.user.tab}&lang=${getLang()}`;
+}
 // Direct mode: the device itself talks to the IPTV server (Android app bridge).
 const bridge = () => window.IPTVBridge;
 const isDirect = () => state.user.me?.stream?.mode === 'direct' || (!!bridge() && !!state.user.me?.stream);
@@ -872,6 +882,12 @@ async function xt(action, params = {}) {
     const url = `${st.server}/player_api.php?${new URLSearchParams({ username: st.u, password: st.p, ...Object.fromEntries(q) })}`;
     let txt;
     if (bridge()) txt = await bridgeFetch(url, st.userAgent);
+    else if (httpOK()) {
+      const r = await fetch(url).catch(() => null);
+      if (!r) throw new Error(t('lineBad'));
+      if (!r.ok) throw new Error(r.status === 403 ? t('lineInactive') : `Server error ${r.status}`);
+      txt = await r.text();
+    } else if (canSwitchHttp()) { goHttp(); throw Object.assign(new Error('switching'), { switching: true }); }
     else if (st.relay) {
       const r = await fetch(`${st.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(st.proxyToken)}`).catch(() => null);
       if (!r) throw new Error(t('relayDown'));
@@ -923,6 +939,8 @@ function play(title, kind, id, ext, extraHtml = '') {
       : `${st.server}/${kind}/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${ext || 'mp4'}`;
     if (b && !b.inline) return b.play(raw('ts'), title, st.userAgent); // Android / TV: native player
     if (b && b.inline) { url = raw('m3u8'); }                          // Windows / Mac app: plays here, direct
+    else if (httpOK()) { url = raw('m3u8'); }                         // any browser on the http:// address: direct
+    else if (canSwitchHttp()) { closeModal(); return goHttp(); }
     else if (st.relay) { url = `${st.relay}/x?u=${encodeURIComponent(raw('m3u8'))}&t=${encodeURIComponent(st.proxyToken)}`; } // iPhone / browsers
     else return modal(esc(title), appsCard(), { wide: true });
     isHls = kind === 'live' || ext === 'm3u8';
