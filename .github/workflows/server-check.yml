@@ -1,0 +1,23 @@
+# Diagnostic: can a normal data-centre server (GitHub / Microsoft Azure) reach the IPTV server?
+name: IPTV server check
+on:
+  push:
+    paths: ['.github/server-check.txt']
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test IPTV server from Azure
+        run: |
+          read SERVER USER PASS < .github/server-check.txt
+          echo "My IP: $(curl -s https://api.ipify.org)"
+          for UA in "IPTVSmartersPro" "VLC/3.0.20 LibVLC/3.0.20" "okhttp/4.12.0" "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"; do
+            CODE=$(curl -s -o /tmp/b -w "%{http_code}" -m 20 -A "$UA" "$SERVER/player_api.php?username=$USER&password=$PASS")
+            echo "player_api [$UA] -> $CODE $(head -c 160 /tmp/b | tr '\n' ' ')"
+          done
+          CODE=$(curl -s -o /tmp/m -w "%{http_code}" -m 30 -A "IPTVSmartersPro" "$SERVER/get.php?username=$USER&password=$PASS&type=m3u_plus&output=ts")
+          echo "m3u -> $CODE size=$(wc -c < /tmp/m) first: $(head -c 120 /tmp/m | tr '\n' ' ')"
+          URL=$(grep -m1 -E '^https?://.*/live/|^https?://' /tmp/m || true); echo "first stream: ${URL:0:80}"
+          [ -n "$URL" ] && curl -s -o /dev/null -w "stream -> %{http_code} %{size_download} bytes in 5s\n" -m 5 -A "IPTVSmartersPro" -L "$URL" || true
