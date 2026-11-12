@@ -451,7 +451,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const q = new URLSearchParams({ username: c.lineUsername, password: c.linePassword, ...params });
     const res = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' } });
     const text = await res.text();
-    try { return JSON.parse(text); } catch { throw httpErr(502, 'The streaming server returned an invalid response.'); }
+    if (res.status === 403 || res.status === 404) throw httpErr(502, `The IPTV server refused the app server (error ${res.status}). Ask the admin to set Playback mode to "Direct".`);
+    let data; try { data = JSON.parse(text); } catch { throw httpErr(502, `The IPTV server returned an invalid response (error ${res.status}).`); }
+    if (data && data.user_info && Number(data.user_info.auth) === 0) throw httpErr(403, 'Your IPTV line is not active on the server yet. Please contact support.');
+    return data;
   }
 
   const httpErr = (status, error) => Object.assign(new Error(error), { status });

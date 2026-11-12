@@ -713,9 +713,10 @@ function toggleFav(item) {
 
 async function renderUser() {
   const u = state.user;
+  if (u.me && Date.now() - (u.meAt || 0) > 60000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify(u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); } catch { return; }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); } catch { return; }
     applyBranding(u.me.branding);
   }
   const { user, dashboard: d, branding: b } = u.me;
@@ -784,12 +785,12 @@ async function renderUserTab() {
       <div class="chips"><a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
       <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
-  } catch (e) { el.innerHTML = e.direct ? externalCard() : `<div class="err-box">${esc(e.message)}</div>`; }
+  } catch (e) { el.innerHTML = e.direct ? externalCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
 }
 
 // Direct mode: the device itself talks to the IPTV server (Android app bridge).
 const bridge = () => window.IPTVBridge;
-const isDirect = () => state.user.me?.stream?.mode === 'direct';
+const isDirect = () => state.user.me?.stream?.mode === 'direct' || (!!bridge() && !!state.user.me?.stream);
 window.__bcb = {};
 window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(new Error(status === 403 ? 'The server refused the connection (403).' : 'Server error ' + status)); };
 const bridgeFetch = (url, ua) => new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); window.__bcb[id] = { res, rej }; bridge().fetch(id, url, ua); });
@@ -803,7 +804,10 @@ async function xt(action, params = {}) {
     if (!bridge()) throw Object.assign(new Error('direct'), { direct: true });
     const url = `${st.server}/player_api.php?${new URLSearchParams({ username: st.u, password: st.p, ...Object.fromEntries(q) })}`;
     const txt = await bridgeFetch(url, st.userAgent);
-    try { return (c[key] = JSON.parse(txt)); } catch { throw new Error('The IPTV server returned an unexpected answer.'); }
+    let data; try { data = JSON.parse(txt); } catch { throw new Error(t('lineBad')); }
+    if (data && data.user_info && Number(data.user_info.auth) === 0) throw Object.assign(new Error(t('lineInactive')), { line: true });
+    if (action.startsWith('get_') && action.endsWith('categories') && !Array.isArray(data)) throw Object.assign(new Error(t('lineInactive')), { line: true });
+    return (c[key] = data);
   }
   return (c[key] = await api('GET', '/api/xtream?' + q));
 }
@@ -892,6 +896,7 @@ async function openItem(i) {
 
 // ---------------- events ----------------
 const actions = {
+  retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
   'copy-ext': async () => { try { await navigator.clipboard.writeText(state.user.extText); toast(t('copied')); } catch { prompt('', state.user.extText); } },
   'email-login': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
@@ -1130,6 +1135,7 @@ document.addEventListener('click', (e) => {
   const fn = actions[el.dataset.act];
   if (fn) { if (el.tagName === 'A') e.preventDefault(); Promise.resolve(fn(el, e)).catch((err) => toast(err.message, true)); }
 });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.role === 'user' && state.user.me && Date.now() - (state.user.meAt || 0) > 60000) renderUser(); });
 document.addEventListener('submit', (e) => {
   const f = e.target.closest('form[data-form]');
   if (!f) return;
