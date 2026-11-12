@@ -293,6 +293,7 @@ function custActions(c) {
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     ${c.whatsapp || c.phone ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp || c.phone).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
     ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
+    ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
 }
@@ -322,7 +323,7 @@ function oldCustomerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -753,6 +754,14 @@ function adminTrial(s) {
       ${field('Days before expiry', 'email.reminderDays', e.reminderDays, { type: 'number', attrs: 'min="1" max="30"' })}
       <div class="row"><input id="test-to" placeholder="send test to…" value="${esc(e.adminEmail)}" data-skip style="flex:1"><button type="button" class="btn" data-act="test-email">Send test</button></div><div id="test-email-out"></div>
     </div></div>
+    <div class="card"><h3>🔁 Renewal offer (email to expired customers)</h3>
+      <p class="small muted" style="margin-top:0">Uses your renewal template. Sent in the customer's language (Arabic, French, English).</p>
+      <div class="grid2">${field('Offer title', 'renewalOffer.title', s.renewalOffer.title)}${field('Price shown', 'renewalOffer.price', s.renewalOffer.price, { ph: '$109.99' })}</div>
+      <div class="grid3">${field('Bonus badge', 'renewalOffer.bonus', s.renewalOffer.bonus, { ph: 'Including 2 FREE Months' })}${field('Coupon code', 'renewalOffer.coupon', s.renewalOffer.coupon)}${field('Renew button link', 'renewalOffer.url', s.renewalOffer.url, { attrs: 'autocapitalize="none"' })}</div>
+      ${toggle('Send automatically when a subscription or trial ends', 'renewalOffer.auto', s.renewalOffer.auto, 'Checked once a day. Each customer gets it once per expiry.')}
+      <div class="grid2" style="margin-top:10px">${field('Only if expired within (days)', 'renewalOffer.autoDays', s.renewalOffer.autoDays, { type: 'number', attrs: 'min="1" max="60"' })}${field('Max renewal emails per day', 'renewalOffer.dailyLimit', s.renewalOffer.dailyLimit, { type: 'number', attrs: 'min="1" max="5000"', help: 'Resend free plan: 100 emails/day, 3,000/month.' })}</div>
+      <div class="row"><button type="button" class="btn" data-act="renewal-bulk">🔁 Send to expired customers…</button></div>
+    </div>
     <button class="btn primary">💾 Save trial & email settings</button></form>`;
 }
 
@@ -964,6 +973,39 @@ async function openItem(i) {
 // ---------------- events ----------------
 const actions = {
   retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
+  'renewal-one': async (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id);
+    const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
+    const pv = await api('GET', `/api/admin/customers/${c.id}/renewalpreview?appUrl=${encodeURIComponent(appUrl)}`);
+    const body = modal('🔁 Renewal offer', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b>${c.renewalSentAt ? ` · already sent ${fmtDate(c.renewalSentAt)}` : ''}</p><iframe id="mail-pv" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+      <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="renewal-send" data-id="${c.id}">Send renewal email</button></div>`, { wide: true });
+    $('#mail-pv', body).srcdoc = pv.html;
+  },
+  'renewal-send': async (el) => {
+    el.disabled = true;
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/renewal`, { to: $('#mail-to').value, appUrl: location.origin }); toast('Renewal email sent ✓'); closeModal(); if (state.admin.tab === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); $('#cust-list').innerHTML = customerListHtml(); } }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'renewal-bulk': async () => {
+    const st = await api('GET', '/api/admin/renewal/status');
+    const left = Math.max(0, st.dailyLimit - st.sentToday);
+    modal('🔁 Renewal emails', `<p>Expired customers with an email who haven't had the offer for their latest expiry: <b>${st.waiting}</b> (expired in the last ${state.admin.settings.renewalOffer.autoDays} days: <b>${st.recent}</b>).</p>
+      <p class="small muted">Sent today: ${st.sentToday} / ${st.dailyLimit}. You can send <b>${left}</b> more today. Newest expiries go first; the rest can be sent on the next days.</p>
+      <div class="row"><button class="btn primary" data-act="renewal-go" ${left && st.waiting ? '' : 'disabled'}>Send up to ${Math.min(left, st.waiting)} now</button><button class="btn" data-act="renewal-go" data-recent="1" ${left && st.recent ? '' : 'disabled'}>Only recent (${Math.min(left, st.recent)})</button></div>
+      <div id="rb-out" style="margin-top:12px"></div>`);
+  },
+  'renewal-go': async (el) => {
+    const out = $('#rb-out'); document.querySelectorAll('[data-act=renewal-go]').forEach((b) => (b.disabled = true));
+    let total = 0;
+    try {
+      for (let i = 0; i < 40; i++) {
+        out.innerHTML = `<div class="spinner"></div><p class="small muted" style="text-align:center">Sent ${total}…</p>`;
+        const r = await api('POST', '/api/admin/renewal/send', { appUrl: location.origin, onlyRecentDays: el.dataset.recent ? state.admin.settings.renewalOffer.autoDays : 0 });
+        total += r.sent;
+        if (!r.sent || r.limitReached) { out.innerHTML = `<div class="notice success">✅ Sent ${total} renewal emails.${r.limitReached ? " Today's limit is reached — continue tomorrow." : ''} ${r.waiting} still waiting.</div>`; break; }
+      }
+    } catch (e) { out.innerHTML = `<div class="notice danger">${esc(e.message)} (sent ${total})</div>`; }
+  },
   'email-login': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');

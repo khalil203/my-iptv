@@ -91,6 +91,7 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'r50', name: 'VIP', credits: 50, price: 999.99 },
   ],
   resellerCurrency: 'EUR',
+  renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
   email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
   finance: {
@@ -150,12 +151,14 @@ function permFor(method, path, body) {
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
-    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency'].includes(x))) return 'plans';
+    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer'].includes(x))) return 'plans';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
   }
   if (path === '/api/admin/reseller-sale') return 'customers_edit';
+  if (path === '/api/admin/renewal/send') return 'customers_edit';
+  if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
   if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
@@ -272,6 +275,66 @@ ${sup ? `<div style="font-size:13px;font-weight:700;color:${P};text-transform:up
   return { subject: v(trial ? 'trialTitle' : 'subTitle') + ` | ${app}`, html };
 }
 
+// ---- Renewal email (your "subscription expired" template), English / French / Arabic ----
+const RM = {
+  en: { dir: 'ltr', badgeSub: 'Subscription expired • Renewal reminder', badgeTrial: 'Free trial ended • Special offer', title: 'Renew Your {app} Subscription Today 🎉', dear: 'Dear {name},',
+    introTrial: '🌼 We hope you enjoyed your recent trial with <b>{app}</b>. Thank you for giving our service a try.', introSub: '🌼 Thank you for watching with <b>{app}</b>. Your subscription ended on <b>{date}</b>.',
+    intro2: 'We’d be delighted to welcome you back with our special renewal offer:', offerLabel: 'Special Welcome-Back Package', coupon: '🎁 Exclusive Coupon Code', cta: 'Renew Subscription Now →',
+    how: 'How to Renew', h1: '🌐 Visit {site}', h2: '📺 Browse the available subscription plans and select the package that suits you.', h3: '🎁 Enter {coupon} at checkout, if applicable.', h4: '🔒 Complete your payment through the secure checkout.', h5: '🔄 Once your order is confirmed, contact our support team if you need help with activation.',
+    help: 'If you have any questions or need help with your renewal, our support team is happy to assist.', thanks: 'Thank you for choosing <b>{app}</b>. We appreciate your support and look forward to serving you again.', regards: 'Best regards,', team: 'Customer Support Team', subject: 'Renew your {app} subscription — special offer inside 🎉' },
+  fr: { dir: 'ltr', badgeSub: 'Abonnement expiré • Rappel de renouvellement', badgeTrial: 'Essai terminé • Offre spéciale', title: 'Renouvelez votre abonnement {app} 🎉', dear: 'Cher/Chère {name},',
+    introTrial: "🌼 Nous espérons que vous avez apprécié votre essai avec <b>{app}</b>. Merci d'avoir essayé notre service.", introSub: '🌼 Merci de regarder avec <b>{app}</b>. Votre abonnement a pris fin le <b>{date}</b>.',
+    intro2: 'Nous serions ravis de vous retrouver avec notre offre spéciale de renouvellement :', offerLabel: 'Offre spéciale de retour', coupon: '🎁 Code promo exclusif', cta: "Renouveler maintenant →",
+    how: 'Comment renouveler', h1: '🌐 Rendez-vous sur {site}', h2: '📺 Parcourez les formules et choisissez celle qui vous convient.', h3: '🎁 Saisissez {coupon} lors du paiement, si applicable.', h4: '🔒 Finalisez votre paiement en toute sécurité.', h5: "🔄 Une fois la commande confirmée, contactez notre support si vous avez besoin d'aide pour l'activation.",
+    help: "Pour toute question ou aide au renouvellement, notre équipe support est là pour vous.", thanks: "Merci d'avoir choisi <b>{app}</b>. Nous serons heureux de vous servir à nouveau.", regards: 'Cordialement,', team: 'Service client', subject: 'Renouvelez votre abonnement {app} — offre spéciale 🎉' },
+  ar: { dir: 'rtl', badgeSub: 'انتهى الاشتراك • تذكير بالتجديد', badgeTrial: 'انتهت التجربة • عرض خاص', title: 'جدّد اشتراكك في {app} اليوم 🎉', dear: 'عزيزي/عزيزتي {name}،',
+    introTrial: '🌼 نتمنى أن تكون قد استمتعت بتجربتك مع <b>{app}</b>. شكرًا لتجربتك خدمتنا.', introSub: '🌼 شكرًا لمشاهدتك مع <b>{app}</b>. انتهى اشتراكك في <b>{date}</b>.',
+    intro2: 'يسعدنا أن نرحب بعودتك مع عرض التجديد الخاص:', offerLabel: 'باقة العودة الخاصة', coupon: '🎁 كود خصم حصري', cta: 'جدّد اشتراكك الآن ←',
+    how: 'طريقة التجديد', h1: '🌐 زر موقع {site}', h2: '📺 تصفح الباقات واختر ما يناسبك.', h3: '🎁 أدخل {coupon} عند الدفع إن أمكن.', h4: '🔒 أكمل الدفع عبر صفحة الدفع الآمنة.', h5: '🔄 بعد تأكيد الطلب، تواصل مع الدعم إذا احتجت مساعدة في التفعيل.',
+    help: 'إذا كان لديك أي سؤال أو تحتاج مساعدة في التجديد، فريق الدعم جاهز لمساعدتك.', thanks: 'شكرًا لاختيارك <b>{app}</b>. نتطلع لخدمتك مرة أخرى.', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: 'جدّد اشتراكك في {app} — عرض خاص 🎉' },
+};
+export function renewalEmail(s, c, appUrl) {
+  const lang = RM[c.lang] ? c.lang : 'en'; const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
+  const app = s.branding.appName || 'IPTV';
+  const site = String(o.url || s.email.website || s.email.appUrl || appUrl || '').replace(/\/+$/, '');
+  const siteTxt = site.replace(/^https?:\/\//, '');
+  const date = new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' });
+  const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, n) => (n === 'app' ? e(app) : n === 'site' ? `<a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a>` : n === 'coupon' ? `<b style="color:#0f172a;background:#e0f2fe;padding:2px 6px;border-radius:4px;font-family:'Courier New',monospace">${e(o.coupon)}</b>` : e(x[n] ?? '')));
+  const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
+  const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
+  const al = L.dir === 'rtl' ? 'right' : 'left';
+  const step = (n, t) => `<tr><td width="28" style="vertical-align:top;font-weight:700;color:#0284c7;padding-bottom:12px">${n}.</td><td style="padding-bottom:12px">${t}</td></tr>`;
+  const trial = !!c.isTrial;
+  const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v('title')}</title>
+<style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
+@media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
+<body dir="${L.dir}" style="background:#f4f7fa;margin:0;padding:0"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7fa;padding:30px 10px"><tr><td align="center">
+<table border="0" cellpadding="0" cellspacing="0" width="600" class="container" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 25px rgba(0,0,0,.05)">
+<tr><td height="6" style="background:linear-gradient(90deg,#0284c7 0%,#0ea5e9 50%,#38bdf8 100%);font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:40px 40px 30px;background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);border-bottom:1px solid #f1f5f9">
+${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="95" style="display:block;border-radius:50%;border:3px solid #0ea5e9;box-shadow:0 4px 12px rgba(14,165,233,.2);margin:0 auto 18px">` : ''}
+<div style="display:inline-block;background:#fef3c7;border:1px solid #fde68a;color:#b45309;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${L[trial ? 'badgeTrial' : 'badgeSub']}</div>
+<h1 class="header-title" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${v('title')}</h1></td></tr>
+<tr><td class="mobile-pad" style="padding:32px 40px 20px;text-align:${al}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${v('dear', { name: c.name || '' })}</p>
+<p style="margin:0 0 14px;font-size:15px;line-height:1.65">${v(trial ? 'introTrial' : 'introSub', { date })}</p><p style="margin:0;font-size:15px;line-height:1.65">${L.intro2}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:2px solid #7dd3fc;border-radius:14px;overflow:hidden"><tr><td align="center" style="padding:26px 24px;text-align:center">
+<div style="font-size:13px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">${L.offerLabel}</div>
+<div dir="auto" style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.3;margin-bottom:6px">${e(o.title || '')}</div>
+${o.price ? `<div dir="auto" style="font-size:32px;font-weight:900;color:#0284c7;margin-bottom:8px">${e(o.price)}</div>` : ''}
+${o.bonus ? `<div dir="auto" style="display:inline-block;background:#dcfce7;border:1px solid #86efac;color:#166534;font-size:13px;font-weight:700;padding:4px 12px;border-radius:50px;margin-bottom:20px">✨ ${e(o.bonus)}</div>` : ''}
+${o.coupon ? `<div style="background:#fff;border:2px dashed #38bdf8;border-radius:10px;padding:14px 20px;margin-bottom:20px"><div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:6px">${L.coupon}</div><div style="font-family:'Courier New',monospace;font-size:22px;font-weight:800;color:#0284c7;letter-spacing:2px">${e(o.coupon)}</div></div>` : ''}
+${site ? `<a href="${e(site)}" class="cta-btn" style="display:inline-block;background:#0284c7;color:#fff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;box-shadow:0 4px 12px rgba(2,132,199,.25)">${L.cta}</a>` : ''}
+</td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px"><tr><td style="padding:24px;text-align:${al}"><h2 style="margin:0 0 16px;font-size:17px;font-weight:700;color:#0f172a">${L.how}</h2>
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;line-height:1.6">${site ? step(1, v('h1')) : ''}${step(site ? 2 : 1, L.h2)}${o.coupon ? step(site ? 3 : 2, v('h3')) : ''}${step(4 - (site ? 0 : 1) - (o.coupon ? 0 : 1), L.h4)}${step(5 - (site ? 0 : 1) - (o.coupon ? 0 : 1), L.h5)}</table></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 32px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0"><tr><td style="padding:22px 24px;text-align:${al}"><p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#166534">${L.help}</p>
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;color:#166534">${s.email.supportEmail ? `<tr><td style="padding:4px 0">📧 <a href="mailto:${e(s.email.supportEmail)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.email.supportEmail)}</a></td></tr>` : ''}${site ? `<tr><td style="padding:4px 0">🌐 <a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a></td></tr>` : ''}${s.branding.supportUrl ? `<tr><td style="padding:4px 0">💬 <a href="${e(s.branding.supportUrl)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.branding.supportLabel || 'WhatsApp')}</a></td></tr>` : ''}</table></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 36px;border-bottom:1px solid #f1f5f9;text-align:${al}"><p style="margin:0 0 18px;font-size:14px;line-height:1.65">${v('thanks')}</p><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:#0284c7;font-weight:600">${L.team}</span></p></td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:24px 40px;background:#f8fafc;text-align:center">${site ? `<a href="${e(site)}" style="font-size:13px;font-weight:700;color:#0284c7;text-decoration:none;letter-spacing:.5px">${e(siteTxt)}</a>` : ''}</td></tr>
+</table></td></tr></table></body></html>`;
+  return { subject: v('subject').replace(/<[^>]+>/g, ''), html };
+}
+
 export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) {
   let sCache = null, sAt = 0;
 
@@ -344,6 +407,23 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     } catch (err) { return { ok: false, error: err.message }; }
   }
   const withUrl = (s, u) => (s.email.appUrl || !u ? s : { ...s, email: { ...s.email, appUrl: String(u) } });
+  // Send many emails in one request (Resend batch API, up to 100)
+  async function sendBatch(s, msgs) {
+    const e = s.email;
+    if (!e.resendKey || !e.from) return { ok: false, error: 'Email is not set up (Resend key / sender missing).' };
+    if (!msgs.length) return { ok: true, sent: 0 };
+    try {
+      const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: e.from, to: [m.to], subject: m.subject, html: m.html }))) });
+      const d = await r.json().catch(() => ({}));
+      return r.ok ? { ok: true, sent: msgs.length } : { ok: false, error: d.message || 'Resend error ' + r.status };
+    } catch (err) { return { ok: false, error: err.message }; }
+  }
+  // Who can get a renewal email right now
+  function renewalTargets(list, onlyRecentDays) {
+    const now = Date.now();
+    return list.filter((c) => c.email && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
+  }
+  async function sentToday() { const k = 'renewsent:' + new Date().toISOString().slice(0, 10); return { k, n: (await store.get(k)) || 0 }; }
   function loginMail(s, c, password, kind) {
     return accessEmail(s, c, password, kind === 'trial' ? 'trial' : 'sub', s.email.appUrl);
   }
@@ -807,6 +887,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
+        if (method === 'GET' && sub === 'renewalpreview') return ok(renewalEmail(s, c, query.appUrl));
+        if (method === 'POST' && sub === 'renewal') {
+          const to = String(body.to || c.email || '').trim();
+          if (!to) return err(400, 'This customer has no email address.');
+          const m = renewalEmail(s, c, body.appUrl);
+          const r = await sendEmail(s, to, m.subject, m.html);
+          if (r.ok) { c.renewalSentFor = c.expiresAt; c.renewalSentAt = Date.now(); await saveCustomers(list); const t = await sentToday(); await store.put(t.k, t.n + 1, 2 * 86400); }
+          await log('customer', `Renewal email to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
+          return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
         if (method === 'GET' && sub === 'emailpreview') return ok(accessEmail(s, c, c.linePassword, c.isTrial ? 'trial' : 'sub', query.appUrl));
         if (method === 'POST' && sub === 'toggle') {
           const next = c.status === 'disabled' ? 'active' : 'disabled';
@@ -969,6 +1059,24 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(r);
       }
 
+      // ----- renewal emails (bulk) -----
+      if (R('GET', '/api/admin/renewal/status')) {
+        const list = await getCustomers(); const t = await sentToday();
+        return ok({ waiting: renewalTargets(list).length, recent: renewalTargets(list, s.renewalOffer.autoDays || 3).length, sentToday: t.n, dailyLimit: Number(s.renewalOffer.dailyLimit) || 90 });
+      }
+      if (R('POST', '/api/admin/renewal/send')) { // sends the next batch (max 50 per call, within today's limit)
+        const list = await getCustomers(); const t = await sentToday();
+        const left = Math.max(0, (Number(s.renewalOffer.dailyLimit) || 90) - t.n);
+        if (!left) return ok({ sent: 0, limitReached: true, waiting: renewalTargets(list).length });
+        const batch = renewalTargets(list, body.onlyRecentDays).sort((a, b) => b.expiresAt - a.expiresAt).slice(0, Math.min(50, left));
+        const r = await sendBatch(s, batch.map((c) => ({ to: c.email, ...renewalEmail(s, c, body.appUrl) })));
+        if (!r.ok) return err(502, r.error);
+        const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; });
+        await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400);
+        await log('customer', `Renewal emails sent to ${batch.length} customers`);
+        return ok({ sent: batch.length, waiting: renewalTargets(list).length, limitReached: t.n + batch.length >= (Number(s.renewalOffer.dailyLimit) || 90) });
+      }
+
       // ----- reseller packages -----
       if (R('POST', '/api/admin/reseller-sale')) {
         const pk = s.resellerPackages.find((p) => p.id === body.packageId);
@@ -1124,6 +1232,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
       }
       if (changed) await saveCustomers(list);
+    }
+    if (s.renewalOffer.auto && s.email.resendKey) {
+      const list = await getCustomers(); const t = await sentToday();
+      const left = Math.max(0, (Number(s.renewalOffer.dailyLimit) || 90) - t.n);
+      const batch = renewalTargets(list, Number(s.renewalOffer.autoDays) || 3).slice(0, Math.min(50, left));
+      if (batch.length) {
+        const r = await sendBatch(s, batch.map((c) => ({ to: c.email, ...renewalEmail(s, c, s.email.appUrl) })));
+        if (r.ok) { const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; }); await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400); out.reminders += batch.length; }
+      }
     }
     if (out.alert || out.reminders) await log('daily', `Daily check: ${out.reminders} reminder(s)${out.alert ? ', low-credit alert sent' : ''}`);
     return out;
