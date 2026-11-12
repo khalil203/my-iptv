@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Get the app · INTPROTO-TV</title>
+  <meta name="theme-color" content="#060a12">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&family=Inter:wght@400;500;600;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .dl { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; }
+    .dl .hero { margin: 10px 0 26px; }
+    .plats { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .plat { background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.015)); border: 1px solid var(--line); border-radius: 18px; padding: 18px; animation: fadeUp .5s var(--ease) both; }
+    .plat.me { border-color: var(--primary); box-shadow: var(--glow); }
+    .plat h3 { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .plat h3 .ic { font-size: 26px; }
+    .plat ol { margin: 8px 0 0; padding-inline-start: 20px; color: var(--muted); font-size: .9rem; line-height: 1.6; }
+    .plat ol b { color: var(--text); }
+    .badge-me { font-size: .7rem; background: var(--primary); color: #fff; padding: 3px 8px; border-radius: 99px; margin-inline-start: auto; font-family: Inter, sans-serif; }
+    .auto { margin-top: 22px; text-align: center; color: var(--muted); font-size: .9rem; }
+    .code-url { font-family: ui-monospace, Menlo, monospace; background: rgba(0,0,0,.4); padding: 3px 8px; border-radius: 8px; color: var(--accent); }
+  </style>
+</head>
+<body>
+<div class="dl">
+  <div class="row" style="justify-content:space-between"><a class="btn sm ghost" href="./" id="back">←</a><div class="lang-sw small" id="langs"></div></div>
+  <div class="hero"><div class="hero-logo"><i></i><img src="logo.png" alt=""></div><div class="brand-name xl">INTPROTO-TV</div><p class="muted" id="intro"></p></div>
+  <div class="plats" id="plats"></div>
+  <p class="auto" id="auto"></p>
+</div>
+<script type="module">
+const T = {
+  en: { intro: 'Install the app on any device. It updates by itself — you never need to download it again.', back: '← Back',
+    android: 'Android phone & tablet', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone & iPad', windows: 'Windows PC', mac: 'Mac', you: 'Your device',
+    apk: '⬇ Download for Android (APK)', install: '⬇ Install the app', open: 'Open in browser',
+    aSteps: ['Tap <b>Download for Android</b>.', 'Open the downloaded file and tap <b>Install</b> (allow “Install unknown apps” if asked).', 'Or tap <b>Install the app</b> to add the web app from Chrome.'],
+    tvSteps: ['On your TV, install the free app <b>Downloader</b> from the Play Store / App Store.', 'Open Downloader and type: <span class="code-url">{tv}</span>', 'Install, then open <b>INTPROTO-TV</b> from your apps. Use the remote arrows and OK.'],
+    iSteps: ['Open this page in <b>Safari</b>.', 'Tap the <b>Share</b> button (square with arrow).', 'Tap <b>Add to Home Screen</b>, then <b>Add</b>.'],
+    wSteps: ['Open this page in <b>Chrome</b> or <b>Edge</b>.', 'Click <b>Install the app</b> (or the install icon in the address bar).', 'It opens in its own window and appears in the Start menu.'],
+    mSteps: ['In <b>Chrome</b> or <b>Edge</b>: click <b>Install the app</b> or the install icon in the address bar.', 'In <b>Safari</b>: menu <b>File → Add to Dock</b>.', 'Open it from the Dock or Launchpad.'],
+    auto: '✨ All versions update automatically. New features appear the next time you open the app.' },
+  fr: { intro: "Installez l'application sur n'importe quel appareil. Elle se met à jour toute seule — plus besoin de la retélécharger.", back: '← Retour',
+    android: 'Téléphone & tablette Android', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone & iPad', windows: 'PC Windows', mac: 'Mac', you: 'Votre appareil',
+    apk: '⬇ Télécharger pour Android (APK)', install: "⬇ Installer l'application", open: 'Ouvrir dans le navigateur',
+    aSteps: ['Appuyez sur <b>Télécharger pour Android</b>.', 'Ouvrez le fichier et appuyez sur <b>Installer</b> (autorisez « sources inconnues » si demandé).', "Ou appuyez sur <b>Installer l'application</b> depuis Chrome."],
+    tvSteps: ["Sur votre TV, installez l'app gratuite <b>Downloader</b>.", 'Ouvrez Downloader et tapez : <span class="code-url">{tv}</span>', 'Installez, puis ouvrez <b>INTPROTO-TV</b>. Utilisez les flèches et OK de la télécommande.'],
+    iSteps: ['Ouvrez cette page dans <b>Safari</b>.', 'Touchez le bouton <b>Partager</b>.', "Touchez <b>Sur l'écran d'accueil</b>, puis <b>Ajouter</b>."],
+    wSteps: ['Ouvrez cette page dans <b>Chrome</b> ou <b>Edge</b>.', "Cliquez sur <b>Installer l'application</b> (ou l'icône dans la barre d'adresse).", 'Elle s’ouvre dans sa propre fenêtre et apparaît dans le menu Démarrer.'],
+    mSteps: ["Dans <b>Chrome</b> ou <b>Edge</b> : cliquez sur <b>Installer l'application</b>.", 'Dans <b>Safari</b> : menu <b>Fichier → Ajouter au Dock</b>.', 'Ouvrez-la depuis le Dock ou le Launchpad.'],
+    auto: "✨ Toutes les versions se mettent à jour automatiquement à la prochaine ouverture." },
+  ar: { intro: 'ثبّت التطبيق على أي جهاز. يتحدّث تلقائيًا — لن تحتاج لتحميله مرة أخرى.', back: '→ رجوع',
+    android: 'هاتف وتابلت أندرويد', androidTV: 'أندرويد TV · تي في بوكس · Fire TV', iphone: 'آيفون وآيباد', windows: 'كمبيوتر ويندوز', mac: 'ماك', you: 'جهازك',
+    apk: '⬇ تحميل لأندرويد (APK)', install: '⬇ تثبيت التطبيق', open: 'فتح في المتصفح',
+    aSteps: ['اضغط <b>تحميل لأندرويد</b>.', 'افتح الملف واضغط <b>تثبيت</b> (اسمح بتثبيت التطبيقات غير المعروفة إن طُلب).', 'أو اضغط <b>تثبيت التطبيق</b> من كروم.'],
+    tvSteps: ['على التلفاز، ثبّت تطبيق <b>Downloader</b> المجاني.', 'افتح Downloader واكتب: <span class="code-url">{tv}</span>', 'ثبّت ثم افتح <b>INTPROTO-TV</b>. استخدم أسهم الريموت وزر OK.'],
+    iSteps: ['افتح هذه الصفحة في <b>Safari</b>.', 'اضغط زر <b>المشاركة</b>.', 'اختر <b>إضافة إلى الشاشة الرئيسية</b> ثم <b>إضافة</b>.'],
+    wSteps: ['افتح هذه الصفحة في <b>Chrome</b> أو <b>Edge</b>.', 'اضغط <b>تثبيت التطبيق</b> (أو أيقونة التثبيت في شريط العنوان).', 'يفتح في نافذة خاصة ويظهر في قائمة ابدأ.'],
+    mSteps: ['في <b>Chrome</b> أو <b>Edge</b>: اضغط <b>تثبيت التطبيق</b>.', 'في <b>Safari</b>: القائمة <b>ملف ← إضافة إلى Dock</b>.', 'افتحه من Dock أو Launchpad.'],
+    auto: '✨ جميع النسخ تتحدّث تلقائيًا عند فتح التطبيق.' },
+};
+let lang = localStorage.getItem('tvp_lang') || (navigator.languages || [navigator.language]).map((l) => String(l).slice(0, 2)).find((l) => T[l]) || 'en';
+const ua = navigator.userAgent;
+const isTV = /Android/.test(ua) && /(TV|AFT|BRAVIA|SMART|Box|MiBOX|SHIELD)/i.test(ua);
+const isAndroid = /Android/.test(ua) && !isTV;
+const isIOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const isMac = /Macintosh/.test(ua) && !isIOS;
+const isWin = /Windows/.test(ua);
+const me = isTV ? 'tv' : isAndroid ? 'android' : isIOS ? 'ios' : isMac ? 'mac' : isWin ? 'win' : '';
+const apkUrl = 'apk/INTPROTO-TV.apk';
+const tvShort = location.host + '/tv';
+let deferred = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; render(); });
+window.installApp = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; render(); } else alert(T[lang].wSteps[1].replace(/<[^>]+>/g, '')); };
+let apkOk = null;
+fetch(apkUrl, { method: 'HEAD' }).then((r) => { apkOk = r.ok; render(); }).catch(() => { apkOk = false; render(); });
+function render() {
+  const L = T[lang];
+  document.documentElement.lang = lang; document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  document.getElementById('intro').textContent = L.intro;
+  document.getElementById('auto').textContent = L.auto;
+  document.getElementById('back').textContent = L.back;
+  document.getElementById('langs').innerHTML = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']].map(([k, n]) => `<a class="${k === lang ? 'on' : ''}" data-l="${k}" tabindex="0">${n}</a>`).join(' · ');
+  const apkBtn = apkOk === false ? `<a class="btn primary block" href="https://github.com/khalil203/my-iptv/releases/latest">${L.apk}</a>` : `<a class="btn primary block" href="${apkUrl}" download>${L.apk}</a>`;
+  const installBtn = `<button class="btn block" onclick="installApp()" style="margin-top:8px">${L.install}</button>`;
+  const card = (id, ic, title, steps, btns) => `<div class="plat ${me === id ? 'me' : ''}" style="order:${me === id ? 0 : 1}"><h3><span class="ic">${ic}</span>${title}${me === id ? `<span class="badge-me">${L.you}</span>` : ''}</h3>${btns}<ol>${steps.map((s) => `<li>${s.replace('{tv}', tvShort)}</li>`).join('')}</ol></div>`;
+  document.getElementById('plats').innerHTML = [
+    card('android', '🤖', L.android, L.aSteps, apkBtn + installBtn),
+    card('tv', '📺', L.androidTV, L.tvSteps, apkBtn),
+    card('ios', '📱', L.iphone, L.iSteps, ''),
+    card('win', '🪟', L.windows, L.wSteps, installBtn),
+    card('mac', '💻', L.mac, L.mSteps, installBtn),
+  ].join('');
+}
+document.addEventListener('click', (e) => { const a = e.target.closest('[data-l]'); if (a) { lang = a.dataset.l; localStorage.setItem('tvp_lang', lang); render(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && document.activeElement?.dataset.l) document.activeElement.click(); });
+if ('serviceWorker' in navigator && !location.hostname.endsWith('github.io')) navigator.serviceWorker.register('sw.js').catch(() => {});
+render();
+</script>
+</body>
+</html>

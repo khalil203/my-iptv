@@ -20,7 +20,7 @@ const D = {
     play: '▶ Play', tvGuide: 'TV guide', season: 'Season {n}', noEps: 'No episodes yet.', streamFail: '⚠️ This stream could not be played. Try another one or contact support.',
     status: 'Status', plan: 'Plan', started: 'Started', expires: 'Expires', devicesL: 'Devices', history: 'History', startedOn: 'Started', renewed: 'Renewed',
     changePw: 'Change password', currentPw: 'Current password', newPw: 'New password', updatePw: 'Update password', pwUpdated: 'Password updated ✓',
-    logout: 'Log out', notAvailable: 'Playback is not available right now.', demo: 'Demo mode · data stays in this browser',
+    logout: 'Log out', getApp: 'Get the app', notAvailable: 'Playback is not available right now.', demo: 'Demo mode · data stays in this browser',
   },
   fr: {
     welcome: 'Bon retour', loginSub: 'Connectez-vous avec les identifiants reçus.', tagline: 'TV en direct · Films · Séries',
@@ -42,7 +42,7 @@ const D = {
     play: '▶ Lire', tvGuide: 'Guide TV', season: 'Saison {n}', noEps: "Pas encore d'épisodes.", streamFail: '⚠️ Impossible de lire ce flux. Essayez-en un autre ou contactez le support.',
     status: 'Statut', plan: 'Formule', started: 'Début', expires: 'Expire le', devicesL: 'Appareils', history: 'Historique', startedOn: 'Début', renewed: 'Renouvelé',
     changePw: 'Changer le mot de passe', currentPw: 'Mot de passe actuel', newPw: 'Nouveau mot de passe', updatePw: 'Mettre à jour', pwUpdated: 'Mot de passe mis à jour ✓',
-    logout: 'Se déconnecter', notAvailable: 'La lecture est indisponible pour le moment.', demo: 'Mode démo · données dans ce navigateur',
+    logout: 'Se déconnecter', getApp: "Télécharger l'application", notAvailable: 'La lecture est indisponible pour le moment.', demo: 'Mode démo · données dans ce navigateur',
   },
   ar: {
     welcome: 'مرحبًا بعودتك', loginSub: 'سجّل الدخول بالمعلومات التي وصلتك.', tagline: 'بث مباشر · أفلام · مسلسلات',
@@ -64,7 +64,7 @@ const D = {
     play: '▶ تشغيل', tvGuide: 'دليل البرامج', season: 'الموسم {n}', noEps: 'لا توجد حلقات بعد.', streamFail: '⚠️ تعذّر تشغيل هذا البث. جرّب قناة أخرى أو تواصل مع الدعم.',
     status: 'الحالة', plan: 'الباقة', started: 'البداية', expires: 'ينتهي في', devicesL: 'الأجهزة', history: 'السجل', startedOn: 'بدأ', renewed: 'تجديد',
     changePw: 'تغيير كلمة المرور', currentPw: 'كلمة المرور الحالية', newPw: 'كلمة المرور الجديدة', updatePw: 'تحديث كلمة المرور', pwUpdated: 'تم تحديث كلمة المرور ✓',
-    logout: 'تسجيل الخروج', notAvailable: 'التشغيل غير متاح حاليًا.', demo: 'وضع تجريبي · البيانات في هذا المتصفح فقط',
+    logout: 'تسجيل الخروج', getApp: 'حمّل التطبيق', notAvailable: 'التشغيل غير متاح حاليًا.', demo: 'وضع تجريبي · البيانات في هذا المتصفح فقط',
   },
 };
 

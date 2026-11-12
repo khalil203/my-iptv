@@ -161,6 +161,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
         <button class="btn primary block" ${preview ? 'type="button"' : ''}>${t('signIn')}</button>
       </form>
       ${state.config?.trial?.enabled ? `<button class="btn block" style="margin-top:10px;border-color:var(--accent);color:var(--accent)" ${preview ? '' : 'data-act="trial"'}>🎁 ${t('startTrial', { hours: state.config.trial.hours })}</button>` : ''}
+      ${preview ? '' : `<a class="btn block ghost" href="download.html" style="margin-top:8px">📲 ${t('getApp')}</a>`}
       ${preview ? '' : `<div class="login-foot lang-sw">${LANGS.map(([k, n]) => `<a data-act="lang" data-lang="${k}" class="${getLang() === k ? 'on' : ''}">${n}</a>`).join(' · ')}</div>`}
       ${b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
       ${b.footerText ? `<div class="login-foot">${esc(b.footerText)}</div>` : ''}
@@ -213,6 +214,7 @@ async function renderAdmin() {
   document.body.className = (me.allPerms || []).filter(([p]) => !can(p)).map(([p]) => 'np-' + p).join(' ');
   $('#app').innerHTML = `<div class="admin">
     <aside class="side">${brandHtml(b, false)}<nav class="nav">${tabs.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}</nav>
+      <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <div class="main">
       <div class="topbar"><img class="tb-logo" src="${esc(b.logoUrl || 'logo.png')}" alt=""><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="logout">Log out</button></div>
@@ -288,7 +290,7 @@ function custActions(c) {
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     ${c.whatsapp ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
-    ${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}" title="Email">✉️</a>` : ''}
+    ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
 }
@@ -440,6 +442,7 @@ function adminApi(s) {
     ${toggle('Auto-sync enable/disable with the panel', 'reseller.autoSync', r.autoSync)}
     <div class="grid2" style="margin-top:12px">${field('API base URL', 'reseller.baseUrl', r.baseUrl, { ph: 'https://panel.tvpluspanel.com', attrs: 'autocapitalize="none"', help: 'Used as {base}' })}${field('API key / token', 'reseller.apiKey', r.apiKey, { type: 'password', attrs: 'autocomplete="off"', help: 'Used as {key}. Stored on the server only.' })}</div>
     <div class="grid2">${field('Reseller username', 'reseller.username', r.username, { attrs: 'autocapitalize="none"', help: '{reseller_user}' })}${field('Reseller password', 'reseller.password', r.password, { type: 'password', help: '{reseller_pass}' })}</div>
+    <div class="grid3">${field('New line username in response', 'reseller.usernamePath', r.usernamePath, { ph: 'e.g. username or data.username', help: 'If TVplus creates the username, the app uses it.' })}${field('New line password in response', 'reseller.passwordPath', r.passwordPath, { ph: 'e.g. password' })}${field('DNS in response (optional)', 'reseller.dnsPath', r.dnsPath, { ph: 'e.g. dns or data.url' })}</div>
     <div class="grid2">${field('Where is the new line ID in the response?', 'reseller.idPath', r.idPath, { help: 'e.g. <code>id</code> or <code>data.id</code>' })}${field('Where are credits in the response?', 'reseller.creditsPath', r.creditsPath, { help: 'e.g. <code>credits</code> or <code>data.credits</code>' })}</div>
     <h3 style="margin-top:8px">API actions</h3>
     <p class="small muted">Copy each call from the TVplus API docs. These placeholders are filled in automatically:</p>
@@ -684,6 +687,8 @@ function adminTrial(s) {
       ${field('Resend API key', 'email.resendKey', e.resendKey, { type: 'password', attrs: 'autocomplete="off"', ph: 're_…', help: 'From resend.com → API Keys. Stored on the server only.' })}
       ${field('Send from', 'email.from', e.from, { ph: 'My IPTV <noreply@yourdomain.com>', help: 'Must use a domain verified in Resend. For a quick test use <code>onboarding@resend.dev</code> (only sends to your own Resend email).' })}
       ${field('App link in emails', 'email.appUrl', e.appUrl || location.origin, { attrs: 'autocapitalize="none"' })}
+      ${field('DNS / Portal shown to customers', 'email.dns', e.dns, { ph: s.player.serverUrl || 'http://line.yourdns.com', attrs: 'autocapitalize="none"', help: 'Used in the email for Username / Password / DNS and the M3U links. Empty = your streaming server URL.' })}
+      <div class="grid2">${field('Support email', 'email.supportEmail', e.supportEmail, { type: 'email', ph: 'contact@intproto-tv.com', attrs: 'autocapitalize="none"' })}${field('Website', 'email.website', e.website, { ph: 'https://intproto-tv.com', attrs: 'autocapitalize="none"' })}</div>
       ${field('Your email (for alerts)', 'email.adminEmail', e.adminEmail, { type: 'email', attrs: 'autocapitalize="none"' })}
       ${toggle('Email me when credits are low (daily check)', 'email.lowCreditAlerts', e.lowCreditAlerts)}
       ${toggle('Email customers before their subscription ends', 'email.expiryReminders', e.expiryReminders)}
@@ -753,7 +758,7 @@ async function renderUserTab() {
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
-      <div class="row">${b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
+      <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
     return;
   }
   const blocked = blockedScreen();
@@ -855,6 +860,19 @@ async function openItem(i) {
 
 // ---------------- events ----------------
 const actions = {
+  'email-login': async (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id);
+    const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
+    const pv = await api('GET', `/api/admin/customers/${c.id}/emailpreview?appUrl=${encodeURIComponent(appUrl)}`);
+    const body = modal('✉️ Email login details', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b></p><iframe id="mail-pv" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+      <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="email-send" data-id="${c.id}">Send email</button></div>`, { wide: true });
+    $('#mail-pv', body).srcdoc = pv.html;
+  },
+  'email-send': async (el) => {
+    el.disabled = true;
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/email`, { to: $('#mail-to').value, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast('Email sent ✓'); closeModal(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
   'close-modal': () => closeModal(),
   'new-member': () => modal('Add team member', memberForm(null), { wide: true }),
   'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
@@ -1117,4 +1135,15 @@ document.addEventListener('change', async (e) => {
   }
 });
 
+// TV remotes & keyboards: make every clickable item focusable and press it with OK/Enter.
+function tvFocus(root = document) {
+  root.querySelectorAll('[data-act]:not(a[href]):not(button):not([tabindex])').forEach((el) => el.setAttribute('tabindex', '0'));
+}
+new MutationObserver(() => tvFocus()).observe(document.getElementById('app'), { childList: true, subtree: true });
+new MutationObserver(() => tvFocus()).observe(document.getElementById('modal-root'), { childList: true, subtree: true });
+document.addEventListener('keydown', (e) => {
+  const el = document.activeElement;
+  if ((e.key === 'Enter' || e.key === ' ') && el && el.hasAttribute('data-act') && el.tagName !== 'BUTTON' && !(el.tagName === 'A' && el.hasAttribute('href'))) { e.preventDefault(); el.click(); }
+  if ((e.key === 'Escape' || e.key === 'Backspace' && !/INPUT|TEXTAREA/.test(el?.tagName || '')) && $('#modal-root').innerHTML) { e.preventDefault(); closeModal(); }
+});
 boot();

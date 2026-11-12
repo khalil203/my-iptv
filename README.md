@@ -76,6 +76,16 @@ Username **Iptv** · Password **Iptv**. Change it right after the first sign-in:
 2. API Keys → Create → copy the key.
 3. In the app, go to **Trial & email**. Paste the key, set *Send from* (e.g. `My IPTV <noreply@yourdomain.com>`), add your email, then press **Send test**.
 
+## Customer email
+Every trial and new customer gets your INTPROTO-TV email (Arabic, French or English) with **Username, Password, DNS and M3U links** (TS + HLS), filled from the TVplus panel. If the panel returns its own username/password, set *New line username / password in response* in **API settings**. On the Customers page, use ✉️ to preview and (re)send it.
+
+## Apps for every device (auto-updating)
+Open **/download.html** on any device:
+- **Android phone/tablet, Android TV, TV Box, Fire TV:** APK built automatically by GitHub Actions. TVs: install *Downloader* and type `your-app-url/tv`.
+- **iPhone / iPad:** Safari → Share → Add to Home Screen.
+- **Windows / Mac:** Chrome or Edge → Install app (Safari on Mac: File → Add to Dock).
+All versions load the live app, so they update automatically. The APK only needs reinstalling if the Android wrapper itself changes.
+
 ## Install on phones
 - **iPhone:** open the link in Safari → Share → *Add to Home Screen*.
 - **Android:** open the link in Chrome → ⋮ → *Install app*.

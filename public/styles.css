@@ -271,6 +271,10 @@ svg polyline { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: draw 
 .lang-sw a.on { color: var(--text); font-weight: 700; }
 @media (max-width: 640px) { .acc-row { grid-template-columns: 1fr 1fr; } .hbar { grid-template-columns: 80px 1fr auto; } }
 
+/* TV remote focus */
+[data-act]:focus-visible, .btn:focus-visible, a:focus-visible, .ch:focus, .poster:focus, .tile:focus { outline: 3px solid var(--accent); outline-offset: 3px; box-shadow: 0 0 24px color-mix(in srgb, var(--primary) 70%, transparent); }
+.poster:focus .img, .ch:focus { transform: scale(1.05); }
+
 /* Arabic (right-to-left) */
 [dir=rtl] .pw button { right: auto; left: 6px; }
 [dir=rtl] .fav { right: auto; left: 6px; }

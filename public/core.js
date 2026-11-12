@@ -66,7 +66,7 @@ export const DEFAULT_SETTINGS = () => ({
   reseller: {
     enabled: false, autoSync: true,
     baseUrl: '', apiKey: '', username: '', password: '',
-    idPath: 'id', creditsPath: 'credits',
+    idPath: 'id', creditsPath: 'credits', usernamePath: '', passwordPath: '', dnsPath: '',
     actions: {
       create: { method: 'GET', url: '{base}/api.php?api_key={key}&action=create_line&username={username}&password={password}&package={package}&max_connections={connections}', body: '', headers: '' },
       renew: { method: 'GET', url: '{base}/api.php?api_key={key}&action=extend_line&id={line_id}&package={package}', body: '', headers: '' },
@@ -85,7 +85,7 @@ export const DEFAULT_SETTINGS = () => ({
   ],
   currency: 'USD',
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
-  email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true },
+  email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
   finance: {
     autoRates: true, ratesUpdatedAt: 0,
     rates: { USD: 1, USDT: 1, MAD: 9.3, EUR: 0.86, THB: 32.5 },
@@ -182,6 +182,84 @@ function mailHtml(s, lang, rows, intro, name) {
   <p>${escHtml(mt(lang, 'thanks'))}</p></div></div>`;
 }
 
+// ---- Customer access email (your INTPROTO-TV template), in English, French and Arabic ----
+const AM = {
+  en: { dir: 'ltr', trialTitle: 'Your Free Trial Is Ready 🎉', subTitle: 'Your Subscription Is Active ✅', trialSub: 'Instant activation complete. Start streaming now.', subSub: 'Your line is active. Start streaming now.',
+    dear: 'Dear {name},', trialIntro: 'Thank you for choosing <b>{app}</b>. We’re pleased to let you know that your free trial is ready to use.', subIntro: 'Thank you for choosing <b>{app}</b>. Your subscription is active and ready to use.',
+    trialNote: '<b>⏳ Please note:</b> Your free trial expires after <b>{hours} hours</b>.', subNote: '<b>📅 Valid until:</b> {date}',
+    details: '📺 Access Details', detailsIntro: 'Watch in our app, or use any compatible IPTV player with these details:', user: 'Username', pass: 'Password', dns: 'DNS / Portal', m3u: 'M3U Line URLs',
+    appTitle: '📲 Watch in the {app} app', appText: 'Works on Android, Android TV, iPhone, iPad, Windows and Mac. It updates by itself.', openApp: 'Open the app', getApp: 'Download the app',
+    setup: '⚙️ Setup instructions for other IPTV players', s1: 'Download and install a compatible IPTV player (e.g. IPTV Smarters Pro, XCIPTV or TiviMate).', s2: 'Open it and choose <b>Login with Xtream Codes API</b> or <b>M3U Playlist URL</b>.', s3: 'Enter the <b>Username</b>, <b>Password</b> and <b>DNS URL</b> above.', s4: 'Tap <b>Connect</b> or <b>Add User</b>, wait for channels to load, and enjoy!',
+    help: '📞 Need assistance?', helpText: 'If you have any questions or need help with setup, our customer support team is here for you.', support: 'Customer support', email: 'Email', website: 'Website', whatsapp: 'WhatsApp',
+    closing: 'We sincerely appreciate your interest in <b>{app}</b> and hope you enjoy your experience.', regards: 'Warm regards,', team: 'Customer Support Team',
+    footer: 'Thank you for your trust and support. If you have any questions, please contact our support team — we are here to make your IPTV experience exceptional.' },
+  fr: { dir: 'ltr', trialTitle: 'Votre essai gratuit est prêt 🎉', subTitle: 'Votre abonnement est actif ✅', trialSub: 'Activation instantanée terminée. Commencez à regarder.', subSub: 'Votre ligne est active. Commencez à regarder.',
+    dear: 'Cher/Chère {name},', trialIntro: "Merci d'avoir choisi <b>{app}</b>. Nous avons le plaisir de vous informer que votre essai gratuit est prêt.", subIntro: "Merci d'avoir choisi <b>{app}</b>. Votre abonnement est actif et prêt à l'emploi.",
+    trialNote: '<b>⏳ À noter :</b> votre essai gratuit expire après <b>{hours} heures</b>.', subNote: "<b>📅 Valable jusqu'au :</b> {date}",
+    details: "📺 Informations d'accès", detailsIntro: "Regardez dans notre application, ou utilisez un lecteur IPTV compatible avec ces informations :", user: "Nom d'utilisateur", pass: 'Mot de passe', dns: 'DNS / Portail', m3u: 'Liens M3U',
+    appTitle: "📲 Regardez dans l'application {app}", appText: "Fonctionne sur Android, Android TV, iPhone, iPad, Windows et Mac. Mise à jour automatique.", openApp: "Ouvrir l'application", getApp: "Télécharger l'application",
+    setup: "⚙️ Configuration pour d'autres lecteurs IPTV", s1: 'Installez un lecteur IPTV compatible (ex. IPTV Smarters Pro, XCIPTV ou TiviMate).', s2: 'Ouvrez-le et choisissez <b>Login with Xtream Codes API</b> ou <b>M3U Playlist URL</b>.', s3: "Saisissez le <b>nom d'utilisateur</b>, le <b>mot de passe</b> et l'<b>URL DNS</b> ci-dessus.", s4: 'Appuyez sur <b>Connect</b> ou <b>Add User</b>, attendez le chargement des chaînes et profitez !',
+    help: "📞 Besoin d'aide ?", helpText: "Pour toute question ou aide à l'installation, notre service client est là pour vous.", support: 'Service client', email: 'E-mail', website: 'Site web', whatsapp: 'WhatsApp',
+    closing: "Nous vous remercions de votre intérêt pour <b>{app}</b> et espérons que vous apprécierez l'expérience.", regards: 'Cordialement,', team: 'Service client',
+    footer: "Merci pour votre confiance. Pour toute question, contactez notre service client — nous sommes là pour vous offrir la meilleure expérience IPTV." },
+  ar: { dir: 'rtl', trialTitle: 'تجربتك المجانية جاهزة 🎉', subTitle: 'اشتراكك مفعّل ✅', trialSub: 'تم التفعيل فورًا. ابدأ المشاهدة الآن.', subSub: 'خطّك مفعّل. ابدأ المشاهدة الآن.',
+    dear: 'عزيزي/عزيزتي {name}،', trialIntro: 'شكرًا لاختيارك <b>{app}</b>. يسعدنا إبلاغك بأن تجربتك المجانية جاهزة للاستخدام.', subIntro: 'شكرًا لاختيارك <b>{app}</b>. اشتراكك مفعّل وجاهز للاستخدام.',
+    trialNote: '<b>⏳ ملاحظة:</b> تنتهي تجربتك المجانية بعد <b>{hours} ساعة</b>.', subNote: '<b>📅 صالح حتى:</b> {date}',
+    details: '📺 معلومات الدخول', detailsIntro: 'شاهد في تطبيقنا، أو استخدم أي مشغّل IPTV متوافق بهذه المعلومات:', user: 'اسم المستخدم', pass: 'كلمة المرور', dns: 'DNS / البوابة', m3u: 'روابط M3U',
+    appTitle: '📲 شاهد في تطبيق {app}', appText: 'يعمل على أندرويد وأندرويد TV وآيفون وآيباد وويندوز وماك. يتحدّث تلقائيًا.', openApp: 'افتح التطبيق', getApp: 'حمّل التطبيق',
+    setup: '⚙️ طريقة الإعداد على مشغّلات IPTV الأخرى', s1: 'حمّل وثبّت مشغّل IPTV متوافق (مثل IPTV Smarters Pro أو XCIPTV أو TiviMate).', s2: 'افتحه واختر <b>Login with Xtream Codes API</b> أو <b>M3U Playlist URL</b>.', s3: 'أدخل <b>اسم المستخدم</b> و<b>كلمة المرور</b> و<b>رابط DNS</b> أعلاه.', s4: 'اضغط <b>Connect</b> أو <b>Add User</b>، وانتظر تحميل القنوات، واستمتع!',
+    help: '📞 تحتاج مساعدة؟', helpText: 'إذا كان لديك أي سؤال أو تحتاج مساعدة في الإعداد، فريق خدمة العملاء جاهز لمساعدتك.', support: 'خدمة العملاء', email: 'البريد', website: 'الموقع', whatsapp: 'واتساب',
+    closing: 'نشكرك على اهتمامك بـ <b>{app}</b> ونتمنى لك تجربة ممتعة.', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء',
+    footer: 'شكرًا لثقتك ودعمك. لأي سؤال تواصل مع فريق الدعم — نحن هنا لنجعل تجربتك مع IPTV استثنائية.' },
+};
+export function accessEmail(s, c, password, kind, appUrl) {
+  const lang = AM[c.lang] ? c.lang : 'en'; const L = AM[lang]; const e = escHtml;
+  const app = s.branding.appName || 'IPTV';
+  const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, n) => (n === 'app' ? e(app) : e(x[n] ?? '')));
+  const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
+  const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
+  const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
+  const u = c.lineUsername || c.username, p = c.linePassword || password;
+  const q = `username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}`;
+  const m3u = dns ? [`${dns}/get.php?${q}&type=m3u_plus&output=ts`, `${dns}/get.php?${q}&type=m3u_plus&output=m3u8`] : [];
+  const date = new Date(c.expiresAt).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' });
+  const trial = kind === 'trial';
+  const P = '#0284c7', align = L.dir === 'rtl' ? 'right' : 'left';
+  const row = (k, val, mono = true) => `<tr><td class="cred-label" width="120" style="padding:10px 0;font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e2e8f0;text-align:${align}">${k}</td><td class="cred-val" style="padding:10px 0;${mono ? "font-family:'Courier New',Courier,monospace;" : ''}font-size:15px;font-weight:700;color:${P};border-bottom:1px solid #e2e8f0;word-break:break-all;text-align:${align}" dir="ltr">${val}</td></tr>`;
+  const step = (n, t) => `<tr><td width="24" style="vertical-align:top;font-weight:700;padding-bottom:10px;color:#15803d">${n}.</td><td style="padding-bottom:10px;color:#166534">${t}</td></tr>`;
+  const sup = [s.email.supportEmail && `<tr><td style="padding:4px 0"><b style="color:#64748b">${L.email}:</b> <a href="mailto:${e(s.email.supportEmail)}" style="color:${P};text-decoration:none">${e(s.email.supportEmail)}</a></td></tr>`,
+    s.email.website && `<tr><td style="padding:4px 0"><b style="color:#64748b">${L.website}:</b> <a href="${e(s.email.website)}" style="color:${P};text-decoration:none">${e(String(s.email.website).replace(/^https?:\/\//, ''))}</a></td></tr>`,
+    s.branding.supportUrl && `<tr><td style="padding:4px 0"><b style="color:#64748b">${L.whatsapp}:</b> <a href="${e(s.branding.supportUrl)}" style="color:${P};text-decoration:none">${e(s.branding.supportLabel || s.branding.supportUrl)}</a></td></tr>`].filter(Boolean).join('');
+  const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v(trial ? 'trialTitle' : 'subTitle')}</title>
+<style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
+@media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cred-label,.cred-val{display:block!important;width:100%!important}.cred-label{padding-bottom:2px!important;border-bottom:none!important}.cred-val{padding-top:0!important}}</style></head>
+<body dir="${L.dir}" style="background:#f4f7fa;margin:0;padding:0"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f7fa;padding:30px 10px"><tr><td align="center">
+<table border="0" cellpadding="0" cellspacing="0" width="600" class="container" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 25px rgba(0,0,0,.05)">
+<tr><td height="6" style="background:linear-gradient(90deg,#0284c7 0%,#0ea5e9 50%,#38bdf8 100%);font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:40px 40px 30px;background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);border-bottom:1px solid #f1f5f9">
+${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="96" style="display:block;border-radius:50%;border:3px solid #0ea5e9;box-shadow:0 4px 12px rgba(14,165,233,.2);margin:0 auto 20px">` : ''}
+<div style="display:inline-block;background:#e0f2fe;border:1px solid #bae6fd;color:#0369a1;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${e(app)}</div>
+<h1 class="header-title" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${v(trial ? 'trialTitle' : 'subTitle')}</h1>
+<p style="margin:8px 0 0;font-size:14px;color:#64748b">${v(trial ? 'trialSub' : 'subSub')}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:32px 40px 16px;text-align:${align}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${v('dear', { name: c.name })}</p><p style="margin:0;font-size:15px;line-height:1.65">${v(trial ? 'trialIntro' : 'subIntro')}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:10px 40px 20px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#fef3c7;border-${align}:4px solid #f59e0b;border-radius:6px"><tr><td style="padding:12px 16px;font-size:14px;color:#b45309;line-height:1.5;text-align:${align}">${trial ? v('trialNote', { hours: s.trial.hours }) : v('subNote', { date })}</td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+<tr><td style="padding:20px 24px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;text-align:${align}"><h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a">${L.details}</h2><p style="margin:6px 0 0;font-size:13px;color:#475569;line-height:1.5">${L.detailsIntro}</p></td></tr>
+<tr><td style="padding:20px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%">${row(L.user, e(u))}${row(L.pass, e(p))}${dns ? row(L.dns, `<a href="${e(dns)}" style="color:${P};text-decoration:none;font-size:14px">${e(dns)}</a>`) : ''}
+${m3u.length ? `<tr><td colspan="2" style="padding-top:16px;text-align:${align}"><div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${L.m3u}</div>${m3u.map((x, i) => `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-bottom:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">${i ? 'HLS' : 'TS'}:</b> ${e(x)}</div>`).join('')}</td></tr>` : ''}
+</table></td></tr></table></td></tr>
+${base ? `<tr><td class="mobile-pad" align="center" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#0c4a6e,#0284c7);border-radius:12px"><tr><td align="center" style="padding:24px;color:#fff"><h3 style="margin:0 0 6px;font-size:17px;color:#fff">${v('appTitle')}</h3><p style="margin:0 0 16px;font-size:13px;color:#e0f2fe">${L.appText}</p>
+<a href="${e(base)}/" style="display:inline-block;background:#fff;color:#0369a1;font-weight:700;padding:11px 18px;border-radius:10px;text-decoration:none;margin:4px">${L.openApp}</a> <a href="${e(base)}/download.html" style="display:inline-block;background:#38bdf8;color:#fff;font-weight:700;padding:11px 18px;border-radius:10px;text-decoration:none;margin:4px">${L.getApp}</a></td></tr></table></td></tr>` : ''}
+<tr><td class="mobile-pad" style="padding:0 40px 30px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px"><tr><td style="padding:24px;text-align:${align}"><h3 style="margin:0 0 14px;font-size:16px;font-weight:700;color:#166534">${L.setup}</h3>
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;line-height:1.6">${step(1, L.s1)}${step(2, L.s2)}${step(3, L.s3)}${step(4, L.s4)}</table></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 32px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0"><tr><td style="padding:24px;text-align:${align}"><h3 style="margin:0 0 8px;font-size:16px;font-weight:700;color:#0f172a">${L.help}</h3><p style="margin:0 0 16px;font-size:14px;line-height:1.6">${L.helpText}</p>
+${sup ? `<div style="font-size:13px;font-weight:700;color:${P};text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📞 ${L.support}</div><table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px">${sup}</table>` : ''}</td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 36px;border-bottom:1px solid #f1f5f9;text-align:${align}"><p style="margin:0 0 20px;font-size:14px;line-height:1.65">${v('closing')}</p><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:${P}">${L.team}</span></p></td></tr>
+<tr><td align="center" class="mobile-pad" style="padding:28px 40px;background:#f8fafc;text-align:center"><p style="margin:0 0 16px;font-size:12px;line-height:1.7;color:#64748b">${L.footer}</p>${s.email.website ? `<a href="${e(s.email.website)}" style="font-size:13px;font-weight:700;color:${P};text-decoration:none;letter-spacing:.5px">${e(String(s.email.website).replace(/^https?:\/\//, ''))}</a>` : ''}</td></tr>
+</table></td></tr></table></body></html>`;
+  return { subject: v(trial ? 'trialTitle' : 'subTitle') + ` | ${app}`, html };
+}
+
 export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) {
   let sCache = null, sAt = 0;
 
@@ -255,6 +333,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
   const withUrl = (s, u) => (s.email.appUrl || !u ? s : { ...s, email: { ...s.email, appUrl: String(u) } });
   function loginMail(s, c, password, kind) {
+    return accessEmail(s, c, password, kind === 'trial' ? 'trial' : 'sub', s.email.appUrl);
+  }
+  function oldLoginMail(s, c, password, kind) {
     const lang = ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en';
     const hours = s.trial.hours;
     const exp = new Date(c.expiresAt).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
@@ -328,6 +409,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return { ...rest, daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
   }
 
+  // Use the username / password / DNS the panel gives back (if it returns them).
+  function applyPanelCreds(s, c, data) {
+    const r = s.reseller; const g = (p) => (p ? getPath(data, p) : undefined);
+    const id = g(r.idPath); if (id != null && id !== '' && typeof id !== 'object') c.lineId = String(id);
+    const u = g(r.usernamePath), p = g(r.passwordPath), d = g(r.dnsPath);
+    if (u) c.lineUsername = String(u);
+    if (p) c.linePassword = String(p);
+    if (d) c.dns = String(d);
+    return { u: u ? String(u) : null, p: p ? String(p) : null };
+  }
   async function panelCall(s, action, vars) {
     const r = s.reseller;
     const a = r.actions && r.actions[action];
@@ -408,18 +499,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
         let username; do { username = 't' + rnd(6, '0123456789'); } while (list.some((c) => c.username === username));
-        const password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
+        let password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const salt = uid(8);
         const now = Date.now();
         const c = { id: uid(8), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         if (s.reseller.enabled) {
           const panel = await panelCall(s, 'trial', { username, password, line_id: '', package: s.trial.package, connections: c.connections, days: 1, months: 1, hours: s.trial.hours, name, phone, note: 'trial' });
           if (!panel.ok && !panel.skipped) { await log('trial', `Trial for ${email} failed on panel: ${panel.error}`); return err(502, 'trial_panel'); }
-          const id = getPath(panel.data, s.reseller.idPath); if (id != null && id !== '') c.lineId = String(id);
+          if (!panel.skipped) {
+            const got = applyPanelCreds(s, c, panel.data);
+            if (got.u && !list.some((x) => x.username.toLowerCase() === got.u.toLowerCase())) username = c.username = got.u;
+            if (got.p) { password = got.p; c.salt = uid(8); c.passwordHash = await hashPassword(password, c.salt); }
+          }
         }
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
-        const m = loginMail(withUrl(s, body.appUrl), c, password, 'trial');
+        const m = accessEmail(s, c, password, 'trial', body.appUrl);
         const sent = await sendEmail(s, email, m.subject, m.html);
         await log('trial', `Free trial ${username} for ${name} <${email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}`);
         const showOnScreen = !sent.ok || s.trial.showCredentialsOnScreen;
@@ -611,14 +706,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.createOnPanel) {
           panel = await panelCall(s, 'create', panelVars(c, s));
           if (!panel.ok && !panel.skipped) return err(502, 'Panel: ' + panel.error);
-          const id = getPath(panel.data, s.reseller.idPath);
-          if (id != null && id !== '') c.lineId = String(id);
+          if (!panel.skipped) applyPanelCreds(s, c, panel.data);
         }
         list.push(c);
         await saveCustomers(list);
         await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
         let mail = null;
-        if (body.sendEmail && c.email) { const m = loginMail(withUrl(s, body.appUrl), c, String(body.password), 'welcome'); mail = await sendEmail(s, c.email, m.subject, m.html); }
+        if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
         return ok({ customer: view(c, s), panel, mail });
       }
@@ -677,6 +771,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${s.currency})`);
           return ok({ customer: view(c, s), panel });
         }
+        if (method === 'POST' && sub === 'email') {
+          const to = String(body.to || c.email || '').trim();
+          if (!to) return err(400, 'This customer has no email address.');
+          const m = accessEmail(s, c, c.linePassword, c.isTrial ? 'trial' : 'sub', body.appUrl);
+          const r = await sendEmail(s, to, m.subject, m.html);
+          await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
+          return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
+        if (method === 'GET' && sub === 'emailpreview') return ok(accessEmail(s, c, c.linePassword, c.isTrial ? 'trial' : 'sub', query.appUrl));
         if (method === 'POST' && sub === 'toggle') {
           const next = c.status === 'disabled' ? 'active' : 'disabled';
           let panel = null;

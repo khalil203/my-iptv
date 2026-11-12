@@ -35,6 +35,8 @@ export default {
     }
 
     if (url.pathname === '/proxy') return proxy(request, url);
+    // Short links for TVs (type in the "Downloader" app): /tv or /apk → Android app
+    if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
 
     return env.ASSETS.fetch(request);
   },
