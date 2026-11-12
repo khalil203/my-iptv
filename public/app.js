@@ -944,7 +944,11 @@ function appsCard() {
 function imgSrc(u) {
   if (!u || !/^https?:/.test(u)) return '';
   const st = state.user.me?.stream;
-  if (location.protocol === 'https:' && st?.proxyToken) return `/img?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`;
+  if (u.startsWith('https:') || location.protocol === 'http:') return u;      // already loadable
+  if (bridge()) return u;                                                     // Android / TV / desktop apps load http images directly
+  const ipHost = /^http:\/\/\d{1,3}(\.\d{1,3}){3}(:\d+)?\//.test(u);
+  if (ipHost && st?.relay) return `${st.relay}/x?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`; // bare-IP logos: via the relay
+  if (st?.proxyToken) return `/img?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}`;
   return u;
 }
 function initialsTile(name, big) {

@@ -96,7 +96,7 @@ async function image(request, url) {
   try { up = await fetch(target, { headers: { 'User-Agent': 'Mozilla/5.0' }, cf: { cacheTtl: 604800, cacheEverything: true } }); }
   catch { return new Response('', { status: 502 }); }
   const ct = up.headers.get('content-type') || '';
-  if (!up.ok || !/^image\//.test(ct)) return new Response('', { status: 404 });
+  if (!up.ok || !/^image\//.test(ct)) return new Response('', { status: 404, headers: { 'x-upstream-status': String(up.status) } });
   res = new Response(up.body, { headers: { 'content-type': ct, 'cache-control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*' } });
   await cache.put(key, res.clone());
   return res;
