@@ -1,4 +1,4 @@
-# Diagnostic: can a normal data-centre server (GitHub / Microsoft Azure) reach the IPTV server? Does it allow browsers (CORS)?
+# Diagnostic: channel logo check on the IPTV server
 name: IPTV server check
 on:
   push:
@@ -9,11 +9,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test IPTV server
+      - name: Check channel logos
         run: |
           set +e; read SERVER USER PASS X < .github/server-check.txt
-          echo "== player_api headers"; curl -s -D - -o /tmp/b -m 20 -A "IPTVSmartersPro" -H "Origin: https://example.com" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_live_streams" | grep -i -E "^HTTP|access-control|content-type|server"
-          ID=$(python3 -c "import json;d=json.load(open('/tmp/b'));print(d[0]['stream_id'])" 2>/dev/null); echo "first stream id: $ID"
-          echo "== live m3u8"; curl -s -D - -o /tmp/m -m 20 -L -A "IPTVSmartersPro" -H "Origin: https://example.com" "$SERVER/live/$USER/$PASS/$ID.m3u8" | grep -i -E "^HTTP|access-control|content-type|location"; head -c 300 /tmp/m; echo
-          SEG=$(grep -v '^#' /tmp/m | head -1); echo "segment: ${SEG:0:90}"
-          echo "== https?"; curl -s -o /dev/null -w "https %{http_code}\n" -m 10 "https://${SERVER#http://}/player_api.php?username=$USER&password=$PASS" || true
+          curl -s -m 60 -A "IPTVSmartersPro" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_live_streams" -o live.json
+          curl -s -m 60 -A "IPTVSmartersPro" "$SERVER/player_api.php?username=$USER&password=$PASS&action=get_vod_streams" -o vod.json
+          python3 - <<'PY'
+          import json, collections, urllib.parse, urllib.request, random
+          for f in ['live.json','vod.json']:
+              try: d=json.load(open(f))
+              except Exception as e: print(f,'not json',e); continue
+              icons=[x.get('stream_icon') or '' for x in d]
+              have=[i for i in icons if i.strip()]
+              print(f'== {f}: {len(d)} items, with logo: {len(have)} ({100*len(have)//max(1,len(d))}%), empty: {len(d)-len(have)}')
+              print('   http:',sum(1 for i in have if i.startswith('http:')),' https:',sum(1 for i in have if i.startswith('https:')))
+              print('   logo hosts:', collections.Counter(urllib.parse.urlparse(i).netloc for i in have).most_common(6))
+              ok=0; sample=random.sample(have, min(15,len(have)))
+              for u in sample:
+                  try:
+                      r=urllib.request.urlopen(urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'}),timeout=8); ok+= r.status==200 and r.headers.get('content-type','').startswith('image')
+                  except Exception: pass
+              print(f'   sample of {len(sample)} logo links: {ok} load OK, {len(sample)-ok} broken')
+              print('   examples without logo:', [x.get('name') for x in d if not (x.get('stream_icon') or '').strip()][:5])
+          PY
