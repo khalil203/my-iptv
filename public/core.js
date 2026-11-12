@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS = () => ({
     announcement: '', announcementType: 'info',
     maintenance: false, maintenanceMessage: 'We are updating the service. Please come back soon.',
   },
-  player: { serverUrl: '', useProxy: true },
+  player: { serverUrl: '', useProxy: true, userAgent: 'IPTVSmartersPro' },
   reseller: {
     enabled: false, autoSync: true,
     baseUrl: '', apiKey: '', username: '', password: '',
@@ -449,7 +449,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const server = trimSlash(s.player.serverUrl);
     if (!server) throw httpErr(400, 'The streaming server is not set up yet.');
     const q = new URLSearchParams({ username: c.lineUsername, password: c.linePassword, ...params });
-    const res = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': 'Mozilla/5.0 (IPTV Player)' } });
+    const res = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' } });
     const text = await res.text();
     try { return JSON.parse(text); } catch { throw httpErr(502, 'The streaming server returned an invalid response.'); }
   }
@@ -946,7 +946,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!server) return err(400, 'Add the streaming server URL first.');
         try {
           const q = new URLSearchParams({ username: body.username || '', password: body.password || '' });
-          const res = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': 'Mozilla/5.0 (IPTV Player)' } });
+          if (body.tryAgents) { // try several player identities and report which ones the server accepts
+            const out = [];
+            for (const ua of ['IPTVSmartersPro', 'VLC/3.0.20 LibVLC/3.0.20', 'okhttp/4.12.0', 'TiviMate/4.7.0 (Android 12)', 'Lavf/58.76.100', 'Mozilla/5.0 (Linux; Android 12; SM-A525F) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36', s.player.userAgent]) {
+              try { const r = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': ua } }); const t = await r.text(); out.push({ ua, status: r.status, body: t.slice(0, 160) }); }
+              catch (e) { out.push({ ua, error: e.message }); }
+            }
+            return ok({ ok: out.some((x) => x.status === 200), agents: out });
+          }
+          const res = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' } });
           const text = await res.text();
           let data; try { data = JSON.parse(text); } catch { data = text.slice(0, 300); }
           const auth = isObj(data) && data.user_info ? Number(data.user_info.auth) === 1 : false;

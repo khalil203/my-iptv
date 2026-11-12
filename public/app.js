@@ -434,6 +434,7 @@ function adminApi(s) {
     <p class="small muted">The Xtream-style DNS/URL from TVplus, the same one you'd type into IPTV Smarters.</p>
     ${field('Server URL', 'player.serverUrl', s.player.serverUrl, { ph: 'http://your-dns.com:8080', attrs: 'autocapitalize="none"' })}
     ${toggle('Play through the built-in secure proxy (recommended)', 'player.useProxy', s.player.useProxy, 'Fixes "http" streams on iPhone/HTTPS and hides the server from customers. Note: Cloudflare only connects to ports 80, 8080, 8880, 2052, 2082, 2086, 2095 (http) or 443, 8443, 2053, 2083, 2087, 2096 (https).')}
+    ${field('Player identity (User-Agent)', 'player.userAgent', s.player.userAgent, { help: 'Some IPTV servers only accept known players. Default: IPTVSmartersPro.' })}
     <div class="grid3" style="margin-top:12px">${field('Test line username', 'tu', '', { attrs: 'data-skip id="test-u" autocapitalize="none"' })}${field('Test line password', 'tp', '', { attrs: 'data-skip id="test-p" autocapitalize="none"' })}<div class="field"><span>&nbsp;</span><button type="button" class="btn" data-act="test-player">Test server</button></div></div>
     <div id="test-player-out"></div>
   </div>

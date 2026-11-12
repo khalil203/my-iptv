@@ -56,7 +56,7 @@ async function proxy(request, url) {
   try { tu = new URL(target); } catch { return new Response('Bad URL', { status: 400, headers: CORS }); }
   if (!/^https?:$/.test(tu.protocol)) return new Response('Bad URL', { status: 400, headers: CORS });
 
-  const headers = new Headers({ 'User-Agent': 'Mozilla/5.0 (IPTV Player)' });
+  const headers = new Headers({ 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' });
   const range = request.headers.get('range');
   if (range) headers.set('range', range);
 
