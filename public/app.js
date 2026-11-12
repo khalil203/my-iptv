@@ -106,10 +106,30 @@ function applyBranding(b) {
   const r = document.documentElement.style;
   r.setProperty('--primary', b.primary || '#7c5cff');
   r.setProperty('--accent', b.accent || '#22d3ee');
-  r.setProperty('--bg', b.background || '#0b0d17');
+  r.setProperty('--brand-bg', b.background || '#060a12');
   document.title = b.appName || 'IPTV';
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', b.background || '#0b0d17');
+  applyTheme();
 }
+
+// ---------------- day / night theme ----------------
+// Auto (default): day theme 06:00–18:00 in the device's own time zone, night theme otherwise.
+const themeMode = () => localStorage.getItem('tvp_theme') || 'auto';
+const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
+function currentTheme() {
+  const m = themeMode();
+  if (m === 'light' || m === 'dark') return m;
+  const h = new Date().getHours();
+  return h >= 6 && h < 18 ? 'light' : 'dark';
+}
+function applyTheme() {
+  const th = currentTheme();
+  document.documentElement.dataset.theme = th;
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', th === 'light' ? '#f3f6fa' : '#060a12');
+  document.querySelectorAll('[data-act=theme]').forEach((b) => { b.textContent = themeMode() === 'auto' ? '🌗' : th === 'light' ? '☀️' : '🌙'; b.title = themeLabel(); });
+}
+const themeLabel = () => { const m = themeMode(); return m === 'auto' ? `Auto (${currentTheme() === 'light' ? 'day' : 'night'} · ${tzName()})` : m === 'light' ? 'Day' : 'Night'; };
+setInterval(applyTheme, 5 * 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) applyTheme(); });
 
 async function boot() {
   const hp = new URLSearchParams(location.hash.slice(1));
@@ -133,7 +153,7 @@ async function boot() {
 }
 
 function route() {
-  closeModal();
+  closeModal(); setTimeout(applyTheme);
   if (isAdminUI() && location.protocol === 'http:' && !/localhost|127\.0\.0\.1/.test(location.hostname)) { location.replace('https://' + location.host + location.pathname); return; }
   if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
@@ -168,6 +188,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       </form>
       ${state.config?.trial?.enabled ? `<button class="btn block" style="margin-top:10px;border-color:var(--accent);color:var(--accent)" ${preview ? '' : 'data-act="trial"'}>🎁 ${t('startTrial', { hours: state.config.trial.hours })}</button>` : ''}
       ${preview ? '' : `<a class="btn block ghost" href="download.html" style="margin-top:8px">📲 ${t('getApp')}</a>`}
+      ${preview ? '' : `<div class="login-foot"><a data-act="theme" style="cursor:pointer;text-decoration:none">🌗</a></div>`}
       ${preview ? '' : `<div class="login-foot lang-sw">${LANGS.map(([k, n]) => `<a data-act="lang" data-lang="${k}" class="${getLang() === k ? 'on' : ''}">${n}</a>`).join(' · ')}</div>`}
       ${b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
       ${b.footerText ? `<div class="login-foot">${esc(b.footerText)}</div>` : ''}
@@ -202,7 +223,7 @@ function renderSetup() {
 
 // ---------------- ADMIN ----------------
 const ADMIN_TABS = [
-  ['overview', '📊', 'Overview', null], ['customers', '👥', 'Customers', 'customers_view'], ['subs', '📅', 'Subscriptions', 'customers_view'],
+  ['overview', '📊', 'Overview', null], ['customers', '👥', 'Customers', 'customers_view'], ['subs', '📅', 'Subscriptions', 'customers_view'], ['dups', '🧬', 'Duplicates', 'customers_view'],
   ['finance', '🏦', 'Banks & balances', 'finance_view'], ['profits', '📈', 'Profits', 'profits'], ['stock', '🎟', 'Credits stock', 'stock'],
   ['plans', '💳', 'Plans & prices', 'plans'], ['trial', '🎁', 'Trial & email', 'settings'], ['userdash', '📱', 'User dashboard', 'settings'],
   ['branding', '🎨', 'Login & branding', 'settings'], ['api', '🔌', 'API settings', 'settings'], ['team', '🛡', 'Team & access', 'owner'],
@@ -210,6 +231,7 @@ const ADMIN_TABS = [
 ];
 
 async function renderAdmin() {
+  setTimeout(applyTheme);
   const b = state.config.branding;
   if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
   const me = state.admin.me;
@@ -223,7 +245,7 @@ async function renderAdmin() {
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <div class="main">
-      <div class="topbar"><img class="tb-logo" src="${esc(b.logoUrl || 'logo.png')}" alt=""><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="topbar"><img class="tb-logo" src="${esc(b.logoUrl || 'logo.png')}" alt=""><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
       <div class="mobile-nav">${tabs.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </div></div>`;
@@ -245,6 +267,7 @@ async function renderAdmin() {
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'activity') body.innerHTML = await adminActivity();
     else if (t === 'team') body.innerHTML = await adminTeam();
+    else if (t === 'dups') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminDups(); }
     animateIn(body);
   } catch (e) { if (state.token) $('#admin-body').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
 }
@@ -407,6 +430,31 @@ async function adminSubs() {
     </div>`;
 }
 
+// ---------------- duplicates ----------------
+const DUP_ICON = { email: '📧', phone: '📱', line: '📺', name: '👤' };
+const DUP_LABEL = { email: 'Same email', phone: 'Same phone / WhatsApp', line: 'Same IPTV line', name: 'Same name' };
+async function adminDups() {
+  const a = state.admin; a.dupType ||= 'all'; a.dupLimit ||= 30;
+  const d = await api('GET', '/api/admin/duplicates' + (a.dupType === 'name' ? '?name=1' : ''));
+  a.dups = d;
+  const q = (a.dupQ || '').toLowerCase();
+  const groups = d.groups.filter((g) => (a.dupType === 'all' ? g.type !== 'name' : g.type === a.dupType))
+    .filter((g) => !q || g.value.toLowerCase().includes(q) || g.members.some((m) => [m.name, m.username, m.email, m.phone, m.orderNo].some((x) => String(x || '').toLowerCase().includes(q))));
+  const count = (t) => d.groups.filter((g) => g.type === t).length;
+  const row = (m) => `<tr><td><b>${esc(m.name)}</b>${m.orderNo ? ` <span class="tagp">${esc(m.orderNo)}</span>` : ''}<div class="small muted">${esc(m.username)}</div></td><td class="small">${esc(m.email || '')}<div class="muted">${esc(m.whatsapp || m.phone || '')}</div></td><td class="small">${esc(m.planName)}<div class="muted">${fmtDate(m.createdAt || m.startAt)} → ${fmtDate(m.expiresAt)}</div></td><td>${pill(m.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(m)}</div></td></tr>`;
+  return `<div class="stats">
+      <div class="stat c-warn"><span>Duplicate groups</span><b>${d.groups.filter((g) => g.type !== 'name').length}</b></div>
+      <div class="stat"><span>Customers involved</span><b>${d.customersInGroups}</b></div>
+      <div class="stat c-bad"><span>Repeat attempts blocked / flagged</span><b>${d.attempts.length}</b></div></div>
+    <div class="row" style="margin-bottom:12px"><input style="flex:1;min-width:200px" placeholder="🔎 Search email, phone, name, order…" value="${esc(a.dupQ || '')}" data-input="dup-search"></div>
+    <div class="chips">${[['all', 'All'], ['email', '📧 Email (' + count('email') + ')'], ['phone', '📱 Phone (' + count('phone') + ')'], ['line', '📺 IPTV line (' + count('line') + ')'], ['name', '👤 Same name'], ['attempts', '🚩 Repeat attempts (' + d.attempts.length + ')']].map(([k, n]) => `<a class="${a.dupType === k ? 'on' : ''}" data-act="dup-type" data-t="${k}">${n}</a>`).join('')}</div>
+    ${a.dupType === 'attempts' ? (d.attempts.length ? `<div class="card"><p class="small muted" style="margin-top:0">Someone tried to start a free trial or was added as a new customer with an email or phone that already belongs to another customer.</p><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Used details</th><th>Already used by</th></tr></thead><tbody>
+      ${d.attempts.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td>${x.kind === 'trial' ? '🎁 Free trial (blocked)' : '➕ New customer (flagged)'}${x.by ? `<div class="small muted">by ${esc(x.by)}</div>` : ''}</td><td><b>${esc(x.name || '')}</b><div class="small muted">${esc([x.email, x.phone, x.ip && 'IP ' + x.ip].filter(Boolean).join(' · '))}</div></td><td class="small">${(x.matches || []).map((m) => `${esc(m.name)} <span class="tagp">${esc(m.username)}</span> <span class="muted">(${esc(m.why.join(', '))})</span>`).join('<br>')}</td></tr>`).join('')}
+      </tbody></table></div></div>` : '<div class="empty card"><span class="ic">✅</span>No repeat attempts yet.</div>')
+    : groups.length ? groups.slice(0, a.dupLimit).map((g) => `<div class="card dup-g"><div class="row"><h3 style="margin:0">${DUP_ICON[g.type]} ${DUP_LABEL[g.type]}: <span class="tagp" style="font-size:.85rem">${esc(g.value)}</span></h3><span class="spacer"></span><span class="pill st-expiring">${g.members.length} customers</span></div>
+      <div class="tbl-wrap" style="margin-top:8px"><table class="tbl"><tbody>${g.members.map(row).join('')}</tbody></table></div></div>`).join('') + (groups.length > a.dupLimit ? `<div style="text-align:center"><button class="btn" data-act="dup-more">Show more (${groups.length - a.dupLimit})</button></div>` : '')
+    : '<div class="empty card"><span class="ic">✅</span>No duplicates found.</div>'}`;
+}
 async function adminResellerSection(s) {
   const sales = can('customers_view') ? await api('GET', '/api/admin/reseller-sales').catch(() => []) : [];
   const rp = s.resellerPackages || [];
@@ -792,7 +840,7 @@ async function renderUser() {
   const { user, dashboard: d, branding: b } = u.me;
   const tabs = [['home', '🏠', t('home')], d.live && ['live', '📺', t('live')], d.movies && ['movies', '🎬', t('movies')], d.series && ['series', '🎞', t('series')], ['account', '👤', t('account')]].filter(Boolean);
   if (!tabs.some((t) => t[0] === u.tab)) u.tab = 'home';
-  $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
+  $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
     <div class="ubody" id="ubody"></div>
     <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}</nav></div>`;
   renderUserTab();
@@ -1163,6 +1211,8 @@ async function openItem(i) {
 // ---------------- events ----------------
 const actions = {
   retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
+  'dup-type': async (el) => { state.admin.dupType = el.dataset.t; state.admin.dupLimit = 30; $('#admin-body').innerHTML = await adminDups(); },
+  'dup-more': async () => { state.admin.dupLimit += 30; $('#admin-body').innerHTML = await adminDups(); },
   'renewal-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
@@ -1181,16 +1231,20 @@ const actions = {
     const left = Math.max(0, st.dailyLimit - st.sentToday);
     modal('🔁 Renewal emails', `<p>Expired customers with an email who haven't had the offer for their latest expiry: <b>${st.waiting}</b> (expired in the last ${state.admin.settings.renewalOffer.autoDays} days: <b>${st.recent}</b>).</p>
       <p class="small muted">Sent today: ${st.sentToday} / ${st.dailyLimit}. You can send <b>${left}</b> more today. Newest expiries go first; the rest can be sent on the next days.</p>
-      <div class="row"><button class="btn primary" data-act="renewal-go" ${left && st.waiting ? '' : 'disabled'}>Send up to ${Math.min(left, st.waiting)} now</button><button class="btn" data-act="renewal-go" data-recent="1" ${left && st.recent ? '' : 'disabled'}>Only recent (${Math.min(left, st.recent)})</button></div>
+      <div class="row"><button class="btn primary" data-act="renewal-go" data-all="1" ${st.waiting ? '' : 'disabled'}>📨 Send to ALL ${st.waiting} now</button><button class="btn" data-act="renewal-go" ${left && st.waiting ? '' : 'disabled'}>Today's limit only (${Math.min(left, st.waiting)})</button><button class="btn" data-act="renewal-go" data-recent="1" ${left && st.recent ? '' : 'disabled'}>Only recent (${Math.min(left, st.recent)})</button></div>
+      <p class="small muted">"Send to ALL" ignores the daily limit and sends in batches of 100. Your Resend plan must allow that many emails (free plan: 100/day, 3,000/month) — if Resend stops, the rest stay waiting.</p>
       <div id="rb-out" style="margin-top:12px"></div>`);
   },
   'renewal-go': async (el) => {
+    const all = !!el.dataset.all;
+    if (all && !confirm('Send the renewal offer to ALL expired customers now?')) return;
     const out = $('#rb-out'); document.querySelectorAll('[data-act=renewal-go]').forEach((b) => (b.disabled = true));
     let total = 0;
     try {
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 60; i++) {
         out.innerHTML = `<div class="spinner"></div><p class="small muted" style="text-align:center">Sent ${total}…</p>`;
-        const r = await api('POST', '/api/admin/renewal/send', { appUrl: location.origin, onlyRecentDays: el.dataset.recent ? state.admin.settings.renewalOffer.autoDays : 0 });
+        if (i) await new Promise((ok) => setTimeout(ok, 700));
+        const r = await api('POST', '/api/admin/renewal/send', { all, appUrl: location.origin, onlyRecentDays: el.dataset.recent ? state.admin.settings.renewalOffer.autoDays : 0 });
         total += r.sent;
         if (!r.sent || r.limitReached) { out.innerHTML = `<div class="notice success">✅ Sent ${total} renewal emails.${r.limitReached ? " Today's limit is reached — continue tomorrow." : ''} ${r.waiting} still waiting.</div>`; break; }
       }
@@ -1216,6 +1270,10 @@ const actions = {
   'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast('Removed'); renderAdmin(); },
   preset: (el) => { const p = PRESETS[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },
   'trial-login': async (el) => { closeModal(); try { const r = await api('POST', '/api/login', { username: el.dataset.u, password: el.dataset.p }); setSession(r.token, r.role); route(); } catch (e) { renderLogin(e.message); } },
+  theme: () => {
+    const order = ['auto', 'light', 'dark']; const next = order[(order.indexOf(themeMode()) + 1) % 3];
+    localStorage.setItem('tvp_theme', next); applyTheme(); toast('Theme: ' + themeLabel());
+  },
   lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else renderLogin(); },
   trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
   'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
@@ -1427,6 +1485,7 @@ const forms = {
         const r = await api('POST', '/api/admin/customers', o);
         toast(r.panel && !r.panel.skipped ? 'Customer created + line added on panel ✓' : 'Customer created ✓');
         if (r.mail) toast(r.mail.ok ? `Login emailed to ${o.email} ✓` : 'Email failed: ' + (r.mail.error || ''), !r.mail.ok);
+        if (r.duplicates?.length) toast(`⚠️ Same details as: ${r.duplicates.slice(0, 3).map((x) => `${x.name} (${x.username}, ${x.why.join('+')})`).join('; ')}`, true);
         const b = state.config.branding;
         const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${o.username}\n🔑 Password: ${o.password}\n📅 Expires: ${fmtDate(r.customer.expiresAt)}`;
         closeModal();
@@ -1474,6 +1533,7 @@ document.addEventListener('submit', (e) => {
 let searchT;
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
   if (t.dataset.input === 'u-search') { state.user.q = t.value; clearTimeout(searchT); searchT = setTimeout(() => { const pos = t.selectionStart; renderUserTab().then(() => { const n = $('[data-input=u-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); }, 300); }
   const pf = t.closest('form[data-preview]');

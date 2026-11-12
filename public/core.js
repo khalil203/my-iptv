@@ -159,6 +159,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/reseller-sale') return 'customers_edit';
   if (path === '/api/admin/renewal/send') return 'customers_edit';
   if (path === '/api/admin/renewal/status') return 'customers_view';
+  if (path === '/api/admin/duplicates') return 'customers_view';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
   if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
@@ -466,6 +467,34 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       return { ...a, balance: Math.round(bal * 100) / 100, usd, mad: fromUsd(usd, 'MAD', rates) };
     });
   }
+  // ----- duplicate detection -----
+  const normEmail = (x) => String(x || '').trim().toLowerCase();
+  const normPhone = (x) => { const d = String(x || '').replace(/\D/g, ''); return d.length >= 8 ? d.slice(-9) : ''; };
+  const normName = (x) => String(x || '').toLowerCase().normalize('NFKD').replace(/[^a-z\u0600-\u06ff]/g, '');
+  function contactKeys(c) {
+    const k = [];
+    if (normEmail(c.email)) k.push(['email', normEmail(c.email)]);
+    for (const ph of new Set([normPhone(c.phone), normPhone(c.whatsapp)])) if (ph) k.push(['phone', ph]);
+    if (c.lineUsername && c.lineUsername !== c.username) k.push(['line', String(c.lineUsername).toLowerCase()]);
+    const nm = normName(c.name); if (nm.length >= 6) k.push(['name', nm]);
+    return k;
+  }
+  function findMatches(list, probe, skipId) {
+    const keys = contactKeys(probe).filter(([t]) => t !== 'name');
+    const out = [];
+    for (const c of list) {
+      if (c.id === skipId) continue;
+      const ck = contactKeys(c);
+      const why = keys.filter(([t, v]) => ck.some(([t2, v2]) => t === t2 && v === v2)).map(([t]) => t);
+      if (why.length) out.push({ c, why: [...new Set(why)] });
+    }
+    return out;
+  }
+  async function logAttempt(a) {
+    const l = (await store.get('dupAttempts')) || [];
+    l.unshift({ at: Date.now(), ...a });
+    await store.put('dupAttempts', l.slice(0, 500));
+  }
   async function stockInfo(s) {
     const st = await getStock(); const sales = await getSales();
     const purchased = st.reduce((a, x) => a + (Number(x.credits) || 0), 0);
@@ -585,7 +614,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || phone.replace(/\D/g, '').length < 8) return err(400, 'trial_invalid');
         const list = await getCustomers();
         const digits = (x) => String(x || '').replace(/\D/g, '').slice(-9);
-        if (list.some((c) => (c.email && c.email === email) || (c.phone && digits(c.phone) === digits(phone)) || (c.whatsapp && digits(c.whatsapp) === digits(whatsapp)))) return err(409, 'trial_used');
+        const prev = findMatches(list, { email, phone, whatsapp });
+        if (prev.length) {
+          await logAttempt({ kind: 'trial', name, email, phone, whatsapp, ip: body.ip || '', matches: prev.slice(0, 5).map((m) => ({ id: m.c.id, username: m.c.username, name: m.c.name, why: m.why })) });
+          await log('trial', `Blocked repeat trial: ${name} <${email}> matches ${prev.map((m) => m.c.username).slice(0, 3).join(', ')}`);
+          return err(409, 'trial_used');
+        }
         if (body.ip) { // max 3 trials per network per day
           const k = 'trialip:' + body.ip;
           const n = (await store.get(k)) || 0;
@@ -815,13 +849,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!panel.ok && !panel.skipped) return err(502, 'Panel: ' + panel.error);
           if (!panel.skipped) applyPanelCreds(s, c, panel.data);
         }
+        const dup = findMatches(list, c);
+        if (dup.length) await logAttempt({ kind: 'new customer', name: c.name, email: c.email, phone: c.phone, whatsapp: c.whatsapp, by: actorName, newUsername: c.username, matches: dup.slice(0, 5).map((m) => ({ id: m.c.id, username: m.c.username, name: m.c.name, why: m.why })) });
         list.push(c);
         await saveCustomers(list);
         await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
         let mail = null;
         if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
-        return ok({ customer: view(c, s), panel, mail });
+        return ok({ customer: view(c, s), panel, mail, duplicates: dup.map((m) => ({ username: m.c.username, name: m.c.name, why: m.why })) });
       }
 
       const m = path.match(/^\/api\/admin\/customers\/([\w-]+)(?:\/(\w+))?$/);
@@ -1059,6 +1095,28 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(r);
       }
 
+      // ----- duplicates -----
+      if (R('GET', '/api/admin/duplicates')) {
+        const list = await getCustomers();
+        const useName = query.name === '1';
+        const byKey = new Map();
+        for (const c of list) for (const [t, v] of contactKeys(c)) {
+          if (t === 'name' && !useName) continue;
+          const k = t + ':' + v;
+          if (!byKey.has(k)) byKey.set(k, []);
+          if (!byKey.get(k).includes(c)) byKey.get(k).push(c);
+        }
+        const out = [];
+        for (const [k, members] of byKey) {
+          if (members.length < 2) continue;
+          const type = k.slice(0, k.indexOf(':')), value = k.slice(k.indexOf(':') + 1);
+          out.push({ id: k, type, value: type === 'phone' ? (members.map((m) => m.whatsapp || m.phone).find((x) => String(x || '').replace(/\D/g, '').endsWith(value)) || value) : type === 'name' ? members[0].name : value,
+            members: members.map((c) => view(c, s)).sort((a, b) => (b.createdAt || b.startAt) - (a.createdAt || a.startAt)) });
+        }
+        out.sort((a, b) => b.members.length - a.members.length || a.type.localeCompare(b.type));
+        return ok({ groups: out, attempts: ((await store.get('dupAttempts')) || []).slice(0, 200), customersInGroups: new Set(out.flatMap((g) => g.members.map((m) => m.id))).size });
+      }
+
       // ----- renewal emails (bulk) -----
       if (R('GET', '/api/admin/renewal/status')) {
         const list = await getCustomers(); const t = await sentToday();
@@ -1066,15 +1124,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('POST', '/api/admin/renewal/send')) { // sends the next batch (max 50 per call, within today's limit)
         const list = await getCustomers(); const t = await sentToday();
-        const left = Math.max(0, (Number(s.renewalOffer.dailyLimit) || 90) - t.n);
+        const left = body.all ? 100 : Math.max(0, (Number(s.renewalOffer.dailyLimit) || 90) - t.n);
         if (!left) return ok({ sent: 0, limitReached: true, waiting: renewalTargets(list).length });
-        const batch = renewalTargets(list, body.onlyRecentDays).sort((a, b) => b.expiresAt - a.expiresAt).slice(0, Math.min(50, left));
+        const batch = renewalTargets(list, body.onlyRecentDays).sort((a, b) => b.expiresAt - a.expiresAt).slice(0, Math.min(body.all ? 100 : 50, left));
         const r = await sendBatch(s, batch.map((c) => ({ to: c.email, ...renewalEmail(s, c, body.appUrl) })));
         if (!r.ok) return err(502, r.error);
         const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; });
         await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400);
         await log('customer', `Renewal emails sent to ${batch.length} customers`);
-        return ok({ sent: batch.length, waiting: renewalTargets(list).length, limitReached: t.n + batch.length >= (Number(s.renewalOffer.dailyLimit) || 90) });
+        return ok({ sent: batch.length, waiting: renewalTargets(list).length, limitReached: !body.all && t.n + batch.length >= (Number(s.renewalOffer.dailyLimit) || 90) });
       }
 
       // ----- reseller packages -----
