@@ -320,7 +320,7 @@ function custActions(c) {
   return `<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
-    ${c.whatsapp || c.phone ? `<a class="btn sm" href="https://wa.me/${esc(String(c.whatsapp || c.phone).replace(/\D/g, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}
+    <button class="btn sm ${c.whatsapp || c.phone ? 'wa-btn' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="WhatsApp message${c.waSentAt ? ' (last ' + fmtDate(c.waSentAt) + ')' : ''}">💬</button>
     ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
     ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}">💳</button>` : ''}
     ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
@@ -495,6 +495,13 @@ function adminOrderSection(s) {
     <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages, prices & Stripe links</summary><div style="margin-top:10px">
       <div id="ops">${op.map(opRow).join('')}</div>
       <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${[['ALL', 'USD + EUR links (mixed)'], ['EUR', 'EUR only'], ['USD', 'USD only'], ['USDT', 'USDT']].map(([c, l]) => `<option value="${c}" ${c === cur ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
+}
+const waForm = () => { const f = $('[data-form=wa]'); const d = Object.fromEntries(new FormData(f)); return { ...d, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }; };
+async function waLoad() {
+  const f = $('[data-form=wa]'); if (!f) return;
+  try { const r = await api('POST', `/api/admin/customers/${f.dataset.id}/wamsg`, waForm()); $('#wa-text').value = r.text; $('#wa-tpl-text').value = r.template;
+    const acc = (state.admin.settings.orderAccounts || []).find((a) => a.id === r.payAcc); $('#wa-info').textContent = (r.type !== 'login' && acc ? `Stripe account: ${acc.name}. ` : '') + (r.isDefault ? 'Default template.' : 'Your saved template.'); }
+  catch (e) { toast(e.message, true); }
 }
 const orderTargets = (grp) => (state.admin.customers || []).filter((c) => c.email && (grp === 'all' || (grp === 'trial' ? c.isTrial : grp === 'notrecent' ? !c.orderSentAt || Date.now() - c.orderSentAt > 7 * 86400000 : c.state === grp)));
 function resellerSaleForm(s) {
@@ -1304,6 +1311,36 @@ const actions = {
     try { const r = await api('POST', '/api/me/order', { pkg: el.dataset.pkg, email: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast(t('offerSent', { email: r.email })); }
     catch (e) { toast(e.message === 'no_email' ? t('noEmail') : e.message, true); }
     el.disabled = false;
+  },
+  'wa-one': async (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
+    const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
+    const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details']] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
+      <div id="wa-pkg">${field('Package', 'pkg', pick, { type: 'select', options: [...s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`])] })}
+      <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
+        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['ALL', 'Random € or $'], ['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
+        <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}${field('Pay link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'Empty = random Stripe link' })}</div>
+      </details></div>
+      <label class="field"><span>Message (you can edit it)</span><textarea id="wa-text" rows="12" dir="auto"></textarea></label>
+      <div class="row"><button type="button" class="btn sm" data-act="wa-refresh">🎲 New random link</button><button type="button" class="btn sm" data-act="wa-copy">📋 Copy</button><button type="button" class="btn sm" data-act="wa-tpl">⚙️ Edit template</button><span class="spacer"></span><button type="button" class="btn primary wa-btn" data-act="wa-open" data-id="${c.id}">💬 Open WhatsApp</button></div>
+      <div id="wa-tpl-box" style="display:none;margin-top:10px"><p class="small muted">Saved template for this message type and language. You can use: {name} {fullname} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {ends} {appUrl} {website} {order} {app}. Use *text* for bold in WhatsApp.</p><textarea id="wa-tpl-text" rows="10" dir="auto"></textarea><div class="row"><button type="button" class="btn sm" data-act="wa-tpl-reset">Reset to default</button><span class="spacer"></span><button type="button" class="btn sm primary" data-act="wa-tpl-save">Save template</button></div></div>
+      <p class="small muted" id="wa-info"></p></form>`, { wide: true });
+    const f = $('[data-form=wa]', body); f.dataset.id = c.id;
+    const show = () => { $('#wa-pkg').style.display = f.type.value === 'login' ? 'none' : ''; };
+    ['type', 'lang', 'pkg', 'title', 'price', 'currency', 'days', 'devices', 'link'].forEach((k) => f[k].addEventListener('change', () => { show(); waLoad(); }));
+    show(); waLoad();
+  },
+  'wa-refresh': () => waLoad(),
+  'wa-copy': async () => { try { await navigator.clipboard.writeText($('#wa-text').value); toast('Copied ✓'); } catch { $('#wa-text').select(); document.execCommand('copy'); toast('Copied ✓'); } },
+  'wa-tpl': () => { const b = $('#wa-tpl-box'); b.style.display = b.style.display === 'none' ? '' : 'none'; },
+  'wa-tpl-reset': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: '' } } }); toast('Back to default ✓'); waLoad(); },
+  'wa-tpl-save': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: $('#wa-tpl-text').value } } }); toast('Template saved ✓'); waLoad(); },
+  'wa-open': async (el) => {
+    const f = $('[data-form=wa]'); const phone = f.phone.value.replace(/\D/g, ''); const text = $('#wa-text').value;
+    if (!phone) return toast('Enter the WhatsApp number with country code.', true);
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
   },
   'order-custom': async () => {
     const s = state.admin.settings; const p0 = s.orderPackages[0] || {};

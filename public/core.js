@@ -104,6 +104,7 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'o1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 139.99, badge: '🔥 Ultimate Plan • 4 Connections', link: '' },
   ],
   orderCurrency: 'EUR',
+  waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
   orderAccounts: [], // Stripe accounts the pay links come from: { id, name, enabled }
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
@@ -165,7 +166,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
-    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts'].includes(x))) return 'plans';
+    if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts', 'waTemplates'].includes(x))) return 'plans';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
@@ -381,6 +382,24 @@ ${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style
 </table></td></tr></table></body></html>`;
   return { subject: v('subject').replace(/<[^>]+>/g, ''), html, payAcc: pl?.acc || '' };
 }
+// WhatsApp message templates. {placeholders} are filled per customer. Admin can override them in settings.waTemplates
+export const WA_TPL = {
+  pay: {
+    en: 'Hello {name} 👋\n\nThank you for choosing *{app}* 🎉\nHere is your package:\n\n📺 *{package}*\n⏳ {days} days · {devices} device(s)\n💶 *{price}*\n\n🔒 Pay securely here:\n{link}\n\nYou get instant activation after payment. Any question? Just reply here 😊',
+    fr: 'Bonjour {name} 👋\n\nMerci d\'avoir choisi *{app}* 🎉\nVoici votre formule :\n\n📺 *{package}*\n⏳ {days} jours · {devices} appareil(s)\n💶 *{price}*\n\n🔒 Payez en toute sécurité ici :\n{link}\n\nActivation immédiate après le paiement. Une question ? Répondez ici 😊',
+    ar: 'مرحبًا {name} 👋\n\nشكرًا لاختيارك *{app}* 🎉\nهذه باقتك:\n\n📺 *{package}*\n⏳ {days} يوم · {devices} جهاز\n💶 *{price}*\n\n🔒 ادفع بأمان من هنا:\n{link}\n\nالتفعيل فوري بعد الدفع. لأي سؤال، رد هنا 😊',
+  },
+  login: {
+    en: 'Hello {name} 👋\n\nYour *{app}* subscription is ready ✅\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n📅 Expires: {expires}\n\n📋 M3U link:\n{m3u}\n\n📲 Watch in our app: {appUrl}\nEnjoy! 🍿',
+    fr: 'Bonjour {name} 👋\n\nVotre abonnement *{app}* est prêt ✅\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n📅 Expire le : {expires}\n\n📋 Lien M3U :\n{m3u}\n\n📲 Regardez dans notre application : {appUrl}\nBon visionnage ! 🍿',
+    ar: 'مرحبًا {name} 👋\n\nاشتراكك في *{app}* جاهز ✅\n\n👤 اسم المستخدم: {username}\n🔑 كلمة المرور: {password}\n🌐 DNS: {dns}\n📅 ينتهي في: {expires}\n\n📋 رابط M3U:\n{m3u}\n\n📲 شاهد في تطبيقنا: {appUrl}\nمشاهدة ممتعة! 🍿',
+  },
+  renew: {
+    en: 'Hello {name} 👋\n\nYour *{app}* subscription {ends} *{expires}* ⏰\nRenew now and keep watching 📺\n\n*{package}* — *{price}*\n🔒 Pay here: {link}\n\nNeed help? Just reply here 😊',
+    fr: 'Bonjour {name} 👋\n\nVotre abonnement *{app}* {ends} *{expires}* ⏰\nRenouvelez maintenant pour continuer à regarder 📺\n\n*{package}* — *{price}*\n🔒 Payez ici : {link}\n\nBesoin d\'aide ? Répondez ici 😊',
+    ar: 'مرحبًا {name} 👋\n\nاشتراكك في *{app}* {ends} *{expires}* ⏰\nجدّد الآن واستمر في المشاهدة 📺\n\n*{package}* — *{price}*\n🔒 ادفع من هنا: {link}\n\nتحتاج مساعدة؟ رد هنا 😊',
+  },
+};
 export function renewalEmail(s, c, appUrl) {
   const lang = RM[c.lang] ? c.lang : 'en'; const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
   const app = s.branding.appName || 'IPTV';
@@ -1042,6 +1061,34 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentAcc = m.payAcc; await saveCustomers(list); }
           await log('customer', `Package email "${pk.title}" to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
+        if (method === 'POST' && sub === 'wamsg') { // WhatsApp message for this customer
+          const type = WA_TPL[body.type] ? body.type : 'pay'; const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : (WA_TPL.pay[c.lang] ? c.lang : 'en');
+          const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
+          const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
+          const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
+          const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
+          const pl = /^https:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : pickPayLink(st, pk);
+          const cur = st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
+          const price = (CUR_SIGN[cur] || '') + Number(pk.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
+          const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
+          const lu = c.lineUsername || c.username, lp = c.linePassword || c.loginPassword || '';
+          const vars = { name: (c.name || '').split(' ')[0], fullname: c.name || '', app: s.branding.appName || 'IPTV', package: pk.title, price, days: pk.days, devices: pk.devices,
+            link: pl?.url || s.email.website || '', username: lu, password: lp, dns, m3u: dns && lp ? `${dns}/get.php?username=${encodeURIComponent(lu)}&password=${encodeURIComponent(lp)}&type=m3u_plus&output=ts` : '',
+            expires: new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
+            website: s.email.website || '', order: c.orderNo || '',
+            ends: c.expiresAt < Date.now() ? { en: 'ended on', fr: 's\'est terminé le', ar: 'انتهى في' }[lang] : { en: 'ends on', fr: 'se termine le', ar: 'ينتهي في' }[lang] };
+          const tpl = String(body.template || s.waTemplates?.[type]?.[lang] || WA_TPL[type][lang]);
+          const out = []; // a line whose value is empty (e.g. no DNS yet) is left out, with its label line
+          for (const line of tpl.split('\n')) {
+            const empty = [...line.matchAll(/\{(\w+)\}/g)].some((m) => m[1] in vars && String(vars[m[1]]) === '');
+            if (empty) { if (/^\s*\{\w+\}\s*$/.test(line) && /:\s*$/.test(out.at(-1) || '')) out.pop(); continue; }
+            out.push(line.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)));
+          }
+          const text = out.join('\n').replace(/\n{3,}/g, '\n\n');
+          const phone = String(body.phone || c.whatsapp || c.phone || '').replace(/\D/g, '');
+          if (body.log) { c.waSentAt = Date.now(); c.waSentType = type; if (type !== 'login') { c.orderSentPkg = pk.id; c.orderSentAcc = pl?.acc || ''; } await saveCustomers(list); await log('customer', `WhatsApp "${type}" message to ${c.username}${type !== 'login' ? ` (${pk.title}, ${price})` : ''}`); }
+          return ok({ text, phone, lang, type, payAcc: pl?.acc || '', template: tpl, isDefault: !s.waTemplates?.[type]?.[lang] });
         }
         if (method === 'GET' && sub === 'renewalpreview') return ok(renewalEmail(s, c, query.appUrl));
         if (method === 'POST' && sub === 'renewal') {
