@@ -51,7 +51,7 @@ npx wrangler deploy
 
 You get a link like `https://my-iptv.<you>.workers.dev`. Open it, then:
 
-1. **Create the admin account** (first-time screen).
+1. **Sign in** with the default admin login **Iptv / Iptv**, then change it in *Account & backup*.
 2. **API settings:**
    - *Streaming server URL*: the TVplus DNS, e.g. `http://your-dns.com:8080`. Put in a test line, then tap **Test server**.
    - *Reseller API*: turn it on and fill in the base URL and API key. Copy each action (create, renew, enable, disable, delete, credits) from the TVplus API docs using the placeholders shown on that page, then tap **Test API**.
@@ -60,6 +60,9 @@ You get a link like `https://my-iptv.<you>.workers.dev`. Open it, then:
 5. **Customers → Add customer.** The app creates the line on the panel and gives you the login details to send.
 
 Optional: add your own domain in Cloudflare → Workers → your worker → *Domains & Routes*.
+
+## Default admin login
+Username **Iptv** · Password **Iptv**. Change it right after the first sign-in: **Account & backup → Admin login details**.
 
 ## Install on phones
 - **iPhone:** open the link in Safari → Share → *Add to Home Screen*.

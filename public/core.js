@@ -108,6 +108,17 @@ const XTREAM_ACTIONS = new Set([
 export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) {
   let sCache = null, sAt = 0;
 
+  // First run: create the default admin (username "Iptv", password "Iptv"). Change it after signing in.
+  async function getAdmin() {
+    let a = await store.get('admin');
+    if (!a) {
+      const salt = uid(8);
+      a = { username: 'Iptv', salt, hash: await hashPassword('Iptv', salt), isDefault: true };
+      await store.put('admin', a);
+    }
+    return a;
+  }
+
   async function getSettings() {
     if (sCache && Date.now() - sAt < cacheMs) return sCache;
     let s = deepMerge(DEFAULT_SETTINGS(), (await store.get('settings')) || {});
@@ -201,8 +212,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       // ---------- public ----------
       if (R('GET', '/api/config')) {
-        const admin = await store.get('admin');
-        return ok({ branding: s.branding, currency: s.currency, setupRequired: !admin, mode });
+        await getAdmin();
+        return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode });
       }
       if (R('POST', '/api/setup')) {
         if (await store.get('admin')) return err(403, 'Admin already exists.');
@@ -216,7 +227,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/login')) {
         const username = String(body.username || '').trim().toLowerCase();
         const password = String(body.password || '');
-        const admin = await store.get('admin');
+        const admin = await getAdmin();
         if (admin && admin.username.toLowerCase() === username) {
           if ((await hashPassword(password, admin.salt)) !== admin.hash) return err(401, 'Wrong username or password.');
           return ok({ token: await newSession('admin', 'admin', s), role: 'admin' });
@@ -450,12 +461,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.newPassword) {
           if (String(body.newPassword).length < 6) return err(400, 'New password needs 6+ characters.');
           admin.salt = uid(8); admin.hash = await hashPassword(body.newPassword, admin.salt);
+          admin.isDefault = false;
         }
         await store.put('admin', admin);
         await log('admin', 'Admin login details changed');
         return ok({ ok: true, username: admin.username });
       }
-      if (R('GET', '/api/admin/me')) return ok({ username: (await store.get('admin')).username, mode });
+      if (R('GET', '/api/admin/me')) { const a = await getAdmin(); return ok({ username: a.username, isDefault: !!a.isDefault, mode }); }
       if (R('GET', '/api/admin/log')) return ok((await store.get('log')) || []);
       if (R('GET', '/api/admin/backup')) return ok({ version: 1, exportedAt: Date.now(), settings: s, customers: await getCustomers() });
       if (R('POST', '/api/admin/restore')) {

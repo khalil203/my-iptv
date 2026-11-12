@@ -194,14 +194,15 @@ async function renderAdmin() {
 }
 
 async function adminOverview() {
-  const [st, cr] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({}))]);
+  const [st, cr, me] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me')]);
   const max = Math.max(1, ...Object.values(st.byMonth));
   const s = state.admin.settings;
   const setupTips = [];
   if (!s.player.serverUrl) setupTips.push('Add your streaming server URL in <a data-act="atab" data-tab="api">API settings</a> so customers can watch.');
   if (!s.reseller.enabled) setupTips.push('Connect the TVplus reseller API in <a data-act="atab" data-tab="api">API settings</a> to create and renew lines automatically.');
   const row = (c) => `<div class="list-item"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'expired ' + fmtDate(c.expiresAt) : c.daysLeft + ' days left'}</div></div><button class="btn sm primary" data-act="renew" data-id="${c.id}">Renew</button></div>`;
-  return `${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
+  const pwWarn = me.isDefault ? `<div class="notice danger">🔐 You are using the default admin login (<b>Iptv / Iptv</b>). Anyone who knows it can control your app. <a data-act="atab" data-tab="security" style="cursor:pointer">Change it now →</a></div>` : '';
+  return `${pwWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
   <div class="stats">
     <div class="stat"><span>Customers</span><b>${st.total}</b></div>
     <div class="stat c-ok"><span>Active</span><b>${st.active}</b></div>
