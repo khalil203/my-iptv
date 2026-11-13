@@ -2008,12 +2008,12 @@ async function loadAccountExtras() {
   });
 }
 function ticketThread(x, admin) {
-  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div></div>`).join('')}</div>`;
+  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>` : ''}</div>`).join('')}</div>`;
 }
 function openTicket(id) {
   const x = (state.user.tickets || []).find((k) => k.id === id); if (!x) return;
   modal(esc(x.subject), `<div style="margin-bottom:10px">${tpill(x.status)}</div>${ticketThread(x, false)}
-    ${x.status === 'closed' ? '' : `<form data-form="ticket-reply" data-id="${esc(x.id)}">${field(t('reply'), 'text', '', { type: 'textarea', rows: 3, ph: t('writeReply'), attrs: 'required maxlength="2000"' })}<button class="btn primary">${t('send')}</button></form>`}`);
+    ${x.status === 'closed' ? '' : `<form data-form="ticket-reply" data-id="${esc(x.id)}">${field(t('reply'), 'text', '', { type: 'textarea', rows: 3, ph: t('writeReply'), attrs: 'required maxlength="2000"' })}<label class="field"><span>${t('attAdd')}</span><input type="file" name="image" accept="image/*"></label><button class="btn primary">${t('send')}</button></form>`}`);
 }
 function openReceipt(id) {
   const x = (state.user.payments || []).find((k) => k.id === id); if (!x) return; const me = state.user.me;
@@ -2040,7 +2040,7 @@ async function adminSupport() {
 function adminTicketModal(id) {
   const x = (state.admin.tickets || []).find((k) => k.id === id); if (!x) return;
   modal(esc(x.subject), `<p class="small muted" style="margin-top:0">${esc(x.name)} · ${esc(x.username)} · opened ${fmtDT(x.createdAt)} ${tpill(x.status)}</p>${ticketThread(x, true)}
-    <form data-form="tk-reply" data-id="${esc(x.id)}" data-perm="customers_edit">${field('Your answer', 'text', '', { type: 'textarea', rows: 4, ph: 'Write the answer the customer will read in the app…', attrs: 'maxlength="2000"' })}
+    <form data-form="tk-reply" data-id="${esc(x.id)}" data-perm="customers_edit">${field('Your answer', 'text', '', { type: 'textarea', rows: 4, ph: 'Write the answer the customer will read in the app…', attrs: 'maxlength="2000"' })}<label class="field"><span>${'Attach a picture (optional)'}</span><input type="file" name="image" accept="image/*"></label>
       <div class="grid2">${field('Status after saving', 'status', x.status === 'closed' ? 'closed' : 'answered', { type: 'select', options: [['answered', 'Answered'], ['open', 'Still waiting for reply'], ['closed', 'Closed']] })}${field('Priority', 'priority', x.priority, { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div>
       <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Save</button></div></form>`, { wide: true });
 }
@@ -2074,7 +2074,7 @@ Object.assign(actions, {
   'hist-clear': () => { localStorage.removeItem(histKey()); toast(t('histCleared')); renderUserTab(); },
   'pin-unlock': () => { const b = modal('🔒 ' + t('parentalT'), `<form data-form="pin-unlock">${field(t('enterPin'), 'pin', '', { type: 'password', attrs: 'required inputmode="numeric" maxlength="4" autocomplete="off" dir="ltr"' })}<button class="btn primary block">${t('unlock')}</button></form>`); b.querySelector('input').focus(); },
   'dev-remove': async (el) => { if (!confirm(t('signOutDev') + '?')) return; await api('POST', '/api/me/devices/remove', { did: el.dataset.did }); toast(t('devOut')); loadAccountExtras(); },
-  'ticket-new': () => { modal('💬 ' + t('newTicket'), `<form data-form="ticket-new">${field(t('subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}${field(t('message'), 'text', '', { type: 'textarea', rows: 5, attrs: 'required minlength="5" maxlength="2000"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">${t('send')}</button></div></form>`); },
+  'ticket-new': () => { modal('💬 ' + t('newTicket'), `<form data-form="ticket-new">${field(t('subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}${field(t('message'), 'text', '', { type: 'textarea', rows: 5, attrs: 'required minlength="5" maxlength="2000"' })}<label class="field"><span>${t('attAdd')}</span><input type="file" name="image" accept="image/*"></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">${t('send')}</button></div></form>`); },
   'ticket-open': (el) => openTicket(el.dataset.id),
   receipt: (el) => openReceipt(el.dataset.id),
   print: () => window.print(),
@@ -2106,15 +2106,15 @@ Object.assign(forms, {
   'pin-off'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); localStorage.removeItem(pinKey()); toast(t('pinRemoved')); renderUserTab(); },
   'pin-unlock'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); state.user.unlocked = true; closeModal(); renderUserTab(); },
   async 'ticket-new'(f) {
-    try { await api('POST', '/api/me/tickets', { subject: f.subject.value, text: f.text.value }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
+    try { await api('POST', '/api/me/tickets', { subject: f.subject.value, text: f.text.value, image: await pickedImage(f) }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
     catch (e) { toast(tErr(e.message), true); }
   },
   async 'ticket-reply'(f) {
-    try { await api('POST', '/api/me/tickets/reply', { id: f.dataset.id, text: f.text.value }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
+    try { await api('POST', '/api/me/tickets/reply', { id: f.dataset.id, text: f.text.value, image: await pickedImage(f) }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
     catch (e) { toast(tErr(e.message), true); }
   },
   async 'tk-reply'(f) {
-    try { await api('POST', '/api/admin/tickets/reply', { id: f.dataset.id, text: f.text.value, status: f.status.value, priority: f.priority.value }); closeModal(); toast('Saved ✓'); $('#admin-body').innerHTML = await adminSupport(); }
+    try { await api('POST', '/api/admin/tickets/reply', { id: f.dataset.id, text: f.text.value, status: f.status.value, priority: f.priority.value, image: await pickedImage(f) }); closeModal(); toast('Saved ✓'); $('#admin-body').innerHTML = await adminSupport(); }
     catch (e) { toast(e.message, true); }
   },
   async 'tfa-enable'(f) {
@@ -2269,6 +2269,32 @@ Object.assign(actions, {
 });
 Object.assign(forms, {
   async 'em-verify'(f) { try { await api('POST', '/api/me/email/verify', { code: f.code.value }); closeModal(); toast(t('emVerified') + ' ✓'); await refreshMe(); } catch (e) { toast(tErr(e.message), true); } },
+});
+
+// ---------------- pictures in support requests ----------------
+// Shrinks the chosen photo on the device (longest side 1280px, JPEG) so it is small to send and store.
+async function pickedImage(f) {
+  const file = f.image && f.image.files[0]; if (!file) return '';
+  if (!/^image\//.test(file.type)) throw new Error('att_bad');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('att_bad')); i.src = url; });
+    for (const [side, q] of [[1280, 0.72], [1000, 0.6], [800, 0.5]]) {
+      const k = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const data = c.toDataURL('image/jpeg', q);
+      if (data.length <= 560000) return data;
+    }
+    throw new Error('att_bad');
+  } finally { URL.revokeObjectURL(url); }
+}
+Object.assign(actions, {
+  'att-show': async (el) => {
+    el.disabled = true;
+    try { const r = await api('GET', `${el.dataset.admin ? '/api/admin' : '/api/me'}/tickets/att?id=${encodeURIComponent(el.dataset.id)}`); const img = new Image(); img.src = r.data; img.alt = ''; img.style.cssText = 'display:block;max-width:100%;border-radius:10px;margin-top:8px'; el.replaceWith(img); }
+    catch (e) { el.disabled = false; toast(tErr(e.message), true); }
+  },
 });
 
 boot();

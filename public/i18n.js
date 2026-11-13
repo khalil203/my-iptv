@@ -169,6 +169,11 @@ Object.assign(D.en, { emVerify: 'Verify email', emVerified: 'Verified', emSent: 
 Object.assign(D.fr, { emVerify: 'Vérifier l’e-mail', emVerified: 'Vérifié', emSent: 'Nous avons envoyé un code à 6 chiffres à {email}. Saisissez-le ici.', em_none: 'Aucune adresse e-mail sur ce compte.', em_limit: 'Vous avez demandé 3 codes aujourd’hui. Réessayez demain.', em_fail: 'L’e-mail n’a pas pu être envoyé. Réessayez plus tard.', em_expired: 'Ce code a expiré. Demandez-en un nouveau.', em_wrong: 'Ce code est incorrect.' });
 Object.assign(D.ar, { emVerify: 'تأكيد البريد', emVerified: 'تم التأكيد', emSent: 'أرسلنا رمزاً من 6 أرقام إلى {email}. أدخله هنا.', em_none: 'لا يوجد بريد إلكتروني في هذا الحساب.', em_limit: 'طلبت 3 رموز اليوم. حاول غداً.', em_fail: 'تعذّر إرسال البريد. حاول لاحقاً.', em_expired: 'انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً.', em_wrong: 'الرمز غير صحيح.' });
 
+
+Object.assign(D.en, { attAdd: 'Add a picture (optional)', attShow: 'Show picture', att_bad: 'This picture could not be used. Choose a smaller photo or a screenshot.', att_gone: 'This picture is no longer stored.' });
+Object.assign(D.fr, { attAdd: 'Ajouter une image (facultatif)', attShow: 'Afficher l’image', att_bad: 'Cette image ne peut pas être utilisée. Choisissez une photo plus petite ou une capture d’écran.', att_gone: 'Cette image n’est plus enregistrée.' });
+Object.assign(D.ar, { attAdd: 'إضافة صورة (اختياري)', attShow: 'عرض الصورة', att_bad: 'تعذّر استعمال هذه الصورة. اختر صورة أصغر أو لقطة شاشة.', att_gone: 'هذه الصورة لم تعد محفوظة.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

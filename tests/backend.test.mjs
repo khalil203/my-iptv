@@ -186,3 +186,18 @@ test('email check: code by email, wrong codes refused, verified flag follows the
   await x.call('PUT', `/api/admin/customers/${cust.id}`, { email: 'new.address@example.com' }, tok);
   assert.equal((await x.call('GET', '/api/me', {}, u)).json.user.emailVerified, false, 'a changed address must be checked again');
 });
+
+test('support pictures: stored with the message, only readable by the owner and staff, bad files refused', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await addCustomer(x, tok); await addCustomer(x, tok, { username: 'other1', email: 'other@example.com', name: 'Other' });
+  const a = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  const b = (await x.call('POST', '/api/login', { username: 'other1', password: 'secret12' })).json.token;
+  const image = 'data:image/jpeg;base64,' + 'A'.repeat(400);
+  assert.equal((await x.call('POST', '/api/me/tickets', { subject: 'Screen problem', text: 'See the picture please', image: 'data:text/html;base64,AAAA' }, a)).status, 400);
+  assert.equal((await x.call('POST', '/api/me/tickets', { subject: 'Screen problem', text: 'See the picture please', image: 'data:image/jpeg;base64,' + 'A'.repeat(700000) }, a)).status, 400);
+  assert.equal((await x.call('POST', '/api/me/tickets', { subject: 'Screen problem', text: 'See the picture please', image }, a)).status, 200);
+  const att = (await x.call('GET', '/api/me/tickets', {}, a)).json[0].messages[0].att; assert.ok(att);
+  assert.equal((await x.call('GET', '/api/me/tickets/att', {}, a, { id: att })).json.data, image);
+  assert.equal((await x.call('GET', '/api/me/tickets/att', {}, b, { id: att })).status, 404, 'another customer cannot open it');
+  assert.equal((await x.call('GET', '/api/admin/tickets/att', {}, tok, { id: att })).json.data, image);
+});

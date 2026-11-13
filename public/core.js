@@ -740,6 +740,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   const getTickets = async () => (await store.get('tickets')) || [];
   const saveTickets = (l) => { const open = l.filter((x) => x.status !== 'closed'); const closed = l.filter((x) => x.status === 'closed').sort((a, b) => b.updatedAt - a.updatedAt); return store.put('tickets', [...open, ...closed].slice(0, 400)); };
   const cleanText = (x, n) => String(x || '').replace(/[\u0000-\u0008\u000b-\u001f]/g, '').trim().slice(0, n);
+  // One picture per support message, shrunk on the device first; kept 90 days.
+  const saveAttachment = async (image) => {
+    if (!image) return '';
+    if (typeof image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) throw new Error('att_bad');
+    const id = uid(8); await store.put('att:' + id, image, 90 * 86400); return id;
+  };
   const getPayments = async () => (await store.get('payments')) || [];
   // A verified Stripe payment: find the customer and the package, extend the subscription, keep a record. Never runs twice for one payment.
   async function applyStripePayment(s, event) {
@@ -1113,17 +1119,24 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (n >= 3) return err(429, 'ticket_limit');
           await store.put(k, n + 1, 86400);
           const all = await getTickets(); const now = Date.now();
-          const tk = { id: uid(5), customerId: c.id, username: c.username, name: c.name, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: c.name || c.username, at: now, text }] };
+          let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'att_bad'); }
+          const tk = { id: uid(5), customerId: c.id, username: c.username, name: c.name, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: c.name || c.username, at: now, text, ...(att ? { att } : {}) }] };
           all.unshift(tk); await saveTickets(all);
           await log('support', `New ticket from ${c.username}: ${subject}`);
           return ok({ ok: true, id: tk.id });
+        }
+        if (R('GET', '/api/me/tickets/att')) { // only pictures from the customer's own requests
+          const id = String(query.id || ''); const mine = (await getTickets()).some((x) => x.customerId === c.id && x.messages.some((m) => m.att === id));
+          const data = mine ? await store.get('att:' + id) : null;
+          return data ? ok({ data }) : err(404, 'att_gone');
         }
         if (R('POST', '/api/me/tickets/reply')) {
           const all = await getTickets(); const tk = all.find((x) => x.id === String(body.id || '') && x.customerId === c.id);
           if (!tk) return err(404, 'Ticket not found.');
           const text = cleanText(body.text, 2000); if (text.length < 2) return err(400, 'ticket_short');
           if (tk.messages.length >= 40) return err(400, 'ticket_full');
-          tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text }); tk.status = 'open'; tk.updatedAt = Date.now();
+          let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'att_bad'); }
+          tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'open'; tk.updatedAt = Date.now();
           await saveTickets(all);
           return ok({ ok: true });
         }
@@ -1228,11 +1241,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return err(404, 'Not found');
       }
       if (R('GET', '/api/admin/tickets')) return ok((await getTickets()).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || b.updatedAt - a.updatedAt));
+      if (R('GET', '/api/admin/tickets/att')) { const data = /^[0-9a-f]+$/.test(String(query.id || '')) ? await store.get('att:' + query.id) : null; return data ? ok({ data }) : err(404, 'This picture is no longer stored.'); }
       if (R('POST', '/api/admin/tickets/reply')) {
         const all = await getTickets(); const tk = all.find((x) => x.id === String(body.id || ''));
         if (!tk) return err(404, 'Ticket not found.');
         const text = cleanText(body.text, 2000);
-        if (text) { tk.messages.push({ from: 'staff', by: actorName.replace(' (owner)', ''), at: Date.now(), text }); tk.status = 'answered'; }
+        let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'The picture is too large or not an image.'); }
+        if (text || att) { tk.messages.push({ from: 'staff', by: actorName.replace(' (owner)', ''), at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'answered'; }
         if (['open', 'answered', 'closed'].includes(body.status)) tk.status = body.status;
         if (['low', 'normal', 'high'].includes(body.priority)) tk.priority = body.priority;
         tk.updatedAt = Date.now(); await saveTickets(all);
