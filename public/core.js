@@ -1234,6 +1234,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (R('POST', '/api/me/order')) { // customer picks a package: get a pay link, and optionally the payment email
           const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
           const m = orderEmail(s, c, pk, body.appUrl); const url = (m.html.match(/<a href="([^"]+)" class="cta-btn"/) || [])[1]?.replace(/&amp;/g, '&') || '';
+          { const k0 = 'ordernote:' + c.id + ':' + pk.id; if (!(await store.get(k0))) { await store.put(k0, 1, 6 * 3600); await notifyAdmin(s, `Order request: ${c.name || c.username} wants “${pk.title}”`, `${c.name || ''} (${c.username})\n${c.email || ''}\n${c.whatsapp || c.phone || ''}\n\nPackage: ${pk.title} · ${pk.days} days · ${pk.devices} device(s) · ${pk.price}\n\nThey opened the payment link. When the payment arrives, renew the customer (and the line on your panel).`); } }
           if (!body.email) { c.orderClickAt = Date.now(); c.orderClickPkg = pk.id; await saveCustomers(list); await log('customer', `${c.username} opened pay link "${pk.title}"${m.payAcc ? ' (' + m.payAcc + ')' : ''}`); return ok({ url }); }
           const to = cleanEmail(c.email); if (!to) return err(400, 'no_email');
           const k = 'ordermail:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
