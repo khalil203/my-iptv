@@ -361,7 +361,7 @@ function filteredCustomers() {
   const { filter, q } = state.admin;
   const qq = q.trim().toLowerCase();
   return state.admin.customers
-    .filter((c) => filter === 'all' || c.state === filter || (filter === 'trial' && c.isTrial))
+    .filter((c) => filter === 'all' || c.state === filter || (filter === 'trial' && c.isTrial) || (filter === 'request' && c.buyRequest && !c.buyRequest.answeredAt))
     .filter((c) => !qq || [c.name, c.username, c.phone, c.lineUsername, c.note, c.email, c.whatsapp, c.orderNo, c.country].some((x) => String(x || '').toLowerCase().includes(qq)))
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
@@ -388,14 +388,14 @@ function customerListHtml() {
   if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
       <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function oldCustomerListHtml() {
   const list = filteredCustomers();
   return `<div class="tbl-wrap cust-table"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>
     <div class="cust-cards">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
@@ -403,9 +403,9 @@ function oldCustomerListHtml() {
 }
 function adminCustomers() {
   const a = state.admin;
-  const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
+  const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial) || (st === 'request' && c.buyRequest && !c.buyRequest.answeredAt)).length;
   return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn" data-act="sync-panel" data-perm="customers_edit" title="Checks every line on your panel and updates end dates, devices and broken lines">🔄 Sync with panel</button><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="customers_edit">📣 Newsletter</button></div>
-    <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
+    <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial', 'request'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f === 'request' ? '🛒 requests' : f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
 
@@ -528,33 +528,21 @@ async function adminResellerSection(s) {
 const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮' };
 const orderPrice = (s, p) => (s.orderCurrency === 'ALL' ? Number(p.price).toFixed(2) + ' €/$' : (ORDER_CUR[s.orderCurrency || 'EUR'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[s.orderCurrency || 'EUR'] ? '' : ' ' + s.orderCurrency));
 const opRow = (p = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
-  <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><button class="btn sm danger" data-act="del-op">✕ Remove</button></div>
-  <input data-k="link" style="margin-top:6px" value="${esc(p.link || '')}" placeholder="${(p.links || []).length ? 'Optional: one fixed link instead of the random ones' : 'Stripe payment link https://buy.stripe.com/…'}" autocapitalize="none"></div>`;
+  <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
 function adminOrderSection(s) {
-  const op = s.orderPackages || []; const cur = s.orderCurrency || 'EUR'; const lc = cur === 'USDT' ? 'USD' : cur;
-  const on = new Set((s.orderAccounts || []).filter((a) => a.enabled !== false).map((a) => a.id));
-  const mine = (l) => (lc === 'ALL' || l.cur === lc) && (!l.acc || on.has(l.acc));
-  const nLinks = (p) => (p.links || []).filter(mine).length || (p.link ? 1 : 0);
-  const nAccs = (p) => new Set((p.links || []).filter(mine).map((l) => l.acc)).size;
-  const missing = op.filter((p) => !nLinks(p)).length;
-  const accs = s.orderAccounts || [];
+  const op = s.orderPackages || []; const cur = ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR';
   return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
-    <p class="small muted">Your 8 order templates. Each email shows the package and a <b>Stripe pay button</b>. It is sent in the customer's language (English, French, Arabic). Send one from a customer's 💳 button, or many at once here.</p>
-    <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><div class="small ${nLinks(p) ? 'pos' : 'neg'}">${nLinks(p) ? `✓ ${nLinks(p)} link${nLinks(p) > 1 ? 's' : ''} · ${nAccs(p)} account${nAccs(p) > 1 ? 's' : ''}` : '⚠️ no pay link'}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
-    ${missing ? `<div class="notice warning">${missing} package${missing > 1 ? 's have' : ' has'} no Stripe payment link yet, so the button opens your website instead. ${s.finance.stripeKey ? 'Tap below to create them in your Stripe account.' : 'Paste the links below, or add your Stripe secret key in Finance and let the app create them.'}</div>` : ''}
-    ${accs.length ? `<h3 style="margin:14px 0 6px;font-size:15px">Stripe accounts used for pay links</h3><p class="small muted" style="margin-top:0">Each email picks a random account from the ones switched on, then one of its links${lc === 'ALL' ? ' (USD or EUR — the email shows the price in that currency)' : ' in ' + lc}. Switch an account off if it is blocked or full.</p>
-      <div id="op-accs">${accs.map((a) => `<label class="row" style="padding:4px 0"><input type="checkbox" data-acc="${esc(a.id)}" ${a.enabled !== false ? 'checked' : ''} style="width:auto"> <b>${esc(a.name)}</b> <span class="small muted">${op.reduce((n, p) => n + (p.links || []).filter((l) => l.acc === a.id && (lc === 'ALL' || l.cur === lc)).length, 0)} links${lc === 'ALL' ? '' : ' in ' + lc}</span></label>`).join('')}</div>
-      <button class="btn sm" data-act="save-accs">Save accounts</button>` : ''}
-    <div class="row">${s.finance.stripeKey && missing ? `<button class="btn" data-act="order-stripe-links">⚡ Create ${missing} Stripe links automatically</button>` : ''}</div>
-    <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages, prices & Stripe links</summary><div style="margin-top:10px">
+    <p class="small muted">Customers see these packages in their account and tap <b>🛒 Request</b> or WhatsApp. You get an email and a 🛒 mark on the customer (filter <b>🛒 requests</b>). Then you send the package email (💳 on the customer) with <b>your own payment link</b> for that order. Without a link, the email button says "Contact us to order" and opens your WhatsApp.</p>
+    <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
+    <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages & prices</summary><div style="margin-top:10px">
       <div id="ops">${op.map(opRow).join('')}</div>
-      <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${[['ALL', 'USD + EUR links (mixed)'], ['EUR', 'EUR only'], ['USD', 'USD only'], ['USDT', 'USDT']].map(([c, l]) => `<option value="${c}" ${c === cur ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
+      <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${['EUR', 'USD', 'USDT'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
 }
 const waForm = () => { const f = $('[data-form=wa]'); const d = Object.fromEntries(new FormData(f)); return { ...d, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }; };
 async function waLoad() {
   const f = $('[data-form=wa]'); if (!f) return;
   try { const r = await api('POST', `/api/admin/customers/${f.dataset.id}/wamsg`, waForm()); $('#wa-text').value = r.text; $('#wa-tpl-text').value = r.template;
-    const acc = (state.admin.settings.orderAccounts || []).find((a) => a.id === r.payAcc); $('#wa-info').textContent = (r.type !== 'login' && acc ? `Stripe account: ${acc.name}. ` : '') + (r.isDefault ? 'Default template.' : 'Your saved template.'); }
+    $('#wa-info').textContent = (r.type !== 'login' && !waForm().link ? 'No payment link: the {link} line is left out. ' : '') + (r.isDefault ? 'Default template.' : 'Your saved template.'); }
   catch (e) { toast(e.message, true); }
 }
 const NL_GROUPS = [['all', 'All customers'], ['paying', 'Paying customers (no trials)'], ['active', 'Active subscriptions'], ['expiring', 'Expiring soon'], ['expired', 'Expired subscriptions'], ['trial', 'Trial users']];
@@ -1143,8 +1131,8 @@ function orderCard() {
   const me = state.user.me; const op = me.orderPackages || []; if (!op.length) return '';
   const u = me.user.username; const app = me.branding.appName;
   return `<div class="card"><h3>💎 ${t('buyTitle')}</h3><div class="plans-grid">${op.map((p) => { const pr = priceTxt(p.price, p.cur); const wa = waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u })); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div><div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
-    <a class="btn sm primary block" style="margin-top:8px" href="${esc(p.url)}" rel="noopener" data-keep data-act="pay-click" data-pkg="${esc(p.id)}">${t('payNow')}</a>
-    <div class="row" style="margin-top:6px;gap:6px">${me.hasEmail ? `<button class="btn sm" style="flex:1" data-act="pay-email" data-pkg="${esc(p.id)}">${t('emailMe')}</button>` : ''}${wa ? `<a class="btn sm wa-btn" style="flex:1" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div></div>`; }).join('')}</div><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
+    ${me.buyRequest?.pkg === p.id && !me.buyRequest.answeredAt ? `<div class="small pos" style="margin-top:8px">✓ ${t('requested')}</div>` : `<button class="btn sm primary block" style="margin-top:8px" data-act="buy-request" data-pkg="${esc(p.id)}">🛒 ${t('requestBuy')}</button>`}
+    ${wa ? `<a class="btn sm wa-btn block" style="margin-top:6px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`; }).join('')}</div><p class="small muted" style="margin:10px 0 0">${t('buyHow')}</p><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
   if (state.user.me.orderPackages?.length) return orderCard();
@@ -1426,21 +1414,14 @@ const actions = {
   retry: () => { state.user.cache = {}; state.user.meAt = 0; renderUser(); },
   'dup-type': async (el) => { state.admin.dupType = el.dataset.t; state.admin.dupLimit = 30; $('#admin-body').innerHTML = await adminDups(); },
   'dup-more': async () => { state.admin.dupLimit += 30; $('#admin-body').innerHTML = await adminDups(); },
-  'save-accs': async () => {
-    const orderAccounts = (state.admin.settings.orderAccounts || []).map((a) => ({ ...a, enabled: !!$(`[data-acc="${a.id}"]`)?.checked }));
-    await saveSettings({ orderAccounts }); renderAdmin();
-  },
+
   'add-op': () => $('#ops').insertAdjacentHTML('beforeend', opRow()),
   'del-op': (el) => el.closest('.op-row').remove(),
   'save-op': async () => {
     const orderPackages = [...document.querySelectorAll('#ops .op-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.op || undefined, title: g('title'), days: Number(g('days')), devices: Number(g('devices')), price: Number(g('price')), badge: g('badge'), link: g('link') }; }).filter((p) => p.title);
     await saveSettings({ orderPackages, orderCurrency: $('#op-cur').value }); renderAdmin();
   },
-  'order-stripe-links': async (el) => {
-    el.disabled = true; el.textContent = 'Creating…';
-    try { const r = await api('POST', '/api/admin/stripe/paylinks', {}); state.admin.settings.orderPackages = r.packages; toast(`Created ${r.made} Stripe payment links ✓`); renderAdmin(); }
-    catch (e) { toast(e.message, true); el.disabled = false; el.textContent = 'Try again'; }
-  },
+
   'order-preview': async (el) => {
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
     if (!state.admin.customers) state.admin.customers = await api('GET', '/api/admin/customers');
@@ -1452,37 +1433,33 @@ const actions = {
   },
   'order-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings;
-    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${s.orderPackages.map((p) => `<option value="${esc(p.id)}" ${p.id === c.orderSentPkg ? 'selected' : ''}>${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select></div>
+    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${s.orderPackages.map((p) => `<option value="${esc(p.id)}" ${p.id === (c.buyRequest?.pkg || c.orderSentPkg) ? 'selected' : ''}>${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select></div>
       <p class="muted small" id="op-subj"></p><iframe id="mail-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
-      <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
-      ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}${c.orderSentAcc ? ' · Stripe: ' + esc((s.orderAccounts || []).find((a) => a.id === c.orderSentAcc)?.name || c.orderSentAcc) : ''}</p>` : ''}`, { wide: true });
-    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
-    $('#op-pick').addEventListener('change', load); load();
+      <label class="field" style="margin-top:12px"><span>Payment link for this order</span><input id="op-link" placeholder="https://… (empty = button opens your WhatsApp)" autocapitalize="none"></label>
+      <div class="row"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
+      ${c.buyRequest ? `<p class="small">🛒 Requested <b>${esc(c.buyRequest.title || '')}</b> on ${fmtDT(c.buyRequest.at)}${c.buyRequest.answeredAt ? ' · answered' : ''}</p>` : ''}
+      ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}${c.orderSentLink ? ' · link: ' + esc(c.orderSentLink) : ''}</p>` : ''}`, { wide: true });
+    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&link=${encodeURIComponent($('#op-link').value.trim())}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
+    $('#op-pick').addEventListener('change', load); $('#op-link').addEventListener('change', load); load();
   },
   'order-send': async (el) => {
     el.disabled = true;
-    try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, appUrl: location.origin }); toast('Package email sent ✓'); closeModal(); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; } }
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, link: $('#op-link').value.trim(), appUrl: location.origin }); toast('Package email sent ✓'); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); } closeModal(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
-  'pay-click': (el) => { try { sessionStorage.setItem('tvp_paying', el.dataset.pkg || '1'); localStorage.setItem('tvp_paying_at', String(Date.now())); } catch {} api('POST', '/api/me/order', { pkg: el.dataset.pkg }).catch(() => {}); },
-  'pay-email': async (el) => {
-    el.disabled = true;
-    try { const r = await api('POST', '/api/me/order', { pkg: el.dataset.pkg, email: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast(t('offerSent', { email: r.email })); }
-    catch (e) { toast(e.message === 'no_email' ? t('noEmail') : e.message, true); }
-    el.disabled = false;
-  },
+
   'wa-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
       <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
-      <div id="wa-pkg">${field('Package', 'pkg', pick, { type: 'select', options: [...s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`])] })}
+      <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`])] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
-        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['ALL', 'Random € or $'], ['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
-        <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}${field('Pay link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'Empty = random Stripe link' })}</div>
+        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
+        <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}</div>
       </details></div>
       <label class="field"><span>Message (you can edit it)</span><textarea id="wa-text" rows="12" dir="auto"></textarea></label>
-      <div class="row"><button type="button" class="btn sm" data-act="wa-refresh">🎲 New random link</button><button type="button" class="btn sm" data-act="wa-copy">📋 Copy</button><button type="button" class="btn sm" data-act="wa-tpl">⚙️ Edit template</button><span class="spacer"></span><button type="button" class="btn primary wa-btn" data-act="wa-open" data-id="${c.id}">💬 Open WhatsApp</button></div>
+      <div class="row"><button type="button" class="btn sm" data-act="wa-copy">📋 Copy</button><button type="button" class="btn sm" data-act="wa-tpl">⚙️ Edit template</button><span class="spacer"></span><button type="button" class="btn primary wa-btn" data-act="wa-open" data-id="${c.id}">💬 Open WhatsApp</button></div>
       <div id="wa-tpl-box" style="display:none;margin-top:10px"><p class="small muted">Saved template for this message type and language. You can use: {name} {fullname} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {ends} {appUrl} {website} {order} {app}. Use *text* for bold in WhatsApp.</p><textarea id="wa-tpl-text" rows="10" dir="auto"></textarea><div class="row"><button type="button" class="btn sm" data-act="wa-tpl-reset">Reset to default</button><span class="spacer"></span><button type="button" class="btn sm primary" data-act="wa-tpl-save">Save template</button></div></div>
       <p class="small muted" id="wa-info"></p></form>`, { wide: true });
     const f = $('[data-form=wa]', body); f.dataset.id = c.id;
@@ -1507,14 +1484,14 @@ const actions = {
     let d; try { d = JSON.parse(localStorage.getItem('tvp_nl_draft')); } catch {}
     const running = st.camp?.id && st.groups[st.camp.group]?.left > 0 && st.groups[st.camp.group]?.left < st.groups[st.camp.group]?.total;
     if (running) d = st.camp; d = { ...nlBlank(), ...(d || {}), content: { ...nlBlank().content, ...(d?.content || {}) } };
-    const link = String(d.link || ''); const linkSel = ['', 'site', 'app'].includes(link) || link.startsWith('pkg:') ? link : 'url';
+    const link = String(d.link || ''); const linkSel = ['', 'site', 'app', 'contact'].includes(link) ? link : link.startsWith('pkg:') ? 'contact' : 'url';
     const body = modal('📣 Newsletter / promotion email', `<form data-form="nl" onsubmit="return false" ${running ? `data-cid="${esc(d.id)}"` : ''}>
       ${running ? `<div class="notice info">⏸ Your last campaign stopped with <b>${st.groups[d.group].left}</b> customers still waiting. Press <b>Send</b> to continue it, or <a data-act="nl-new" style="cursor:pointer;text-decoration:underline">start a new one</a>.</div>` : ''}
       <div class="grid2">${field('Send to', 'group', d.group, { type: 'select', options: NL_GROUPS.map(([k, l]) => [k, `${l} (${st.groups[k].total})`]) })}${field('Languages', 'split', d.split ? '1' : '0', { type: 'select', options: [['0', 'One message for everyone'], ['1', 'Different message per language (EN / FR / AR)']] })}</div>
       <div id="nl-one">${field('Email language (greeting & footer)', 'lang', d.lang || 'en', { type: 'select', options: NL_LANGS })}${nlFields('all', d.content.all)}</div>
       <div id="nl-split"><p class="small muted" style="margin:0 0 6px">Each customer gets the version in their language. If one language is empty, they get English.</p><div class="row" style="gap:6px;margin-bottom:8px">${NL_LANGS.map(([k, l], i) => `<button type="button" class="btn sm ${i ? '' : 'primary'}" data-act="nl-tab" data-k="${k}">${l}</button>`).join('')}</div>${['en', 'fr', 'ar'].map((k) => nlFields(k, d.content[k])).join('')}</div>
       <div class="grid3">${field('Top badge (optional)', 'badge', d.badge, { ph: '🔥 Limited offer' })}${field('Coupon code (optional)', 'coupon', d.coupon, { ph: 'LION001' })}${field('Image URL (optional)', 'image', d.image, { attrs: 'autocapitalize="none"', ph: 'https://…/banner.jpg' })}</div>
-      <div class="grid2">${field('Button opens', 'link', linkSel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['app', 'The INTPROTO-TV app'], ...s.orderPackages.map((p) => ['pkg:' + p.id, `Pay: ${p.title} (random Stripe link)`]), ['url', 'Other link…']] })}${field('Other link', 'linkUrl', linkSel === 'url' ? link : '', { attrs: 'autocapitalize="none"', ph: 'https://…' })}</div>
+      <div class="grid2">${field('Button opens', 'link', linkSel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['app', 'The INTPROTO-TV app'], ['contact', 'Contact us (WhatsApp)'], ['url', 'Other link (e.g. a payment link)…']] })}${field('Other link', 'linkUrl', linkSel === 'url' ? link : '', { attrs: 'autocapitalize="none"', ph: 'https://…' })}</div>
       <div class="row"><select id="nl-pvlang" style="width:auto">${NL_LANGS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button type="button" class="btn" data-act="nl-preview">👁 Preview</button><input id="nl-test" value="${esc(s.email.adminEmail || '')}" placeholder="test@email.com" style="flex:1;min-width:150px" autocapitalize="none"><button type="button" class="btn" data-act="nl-test">Send test</button></div>
       <iframe id="nl-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe>
       <div class="row" style="margin-top:12px"><span class="small muted" style="flex:1">Every email has an "Unsubscribe" link; unsubscribed customers are skipped${st.unsubscribed ? ` (${st.unsubscribed} so far)` : ''}. Sent 100 at a time. If Resend's daily limit stops it, open this again tomorrow and press Send to continue — nobody gets it twice.</span><button type="button" class="btn primary" data-act="nl-send">📨 Send</button></div>
@@ -1551,15 +1528,20 @@ const actions = {
     } catch (e) { out.innerHTML = `<div class="notice danger">${esc(e.message)} — sent ${total}. Open the newsletter again later and press Send to continue.</div>`; }
     el.disabled = false;
   },
+  'buy-request': async (el) => {
+    el.disabled = true;
+    try { await api('POST', '/api/me/order', { pkg: el.dataset.pkg }); toast(t('requestSent')); const me = state.user.me; me.buyRequest = { pkg: el.dataset.pkg, at: Date.now() }; renderUserTab(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
   'order-custom': async () => {
     const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const body = modal('✍️ Custom package email', `<form data-form="order-custom" onsubmit="return false">
       <div class="grid2">${field('Email address', 'to', '', { type: 'email', attrs: 'required autocapitalize="none"', ph: 'customer@gmail.com' })}${field('Customer name', 'name', '', { ph: 'Leave empty for "Dear Valued Customer"' })}</div>
       <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('Package', 'pkg', p0.id, { type: 'select', options: s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]) })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">Change the details (optional)</summary>
-        <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['ALL', 'Random € or $'], ['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
+        <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"', ph: String(p0.days ?? '') })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"', ph: String(p0.devices ?? '') })}${field('Top badge', 'badge', '', { ph: 'e.g. 🎁 Special offer' })}</div>
-        ${field('Pay link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'Empty = random Stripe link of this package', help: 'Paste a special Stripe link here for a custom price.' })}
+        ${field('Pay link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your payment link for this order', help: 'Empty = the button says "Contact us to order" and opens your WhatsApp.' })}
         ${field('Email subject', 'subject', '', { ph: 'Empty = automatic' })}
       </details>
       ${field('Personal message', 'note', '', { type: 'textarea', ph: 'Optional — shown in the email under the greeting' })}
@@ -1577,13 +1559,13 @@ const actions = {
     const f = $('[data-form=order-custom]'); const d = Object.fromEntries(new FormData(f));
     if (!f.to.reportValidity()) return;
     el.disabled = true;
-    try { const r = await api('POST', '/api/admin/order/custom', { ...d, saveCustomer: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); const acc = (state.admin.settings.orderAccounts || []).find((a) => a.id === r.payAcc); toast(`Sent to ${d.to} ✓${acc ? ' · Stripe: ' + acc.name : ''}`); closeModal(); }
+    try { const r = await api('POST', '/api/admin/order/custom', { ...d, saveCustomer: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast(`Sent to ${d.to} ✓`); closeModal(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'order-bulk': async () => {
     if (!state.admin.customers) state.admin.customers = await api('GET', '/api/admin/customers');
     const s = state.admin.settings; const n = (g) => orderTargets(g).length;
-    modal('💳 Package emails to many customers', `<label class="small muted">Package</label><select id="ob-pkg"><option value="random">🎲 Random package for each customer</option>${s.orderPackages.map((p) => `<option value="${esc(p.id)}">${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select>
+    modal('💳 Package emails to many customers', `<label class="small muted">Package</label><select id="ob-pkg">${s.orderPackages.map((p) => `<option value="${esc(p.id)}">${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select><label class="small muted" style="margin-top:10px;display:block">Payment link (optional, same for everyone)</label><input id="ob-link" placeholder="https://… empty = button opens your WhatsApp" autocapitalize="none">
       <label class="small muted" style="margin-top:10px;display:block">Send to</label><select id="ob-grp">${[['expired', 'Expired customers'], ['expiring', 'Expiring soon'], ['active', 'Active customers'], ['trial', 'Trial users'], ['notrecent', 'Everyone not emailed in the last 7 days'], ['all', 'All customers']].map(([k, l]) => `<option value="${k}">${l} (${n(k)})</option>`).join('')}</select>
       <div class="row" style="margin-top:12px"><button class="btn primary" data-act="order-go">📨 Send now</button></div>
       <p class="small muted">Sent in batches of 100. Customers with a broken email address are skipped. Your Resend plan must allow that many emails (free plan: 100/day, 3,000/month).</p><div id="ob-out"></div>`);
@@ -1591,13 +1573,13 @@ const actions = {
   'order-go': async (el) => {
     const grp = $('#ob-grp').value; const pkg = $('#ob-pkg').value; const ids = orderTargets(grp).map((c) => c.id);
     if (!ids.length) return toast('Nobody in this group has an email.', true);
-    if (!confirm(`Send ${pkg === 'random' ? 'a random package email' : 'this package email'} to ${ids.length} customers?`)) return;
+    if (!confirm(`Send this package email to ${ids.length} customers?`)) return;
     el.disabled = true; const out = $('#ob-out'); let total = 0;
     try {
       for (let i = 0; i < ids.length; i += 100) {
         out.innerHTML = `<div class="spinner"></div><p class="small muted" style="text-align:center">Sent ${total} of ${ids.length}…</p>`;
         if (i) await new Promise((ok) => setTimeout(ok, 700));
-        const r = await api('POST', '/api/admin/order/send', { ids: ids.slice(i, i + 100), pkg, appUrl: location.origin }); total += r.sent;
+        const r = await api('POST', '/api/admin/order/send', { ids: ids.slice(i, i + 100), pkg, link: $('#ob-link').value.trim(), appUrl: location.origin }); total += r.sent;
       }
       out.innerHTML = `<div class="notice success">✅ Sent ${total} package emails.${ids.length - total ? ` ${ids.length - total} skipped (invalid email).` : ''}</div>`;
       state.admin.customers = await api('GET', '/api/admin/customers');
@@ -2527,7 +2509,7 @@ const TPL_GROUPS = [
   ['AM', 'trial', '🎁 Trial & welcome email', 'Sent with the login details when a free trial or a subscription starts. Texts starting with “trial” are for trials, “sub” for paid subscriptions.', '{name} {app} {date} {hours}'],
   ['MAIL', 'expiry', '⏰ Expiry reminder & short emails', 'The reminder sent a few days before a subscription ends, plus the short labels used in simple emails.', '{name} {days} {date} {hours}'],
   ['RM', 'renewal', '🔁 Renewal offer email', 'Sent to customers whose subscription or trial has ended.', '{name} {app} {site} {coupon}'],
-  ['OM', 'order', '💳 Package order email', 'Sent with the Stripe pay link for a package.', '{name} {app} {pkg} {price} {d} {n}'],
+  ['OM', 'order', '💳 Package order email', 'Package email; the button uses the payment link you type when sending (or WhatsApp).', '{name} {app} {pkg} {price} {d} {n}'],
 ];
 const WA_NAMES = { pay: '💳 Payment link (place an order)', trial: '🎁 Free trial details', thanks: '🙏 Thank you for your purchase', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
 const LANG3 = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
@@ -2573,7 +2555,7 @@ const pickJson = () => new Promise((res) => { const i = document.createElement('
 // ---------------- import & export: every list, as a file or edited by hand ----------------
 const DATA_SETS = [
   ['plans', 'Plans', 'The plans customers are on: name, days, price, devices, panel package, credits.', 'plans'],
-  ['orderPackages', 'Order packages', 'The packages on the website and in order emails, with their Stripe links.', 'plans'],
+  ['orderPackages', 'Order packages', 'The packages customers can request and that you send in order emails.', 'plans'],
   ['resellerPackages', 'Reseller packages', 'Credit packages you sell to resellers.', 'plans'],
   ['templates', 'Message templates', 'Your email wording and WhatsApp messages.', 'templates'],
   ['alerts', 'Alert settings', 'The thresholds and groups of the Alerts page.', 'alerts'],

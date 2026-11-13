@@ -105,7 +105,6 @@ export const DEFAULT_SETTINGS = () => ({
   ],
   orderCurrency: 'EUR',
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
-  orderAccounts: [], // Stripe accounts the pay links come from: { id, name, enabled }
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
   email: { lang: 'en', resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
@@ -181,7 +180,6 @@ function permFor(method, path, body) {
   if (path === '/api/admin/order/send') return 'customers_edit';
   if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
-  if (path === '/api/admin/stripe/paylinks') return 'plans';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
@@ -421,30 +419,23 @@ const OM = {
   en: { dir: 'ltr', badge: '{app} Order Checkout', title: 'Thank You for Choosing {app} 🎉', sub: 'Please place your order for your selected package below.', dear: 'Dear {name},', dearAny: 'Dear Valued Customer,',
     intro: 'Your <strong>{pkg}</strong> subscription package is ready for checkout. Click the secure Stripe payment button below to complete your order and receive instant activation.',
     introMulti: 'Your <strong>{pkg}</strong> subscription package is ready for checkout. Stream simultaneously on {n} devices. Click below to complete your order via Stripe.',
-    access: '{d} Days Access', dev1: '📺 1 Device Connection', devN: '📺 {n} Devices Simultaneous Connection', cta: '🔒 Order {pkg} ({price}) →', secure: '100% Secure Stripe Payment • Instant Email Delivery',
+    access: '{d} Days Access', dev1: '📺 1 Device Connection', devN: '📺 {n} Devices Simultaneous Connection', cta: '🔒 Order {pkg} ({price}) →', ctaContact: '💬 Contact us to order', contactNote: 'Message us and we send you your personal payment link.', secure: '100% Secure Stripe Payment • Instant Email Delivery',
     help: '📞 Need Assistance?', regards: 'Warm regards,', team: 'Customer Support Team', subject: '{pkg} — {price} | {app} order' },
   fr: { dir: 'ltr', badge: 'Commande {app}', title: "Merci d'avoir choisi {app} 🎉", sub: 'Passez votre commande pour la formule choisie ci-dessous.', dear: 'Bonjour {name},', dearAny: 'Cher client,',
     intro: 'Votre abonnement <strong>{pkg}</strong> est prêt. Cliquez sur le bouton de paiement sécurisé Stripe ci-dessous pour finaliser votre commande et recevoir une activation immédiate.',
     introMulti: 'Votre abonnement <strong>{pkg}</strong> est prêt. Regardez en même temps sur {n} appareils. Cliquez ci-dessous pour payer via Stripe.',
-    access: 'Accès {d} jours', dev1: '📺 1 appareil', devN: '📺 {n} appareils en même temps', cta: '🔒 Commander {pkg} ({price}) →', secure: 'Paiement Stripe 100 % sécurisé • Livraison immédiate par email',
+    access: 'Accès {d} jours', dev1: '📺 1 appareil', devN: '📺 {n} appareils en même temps', cta: '🔒 Commander {pkg} ({price}) →', ctaContact: '💬 Contactez-nous pour commander', contactNote: 'Écrivez-nous et nous vous envoyons votre lien de paiement personnel.', secure: 'Paiement Stripe 100 % sécurisé • Livraison immédiate par email',
     help: "📞 Besoin d'aide ?", regards: 'Cordialement,', team: 'Service client', subject: '{pkg} — {price} | commande {app}' },
   ar: { dir: 'rtl', badge: 'طلب {app}', title: 'شكرًا لاختيارك {app} 🎉', sub: 'أكمل طلب الباقة التي اخترتها أدناه.', dear: 'عزيزي/عزيزتي {name}،', dearAny: 'عزيزي العميل،',
     intro: 'باقة اشتراكك <strong>{pkg}</strong> جاهزة للدفع. اضغط على زر الدفع الآمن عبر Stripe لإتمام طلبك والحصول على تفعيل فوري.',
     introMulti: 'باقة اشتراكك <strong>{pkg}</strong> جاهزة للدفع. شاهد على {n} أجهزة في نفس الوقت. اضغط أدناه للدفع عبر Stripe.',
-    access: 'وصول لمدة {d} يومًا', dev1: '📺 جهاز واحد', devN: '📺 {n} أجهزة في نفس الوقت', cta: '🔒 اطلب {pkg} ({price}) ←', secure: 'دفع آمن 100% عبر Stripe • تسليم فوري بالبريد',
+    access: 'وصول لمدة {d} يومًا', dev1: '📺 جهاز واحد', devN: '📺 {n} أجهزة في نفس الوقت', cta: '🔒 اطلب {pkg} ({price}) ←', ctaContact: '💬 تواصل معنا للطلب', contactNote: 'راسلنا وسنرسل لك رابط الدفع الخاص بك.', secure: 'دفع آمن 100% عبر Stripe • تسليم فوري بالبريد',
     help: '📞 تحتاج مساعدة؟', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: '{pkg} — {price} | طلب {app}' },
 };
 const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 // Random pay link for a package: from enabled Stripe accounts, in the email currency
-export function pickPayLink(s, pkg) {
-  const cur = s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency || 'EUR'; const all = cur === 'ALL';
-  const on = new Set((s.orderAccounts || []).filter((a) => a.enabled !== false).map((a) => a.id));
-  let pool = (pkg.links || []).filter((l) => (all || l.cur === cur) && l.url && (!l.acc || on.has(l.acc)));
-  if (all && pool.length) { // first a random account, then one of its links, so every account gets the same share
-    const accs = [...new Set(pool.map((l) => l.acc))]; const a = accs[Math.floor(Math.random() * accs.length)]; pool = pool.filter((l) => l.acc === a);
-  }
-  if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
-  return pkg.link ? { url: pkg.link, acc: '' } : null;
+export function pickPayLink(s, pkg) { // only a link the admin types for one order (no stored Stripe links)
+  return pkg?.link ? { url: pkg.link, acc: '' } : null;
 }
 export function orderEmail(s, c, pkg, appUrl, chosen) {
   const lang = ml(c); const L = OM[lang]; const e = escHtml;
@@ -456,7 +447,8 @@ export function orderEmail(s, c, pkg, appUrl, chosen) {
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
   const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
-  const link = (pl?.url ? payUrlFor(pl.url, c) : '') || site; const al = L.dir === 'rtl' ? 'right' : 'left';
+  const contact = s.branding.supportUrl || (s.email.supportEmail ? 'mailto:' + s.email.supportEmail : '') || site;
+  const link = (pl?.url ? payUrlFor(pl.url, c) : '') || contact; const al = L.dir === 'rtl' ? 'right' : 'left';
   const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v('subject')}</title>
 <style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
 @media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
@@ -473,8 +465,8 @@ ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="95" style="display:block;
 <div dir="auto" style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:6px">${e(pkg.title)}</div>
 <div style="font-size:14px;font-weight:600;color:#475569;margin-bottom:14px">${v(n > 1 ? 'devN' : 'dev1')}</div>
 <div dir="ltr" style="font-size:36px;font-weight:900;color:#0284c7;margin-bottom:18px">${e(price)} <span style="font-size:14px;font-weight:600;color:#64748b">${e(cur)}</span></div>
-${link ? `<a href="${e(link)}" class="cta-btn" style="display:inline-block;background:#0284c7;color:#fff;font-size:16px;font-weight:700;text-decoration:none;padding:15px 36px;border-radius:8px;box-shadow:0 4px 14px rgba(2,132,199,.3)">${v('cta')}</a>` : ''}
-<div style="margin-top:12px;font-size:12px;color:#64748b">${L.secure}</div></td></tr></table></td></tr>
+${link ? `<a href="${e(link)}" class="cta-btn" style="display:inline-block;background:${pl?.url ? '#0284c7' : '#25d366'};color:#fff;font-size:16px;font-weight:700;text-decoration:none;padding:15px 36px;border-radius:8px;box-shadow:0 4px 14px rgba(2,132,199,.3)">${pl?.url ? v('cta') : v('ctaContact')}</a>` : ''}
+<div style="margin-top:12px;font-size:12px;color:#64748b">${pl?.url ? L.secure : v('contactNote')}</div></td></tr></table></td></tr>
 <tr><td class="mobile-pad" style="padding:0 40px 32px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0"><tr><td style="padding:20px 24px;text-align:${al}"><div style="font-size:15px;font-weight:700;color:#166534;margin-bottom:6px">${L.help}</div><div style="font-size:14px;color:#166534">
 ${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.email.supportEmail)}</a>` : ''}${s.email.supportEmail && site ? ' &nbsp;|&nbsp; ' : ''}${site ? `🌐 <a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a>` : ''}${s.branding.supportUrl ? ` &nbsp;|&nbsp; 💬 <a href="${e(s.branding.supportUrl)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.branding.supportLabel || 'WhatsApp')}</a>` : ''}</div></td></tr></table></td></tr>
 <tr><td class="mobile-pad" style="padding:0 40px 32px;border-bottom:1px solid #f1f5f9;text-align:${al}"><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:#0284c7;font-weight:600">${L.team}</span></p></td></tr>
@@ -500,7 +492,8 @@ export function newsletterEmail(s, c, camp, appUrl, unsubUrl) {
   let link = ''; let payAcc = '';
   if (camp.link === 'site') link = site;
   else if (camp.link === 'app') link = base;
-  else if (String(camp.link || '').startsWith('pkg:')) { const pk = (s.orderPackages || []).find((p) => p.id === camp.link.slice(4)); const pl = pk && pickPayLink(s, pk); link = pl?.url || site; payAcc = pl?.acc || ''; }
+  else if (camp.link === 'contact' || String(camp.link || '').startsWith('pkg:')) link = s.branding.supportUrl || (s.email.supportEmail ? 'mailto:' + s.email.supportEmail : '') || site;
+  else if (false) { const pk = (s.orderPackages || []).find((p) => p.id === camp.link.slice(4)); const pl = pk && pickPayLink(s, pk); link = pl?.url || site; payAcc = pl?.acc || ''; }
   else if (/^https?:\/\/\S+$/.test(String(camp.link || ''))) link = camp.link;
   const html = `<!DOCTYPE html><html lang="${lang}" dir="${dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(fillTxt(C.subject || C.title))}</title>
 <style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
@@ -1288,26 +1281,23 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const v = view(c, s);
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance && !c.pendingLine;
 
-        if (R('POST', '/api/me/order')) { // customer picks a package: get a pay link, and optionally the payment email
+        if (R('POST', '/api/me/order')) { // customer asks to buy a package: the admin is told and sends a payment link
           const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
-          const m = orderEmail(s, c, pk, body.appUrl); const url = (m.html.match(/<a href="([^"]+)" class="cta-btn"/) || [])[1]?.replace(/&amp;/g, '&') || '';
-          { const k0 = 'ordernote:' + c.id + ':' + pk.id; if (!(await store.get(k0))) { await store.put(k0, 1, 6 * 3600); await notifyAdmin(s, `Order request: ${c.name || c.username} wants “${pk.title}”`, `${c.name || ''} (${c.username})\n${c.email || ''}\n${c.whatsapp || c.phone || ''}\n\nPackage: ${pk.title} · ${pk.days} days · ${pk.devices} device(s) · ${pk.price}\n\nThey opened the payment link. When the payment arrives, renew the customer (and the line on your panel).`); } }
-          if (!body.email) { c.orderClickAt = Date.now(); c.orderClickPkg = pk.id; await saveCustomers(list); await log('customer', `${c.username} opened pay link "${pk.title}"${m.payAcc ? ' (' + m.payAcc + ')' : ''}`); return ok({ url }); }
-          const to = cleanEmail(c.email); if (!to) return err(400, 'no_email');
-          const k = 'ordermail:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
-          if (n >= 5) return err(429, 'Too many emails today. Please try tomorrow or contact us.');
-          const r = await sendEmail(s, to, m.subject, m.html);
-          if (!r.ok) return err(502, r.error || 'Email failed');
-          await store.put(k, n + 1, 2 * 86400); c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentAcc = m.payAcc; await saveCustomers(list);
-          await log('customer', `${c.username} asked for the "${pk.title}" payment email <${to}>`);
-          return ok({ url, email: to });
+          const k = 'buyreq:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
+          if (n >= 5) return err(429, 'Too many requests today. Please contact us on WhatsApp.');
+          await store.put(k, n + 1, 2 * 86400);
+          c.buyRequest = { pkg: pk.id, title: pk.title, price: pk.price, at: Date.now() }; await saveCustomers(list);
+          await log('customer', `🛒 ${c.username} wants to buy "${pk.title}" (${pk.price})`);
+          await notifyAdmin(s, `🛒 Order request: ${c.name || c.username} wants “${pk.title}”`, `${c.name || ''} (${c.username})\n${c.email || ''}\n${c.whatsapp || c.phone || ''}\n\nPackage: ${pk.title} · ${pk.days} days · ${pk.devices} device(s) · ${pk.price} ${s.orderCurrency || 'EUR'}\n\nOpen the app → Customers → 🛒 requests → 💳 on this customer, paste your payment link and send.`).catch(() => {});
+          return ok({ ok: true });
         }
         if (R('GET', '/api/me')) {
           const { lineUsername, linePassword, loginPassword, ...pub } = v;
           return ok({
             user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
-            orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: payUrlFor(pl.url, c), cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
+            orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
+            buyRequest: c.buyRequest || null,
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
               server: trimSlash(c.dns || s.player.serverUrl), u: lineUsername, p: linePassword,
@@ -1623,12 +1613,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           price: Number(p.price) || 0, connections: Math.max(1, Number(p.connections) || 1), package: String(p.package || ''),
           credits: p.credits === '' || p.credits == null ? Math.max(1, Math.round((Number(p.days) || 30) / 30)) : Number(p.credits),
         }));
-        if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: String(p.link || '').trim(), links: Array.isArray(p.links) ? p.links.filter((l) => /^https:\/\/[^\s]+$/.test(l?.url || '')).map((l) => ({ acc: String(l.acc || ''), cur: String(l.cur || 'EUR').toUpperCase(), url: String(l.url) })) : (s.orderPackages.find((x) => x.id === p.id)?.links || []) }));
+        if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: '' }));
         // Templates are replaced as a whole, so removing a change brings the built-in wording back.
         if (isObj(body.mailTexts)) next.mailTexts = cleanMailTexts(body.mailTexts);
         if (isObj(body.waTemplates)) { next.waTemplates = {}; for (const ty of Object.keys(WA_TPL)) for (const lg of ['en', 'fr', 'ar']) { const v = body.waTemplates?.[ty]?.[lg]; if (typeof v === 'string' && v.trim() && v !== WA_TPL[ty][lg]) (next.waTemplates[ty] ||= {})[lg] = v.slice(0, 3000); } }
         if (Array.isArray(body.waCustom)) next.waCustom = body.waCustom.slice(0, 30).map((x) => ({ id: String(x.id || uid(4)).replace(/[^\w]/g, '').slice(0, 12) || uid(4), name: String(x.name || 'Message').slice(0, 40), text: { en: String(x.text?.en || '').slice(0, 3000), fr: String(x.text?.fr || '').slice(0, 3000), ar: String(x.text?.ar || '').slice(0, 3000) } })).filter((x) => x.text.en || x.text.fr || x.text.ar);
-        if (Array.isArray(body.orderAccounts)) next.orderAccounts = body.orderAccounts.map((a) => ({ id: String(a.id || 'acc' + uid(3)), name: String(a.name || 'Stripe'), enabled: a.enabled !== false }));
         if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
         await saveSettings(next);
@@ -1767,12 +1756,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
-        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); return ok(orderEmail(s, c, pk, query.appUrl)); }
+        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl)); }
         if (method === 'POST' && sub === 'order') {
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
-          const m = orderEmail(s, c, pk, body.appUrl); const r = await sendEmail(s, to, m.subject, m.html);
-          if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentAcc = m.payAcc; await saveCustomers(list); }
+          const fixedL = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
+          const m = orderEmail(s, c, pk, body.appUrl, fixedL); const r = await sendEmail(s, to, m.subject, m.html);
+          if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentLink = fixedL?.url || ''; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); await saveCustomers(list); }
           await log('customer', `Package email "${pk.title}" to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
@@ -1783,13 +1773,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
           const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
-          const pl = /^https:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : pickPayLink(st, pk);
+          const pl = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
           const cur = st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
           const price = (CUR_SIGN[cur] || '') + Number(pk.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
           const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
           const lu = c.lineUsername || c.username, lp = c.linePassword || c.loginPassword || '';
           const vars = { name: (c.name || '').split(' ')[0], fullname: c.name || '', app: s.branding.appName || 'IPTV', package: pk.title, price, days: pk.days, devices: pk.devices,
-            link: pl?.url || s.email.website || '', username: lu, password: lp, dns, m3u: dns && lp ? `${dns}/get.php?username=${encodeURIComponent(lu)}&password=${encodeURIComponent(lp)}&type=m3u_plus&output=ts` : '',
+            link: pl?.url || '', username: lu, password: lp, dns, m3u: dns && lp ? `${dns}/get.php?username=${encodeURIComponent(lu)}&password=${encodeURIComponent(lp)}&type=m3u_plus&output=ts` : '',
             expires: new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
             website: s.email.website || '', order: c.orderNo || '',
             ends: c.expiresAt < Date.now() ? { en: 'ended on', fr: 's\'est terminé le', ar: 'انتهى في' }[lang] : { en: 'ends on', fr: 'se termine le', ar: 'ينتهي في' }[lang] };
@@ -2031,7 +2021,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const want = new Set((body.ids || []).slice(0, 100));
         const pick = (c) => (body.pkg === 'random' ? pk[Math.floor(Math.random() * pk.length)] : pk.find((p) => p.id === body.pkg));
         if (body.pkg !== 'random' && !pick()) return err(400, 'Choose a package.');
-        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email) && !c.unsub).map((c) => { const p = pick(c); return { c, p, m: orderEmail(s, c, p, body.appUrl) }; });
+        const fixedB = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
+        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email) && !c.unsub).map((c) => { const p = pick(c); return { c, p, m: orderEmail(s, c, p, body.appUrl, fixedB) }; });
         if (!batch.length) return ok({ sent: 0 });
         const r = await sendBatch(s, batch.map(({ c, m }) => ({ to: c.email, subject: m.subject, html: m.html })));
         if (!r.ok) return err(502, r.error);
@@ -2076,22 +2067,6 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('customer', `Custom package email "${pk.title}" to <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
         if (body.saveCustomer && r.ok) { const list = await getCustomers(); const c = list.find((x) => cleanEmail(x.email) === to); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = base.id; c.orderSentAcc = m.payAcc; await saveCustomers(list); } }
         return r.ok ? ok({ ...r, payAcc: m.payAcc }) : err(502, r.error || 'Email failed');
-      }
-      if (R('POST', '/api/admin/stripe/paylinks')) { // creates a Stripe Payment Link for every package without one
-        const key = s.finance.stripeKey; if (!key) return err(400, 'Add your Stripe secret key in Finance first.');
-        const st = async (path, form) => { const r = await fetchFn('https://api.stripe.com/v1/' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form).toString() }); const d = await r.json(); if (!r.ok) throw new Error(d.error?.message || 'Stripe error ' + r.status); return d; };
-        const cur = (s.orderCurrency === 'USDT' ? 'USD' : s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR').toLowerCase(); let made = 0;
-        try {
-          for (const p of s.orderPackages) {
-            if (p.link || (p.links || []).length) continue;
-            const price = await st('prices', { currency: cur, unit_amount: String(Math.round(p.price * 100)), 'product_data[name]': `${s.branding.appName || 'IPTV'} — ${p.title}` });
-            const back = String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''); // after paying, Stripe sends the customer back into the app
-            const pl = await st('payment_links', { 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1', 'phone_number_collection[enabled]': 'true', 'metadata[package]': p.id, ...(/^https:\/\//.test(back) ? { 'after_completion[type]': 'redirect', 'after_completion[redirect][url]': back + '/#paid' } : {}) });
-            p.link = pl.url; made++;
-          }
-        } catch (e) { if (made) await saveSettings(s); return err(502, `Stripe: ${e.message}${made ? ` (${made} links were created)` : ''}`); }
-        await saveSettings(s); await log('settings', `Created ${made} Stripe payment links`);
-        return ok({ made, packages: s.orderPackages });
       }
       if (R('POST', '/api/admin/clean-emails')) {
         const list = await getCustomers(); let fixed = 0;
