@@ -340,3 +340,15 @@ test('live chat: both sides see the messages, unread counts work, customers cann
   assert.equal((await x.call('GET', '/api/me/chat', {}, ub)).json.messages.length, 0, 'another customer sees only their own chat');
   assert.notEqual((await x.call('GET', '/api/admin/chats', {}, ua)).status, 200);
 });
+
+test('adding a customer is not blocked when the panel answers 404; the answer is passed back', async () => {
+  const db = new Map();
+  const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  const fetchFn = async (url) => (String(url).startsWith('http://panel.example') ? { ok: false, status: 404, text: async () => '<html>Not Found</html>' } : { ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
+  const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
+  const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  await call('PUT', '/api/admin/settings', { reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' } }, tok);
+  const r = await call('POST', '/api/admin/customers', { name: 'Test Person', username: 'testuser', password: 'secret12', phone: '+212612345678', planId: 'p1', createOnPanel: true }, tok);
+  assert.equal(r.status, 200); assert.equal(r.json.customer.username, 'testuser'); assert.equal(r.json.panel.ok, false); assert.match(r.json.panel.error, /404/);
+  assert.equal((await call('GET', '/api/admin/customers', {}, tok)).json.length, 1);
+});

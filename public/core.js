@@ -1549,8 +1549,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let panel = null;
         if (body.createOnPanel && !ln0) {
           panel = await panelCall(s, 'create', panelVars(c, s));
-          if (!panel.ok && !panel.skipped) return err(502, 'Panel: ' + panel.error);
-          if (!panel.skipped) applyPanelCreds(s, c, panel.data);
+          // The customer is saved even when the panel refuses, so nothing typed is lost; the dashboard shows what the panel answered.
+          if (!panel.ok && !panel.skipped) await log('customer', `Panel did not create the line for ${c.username}: ${panel.error}`);
+          else if (!panel.skipped) applyPanelCreds(s, c, panel.data);
         }
         const dup = findMatches(list, c);
         if (dup.length) await logAttempt({ kind: 'new customer', name: c.name, email: c.email, phone: c.phone, whatsapp: c.whatsapp, by: actorName, newUsername: c.username, matches: dup.slice(0, 5).map((m) => ({ id: m.c.id, username: m.c.username, name: m.c.name, why: m.why })) });

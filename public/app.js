@@ -413,7 +413,8 @@ function customerForm(c) {
     ${c.pendingLine ? `<div class="notice warning">⏳ This trial is waiting for a line. Paste the M3U link from your panel below and save: the trial starts and the login email is sent.</div>` : ''}
     ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
-    <div class="grid3">${field('Phone', 'phone', c.phone || '', { type: 'tel' })}${field('WhatsApp', 'whatsapp', c.whatsapp || '', { type: 'tel', ph: 'same as phone' })}${field('Email language', 'lang', c.lang || 'fr', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
+    <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
+    <div class="grid3">${field('Email language', 'lang', c.lang || 'fr', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '')}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
     <div class="grid3">${field('Address', 'address', c.address || '')}${field('Server', 'server', c.server || '', { ph: 'MEGA, DINO…' })}${field('Panel', 'panel', c.panel || '')}</div>
     <h3 style="margin-top:6px">App login details</h3>
@@ -1855,19 +1856,26 @@ const forms = {
     const o = formToObj(f);
     const id = f.dataset.id;
     if (o.planId === 'custom' && !o.expiresAt) return toast('Pick an expiry date for custom plans', true);
-    const btn = f.querySelector('button.primary'); btn.disabled = true;
+    for (const k of ['phone', 'whatsapp']) { // "+212612345678" from the country code and the number
+      const raw = String(f[k]?.value || '').trim(); const full = fullPhone(f, k);
+      if (raw && !full) return toast(`${k === 'phone' ? 'Phone' : 'WhatsApp'}: choose the country code and enter the full number.`, true);
+      o[k] = full; delete o[k + '_cc'];
+    }
+    if (!o.whatsapp) o.whatsapp = o.phone;
+    const btn = f.querySelector('button.primary'); btn.disabled = true; let panelNote = '';
     try {
       if (id) { if (!o.password) delete o.password; if (!o.expiresAt) delete o.expiresAt; await api('PUT', `/api/admin/customers/${id}`, o); toast('Customer updated'); }
       else {
         o.appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
         const r = await api('POST', '/api/admin/customers', o);
-        toast(r.panel && !r.panel.skipped ? 'Customer created + line added on panel ✓' : 'Customer created ✓');
+        toast(r.panel && !r.panel.skipped && r.panel.ok !== false ? 'Customer created + line added on panel ✓' : 'Customer created ✓');
+        if (r.panel && r.panel.ok === false) panelNote = r.panel.error || 'unknown error';
         if (r.mail) toast(r.mail.ok ? `Login emailed to ${o.email} ✓` : 'Email failed: ' + (r.mail.error || ''), !r.mail.ok);
         if (r.duplicates?.length) toast(`⚠️ Same details as: ${r.duplicates.slice(0, 3).map((x) => `${x.name} (${x.username}, ${x.why.join('+')})`).join('; ')}`, true);
-        const b = state.config.branding;
+        const b = state.config.branding; o.username = r.customer.username || o.username; if (!o.password) o.password = r.customer.linePassword || '';
         const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${o.username}\n🔑 Password: ${o.password}\n📅 Expires: ${fmtDate(r.customer.expiresAt)}`;
         closeModal();
-        modal('Customer created 🎉', `<p class="muted">Send these login details to your customer:</p><div class="code" id="newlogin">${esc(text)}</div><div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" data-act="copy-new">📋 Copy</button></div>`);
+        modal('Customer created 🎉', `${panelNote ? `<div class="notice warning">⚠️ The customer is saved, but <b>the panel did not create the line</b>: ${esc(panelNote)}<br>Create the line on your panel, then tap Edit on this customer and paste its M3U link.</div>` : ''}<p class="muted">Send these login details to your customer:</p><div class="code" id="newlogin">${esc(text)}</div><div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" data-act="copy-new">📋 Copy</button></div>`);
         actions['copy-new'] = async () => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { prompt('Copy:', text); } };
         state.admin.customers = await api('GET', '/api/admin/customers');
         if (state.admin.tab === 'customers') $('#admin-body').innerHTML = adminCustomers(); else if (state.admin.tab === 'overview') renderAdminBodyOnly();
@@ -2611,9 +2619,12 @@ function guessCountry() {
 }
 const flag = (cc) => String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 let regionNames = null; const countryName = (cc) => { try { regionNames ||= new Intl.DisplayNames([getLang()], { type: 'region' }); return regionNames.of(cc); } catch { return cc; } };
-function phoneField(label, name, required = true) {
-  const g = guessCountry();
-  return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" ${required ? 'required' : ''} inputmode="tel" autocomplete="tel-national" dir="ltr" placeholder="612345678" pattern="[0-9 +().-]{6,20}"></div></label>`;
+function phoneField(label, name, required = true, value = '') {
+  // an existing number is split into its country code and the rest (longest matching code wins)
+  const digits = String(value || '').replace(/\D/g, ''); const plus = String(value || '').trim().startsWith('+');
+  const hit = plus ? DIAL.filter(([, d]) => digits.startsWith(d)).sort((x, y) => y[1].length - x[1].length)[0] : null;
+  const g = hit ? hit[0] : value ? '' : guessCountry(); const rest = hit ? digits.slice(hit[1].length) : String(value || '');
+  return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" value="${esc(rest)}" ${required ? 'required' : ''} inputmode="tel" autocomplete="off" dir="ltr" placeholder="612345678" pattern="[0-9 +().-]{6,20}"></div></label>`;
 }
 // "+212612345678" from the country code and the number typed (a leading 0 is dropped; a full +number typed by hand is kept).
 function fullPhone(f, name) {
