@@ -248,6 +248,7 @@ const ADMIN_TABS = [
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
   ['chat', '🗨', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
   ['support', '💬', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
@@ -305,6 +306,7 @@ async function renderAdmin() {
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
+    else if (t === 'receipts') body.innerHTML = await adminReceipts();
     else if (t === 'chat') { body.innerHTML = await adminChat(); chatScroll(); }
     else if (t === 'templates') body.innerHTML = await adminTemplates(s);
     else if (t === 'emails') body.innerHTML = await adminEmails();
@@ -361,7 +363,7 @@ function filteredCustomers() {
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
 function custActions(c) {
-  return `${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+  return `${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
@@ -399,7 +401,7 @@ function oldCustomerListHtml() {
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="customers_edit">📣 Newsletter</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn" data-act="sync-panel" data-perm="customers_edit" title="Checks every line on your panel and updates end dates, devices and broken lines">🔄 Sync with panel</button><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="customers_edit">📣 Newsletter</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
@@ -950,6 +952,7 @@ function blockedScreen() {
   const { user, dashboard: d, branding: b } = state.user.me;
   if (d.maintenance) return `<div class="block-screen"><div class="ic">🛠</div><h2>${t('maintTitle')}</h2><p class="muted">${esc(d.maintenanceMessage)}</p></div>`;
   if (user.state === 'expired') return `<div class="block-screen"><div class="ic">⏰</div><h2>${t('expiredTitle')}</h2><p class="muted">${t('expiredText', { date: fmtDate(user.expiresAt) })}</p>${b.supportUrl ? `<a class="btn primary ${waNum(b) ? 'wa-btn' : ''}" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">${waNum(b) ? '💬 ' + t('whatsapp') : esc(b.supportLabel || t('support'))}</a>` : ''}</div>${orderCard()}`;
+  if (state.user.me.user.lineBad && state.user.me.user.state !== 'expired') return `<div class="block-screen"><div class="ic">📡</div><h2>${t('lineBadTitle')}</h2><p class="muted">${t('lineBadText')}</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="chat-open">🗨 ${t('chatT')}</button>${waNum(state.user.me.branding) ? `<a class="btn wa-btn" href="${esc(waUrl(state.user.me.branding, t('waMsg', { app: state.user.me.branding.appName, u: state.user.me.user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div></div>`;
   if (state.user.me.user.pendingLine) return `<div class="block-screen"><div class="ic">⏳</div><h2>${t('pendingTitle')}</h2><p class="muted">${t('pendingText')}</p>${waNum(state.user.me.branding) ? `<a class="btn wa-btn" href="${esc(waUrl(state.user.me.branding, t('waMsg', { app: state.user.me.branding.appName, u: state.user.me.user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`;
   if (!state.user.me.stream) return `<div class="block-screen"><div class="ic">📡</div><h2>${t('notReady')}</h2><p class="muted">${t('notReadyText')}</p></div>`;
   return '';
@@ -1122,7 +1125,7 @@ function orderCard() {
   const u = me.user.username; const app = me.branding.appName;
   return `<div class="card"><h3>💎 ${t('buyTitle')}</h3><div class="plans-grid">${op.map((p) => { const pr = priceTxt(p.price, p.cur); const wa = waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u })); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div><div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
     <a class="btn sm primary block" style="margin-top:8px" href="${esc(p.url)}" target="_blank" rel="noopener" data-keep data-act="pay-click" data-pkg="${esc(p.id)}">${t('payNow')}</a>
-    <div class="row" style="margin-top:6px;gap:6px">${me.hasEmail ? `<button class="btn sm" style="flex:1" data-act="pay-email" data-pkg="${esc(p.id)}">${t('emailMe')}</button>` : ''}${wa ? `<a class="btn sm wa-btn" style="flex:1" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div></div>`; }).join('')}</div></div>`;
+    <div class="row" style="margin-top:6px;gap:6px">${me.hasEmail ? `<button class="btn sm" style="flex:1" data-act="pay-email" data-pkg="${esc(p.id)}">${t('emailMe')}</button>` : ''}${wa ? `<a class="btn sm wa-btn" style="flex:1" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div></div>`; }).join('')}</div><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
   if (state.user.me.orderPackages?.length) return orderCard();
@@ -2060,7 +2063,8 @@ async function loadAccountExtras() {
   fill(pm, async () => {
     const list = await api('GET', '/api/me/payments'); state.user.payments = list;
     if (!$('#acc-payments')) return;
-    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(x.plan)}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') + `<p style="margin:10px 0 0"><a href="#" class="small muted" data-act="refund-ask">${t('refundAsk')}</a></p>` : `<p class="muted small">${t('noPayments')}</p>`}`;
+    let rcs = []; try { rcs = await api('GET', '/api/me/receipts'); } catch {}
+    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${rcs.length ? rcs.slice(0, 5).map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>🧾 ${esc(x.pkgTitle)}</b><div class="small muted">${fmtDate(x.at)}${x.reason ? ' · ' + esc(x.reason) : ''}</div></div><span class="pill st-${x.status === 'approved' ? 'active' : x.status === 'rejected' ? 'expired' : 'open'}">${t('rc_' + x.status)}</span></div>`).join('') : ''}${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(x.plan)}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') + `<p style="margin:10px 0 0"><a href="#" class="small muted" data-act="refund-ask">${t('refundAsk')}</a></p>` : `<p class="muted small">${t('noPayments')}</p>`}`;
   });
 }
 function ticketThread(x, admin) {
@@ -2404,6 +2408,8 @@ const custCsv = (list) => toCsv(['Name', 'Username', 'Email', 'Phone', 'WhatsApp
 
 // ---------------- alerts: who needs attention, in groups the owner can tune ----------------
 const ALERT_DEFS = [
+  ['lineBad', '📡', 'Line not working on the panel', (c) => !!c.lineBad, () => 'The panel says these lines do not exist or are not active, so these customers cannot watch. Create or fix the line on the panel, then tap Edit and paste its M3U link.'],
+  ['renewPending', '🔁', 'Paid: renew on the panel', (c) => !!c.renewPending, () => 'You approved a payment, and the line still has to be renewed on the panel. This clears by itself after the next sync once the panel shows the new end date.'],
   ['pendingLine', '🆘', 'Waiting for a line', (c) => !!c.pendingLine, () => 'These customers asked for a trial and the panel did not create it. Tap Edit, paste the M3U link from your panel and save.'],
   ['trialEnding', '⏳', 'Trials ending soon', (c, a) => c.isTrial && c.state !== 'expired' && c.status !== 'disabled' && c.hoursLeft <= a.trialHours, (a) => `Free trials with ${a.trialHours} hours or less left. A good moment to send the payment link.`],
   ['expiring', '📅', 'Subscriptions ending soon', (c, a) => !c.isTrial && c.state !== 'expired' && c.status !== 'disabled' && c.daysLeft <= a.expiringDays, (a) => `Paid subscriptions ending within ${a.expiringDays} days.`],
@@ -2425,7 +2431,7 @@ async function adminAlerts(s) {
   state.admin.alGroups = groups;
   const total = new Set(groups.flatMap((g) => g.list.map((c) => c.id))).size;
   const shown = groups.filter((g) => (!ui.f || g.k === ui.f) && (ui.f || g.list.length));
-  return `<div class="row" style="margin-bottom:12px"><input style="flex:1;min-width:180px" type="search" placeholder="🔎 Search these alerts…" value="${esc(ui.q)}" data-input="al-search">${can('settings') ? `<button class="btn" data-act="al-custom">⚙️ Customize</button>` : ''}</div>
+  return `<div class="row" style="margin-bottom:12px"><input style="flex:1;min-width:180px" type="search" placeholder="🔎 Search these alerts…" value="${esc(ui.q)}" data-input="al-search"><button class="btn" data-act="sync-panel" data-perm="customers_edit">🔄 Sync with panel</button>${can('settings') ? `<button class="btn" data-act="al-custom">⚙️ Customize</button>` : ''}</div>
     <div class="chips"><a class="${ui.f ? '' : 'on'}" data-act="al-f" data-f="">All · ${total}</a>${groups.map((g) => `<a class="${ui.f === g.k ? 'on' : ''}" data-act="al-f" data-f="${g.k}">${g.icn} ${g.name} · ${g.list.length}</a>`).join('')}</div>
     ${shown.length ? shown.map((g) => { const all = ui.open[g.k] || ui.f === g.k; const rows = all ? g.list : g.list.slice(0, 5);
       return `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${g.icn} ${g.name} <span class="pill ${g.list.length ? 'st-expiring' : 'st-active'}">${g.list.length}</span></h3>${g.list.length ? `<button class="btn sm" data-act="al-csv" data-k="${g.k}">⬇ CSV</button>` : ''}</div><p class="small muted" style="margin:4px 0 10px">${esc(g.why)}</p>
@@ -2721,6 +2727,48 @@ Object.assign(actions, {
 Object.assign(forms, {
   async 'chat-send'(f) { const text = f.text.value.trim(); if (!text) return; f.text.value = ''; try { const r = await api('POST', '/api/me/chat', { text }); const el = $('#chat-thread'); if (el) el.dataset.n = ''; chatPaint(r.messages, 'c'); chatScroll(); } catch (e) { f.text.value = text; toast(tErr(e.message), true); } f.text.focus(); },
   async 'chat-reply'(f) { const text = f.text.value.trim(); if (!text) return; f.text.value = ''; try { const r = await api('POST', '/api/admin/chat', { id: state.admin.ch.id, text }); const el = $('#chat-thread'); if (el) el.dataset.n = ''; chatPaint(r.messages, 's'); chatScroll(); } catch (e) { f.text.value = text; toast(e.message, true); } f.text.focus(); },
+});
+
+// =====================================================================
+// Panel sync and payment receipts
+// =====================================================================
+async function syncPanel(ids) {
+  let off = 0, changed = 0, bad = 0, total = 0, error = '';
+  for (let guard = 0; guard < 400; guard++) {
+    const r = await api('POST', '/api/admin/sync', { offset: off, ids });
+    changed += r.changed; total = r.total; if (r.error) error = r.error; off = r.next; bad += r.bad;
+    toast(`Checking the panel… ${Math.min(off, total)} / ${total}`);
+    if (r.done) break;
+  }
+  return { changed, bad, total, error };
+}
+async function adminReceipts() {
+  const list = await api('GET', '/api/admin/receipts'); state.admin.rcs = list; const ui = (state.admin.rc ||= { f: 'pending' });
+  const shown = list.filter((x) => ui.f === 'all' || x.status === ui.f); const n = (f) => list.filter((x) => x.status === f).length;
+  const tone = { pending: 'st-open', approved: 'st-active', rejected: 'st-expired' };
+  return `<p class="small muted">Customers who paid by bank transfer, cash or another way upload a photo of their receipt from the app. Look at the picture and tap Approve: the subscription is extended and the customer is told by email and in the chat.</p>
+    <div class="chips">${[['pending', 'To check'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']].map(([k, nm]) => `<a class="${ui.f === k ? 'on' : ''}" data-act="rc-f" data-f="${k}">${nm} · ${k === 'all' ? list.length : n(k)}</a>`).join('')}</div>
+    ${shown.length ? shown.map((x) => `<div class="card"><div class="row"><div class="avatar">${esc(initials(x.name))}</div><div style="flex:1;min-width:160px"><b>${esc(x.name)}</b> <span class="pill ${tone[x.status]}">${x.status === 'pending' ? 'to check' : x.status}</span><div class="small muted">${esc(x.username)} · ${fmtDT(x.at)}</div></div><b dir="ltr">${esc(x.amount)} ${esc(x.cur)}</b></div>
+      <p style="margin:10px 0 6px"><b>${esc(x.pkgTitle)}</b> · ${esc(x.days)} days · ${esc(x.devices)} device(s)${x.note ? `<br><span class="muted">“${esc(x.note)}”</span>` : ''}${x.reason ? `<br><span class="muted">Reason given: ${esc(x.reason)}</span>` : ''}</p>
+      <div class="row"><button class="btn sm" data-act="att-show" data-id="${esc(x.att)}" data-admin="1">📎 Show the receipt</button>${x.status === 'pending' ? `<span class="spacer"></span><button class="btn sm danger" data-act="rc-reject" data-perm="customers_edit" data-id="${esc(x.id)}">Reject</button><button class="btn sm primary" data-act="rc-approve" data-perm="customers_edit" data-id="${esc(x.id)}">Approve</button>` : `<span class="small muted" style="margin-inline-start:auto">${esc(x.by || '')} · ${x.decidedAt ? fmtDT(x.decidedAt) : ''}</span>`}</div></div>`).join('') : `<div class="empty"><span class="ic">🧾</span>${list.length ? 'Nothing in this list.' : 'No receipts yet. Customers send one with “I have paid” under the packages in their app.'}</div>`}`;
+}
+Object.assign(actions, {
+  'sync-panel': async (el) => {
+    el.disabled = true;
+    try { const r = await syncPanel(); state.admin.customers = null; await renderAdmin(); toast(r.error && !r.changed && r.bad === 0 ? 'The panel could not be checked: ' + r.error : `Checked ${r.total} customers · ${r.changed} updated · ${r.bad} line(s) not working${r.error ? ' · some could not be checked' : ''}`, !!r.error && !r.changed); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'rc-f': async (el) => { state.admin.rc.f = el.dataset.f; $('#admin-body').innerHTML = await adminReceipts(); },
+  'rc-approve': (el) => { const x = (state.admin.rcs || []).find((k) => k.id === el.dataset.id); if (!x) return; const s = state.admin.settings;
+    modal('Approve this payment', `<form data-form="rc-approve" data-id="${esc(x.id)}"><p class="muted" style="margin-top:0">${esc(x.name)} · ${esc(x.pkgTitle)}</p><div class="grid3">${field('Days to add', 'days', x.days, { type: 'number', attrs: 'min="1" max="1100" required' })}${field(`Amount received (${s.currency})`, 'amount', '', { type: 'number', attrs: 'min="0" step="0.01"', help: `They paid ${x.amount} ${x.cur}.` })}${field('Received in', 'accountId', '', { type: 'select', options: [['', '—'], ...s.finance.accounts.map((a) => [a.id, `${a.name} (${a.currency})`])] })}</div><div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Approve and extend</button></div></form>`, { wide: true }); },
+  'rc-reject': (el) => { modal('Reject this receipt', `<form data-form="rc-reject" data-id="${esc(el.dataset.id)}">${field('Reason the customer will read (optional)', 'reason', '', { type: 'textarea', rows: 2, attrs: 'maxlength="300"', ph: 'e.g. The amount does not match the package.' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn danger">Reject</button></div></form>`); },
+  'rc-new': () => { const me = state.user.me; const op = me.orderPackages || [];
+    modal('🧾 ' + t('rcTitle'), `<form data-form="rc-new">${field(t('rcPkg'), 'pkg', op[0]?.id || '', { type: 'select', options: op.map((p) => [p.id, `${p.title} · ${priceTxt(p.price, p.cur)}`]) })}<label class="field"><span>${t('rcFile')}</span><input type="file" name="image" accept="image/*" required></label>${field(t('rcNote'), 'note', '', { attrs: 'maxlength="300"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">${t('send')}</button></div></form>`); },
+});
+Object.assign(forms, {
+  async 'rc-new'(f) { const btn = f.querySelector('button.primary'); btn.disabled = true; try { await api('POST', '/api/me/receipt', { pkg: f.pkg.value, note: f.note.value, image: await pickedImage(f) }); closeModal(); modal('🧾 ' + t('rcTitle'), `<div class="notice success">${t('rcSent')}</div><button class="btn block" data-act="close-modal">OK</button>`); if (state.user.tab === 'account') loadAccountExtras(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
+  async 'rc-approve'(f) { try { const r = await api('POST', '/api/admin/receipts/decide', { id: f.dataset.id, action: 'approve', days: f.days.value, amount: f.amount.value, accountId: f.accountId.value }); closeModal(); toast('Approved · customer told ✓'); if (r.panelNote) toast('Renew the line on your panel too: the panel answered “' + r.panelNote + '”', true); $('#admin-body').innerHTML = await adminReceipts(); } catch (e) { toast(e.message, true); } },
+  async 'rc-reject'(f) { try { await api('POST', '/api/admin/receipts/decide', { id: f.dataset.id, action: 'reject', reason: f.reason.value }); closeModal(); toast('Rejected · customer told'); $('#admin-body').innerHTML = await adminReceipts(); } catch (e) { toast(e.message, true); } },
 });
 
 boot();

@@ -166,7 +166,7 @@ export const PERMS = [
 const PERM_KEYS = PERMS.map((p) => p[0]);
 function permFor(method, path, body) {
   if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
-  if (path.startsWith('/api/admin/tickets') || path.startsWith('/api/admin/chat')) return method === 'GET' ? 'customers_view' : 'customers_edit';
+  if (path.startsWith('/api/admin/tickets') || path.startsWith('/api/admin/chat') || path.startsWith('/api/admin/receipts') || path === '/api/admin/sync') return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/payments') return 'finance_view';
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
@@ -814,6 +814,46 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (typeof image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) throw new Error('att_bad');
     const id = uid(8); await store.put('att:' + id, image, 90 * 86400); return id;
   };
+  // ---- real sync with the panel, through the line itself ----
+  // Every Xtream-style panel answers "who is this line?" on player_api.php. That answer is the truth about a customer:
+  // does the line exist, is it active, when does it end, how many devices. No reseller API is needed for it.
+  const lastLineCheck = new Map();
+  async function lineInfo(s, c) {
+    const dns = trimSlash(c.dns || s.player.serverUrl || '');
+    if (!dns) return { ok: false, error: 'The streaming server address is missing (API settings).' };
+    if (!c.lineUsername || !c.linePassword) return { ok: false, error: 'This customer has no line username and password.' };
+    const url = `${dns}/player_api.php?username=${encodeURIComponent(c.lineUsername)}&password=${encodeURIComponent(c.linePassword)}`;
+    const once = async (u, i) => { const ac = typeof AbortController === 'function' ? new AbortController() : null; const tm = ac ? setTimeout(() => ac.abort(), 10000) : 0; try { const rs = await fetchFn(u, ac ? { ...i, signal: ac.signal } : i); return { status: rs.status, text: await rs.text() }; } finally { if (tm) clearTimeout(tm); } };
+    let got = null, why = '';
+    try { got = await once(url, { headers: { 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' } }); } catch (e) { why = e.message; }
+    const relay = trimSlash(s.player.relayUrl || '');
+    if ((!got || (got.status >= 400 && !/^\s*\{/.test(got.text))) && relay) {
+      try { const tk = await makeProxyToken(s.security.proxySecret, 'panel', 1); const r2 = await once(`${relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(tk)}`, {}); if (r2.status < 400 || !got) got = r2; } catch (e) { why = why || e.message; }
+    }
+    if (!got) return { ok: false, error: 'The streaming server could not be reached: ' + why };
+    let data; try { data = JSON.parse(got.text); } catch { return { ok: false, error: got.status === 403 ? 'The streaming server refused the app (403). Add your relay address in API settings.' : `The streaming server gave an unexpected answer (${got.status}).` }; }
+    if (!data || !data.user_info) return { ok: false, error: 'The streaming server did not describe this line.' };
+    return { ok: true, info: data.user_info };
+  }
+  // Brings one customer in line with the panel. Returns true when something worth saving changed.
+  async function syncLine(s, c) {
+    if (c.pendingLine) return false;
+    const r = await lineInfo(s, c); const before = JSON.stringify([c.expiresAt, c.connections, c.lineBad || '', c.renewPending || 0, c.panel && c.panel.status, c.panel && c.panel.error]);
+    lastLineCheck.set(c.id, Date.now());
+    if (!r.ok) { c.panel = { ...(c.panel || {}), at: Date.now(), error: r.error }; return before !== JSON.stringify([c.expiresAt, c.connections, c.lineBad || '', c.renewPending || 0, c.panel.status, c.panel.error]); }
+    const i = r.info; const auth = Number(i.auth) !== 0; const exp = Number(i.exp_date) > 0 ? Number(i.exp_date) * 1000 : 0; const status = String(i.status || (auth ? 'Active' : ''));
+    c.panel = { at: Date.now(), auth, status, exp, max: Number(i.max_connections) || 0, active: Number(i.active_cons) || 0 };
+    if (!auth) c.lineBad = 'not found on the panel';
+    else if (status && !/^(active|trial)$/i.test(status)) c.lineBad = status.toLowerCase() + ' on the panel';
+    else delete c.lineBad;
+    if (auth && exp) {
+      if (c.renewPending) { if (exp >= c.expiresAt - DAY) { c.expiresAt = exp; delete c.renewPending; } } // you renewed it on the panel: done
+      else if (Math.abs(c.expiresAt - exp) > 60000) c.expiresAt = exp; // the panel's end date wins
+    }
+    if (auth && c.panel.max) c.connections = c.panel.max;
+    return before !== JSON.stringify([c.expiresAt, c.connections, c.lineBad || '', c.renewPending || 0, c.panel.status, c.panel.error]);
+  }
+  const getReceipts = async () => (await store.get('receipts')) || [];
   // ---- live chat: one running conversation per customer ----
   const getChats = async () => (await store.get('chats')) || [];
   const getChat = async (id) => (await store.get('chat:' + id)) || { messages: [], ua: 0, uc: 0, at: 0 };
@@ -1228,6 +1268,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const c = list.find((x) => x.id === ses.id);
         if (!c) return err(401, 'Account not found.');
         if (c.status === 'disabled') return err(401, 'This account is disabled.');
+        if (path === '/api/me' && method === 'GET' && !c.pendingLine && (c.dns || s.player.serverUrl) && Date.now() - (lastLineCheck.get(c.id) || (c.panel && c.panel.at) || 0) > 30 * 60000) { try { if (await syncLine(s, c)) await saveCustomers(list); } catch {} }
         const v = view(c, s);
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance && !c.pendingLine;
 
@@ -1316,6 +1357,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'open'; tk.updatedAt = Date.now();
           await saveTickets(all);
           return ok({ ok: true });
+        }
+        if (R('GET', '/api/me/receipts')) return ok((await getReceipts()).filter((x) => x.customerId === c.id).map(({ customerId, att, ...x }) => x));
+        if (R('POST', '/api/me/receipt')) {
+          const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'rc_pkg');
+          if (!body.image) return err(400, 'rc_image');
+          const k = 'rcday:' + c.id; const n = Number(await store.get(k)) || 0; if (n >= 3) return err(429, 'rc_limit');
+          let att; try { att = await saveAttachment(body.image); } catch { return err(400, 'att_bad'); }
+          await store.put(k, n + 1, 86400);
+          const cur = s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
+          const all = await getReceipts(); const rc = { id: uid(5), customerId: c.id, username: c.username, name: c.name, pkg: pk.id, pkgTitle: pk.title, days: pk.days, devices: pk.devices, amount: pk.price, cur, att, note: cleanText(body.note, 300), status: 'pending', at: Date.now() };
+          all.unshift(rc); await store.put('receipts', all.slice(0, 400));
+          await log('payment', `${c.username} uploaded a payment receipt for "${pk.title}"`);
+          await notifyAdmin(s, `Payment receipt to check: ${c.name || c.username}`, `${c.name || ''} (${c.username}) uploaded a payment receipt.\n\nPackage: ${pk.title} · ${pk.days} days · ${pk.price} ${cur}${rc.note ? '\nNote: ' + rc.note : ''}\n\nOpen Money → Payment receipts, look at the picture and tap Approve. The subscription is extended and the customer is told.`);
+          return ok({ ok: true, id: rc.id });
         }
         if (R('GET', '/api/me/chat')) { const ch = await chatRead(c.id, 'c'); return ok({ messages: ch.messages.map(({ from, at, text }) => ({ from, at, text })) }); }
         if (R('POST', '/api/me/chat')) {
@@ -1424,6 +1479,48 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ ok: true });
         }
         return err(404, 'Not found');
+      }
+      if (R('GET', '/api/admin/receipts')) return ok((await getReceipts()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.at - a.at));
+      if (R('POST', '/api/admin/receipts/decide')) {
+        const all = await getReceipts(); const rc = all.find((x) => x.id === String(body.id || '')); if (!rc) return err(404, 'Receipt not found.');
+        if (rc.status !== 'pending') return err(400, 'This receipt was already ' + rc.status + '.');
+        const list = await getCustomers(); const c = list.find((x) => x.id === rc.customerId); if (!c) return err(404, 'This customer no longer exists.');
+        const lang = c.lang; let panelNote = '';
+        if (body.action === 'approve') {
+          const days = Math.max(1, Number(body.days) || Number(rc.days) || 30); const devices = Number(rc.devices) || 1;
+          const plan = s.plans.find((p) => Number(p.days) === days && (Number(p.connections) || 1) === devices) || s.plans.find((p) => Number(p.days) === days);
+          let renewed = false;
+          if (s.reseller.enabled && plan) { const pr = await panelCall(s, 'renew', panelVars(c, s, { days, package: plan.package })); if (pr.ok && !pr.skipped) renewed = true; else if (!pr.skipped) panelNote = pr.error || ''; }
+          const base = Math.max(Date.now(), c.expiresAt); if (c.expiresAt < Date.now()) c.startAt = Date.now();
+          c.expiresAt = base + days * DAY; c.connections = Math.max(Number(c.connections) || 1, devices); if (plan) c.planId = plan.id;
+          const wasTrial = !!c.isTrial; c.isTrial = false;
+          if (!renewed) c.renewPending = Date.now(); // shown in Alerts until the line is renewed on the panel
+          const credits = plan ? planCredits(plan) : Math.max(1, Math.round(days / 30));
+          (c.renewals ||= []).push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(rc.amount) || 0, credits, receipt: rc.id });
+          await saveCustomers(list);
+          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.amount) || 0, accountId: String(body.accountId || ''), by: actorName });
+          rc.status = 'approved'; rc.daysAdded = days;
+          const T = { fr: ['Paiement confirmé ✅', `Merci ! Votre abonnement est prolongé de ${days} jours.`], ar: ['تم تأكيد الدفع ✅', `شكرًا لك! تم تمديد اشتراكك ${days} يومًا.`] }[lang] || ['Payment confirmed ✅', `Thank you! Your subscription has been extended by ${days} days.`];
+          if (cleanEmail(c.email)) await sendEmail(s, c.email, `${s.branding.appName || 'IPTV'} — ${T[0]}`, mailHtml(s, ['en', 'fr', 'ar'].includes(lang) ? lang : 'en', [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' })]], T[1], c.name));
+          await chatAdd(c, 's', s.branding.appName || 'Support', `${T[0]} ${T[1]}`);
+          await log('payment', `Receipt approved for ${c.username}: +${days} days (${rc.pkgTitle})${renewed ? ' · renewed on the panel' : ' · renew the line on the panel'}`);
+        } else {
+          rc.status = 'rejected'; rc.reason = cleanText(body.reason, 300);
+          const T = { fr: 'Nous n’avons pas pu confirmer votre paiement.', ar: 'لم نتمكن من تأكيد دفعتك.' }[lang] || 'We could not confirm your payment.';
+          await chatAdd(c, 's', s.branding.appName || 'Support', `${T}${rc.reason ? ' ' + rc.reason : ''}`);
+          await log('payment', `Receipt rejected for ${c.username}${rc.reason ? ': ' + rc.reason : ''}`);
+        }
+        rc.decidedAt = Date.now(); rc.by = actorName; await store.put('receipts', all);
+        return ok({ ok: true, receipt: rc, panelNote });
+      }
+      if (R('POST', '/api/admin/sync')) { // checks a batch of customers against the panel; the dashboard calls it again until done
+        const list = await getCustomers(); const ids = Array.isArray(body.ids) ? body.ids : null;
+        const todo = list.filter((c) => !c.pendingLine && (ids ? ids.includes(c.id) : true)); const from = Math.max(0, Number(body.offset) || 0); const part = todo.slice(from, from + 12);
+        let changed = 0, bad = 0, unreachable = ''; 
+        for (const c of part) { try { if (await syncLine(s, c)) changed++; } catch {} if (c.lineBad) bad++; if (c.panel && c.panel.error) unreachable = c.panel.error; }
+        if (part.length) await saveCustomers(list);
+        if (from + part.length >= todo.length) { await store.put('lastsync', Date.now()); await log('customer', `Synced ${todo.length} customer(s) with the panel`); }
+        return ok({ done: from + part.length >= todo.length, next: from + part.length, total: todo.length, changed, bad, error: unreachable });
       }
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
@@ -2148,6 +2245,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Daily job (Cloudflare cron): low credit alerts to admin + expiry reminders to customers.
   async function daily() {
     try { const s0 = await getSettings(); if (s0.email.resendKey) await syncBounces(s0); } catch {}
+    try { const s1 = await getSettings(); if (s1.player.serverUrl) { const l = await getCustomers(); const part = l.filter((c) => !c.pendingLine && c.status !== 'disabled').sort((a, b) => ((a.panel && a.panel.at) || 0) - ((b.panel && b.panel.at) || 0)).slice(0, 20); let ch = 0; for (const c of part) { try { if (await syncLine(s1, c)) ch++; } catch {} } if (part.length) await saveCustomers(l); } } catch {}
     const s = await refreshRates(await getSettings(), false);
     const out = { reminders: 0, alert: false };
     if (s.email.lowCreditsAlerts && s.email.adminEmail) {

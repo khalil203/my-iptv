@@ -352,3 +352,46 @@ test('adding a customer is not blocked when the panel answers 404; the answer is
   assert.equal(r.status, 200); assert.equal(r.json.customer.username, 'testuser'); assert.equal(r.json.panel.ok, false); assert.match(r.json.panel.error, /404/);
   assert.equal((await call('GET', '/api/admin/customers', {}, tok)).json.length, 1);
 });
+
+test('panel sync through the line: end date and devices follow the panel, missing lines are flagged', async () => {
+  const db = new Map(); const exp = Math.floor(Date.now() / 1000) + 200 * 86400;
+  const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  const fetchFn = async (url) => { url = String(url);
+    if (url.includes('player_api.php') && url.includes('username=good1')) return { ok: true, status: 200, text: async () => JSON.stringify({ user_info: { auth: 1, status: 'Active', exp_date: String(exp), max_connections: '3', active_cons: '1' } }) };
+    if (url.includes('player_api.php') && url.includes('username=banned1')) return { ok: true, status: 200, text: async () => JSON.stringify({ user_info: { auth: 1, status: 'Banned', exp_date: String(exp) } }) };
+    if (url.includes('player_api.php')) return { ok: true, status: 200, text: async () => JSON.stringify({ user_info: { auth: 0 } }) };
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
+  const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
+  const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  await call('PUT', '/api/admin/settings', { player: { serverUrl: 'http://tv.example.com:8080' } }, tok);
+  for (const u of ['good1', 'banned1', 'ghost1']) assert.equal((await call('POST', '/api/admin/customers', { name: u, username: u, password: 'secret12', planId: 'p1' }, tok)).status, 200);
+  const r = await call('POST', '/api/admin/sync', {}, tok); assert.equal(r.json.done, true); assert.equal(r.json.total, 3); assert.equal(r.json.bad, 2);
+  const list = (await call('GET', '/api/admin/customers', {}, tok)).json; const by = (u) => list.find((c) => c.username === u);
+  assert.equal(by('good1').expiresAt, exp * 1000); assert.equal(by('good1').connections, 3); assert.ok(!by('good1').lineBad); assert.ok(by('good1').daysLeft >= 199);
+  assert.match(by('banned1').lineBad, /banned/); assert.match(by('ghost1').lineBad, /not found/);
+  const ghost = (await call('POST', '/api/login', { username: 'ghost1', password: 'secret12' })).json.token;
+  assert.match((await call('GET', '/api/me', {}, ghost)).json.user.lineBad, /not found/);
+});
+test('payment receipts: upload, owner approves, subscription extends, customer is told; a rejected one changes nothing', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  const cust = await addCustomer(x, tok); await addCustomer(x, tok, { username: 'other1', email: 'other@example.com', name: 'Other' });
+  const u = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token; const ub = (await x.call('POST', '/api/login', { username: 'other1', password: 'secret12' })).json.token;
+  const image = 'data:image/jpeg;base64,' + 'A'.repeat(300);
+  assert.equal((await x.call('POST', '/api/me/receipt', { pkg: 'o3m' }, u)).status, 400);
+  assert.equal((await x.call('POST', '/api/me/receipt', { pkg: 'o3m', image, note: 'Paid by CIH transfer' }, u)).status, 200);
+  assert.ok(x.mails.some((m) => m.to[0] === 'owner@example.com' && /receipt/i.test(m.subject)));
+  assert.equal((await x.call('GET', '/api/me/receipts', {}, ub)).json.length, 0);
+  const rc = (await x.call('GET', '/api/admin/receipts', {}, tok)).json[0]; assert.equal(rc.status, 'pending'); assert.equal(rc.days, 90);
+  const before = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.id === cust.id).expiresAt;
+  const ok = await x.call('POST', '/api/admin/receipts/decide', { id: rc.id, action: 'approve' }, tok); assert.equal(ok.status, 200);
+  const after = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.id === cust.id);
+  assert.equal(Math.round((after.expiresAt - before) / 86400000), 90); assert.ok(after.renewPending, 'flagged until the line is renewed on the panel');
+  assert.equal((await x.call('POST', '/api/admin/receipts/decide', { id: rc.id, action: 'approve' }, tok)).status, 400, 'cannot be approved twice');
+  assert.ok(x.mails.some((m) => m.to[0] === 'test.person@example.com' && /confirmed/i.test(m.subject)));
+  assert.equal((await x.call('GET', '/api/me/receipts', {}, u)).json[0].status, 'approved');
+  assert.match((await x.call('GET', '/api/me/chat', {}, u)).json.messages.at(-1).text, /extended by 90 days/);
+  await x.call('POST', '/api/me/receipt', { pkg: 'o1m', image }, u); const rc2 = (await x.call('GET', '/api/admin/receipts', {}, tok)).json[0];
+  await x.call('POST', '/api/admin/receipts/decide', { id: rc2.id, action: 'reject', reason: 'Amount does not match' }, tok);
+  assert.equal((await x.call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.id === cust.id).expiresAt, after.expiresAt);
+});
