@@ -792,8 +792,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const warn = Number(s.userDashboard.expiryWarningDays) || 7;
     const state = c.status === 'disabled' ? 'disabled' : c.expiresAt < now ? 'expired' : daysLeft <= warn ? 'expiring' : 'active';
     const plan = s.plans.find((p) => p.id === c.planId);
-    const { passwordHash, salt, ...rest } = c;
-    return { ...rest, daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
+    const { passwordHash, salt, totp, emailCode, ...rest } = c; // secrets never leave the server
+    return { ...rest, twoFactor: !!(totp && totp.on), daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
   }
 
   // Use the username / password / DNS the panel gives back (if it returns them).
@@ -1021,6 +1021,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const c = list.find((x) => x.username.toLowerCase() === username);
         if (!c || (await hashPassword(password, c.salt)) !== c.passwordHash) return wrong();
         if (c.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
+        { const st = await second(c); if (st) return st; }
         c.lastLogin = Date.now();
         await saveCustomers(list);
         return ok({ token: await newSession('user', c.id, s, meta), role: 'user' });
@@ -1123,6 +1124,27 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text }); tk.status = 'open'; tk.updatedAt = Date.now();
           await saveTickets(all);
           return ok({ ok: true });
+        }
+        if (path.startsWith('/api/me/2fa')) { // two-step sign-in for the customer's own account
+          if (R('POST', '/api/me/2fa/setup')) {
+            if (c.totp && c.totp.on) return err(400, 'tfa_already');
+            const bytes = new Uint8Array(20); crypto.getRandomValues(bytes);
+            c.totp = { secret: b32encode(bytes), on: false }; await saveCustomers(list);
+            const app = s.branding.appName || 'IPTV';
+            return ok({ secret: c.totp.secret, uri: `otpauth://totp/${encodeURIComponent(app + ':' + c.username)}?secret=${c.totp.secret}&issuer=${encodeURIComponent(app)}` });
+          }
+          if (R('POST', '/api/me/2fa/enable')) {
+            if (!c.totp || !c.totp.secret) return err(400, 'tfa_start');
+            if (!(await totpOk(c.totp.secret, body.code))) return err(400, 'tfa_wrong');
+            c.totp.on = true; await saveCustomers(list); await log('customer', `${c.username} turned on two-step sign-in`);
+            return ok({ ok: true });
+          }
+          if (R('POST', '/api/me/2fa/disable')) {
+            if ((await hashPassword(body.password || '', c.salt)) !== c.passwordHash) return err(400, 'Current password is wrong.');
+            delete c.totp; await saveCustomers(list); await log('customer', `${c.username} turned off two-step sign-in`);
+            return ok({ ok: true });
+          }
+          return err(404, 'Not found');
         }
         if (R('POST', '/api/me/password')) {
           if (!s.userDashboard.allowPasswordChange) return err(403, 'Password change is turned off.');
@@ -1332,6 +1354,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await saveCustomers(list.filter((x) => x !== c));
           await log('customer', `Deleted ${c.username}`);
           return ok({ ok: true, panel });
+        }
+        if (method === 'POST' && sub === 'tfaoff') { // customer lost their phone: support turns two-step sign-in off
+          delete c.totp; await saveCustomers(list); await log('customer', `Two-step sign-in turned off for ${c.username}`);
+          return ok({ ok: true });
         }
         if (method === 'POST' && sub === 'renew') {
           const plan = s.plans.find((p) => p.id === body.planId);

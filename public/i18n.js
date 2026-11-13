@@ -152,6 +152,18 @@ Object.assign(D.ar, {
   refundAsk: 'طلب استرجاع المبلغ', refundSubj: 'طلب استرجاع', delAsk: 'طلب حذف حسابي', delSubj: 'يرجى حذف حسابي', delText: 'أرغب في حذف حسابي وبياناتي.',
 });
 
+
+// ---- customer two-step sign-in, email check, attachments, TV guide ----
+Object.assign(D.en, { tfaT: 'Two-step sign-in', tfaText: 'Adds a 6-digit code from an authenticator app on top of your password.', tfaOnText: 'On. Signing in needs your password and a code from your authenticator app.', turnOn: 'Turn on', turnOff: 'Turn off', tfaOn: 'Two-step sign-in is on', tfaOff: 'Two-step sign-in is off',
+  tfaStep1: 'Open an authenticator app (Google Authenticator, Authy…) and add an account.', tfaStep2: 'On this phone, tap the link. On another device, type this key:', tfaAdd: 'Add to my authenticator app', tfaStep3: 'Enter the 6-digit code the app shows.', tfaKeep: 'Keep the key somewhere safe. If you lose your phone, contact support to turn this off.',
+  tfa_already: 'Two-step sign-in is already on.', tfa_start: 'Start the setup first.', tfa_wrong: 'That code is not right. Try the newest code.' });
+Object.assign(D.fr, { tfaT: 'Connexion en deux étapes', tfaText: 'Ajoute un code à 6 chiffres d’une application d’authentification en plus de votre mot de passe.', tfaOnText: 'Activée. La connexion demande votre mot de passe et un code de votre application d’authentification.', turnOn: 'Activer', turnOff: 'Désactiver', tfaOn: 'Connexion en deux étapes activée', tfaOff: 'Connexion en deux étapes désactivée',
+  tfaStep1: 'Ouvrez une application d’authentification (Google Authenticator, Authy…) et ajoutez un compte.', tfaStep2: 'Sur ce téléphone, touchez le lien. Sur un autre appareil, saisissez cette clé :', tfaAdd: 'Ajouter à mon application d’authentification', tfaStep3: 'Saisissez le code à 6 chiffres affiché.', tfaKeep: 'Gardez la clé en lieu sûr. Si vous perdez votre téléphone, contactez l’assistance pour désactiver.',
+  tfa_already: 'La connexion en deux étapes est déjà activée.', tfa_start: 'Commencez d’abord la configuration.', tfa_wrong: 'Ce code est incorrect. Essayez le code le plus récent.' });
+Object.assign(D.ar, { tfaT: 'الدخول بخطوتين', tfaText: 'يضيف رمزاً من 6 أرقام من تطبيق المصادقة إضافة إلى كلمة المرور.', tfaOnText: 'مفعّل. يتطلب الدخول كلمة المرور ورمزاً من تطبيق المصادقة.', turnOn: 'تفعيل', turnOff: 'إيقاف', tfaOn: 'الدخول بخطوتين مفعّل', tfaOff: 'تم إيقاف الدخول بخطوتين',
+  tfaStep1: 'افتح تطبيق مصادقة (Google Authenticator أو Authy…) وأضف حساباً.', tfaStep2: 'على هذا الهاتف اضغط الرابط. على جهاز آخر اكتب هذا المفتاح:', tfaAdd: 'إضافة إلى تطبيق المصادقة', tfaStep3: 'أدخل الرمز المكوّن من 6 أرقام الظاهر في التطبيق.', tfaKeep: 'احتفظ بالمفتاح في مكان آمن. إذا فقدت هاتفك تواصل مع الدعم لإيقاف هذه الميزة.',
+  tfa_already: 'الدخول بخطوتين مفعّل مسبقاً.', tfa_start: 'ابدأ الإعداد أولاً.', tfa_wrong: 'الرمز غير صحيح. جرّب أحدث رمز.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

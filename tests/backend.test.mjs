@@ -156,3 +156,17 @@ test('M3U playlists: names, groups, logos, movies, and messy files', () => {
   assert.deepEqual(parseM3U('<html>not a playlist</html>'), []);
   assert.equal(parseM3U(text, 2).length, 2);
 });
+
+test('customer two-step sign-in: on, required, secrets never sent, support can turn it off', async () => {
+  const x = setup(); const tok = await adminToken(x); const cust = await addCustomer(x, tok);
+  const u = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  const st = await x.call('POST', '/api/me/2fa/setup', {}, u); assert.equal(st.status, 200);
+  assert.equal((await x.call('POST', '/api/me/2fa/enable', { code: '000000' }, u)).status, 400);
+  assert.equal((await x.call('POST', '/api/me/2fa/enable', { code: await totp(st.json.secret) }, u)).status, 200);
+  const me = (await x.call('GET', '/api/me', {}, u)).json; assert.equal(me.user.twoFactor, true); assert.ok(!JSON.stringify(me).includes(st.json.secret), 'the key is not sent back to the app');
+  assert.ok(!JSON.stringify((await x.call('GET', '/api/admin/customers', {}, tok)).json).includes(st.json.secret), 'nor to the admin list');
+  const no = await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' }); assert.equal(no.status, 401); assert.equal(no.json.need2fa, true);
+  assert.equal((await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12', code: await totp(st.json.secret) })).status, 200);
+  assert.equal((await x.call('POST', `/api/admin/customers/${cust.id}/tfaoff`, {}, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).status, 200);
+});

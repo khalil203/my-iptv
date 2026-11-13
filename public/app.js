@@ -343,6 +343,7 @@ function custActions(c) {
     ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}">💳</button>` : ''}
     ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
+    ${c.twoFactor ? `<button class="btn sm" data-act="cust-tfa-off" data-perm="customers_edit" data-id="${c.id}" title="Two-step sign-in is on. Tap to turn it off (lost phone).">🔐</button>` : ''}
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
 }
 function customerListHtml() {
@@ -962,6 +963,7 @@ async function renderUserTab() {
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-tickets"><div class="row"><h3 style="margin:0;flex:1">${t('supportT')}</h3><button class="btn sm primary" data-act="ticket-new">＋ ${t('newTicket')}</button></div><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-payments"><h3>${t('paymentsT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
+      <div class="card"><h3>${t('tfaT')}</h3><p class="muted small" style="margin-top:0">${user.twoFactor ? t('tfaOnText') : t('tfaText')}</p>${user.twoFactor ? `<span class="pill st-active">${t('tfaOn')}</span> <button class="btn sm" data-act="utfa-off" style="margin-inline-start:8px">${t('turnOff')}</button>` : `<button class="btn primary" data-act="utfa-setup">${t('turnOn')}</button>`}</div>
       ${d.ownPlaylists !== false ? sourcesCard() : ''}
       ${parentalCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
@@ -2237,6 +2239,22 @@ Object.assign(forms, {
     saveM3u(id, items); (state.user.m3u ||= {})[id] = items;
     useSource(id); closeModal(); toast(`${t('srcSaved', { n: f.name.value.trim() })} · ${t('srcChannels', { n: items.length })}`); state.user.tab = 'home'; renderUser();
   },
+});
+
+// ---------------- customer two-step sign-in ----------------
+const refreshMe = async () => { state.user.me = await api('GET', '/api/me'); state.user.meAt = Date.now(); applySource(); renderUserTab(); };
+Object.assign(actions, {
+  'utfa-setup': async () => {
+    const r = await api('POST', '/api/me/2fa/setup', {});
+    modal('🔐 ' + t('tfaT'), `<ol style="padding-inline-start:18px;line-height:1.7;margin-top:0"><li>${t('tfaStep1')}</li><li>${t('tfaStep2')} <a href="${esc(r.uri)}" data-keep>${t('tfaAdd')}</a><div class="code" dir="ltr" style="margin:8px 0;font-size:1rem;letter-spacing:.08em">${esc(r.secret.match(/.{1,4}/g).join(' '))}</div></li><li>${t('tfaStep3')}</li></ol>
+      <form data-form="utfa-enable">${field(t('code2fa'), 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" maxlength="7" dir="ltr"' })}<p class="small muted">${t('tfaKeep')}</p><button class="btn primary block">${t('turnOn')}</button></form>`);
+  },
+  'utfa-off': () => { modal(t('tfaT'), `<form data-form="utfa-off">${field(t('currentPw'), 'password', '', { type: 'password', attrs: 'required' })}<button class="btn danger block">${t('turnOff')}</button></form>`); },
+  'cust-tfa-off': async (el) => { if (!confirm('Turn off two-step sign-in for this customer? Do this only when they lost their phone.')) return; await api('POST', `/api/admin/customers/${el.dataset.id}/tfaoff`, {}); toast('Two-step sign-in turned off ✓'); el.remove(); },
+});
+Object.assign(forms, {
+  async 'utfa-enable'(f) { try { await api('POST', '/api/me/2fa/enable', { code: f.code.value }); closeModal(); toast(t('tfaOn')); await refreshMe(); } catch (e) { toast(tErr(e.message), true); } },
+  async 'utfa-off'(f) { try { await api('POST', '/api/me/2fa/disable', { password: f.password.value }); closeModal(); toast(t('tfaOff')); await refreshMe(); } catch (e) { toast(tErr(e.message), true); } },
 });
 
 boot();
