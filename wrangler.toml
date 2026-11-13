@@ -2,6 +2,12 @@ name = "my-iptv"
 main = "worker/worker.js"
 compatibility_date = "2025-06-01"
 
+# Your own domain (its DNS is on Cloudflare; records stay "Proxied")
+routes = [
+  { pattern = "intproto-tv.store/*", zone_name = "intproto-tv.store" },
+  { pattern = "www.intproto-tv.store/*", zone_name = "intproto-tv.store" }
+]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
