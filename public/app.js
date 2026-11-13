@@ -956,7 +956,8 @@ async function renderUserTab() {
     return;
   }
   if (u.tab === 'account') {
-    el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div></div>
+    el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
+        ${user.email ? `<div class="list-item" style="margin-top:12px"><span style="flex:1;min-width:0;overflow-wrap:anywhere" dir="ltr">${esc(user.email)}</span>${user.emailVerified ? `<span class="pill st-active">${t('emVerified')}</span>` : `<button class="btn sm primary" data-act="em-send">${t('emVerify')}</button>`}</div>` : ''}</div>
       <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div><div class="list-item"><span style="flex:1">${t('devicesL')}</span><b>${user.connections}</b></div>
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
       ${plansCard()}
@@ -2255,6 +2256,19 @@ Object.assign(actions, {
 Object.assign(forms, {
   async 'utfa-enable'(f) { try { await api('POST', '/api/me/2fa/enable', { code: f.code.value }); closeModal(); toast(t('tfaOn')); await refreshMe(); } catch (e) { toast(tErr(e.message), true); } },
   async 'utfa-off'(f) { try { await api('POST', '/api/me/2fa/disable', { password: f.password.value }); closeModal(); toast(t('tfaOff')); await refreshMe(); } catch (e) { toast(tErr(e.message), true); } },
+});
+
+// ---------------- customer email check ----------------
+Object.assign(actions, {
+  'em-send': async (el) => {
+    el.disabled = true;
+    try { const r = await api('POST', '/api/me/email/send', {}); if (r.verified) return refreshMe();
+      const b = modal('✉️ ' + t('emVerify'), `<p class="muted" style="margin-top:0">${t('emSent', { email: esc(state.user.me.user.email) })}</p><form data-form="em-verify">${field(t('code2fa'), 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" maxlength="7" dir="ltr"' })}<button class="btn primary block">${t('verify')}</button></form>`); b.querySelector('input').focus(); }
+    catch (e) { toast(tErr(e.message), true); } finally { el.disabled = false; }
+  },
+});
+Object.assign(forms, {
+  async 'em-verify'(f) { try { await api('POST', '/api/me/email/verify', { code: f.code.value }); closeModal(); toast(t('emVerified') + ' ✓'); await refreshMe(); } catch (e) { toast(tErr(e.message), true); } },
 });
 
 boot();

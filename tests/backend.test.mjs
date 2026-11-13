@@ -170,3 +170,19 @@ test('customer two-step sign-in: on, required, secrets never sent, support can t
   assert.equal((await x.call('POST', `/api/admin/customers/${cust.id}/tfaoff`, {}, tok)).status, 200);
   assert.equal((await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).status, 200);
 });
+
+test('email check: code by email, wrong codes refused, verified flag follows the address', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>' } }, tok);
+  const cust = await addCustomer(x, tok); const sent = x.mails.length;
+  const u = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  assert.equal((await x.call('GET', '/api/me', {}, u)).json.user.emailVerified, false);
+  assert.equal((await x.call('POST', '/api/me/email/send', {}, u)).status, 200); assert.equal(x.mails.length, sent + 1);
+  const code = x.mails.at(-1).html.match(/>(\d{6})</)[1];
+  assert.equal((await x.call('POST', '/api/me/email/verify', { code: code === '111111' ? '222222' : '111111' }, u)).status, 400);
+  assert.equal((await x.call('POST', '/api/me/email/verify', { code }, u)).status, 200);
+  assert.equal((await x.call('GET', '/api/me', {}, u)).json.user.emailVerified, true);
+  assert.equal((await x.call('POST', '/api/me/email/verify', { code }, u)).status, 400, 'a code works once');
+  await x.call('PUT', `/api/admin/customers/${cust.id}`, { email: 'new.address@example.com' }, tok);
+  assert.equal((await x.call('GET', '/api/me', {}, u)).json.user.emailVerified, false, 'a changed address must be checked again');
+});

@@ -164,6 +164,11 @@ Object.assign(D.ar, { tfaT: 'الدخول بخطوتين', tfaText: 'يضيف ر
   tfaStep1: 'افتح تطبيق مصادقة (Google Authenticator أو Authy…) وأضف حساباً.', tfaStep2: 'على هذا الهاتف اضغط الرابط. على جهاز آخر اكتب هذا المفتاح:', tfaAdd: 'إضافة إلى تطبيق المصادقة', tfaStep3: 'أدخل الرمز المكوّن من 6 أرقام الظاهر في التطبيق.', tfaKeep: 'احتفظ بالمفتاح في مكان آمن. إذا فقدت هاتفك تواصل مع الدعم لإيقاف هذه الميزة.',
   tfa_already: 'الدخول بخطوتين مفعّل مسبقاً.', tfa_start: 'ابدأ الإعداد أولاً.', tfa_wrong: 'الرمز غير صحيح. جرّب أحدث رمز.' });
 
+
+Object.assign(D.en, { emVerify: 'Verify email', emVerified: 'Verified', emSent: 'We sent a 6-digit code to {email}. Enter it here.', em_none: 'There is no email address on this account.', em_limit: 'You asked for 3 codes today. Please try again tomorrow.', em_fail: 'The email could not be sent. Please try again later.', em_expired: 'This code has expired. Ask for a new one.', em_wrong: 'That code is not right.' });
+Object.assign(D.fr, { emVerify: 'Vérifier l’e-mail', emVerified: 'Vérifié', emSent: 'Nous avons envoyé un code à 6 chiffres à {email}. Saisissez-le ici.', em_none: 'Aucune adresse e-mail sur ce compte.', em_limit: 'Vous avez demandé 3 codes aujourd’hui. Réessayez demain.', em_fail: 'L’e-mail n’a pas pu être envoyé. Réessayez plus tard.', em_expired: 'Ce code a expiré. Demandez-en un nouveau.', em_wrong: 'Ce code est incorrect.' });
+Object.assign(D.ar, { emVerify: 'تأكيد البريد', emVerified: 'تم التأكيد', emSent: 'أرسلنا رمزاً من 6 أرقام إلى {email}. أدخله هنا.', em_none: 'لا يوجد بريد إلكتروني في هذا الحساب.', em_limit: 'طلبت 3 رموز اليوم. حاول غداً.', em_fail: 'تعذّر إرسال البريد. حاول لاحقاً.', em_expired: 'انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً.', em_wrong: 'الرمز غير صحيح.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

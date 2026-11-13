@@ -203,6 +203,7 @@ async function hmacRaw(keyBytes, msgBytes, hash = 'SHA-256') {
   const k = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash }, false, ['sign']);
   return new Uint8Array(await crypto.subtle.sign('HMAC', k, msgBytes));
 }
+const sha256 = async (t) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(t)))));
 const sameText = (a, b) => { a = String(a); b = String(b); if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
 // Checks a Stripe "Stripe-Signature" header against the raw request body. Returns true only for a fresh, correctly signed event.
 export async function stripeSigOk(raw, header, secret, now = Date.now(), toleranceSec = 300) {
@@ -793,7 +794,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const state = c.status === 'disabled' ? 'disabled' : c.expiresAt < now ? 'expired' : daysLeft <= warn ? 'expiring' : 'active';
     const plan = s.plans.find((p) => p.id === c.planId);
     const { passwordHash, salt, totp, emailCode, ...rest } = c; // secrets never leave the server
-    return { ...rest, twoFactor: !!(totp && totp.on), daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
+    return { ...rest, twoFactor: !!(totp && totp.on), emailVerified: !!c.emailVerified && c.emailVerified === cleanEmail(c.email), daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
   }
 
   // Use the username / password / DNS the panel gives back (if it returns them).
@@ -973,6 +974,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (String(body.password || '').length < 6) return err(400, 'New password needs 6+ characters.');
         const list = await getCustomers(); const c = list.find((x) => x.id === rec.id); if (!c) return err(400, 'reset_bad');
         c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); delete c.loginPassword;
+        if (cleanEmail(c.email)) c.emailVerified = cleanEmail(c.email);
         await saveCustomers(list); await store.del('reset:' + tk);
         for (const d of await getDevices(c.id)) await store.del('session:' + d.token); // signs out every device
         await store.del('devs:' + c.id);
@@ -1123,6 +1125,29 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (tk.messages.length >= 40) return err(400, 'ticket_full');
           tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text }); tk.status = 'open'; tk.updatedAt = Date.now();
           await saveTickets(all);
+          return ok({ ok: true });
+        }
+        if (R('POST', '/api/me/email/send')) { // sends a 6-digit code to the address on the account
+          const to = cleanEmail(c.email); if (!to) return err(400, 'em_none');
+          if (c.emailVerified) return ok({ ok: true, verified: true });
+          const k = 'emailday:' + c.id; const n = Number(await store.get(k)) || 0;
+          if (n >= 3) return err(429, 'em_limit');
+          await store.put(k, n + 1, 86400);
+          const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
+          c.emailCode = { hash: await sha256(code + c.salt), exp: Date.now() + 15 * 60000, tries: 0 }; await saveCustomers(list);
+          const app = escHtml(s.branding.appName || 'IPTV');
+          const T = { fr: ['Votre code de vérification', 'Saisissez ce code dans l’application. Il est valable 15 minutes.'], ar: ['رمز التحقق', 'أدخل هذا الرمز في التطبيق. صالح لمدة 15 دقيقة.'] }[c.lang] || ['Your verification code', 'Enter this code in the app. It works for 15 minutes.'];
+          const html = `<div dir="${c.lang === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p><b>${T[0]}</b></p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;margin:16px 0" dir="ltr">${code}</p><p style="color:#5A6478">${T[1]}</p></div>`;
+          const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
+          if (!r.ok) return err(502, 'em_fail');
+          return ok({ ok: true });
+        }
+        if (R('POST', '/api/me/email/verify')) {
+          const ec = c.emailCode;
+          if (!ec || ec.exp < Date.now() || ec.tries >= 5) return err(400, 'em_expired');
+          if ((await sha256(String(body.code || '').replace(/\D/g, '') + c.salt)) !== ec.hash) { ec.tries++; await saveCustomers(list); return err(400, 'em_wrong'); }
+          delete c.emailCode; c.emailVerified = cleanEmail(c.email); await saveCustomers(list);
+          await log('customer', `${c.username} verified their email`);
           return ok({ ok: true });
         }
         if (path.startsWith('/api/me/2fa')) { // two-step sign-in for the customer's own account
