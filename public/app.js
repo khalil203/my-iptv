@@ -105,9 +105,9 @@ function setSession(token, role) {
 
 function applyBranding(b) {
   const r = document.documentElement.style;
-  r.setProperty('--primary', b.primary || '#7c5cff');
-  r.setProperty('--accent', b.accent || '#22d3ee');
-  r.setProperty('--brand-bg', b.background || '#060a12');
+  r.setProperty('--b-primary', b.primary || '#8065FF');
+  r.setProperty('--b-accent', b.accent || '#19D5B1');
+  r.setProperty('--brand-bg', b.background || '#080C16');
   document.title = b.appName || 'IPTV';
   applyTheme();
 }
@@ -125,7 +125,7 @@ function currentTheme() {
 function applyTheme() {
   const th = currentTheme();
   document.documentElement.dataset.theme = th;
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', th === 'light' ? '#f3f6fa' : '#060a12');
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', th === 'light' ? '#F4F5FA' : '#080C16');
   document.querySelectorAll('[data-act=theme]').forEach((b) => { b.textContent = themeMode() === 'auto' ? '🌗' : th === 'light' ? '☀️' : '🌙'; b.title = themeLabel(); });
 }
 const themeLabel = () => { const m = themeMode(); return m === 'auto' ? `Auto (${currentTheme() === 'light' ? 'day' : 'night'} · ${tzName()})` : m === 'light' ? 'Day' : 'Night'; };

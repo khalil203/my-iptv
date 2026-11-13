@@ -3,8 +3,8 @@
   "short_name": "INTPROTO-TV",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#060a12",
-  "theme_color": "#060a12",
+  "background_color": "#080C16",
+  "theme_color": "#080C16",
   "orientation": "any",
   "icons": [
     {

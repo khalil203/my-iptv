@@ -46,9 +46,9 @@ export const DEFAULT_SETTINGS = () => ({
     appName: 'INTPROTO-TV',
     tagline: 'Live TV · Movies · Series',
     logoUrl: 'logo.png',
-    primary: '#12bfd8',
-    accent: '#7cf0ff',
-    background: '#060a12',
+    primary: '#8065FF',
+    accent: '#19D5B1',
+    background: '#080C16',
     loginTitle: 'Welcome back',
     loginSubtitle: 'Sign in with the login details you received.',
     loginBgUrl: '',
@@ -502,6 +502,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (sCache && Date.now() - sAt < cacheMs) return sCache;
     let s = deepMerge(DEFAULT_SETTINGS(), (await store.get('settings')) || {});
     if (s.branding.appName === 'My IPTV' && !s.branding.logoUrl) s.branding = { ...s.branding, ...DEFAULT_SETTINGS().branding, supportUrl: s.branding.supportUrl, supportLabel: s.branding.supportLabel, footerText: s.branding.footerText };
+    // Design system v2: move the previous default colours (cyan) to the new palette; colours the owner chose are kept.
+    const oldLook = [['#12bfd8', '#7cf0ff'], ['#7c5cff', '#22d3ee']].some(([p, a]) => String(s.branding.primary).toLowerCase() === p && String(s.branding.accent).toLowerCase() === a);
+    if (oldLook) s.branding = { ...s.branding, primary: '#8065FF', accent: '#19D5B1', background: '#080C16' };
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
     sCache = s; sAt = Date.now();
     return s;
