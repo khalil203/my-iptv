@@ -1,0 +1,32 @@
+# Read-only health check of the live app. Prints a redacted summary only (no names, emails, passwords, keys or addresses).
+name: Diagnose (read-only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['tools/diagnose.mjs', '.github/workflows/diagnose.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Download saved data (kept on the runner only, never printed)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          mkdir -p /tmp/diag
+          ID=$(npx wrangler kv namespace list | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const l=JSON.parse(s);const n=l.find(x=>x.title==='my-iptv-db')||l.find(x=>/my-iptv/.test(x.title));console.log(n?n.id:'')})")
+          test -n "$ID" || { echo "storage not found"; exit 1; }
+          for k in settings customers log; do npx wrangler kv key get "$k" --namespace-id "$ID" --remote > /tmp/diag/$k.json 2>/dev/null || echo "null" > /tmp/diag/$k.json; done
+          wc -c /tmp/diag/*.json
+      - name: Diagnose
+        run: node tools/diagnose.mjs
+      - name: Remove downloaded data
+        if: always()
+        run: rm -rf /tmp/diag
