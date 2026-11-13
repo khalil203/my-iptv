@@ -260,3 +260,24 @@ test('bounced emails: typos are caught, bounces are pulled from Resend, paused a
   assert.equal((await call('POST', '/api/admin/email/bounces/sync', {}, tok)).json.added, 0, 'an allowed address is not paused again by the same old bounce');
   assert.equal((await call('POST', '/api/me/email/send', {}, u)).status, 200); assert.equal(mails.length, before + 1);
 });
+
+test('templates: the owner can reword emails and WhatsApp, preview unsaved text, add messages, and go back to the original', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const t0 = (await x.call('GET', '/api/admin/templates', {}, tok)).json;
+  assert.ok(t0.defaults.AM.en.trialTitle); assert.deepEqual(t0.custom, {});
+  const pv = await x.call('POST', '/api/admin/templates/preview', { kind: 'trial', lang: 'en', mailTexts: { AM: { en: { trialTitle: 'MY OWN TRIAL TITLE' } } } }, tok);
+  assert.match(pv.json.html, /MY OWN TRIAL TITLE/); assert.match(pv.json.subject, /MY OWN TRIAL TITLE/);
+  assert.doesNotMatch((await x.call('POST', '/api/admin/templates/preview', { kind: 'trial', lang: 'en' }, tok)).json.html, /MY OWN TRIAL TITLE/, 'a preview does not save anything');
+  await x.call('PUT', '/api/admin/settings', { mailTexts: { AM: { en: { trialTitle: 'Saved title', nope: 'x', dir: 'rtl' } }, RM: { fr: { title: t0.defaults.RM.fr.title } } }, waTemplates: { pay: { en: 'Pay here {link}' } }, waCustom: [{ name: 'Welcome back', text: { en: 'Hi {name}, welcome back to {app}!' } }] }, tok);
+  const t1 = (await x.call('GET', '/api/admin/templates', {}, tok)).json;
+  assert.deepEqual(t1.custom, { AM: { en: { trialTitle: 'Saved title' } } }, 'unknown keys, layout keys and unchanged texts are not stored');
+  assert.equal(t1.wa.pay.en, 'Pay here {link}'); assert.equal(t1.waCustom.length, 1);
+  assert.match((await x.call('POST', '/api/admin/templates/preview', { kind: 'trial', lang: 'en', mailTexts: t1.custom }, tok)).json.html, /Saved title/);
+  for (const kind of ['welcome', 'renewal', 'order', 'expiry']) for (const lang of ['en', 'fr', 'ar']) assert.ok((await x.call('POST', '/api/admin/templates/preview', { kind, lang }, tok)).json.html.length > 200, kind + ' ' + lang);
+  const cust = await addCustomer(x, tok, { phone: '212600000001' });
+  const own = await x.call('POST', `/api/admin/customers/${cust.id}/wamsg`, { type: 'c:' + t1.waCustom[0].id, lang: 'en' }, tok);
+  assert.match(own.json.text, /Hi Test, welcome back to/);
+  await x.call('PUT', '/api/admin/settings', { mailTexts: {}, waTemplates: {} }, tok);
+  const t2 = (await x.call('GET', '/api/admin/templates', {}, tok)).json; assert.deepEqual(t2.custom, {}); assert.deepEqual(t2.wa, {});
+  assert.doesNotMatch((await x.call('POST', '/api/admin/templates/preview', { kind: 'trial', lang: 'en' }, tok)).json.html, /Saved title/, 'the original wording is back');
+});

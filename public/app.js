@@ -1445,7 +1445,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details']] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
       <div id="wa-pkg">${field('Package', 'pkg', pick, { type: 'select', options: [...s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`])] })}
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['ALL', 'Random € or $'], ['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
@@ -2377,7 +2377,7 @@ Object.assign(actions, {
 // =====================================================================
 // Admin: Alerts, Emails & bounces
 // =====================================================================
-const READY_TABS = (k) => !['templates', 'data'].includes(k) || typeof window.__adminExtra === 'object';
+const READY_TABS = () => true;
 const csvCell = (v) => { v = String(v ?? ''); return /[",\n;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
 const toCsv = (head, rows) => '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
 const custCsv = (list) => toCsv(['Name', 'Username', 'Email', 'Phone', 'WhatsApp', 'Plan', 'Status', 'Expires', 'Days left'], list.map((c) => [c.name, c.username, c.email || '', c.phone || '', c.whatsapp || '', c.planName, c.state, isoDay(c.expiresAt), c.daysLeft]));
@@ -2469,6 +2469,120 @@ Object.assign(forms, {
   async 'al-custom'(f) {
     const hide = {}; ALERT_DEFS.forEach(([k]) => { hide[k] = !f['show_' + k].checked; });
     try { await saveSettings({ alerts: { expiringDays: Number(f.expiringDays.value), expiredDays: Number(f.expiredDays.value), trialHours: Number(f.trialHours.value), hide } }, true); closeModal(); toast('Saved ✓'); state.admin.al.f = ''; reAdmin(); } catch (e) { toast(e.message, true); }
+  },
+});
+
+// =====================================================================
+// Admin: Message templates, Import & export
+// =====================================================================
+const TPL_GROUPS = [
+  ['AM', 'trial', '🎁 Trial & welcome email', 'Sent with the login details when a free trial or a subscription starts. Texts starting with “trial” are for trials, “sub” for paid subscriptions.', '{name} {app} {date} {hours}'],
+  ['MAIL', 'expiry', '⏰ Expiry reminder & short emails', 'The reminder sent a few days before a subscription ends, plus the short labels used in simple emails.', '{name} {days} {date} {hours}'],
+  ['RM', 'renewal', '🔁 Renewal offer email', 'Sent to customers whose subscription or trial has ended.', '{name} {app} {site} {coupon}'],
+  ['OM', 'order', '💳 Package order email', 'Sent with the Stripe pay link for a package.', '{name} {app} {pkg} {price} {d} {n}'],
+];
+const WA_NAMES = { pay: '💳 Payment link', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
+const LANG3 = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
+const nice = (k) => k.replace(/([A-Z0-9])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+async function adminTemplates() {
+  const ui = (state.admin.tp ||= { g: 'AM', lang: 'en', q: '', only: false });
+  if (!ui.data) ui.data = await api('GET', '/api/admin/templates');
+  const d = ui.data; const wa = ui.g === 'WA'; const own = ui.g === 'OWN';
+  const edits = (d.custom[ui.g] || {})[ui.lang] || {};
+  const changedCount = (g) => g === 'WA' ? Object.values(d.wa).reduce((n, x) => n + Object.keys(x).length, 0) : g === 'OWN' ? d.waCustom.length : Object.values(d.custom[g] || {}).reduce((n, x) => n + Object.keys(x).length, 0);
+  const grp = TPL_GROUPS.find((x) => x[0] === ui.g);
+  const q = ui.q.trim().toLowerCase();
+  let body;
+  if (own) {
+    body = `<p class="small muted">Your own WhatsApp messages. They appear in the message list when you tap 💬 on a customer. You can use: {name} {fullname} {app} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {appUrl}</p>
+      ${d.waCustom.map((x, i) => `<div class="tpl-f"><div class="row"><input style="flex:1" value="${esc(x.name)}" data-own="${i}" data-k="name" placeholder="Name of this message" maxlength="40"><button type="button" class="btn sm danger" data-act="tp-own-del" data-i="${i}">Delete</button></div><textarea rows="5" data-own="${i}" data-k="text" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}" placeholder="Message in ${LANG3.find((l) => l[0] === ui.lang)[1]}">${esc(x.text[ui.lang] || '')}</textarea></div>`).join('') || '<p class="muted small">No messages of your own yet.</p>'}
+      <button type="button" class="btn" data-act="tp-own-add">＋ Add a message</button>`;
+  } else if (wa) {
+    body = `<p class="small muted">The ready-made WhatsApp messages. You can use: {name} {fullname} {app} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {appUrl}</p>
+      ${Object.keys(d.waDefaults).map((ty) => { const cur = (d.wa[ty] || {})[ui.lang]; return `<div class="tpl-f"><label><b>${WA_NAMES[ty] || nice(ty)}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label><textarea rows="9" data-wa="${ty}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || d.waDefaults[ty][ui.lang] || '')}</textarea>${cur ? `<button type="button" class="btn sm" data-act="tp-wa-reset" data-ty="${ty}">Back to the original</button>` : ''}</div>`; }).join('')}`;
+  } else {
+    const keys = Object.keys(d.defaults[ui.g][ui.lang]).filter((k) => k !== 'dir').filter((k) => (!ui.only || edits[k]) && (!q || (k + ' ' + (edits[k] || d.defaults[ui.g][ui.lang][k])).toLowerCase().includes(q)));
+    body = `<p class="small muted">${grp[3]} You can use: <span dir="ltr">${grp[4]}</span>. Simple formatting like &lt;b&gt;bold&lt;/b&gt; works.</p>
+      <div class="row" style="margin-bottom:10px"><input style="flex:1;min-width:160px" type="search" placeholder="🔎 Find a text…" value="${esc(ui.q)}" data-input="tp-search"><label class="toggle" style="margin:0"><input type="checkbox" data-act="tp-only" ${ui.only ? 'checked' : ''}><i></i><span>Only changed</span></label></div>
+      ${keys.map((k) => { const def = d.defaults[ui.g][ui.lang][k]; const cur = edits[k]; const long = (cur || def).length > 70;
+        return `<div class="tpl-f"><label><b>${esc(nice(k))}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label>${long ? `<textarea rows="${Math.min(8, Math.ceil((cur || def).length / 60) + 1)}" data-tk="${k}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || def)}</textarea>` : `<input data-tk="${k}" value="${esc(cur || def)}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">`}${cur ? `<button type="button" class="btn sm" data-act="tp-reset" data-k="${k}">Back to the original</button>` : ''}</div>`; }).join('') || '<p class="muted small">Nothing matches.</p>'}`;
+  }
+  return `<div class="chips">${TPL_GROUPS.map(([g, , n]) => `<a class="${ui.g === g ? 'on' : ''}" data-act="tp-g" data-g="${g}">${n}${changedCount(g) ? ' · ' + changedCount(g) : ''}</a>`).join('')}<a class="${wa ? 'on' : ''}" data-act="tp-g" data-g="WA">💬 WhatsApp messages${changedCount('WA') ? ' · ' + changedCount('WA') : ''}</a><a class="${own ? 'on' : ''}" data-act="tp-g" data-g="OWN">✍️ My own WhatsApp messages · ${d.waCustom.length}</a></div>
+    <div class="card"><div class="row" style="margin-bottom:10px"><div class="seg">${LANG3.map(([k, n]) => `<button type="button" class="${ui.lang === k ? 'on' : ''}" data-act="tp-lang" data-lang="${k}">${n}</button>`).join('')}</div><span class="spacer"></span>${grp ? `<button type="button" class="btn" data-act="tp-preview">👁 Preview email</button>` : ''}<button type="button" class="btn primary" data-act="tp-save">Save</button></div>
+      <div id="tpl-fields">${body}</div>
+      <div class="row" style="margin-top:14px;justify-content:space-between"><div class="row"><button type="button" class="btn sm" data-act="tp-export">⬇ Export all templates</button><button type="button" class="btn sm" data-act="tp-import">⬆ Import</button></div><button type="button" class="btn primary" data-act="tp-save">Save</button></div></div>`;
+}
+// Reads what is typed on the page into the working copy, so switching language or group loses nothing.
+function tpCollect() {
+  const ui = state.admin.tp; if (!ui || !ui.data) return; const d = ui.data;
+  document.querySelectorAll('#tpl-fields [data-tk]').forEach((el) => { const k = el.dataset.tk; const def = d.defaults[ui.g][ui.lang][k]; const v = el.value; const slot = ((d.custom[ui.g] ||= {})[ui.lang] ||= {}); if (v.trim() && v !== def) slot[k] = v; else delete slot[k]; });
+  document.querySelectorAll('#tpl-fields [data-wa]').forEach((el) => { const ty = el.dataset.wa; const def = d.waDefaults[ty][ui.lang]; const v = el.value; const slot = (d.wa[ty] ||= {}); if (v.trim() && v !== def) slot[ui.lang] = v; else delete slot[ui.lang]; });
+  document.querySelectorAll('#tpl-fields [data-own]').forEach((el) => { const x = d.waCustom[Number(el.dataset.own)]; if (!x) return; if (el.dataset.k === 'name') x.name = el.value; else x.text[ui.lang] = el.value; });
+}
+const tpRedraw = async () => { $('#admin-body').innerHTML = await adminTemplates(); };
+const pickJson = () => new Promise((res) => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.json,application/json'; i.onchange = async () => { try { res(JSON.parse(await i.files[0].text())); } catch { toast('This file is not valid JSON.', true); res(null); } }; i.click(); });
+
+// ---------------- import & export: every list, as a file or edited by hand ----------------
+const DATA_SETS = [
+  ['plans', 'Plans', 'The plans customers are on: name, days, price, devices, panel package, credits.', 'plans'],
+  ['orderPackages', 'Order packages', 'The packages on the website and in order emails, with their Stripe links.', 'plans'],
+  ['resellerPackages', 'Reseller packages', 'Credit packages you sell to resellers.', 'plans'],
+  ['templates', 'Message templates', 'Your email wording and WhatsApp messages.', 'templates'],
+  ['alerts', 'Alert settings', 'The thresholds and groups of the Alerts page.', 'alerts'],
+  ['branding', 'Login & branding', 'App name, logo, colours, WhatsApp number, texts.', 'branding'],
+  ['userDashboard', 'User dashboard', 'What customers can see and the announcement.', 'userdash'],
+  ['renewalOffer', 'Renewal offer', 'The offer shown in renewal emails.', 'trial'],
+  ['trial', 'Free trial', 'Trial length, credits and package.', 'trial'],
+];
+const dataValue = (s, k) => (k === 'templates' ? { mailTexts: s.mailTexts || {}, waTemplates: s.waTemplates || {}, waCustom: s.waCustom || [] } : s[k]);
+const dataPatch = (k, v) => (k === 'templates' ? { mailTexts: v.mailTexts || {}, waTemplates: v.waTemplates || {}, waCustom: v.waCustom || [] } : { [k]: v });
+async function adminData(s) {
+  return `<div class="notice info">Everything here can be downloaded as a file, changed by hand, and loaded back. A full backup of the whole app (customers, money, settings) is one tap.</div>
+    <div class="card"><h3>Whole app</h3><p class="small muted">One file with everything. Keep a copy somewhere safe before big changes.</p><div class="row"><button class="btn primary" data-act="backup">⬇ Download full backup</button><button class="btn" data-act="atab" data-tab="security">Restore from a backup…</button></div></div>
+    <div class="card"><h3>Customers</h3><p class="small muted">Spreadsheet file (CSV) that opens in Excel or Google Sheets. To add many customers at once, use the import on the Customers page.</p><div class="row"><button class="btn" data-act="data-cust-csv">⬇ Customers (CSV)</button><button class="btn" data-act="data-cust-json">⬇ Customers (JSON)</button><button class="btn" data-act="atab" data-tab="customers">Open Customers →</button></div></div>
+    <div class="card"><h3>Settings, one part at a time</h3><p class="small muted">Download a part, edit it by hand right here, or load a file you saved earlier. Nothing changes until you save.</p>
+      ${DATA_SETS.map(([k, n, why, tab]) => `<div class="list-item data-row"><div style="flex:1;min-width:180px"><b>${n}</b><div class="small muted">${why}</div></div><div class="row"><button class="btn sm" data-act="data-export" data-k="${k}">⬇ Export</button><button class="btn sm" data-act="data-import" data-k="${k}">⬆ Import</button><button class="btn sm" data-act="data-edit" data-k="${k}">✏️ Edit by hand</button><button class="btn sm ghost" data-act="atab" data-tab="${tab}">Open page</button></div></div>`).join('')}</div>`;
+}
+async function dataApply(k, v) {
+  const want = Array.isArray(dataValue(state.admin.settings, k)) ? 'a list' : 'a group of settings';
+  if (Array.isArray(dataValue(state.admin.settings, k)) !== Array.isArray(v) || v === null || typeof v !== 'object') throw new Error(`This does not look right: “${DATA_SETS.find((x) => x[0] === k)[1]}” must be ${want}.`);
+  await saveSettings(dataPatch(k, v), true); if (state.admin.tp) state.admin.tp.data = null;
+}
+
+let tpT = 0;
+document.addEventListener('input', (e) => { if (e.target.dataset?.input !== 'tp-search') return; tpCollect(); state.admin.tp.q = e.target.value; clearTimeout(tpT); tpT = setTimeout(() => keepFocus('[data-input=tp-search]', tpRedraw), 250); });
+Object.assign(actions, {
+  'tp-g': (el) => { tpCollect(); Object.assign(state.admin.tp, { g: el.dataset.g, q: '', only: false }); tpRedraw(); },
+  'tp-lang': (el) => { tpCollect(); state.admin.tp.lang = el.dataset.lang; tpRedraw(); },
+  'tp-only': (el) => { tpCollect(); state.admin.tp.only = el.checked; tpRedraw(); },
+  'tp-reset': (el) => { tpCollect(); const ui = state.admin.tp; delete ui.data.custom[ui.g]?.[ui.lang]?.[el.dataset.k]; tpRedraw(); toast('Original text is back. Tap Save to keep it.'); },
+  'tp-wa-reset': (el) => { tpCollect(); const ui = state.admin.tp; delete ui.data.wa[el.dataset.ty]?.[ui.lang]; tpRedraw(); toast('Original text is back. Tap Save to keep it.'); },
+  'tp-own-add': () => { tpCollect(); state.admin.tp.data.waCustom.push({ id: Math.random().toString(36).slice(2, 8), name: 'New message', text: { en: '', fr: '', ar: '' } }); tpRedraw(); },
+  'tp-own-del': (el) => { if (!confirm('Delete this message?')) return; tpCollect(); state.admin.tp.data.waCustom.splice(Number(el.dataset.i), 1); tpRedraw(); },
+  'tp-save': async () => {
+    tpCollect(); const d = state.admin.tp.data;
+    try { await saveSettings({ mailTexts: d.custom, waTemplates: d.wa, waCustom: d.waCustom }, true); state.admin.tp.data = null; toast('Templates saved ✓'); tpRedraw(); } catch {}
+  },
+  'tp-preview': async () => {
+    tpCollect(); const ui = state.admin.tp; const kind = TPL_GROUPS.find((x) => x[0] === ui.g)[1];
+    const show = async (k) => { const r = await api('POST', '/api/admin/templates/preview', { kind: k, lang: ui.lang, mailTexts: ui.data.custom, appUrl: location.origin }); const b = $('.modal-body'); b.querySelector('#pv-subj').textContent = r.subject; b.querySelector('iframe').srcdoc = r.html; };
+    modal('👁 Preview (not saved yet)', `${kind === 'trial' ? `<div class="seg" style="margin-bottom:10px"><button type="button" class="on" data-act="tp-pv" data-k="trial">Trial</button><button type="button" data-act="tp-pv" data-k="welcome">New subscription</button></div>` : ''}<p class="small muted" style="margin:0 0 8px">Subject: <b id="pv-subj"></b></p><iframe title="Email preview" sandbox="" style="width:100%;height:62vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe>`, { wide: true });
+    state.admin.tp.show = show; try { await show(kind); } catch (e) { toast(e.message, true); }
+  },
+  'tp-pv': async (el) => { el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el)); try { await state.admin.tp.show(el.dataset.k); } catch (e) { toast(e.message, true); } },
+  'tp-export': () => { tpCollect(); const d = state.admin.tp.data; download(`templates-${isoDay(Date.now())}.json`, JSON.stringify({ mailTexts: d.custom, waTemplates: d.wa, waCustom: d.waCustom }, null, 2), 'application/json'); },
+  'tp-import': async () => { const v = await pickJson(); if (!v) return; if (!v.mailTexts && !v.waTemplates && !v.waCustom) return toast('This file has no templates in it.', true); if (!confirm('Replace your current templates with the ones in this file?')) return; try { await dataApply('templates', v); toast('Templates imported ✓'); tpRedraw(); } catch (e) { toast(e.message, true); } },
+  'data-export': (el) => download(`${el.dataset.k}-${isoDay(Date.now())}.json`, JSON.stringify(dataValue(state.admin.settings, el.dataset.k), null, 2), 'application/json'),
+  'data-import': async (el) => { const v = await pickJson(); if (!v) return; const n = DATA_SETS.find((x) => x[0] === el.dataset.k)[1]; if (!confirm(`Replace “${n}” with the content of this file?`)) return; try { await dataApply(el.dataset.k, v); toast(n + ' imported ✓'); } catch (e) { toast(e.message, true); } },
+  'data-edit': (el) => { const k = el.dataset.k; const n = DATA_SETS.find((x) => x[0] === k)[1];
+    modal('✏️ ' + n, `<form data-form="data-edit" data-k="${k}"><p class="small muted" style="margin-top:0">Edit carefully and keep the punctuation ( { } [ ] " , ). The app checks it before saving and tells you if something is wrong.</p><textarea name="json" rows="18" spellcheck="false" dir="ltr" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;white-space:pre;overflow:auto">${esc(JSON.stringify(dataValue(state.admin.settings, k), null, 2))}</textarea><div id="data-err"></div><div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Check and save</button></div></form>`, { wide: true }); },
+  'data-cust-csv': async () => { const l = await api('GET', '/api/admin/customers'); download(`customers-${isoDay(Date.now())}.csv`, custCsv(l), 'text/csv'); },
+  'data-cust-json': async () => { const l = await api('GET', '/api/admin/customers'); download(`customers-${isoDay(Date.now())}.json`, JSON.stringify(l, null, 2), 'application/json'); },
+});
+Object.assign(forms, {
+  async 'data-edit'(f) {
+    let v; try { v = JSON.parse(f.json.value); } catch (e) { $('#data-err').innerHTML = `<div class="err-box">This is not valid yet: ${esc(e.message)}</div>`; return; }
+    try { await dataApply(f.dataset.k, v); closeModal(); toast('Saved ✓'); } catch (e) { $('#data-err').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
   },
 });
 

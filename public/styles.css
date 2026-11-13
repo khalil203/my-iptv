@@ -741,3 +741,10 @@ svg.i { flex: none; vertical-align: -5px; }
 @media (max-width: 640px) { .al-acts { width: 100%; justify-content: flex-start; } .al-acts .btn.sm { min-height: 40px; } }
 .admin .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding-bottom: 6px; } .admin .chips a { white-space: nowrap; flex: none; }
 .tbl-wrap { overflow-x: auto; }
+
+/* templates & data pages */
+.tpl-f { display: grid; gap: 6px; margin-bottom: 14px; } .tpl-f label { font-size: .86rem; } .tpl-f .btn.sm { justify-self: start; }
+.tpl-f textarea, .tpl-f input { width: 100%; }
+.data-row { flex-wrap: wrap; gap: 10px; } .data-row .row { gap: 6px; flex-wrap: wrap; }
+@media (max-width: 640px) { .data-row .row { width: 100%; } .data-row .btn.sm { flex: 1 1 auto; min-height: 40px; } }
+.card > .row .spacer { flex: 1; }

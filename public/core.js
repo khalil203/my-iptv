@@ -195,6 +195,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
   if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/email/recent') return 'customers_view';
+  if (path.startsWith('/api/admin/templates')) return 'settings';
   return 'owner';
 }
 
@@ -318,6 +319,25 @@ const AM = {
     closing: 'نشكرك على اهتمامك بـ <b>{app}</b> ونتمنى لك تجربة ممتعة.', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء',
     footer: 'شكرًا لثقتك ودعمك. لأي سؤال تواصل مع فريق الدعم — نحن هنا لنجعل تجربتك مع IPTV استثنائية.' },
 };
+// The owner can reword every email. The built-in wording is kept as the default; their changes are laid on top.
+const tplDicts = () => ({ MAIL, AM, RM, OM });
+let tplSnap = null; // taken once, before any of the owner's wording is applied
+export const tplDefaults = () => (tplSnap ||= JSON.parse(JSON.stringify(tplDicts())));
+export function cleanMailTexts(custom) {
+  const out = {};
+  for (const d of Object.keys(tplDicts())) for (const lang of Object.keys(tplDefaults()[d])) for (const k of Object.keys(tplDefaults()[d][lang])) {
+    if (k === 'dir') continue;
+    const v = custom && custom[d] && custom[d][lang] ? custom[d][lang][k] : undefined;
+    if (typeof v === 'string' && v.trim() && v !== tplDefaults()[d][lang][k]) ((out[d] ||= {})[lang] ||= {})[k] = v.slice(0, 4000);
+  }
+  return out;
+}
+export function applyMailTexts(custom) {
+  for (const d of Object.keys(tplDicts())) for (const lang of Object.keys(tplDefaults()[d])) for (const k of Object.keys(tplDefaults()[d][lang])) {
+    const v = custom && custom[d] && custom[d][lang] ? custom[d][lang][k] : undefined;
+    tplDicts()[d][lang][k] = k !== 'dir' && typeof v === 'string' && v.trim() ? v : tplDefaults()[d][lang][k];
+  }
+}
 export function accessEmail(s, c, password, kind, appUrl) {
   const lang = AM[c.lang] ? c.lang : 'en'; const L = AM[lang]; const e = escHtml;
   const app = s.branding.appName || 'IPTV';
@@ -572,6 +592,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const oldLook = [['#12bfd8', '#7cf0ff'], ['#7c5cff', '#22d3ee'], ['#8065ff', '#19d5b1']].some(([p, a]) => String(s.branding.primary).toLowerCase() === p && String(s.branding.accent).toLowerCase() === a);
     if (oldLook) s.branding = { ...s.branding, primary: '#7C4DFF', accent: '#19D5B1', background: '#07081A' };
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
+    applyMailTexts(s.mailTexts);
     sCache = s; sAt = Date.now();
     return s;
   }
@@ -591,7 +612,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       return false;
     });
   }
-  async function saveSettings(s) { await store.put('settings', s); sCache = s; sAt = Date.now(); }
+  async function saveSettings(s) { await store.put('settings', s); applyMailTexts(s.mailTexts); sCache = s; sAt = Date.now(); }
   const getCustomers = async () => (await store.get('customers')) || [];
   const saveCustomers = (c) => store.put('customers', c);
   const getTx = async () => (await store.get('tx')) || [];
@@ -1404,6 +1425,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           credits: p.credits === '' || p.credits == null ? Math.max(1, Math.round((Number(p.days) || 30) / 30)) : Number(p.credits),
         }));
         if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: String(p.link || '').trim(), links: Array.isArray(p.links) ? p.links.filter((l) => /^https:\/\/[^\s]+$/.test(l?.url || '')).map((l) => ({ acc: String(l.acc || ''), cur: String(l.cur || 'EUR').toUpperCase(), url: String(l.url) })) : (s.orderPackages.find((x) => x.id === p.id)?.links || []) }));
+        // Templates are replaced as a whole, so removing a change brings the built-in wording back.
+        if (isObj(body.mailTexts)) next.mailTexts = cleanMailTexts(body.mailTexts);
+        if (isObj(body.waTemplates)) { next.waTemplates = {}; for (const ty of Object.keys(WA_TPL)) for (const lg of ['en', 'fr', 'ar']) { const v = body.waTemplates?.[ty]?.[lg]; if (typeof v === 'string' && v.trim() && v !== WA_TPL[ty][lg]) (next.waTemplates[ty] ||= {})[lg] = v.slice(0, 3000); } }
+        if (Array.isArray(body.waCustom)) next.waCustom = body.waCustom.slice(0, 30).map((x) => ({ id: String(x.id || uid(4)).replace(/[^\w]/g, '').slice(0, 12) || uid(4), name: String(x.name || 'Message').slice(0, 40), text: { en: String(x.text?.en || '').slice(0, 3000), fr: String(x.text?.fr || '').slice(0, 3000), ar: String(x.text?.ar || '').slice(0, 3000) } })).filter((x) => x.text.en || x.text.fr || x.text.ar);
         if (Array.isArray(body.orderAccounts)) next.orderAccounts = body.orderAccounts.map((a) => ({ id: String(a.id || 'acc' + uid(3)), name: String(a.name || 'Stripe'), enabled: a.enabled !== false }));
         if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
@@ -1534,7 +1559,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
         if (method === 'POST' && sub === 'wamsg') { // WhatsApp message for this customer
-          const type = WA_TPL[body.type] ? body.type : 'pay'; const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : (WA_TPL.pay[c.lang] ? c.lang : 'en');
+          const waOwn = (s.waCustom || []).find((x) => 'c:' + x.id === body.type);
+          const type = waOwn ? body.type : WA_TPL[body.type] ? body.type : 'pay'; const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : (WA_TPL.pay[c.lang] ? c.lang : 'en');
           const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
           const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
@@ -1549,7 +1575,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             expires: new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
             website: s.email.website || '', order: c.orderNo || '',
             ends: c.expiresAt < Date.now() ? { en: 'ended on', fr: 's\'est terminé le', ar: 'انتهى في' }[lang] : { en: 'ends on', fr: 'se termine le', ar: 'ينتهي في' }[lang] };
-          const tpl = String(body.template || s.waTemplates?.[type]?.[lang] || WA_TPL[type][lang]);
+          const tpl = String(body.template || (waOwn ? waOwn.text[lang] || waOwn.text.en || waOwn.text.fr || waOwn.text.ar : s.waTemplates?.[type]?.[lang] || WA_TPL[type][lang]));
           const out = []; // a line whose value is empty (e.g. no DNS yet) is left out, with its label line
           for (const line of tpl.split('\n')) {
             const empty = [...line.matchAll(/\{(\w+)\}/g)].some((m) => m[1] in vars && String(vars[m[1]]) === '');
@@ -1559,7 +1585,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const text = out.join('\n').replace(/\n{3,}/g, '\n\n');
           const phone = String(body.phone || c.whatsapp || c.phone || '').replace(/\D/g, '');
           if (body.log) { c.waSentAt = Date.now(); c.waSentType = type; if (type !== 'login') { c.orderSentPkg = pk.id; c.orderSentAcc = pl?.acc || ''; } await saveCustomers(list); await log('customer', `WhatsApp "${type}" message to ${c.username}${type !== 'login' ? ` (${pk.title}, ${price})` : ''}`); }
-          return ok({ text, phone, lang, type, payAcc: pl?.acc || '', template: tpl, isDefault: !s.waTemplates?.[type]?.[lang] });
+          return ok({ text, phone, lang, type, payAcc: pl?.acc || '', template: tpl, isDefault: waOwn ? true : !s.waTemplates?.[type]?.[lang] });
         }
         if (method === 'GET' && sub === 'renewalpreview') return ok(renewalEmail(s, c, query.appUrl));
         if (method === 'POST' && sub === 'renewal') {
@@ -1726,6 +1752,21 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           totals: { sales: sales.length, revenueUsd: sum((x) => x.amountUsd || 0), costUsd: sum((x) => x.costUsd || 0), profitUsd: sum((x) => (x.amountUsd || 0) - (x.costUsd || 0)) },
           recent: sales.slice().sort((a, x) => x.at - a.at).slice(0, 60).map((x) => ({ ...x, profitUsd: (x.amountUsd || 0) - (x.costUsd || 0) })),
         });
+      }
+      if (R('GET', '/api/admin/templates')) return ok({ defaults: tplDefaults(), custom: s.mailTexts || {}, waDefaults: WA_TPL, wa: s.waTemplates || {}, waCustom: s.waCustom || [] });
+      if (R('POST', '/api/admin/templates/preview')) { // shows an email with wording that is not saved yet, using a made-up customer
+        const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en';
+        const sample = { id: 'sample', name: 'Sara Example', username: 'sara2026', lang, email: 'sara@example.com', lineUsername: 'sara2026', linePassword: 'Pass1234', expiresAt: Date.now() + 30 * DAY, startAt: Date.now(), isTrial: body.kind === 'trial', connections: 1, planId: (s.plans[0] || {}).id };
+        applyMailTexts(cleanMailTexts(body.mailTexts));
+        let out;
+        try {
+          const url = String(s.email.appUrl || body.appUrl || '');
+          if (body.kind === 'renewal') out = renewalEmail(s, sample, url);
+          else if (body.kind === 'order') out = orderEmail(s, sample, (s.orderPackages || [])[0] || { id: 'x', title: '1 Month', days: 30, devices: 1, price: 29.99 }, url);
+          else if (body.kind === 'expiry') out = { subject: mt(lang, 'expirySubject', { days: 3 }), html: mailHtml(s, lang, [[mt(lang, 'user'), sample.username], [mt(lang, 'expires'), new Date(sample.expiresAt).toLocaleDateString()]], mt(lang, 'expiryBody', { date: new Date(sample.expiresAt).toLocaleDateString() }), sample.name) };
+          else out = accessEmail(s, sample, 'Pass1234', body.kind === 'trial' ? 'trial' : 'sub', url);
+        } finally { applyMailTexts(s.mailTexts); }
+        return ok({ subject: out.subject, html: out.html });
       }
       if (R('GET', '/api/admin/email/recent')) { // the latest emails Resend sent for this account, with their delivery status
         if (!s.email.resendKey) return err(400, 'Email is not set up (Resend key missing).');
