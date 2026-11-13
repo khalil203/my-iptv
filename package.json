@@ -4,7 +4,8 @@
   "description": "",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "node --test tests/backend.test.mjs"
   },
   "keywords": [],
   "author": "",

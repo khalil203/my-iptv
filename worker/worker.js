@@ -26,7 +26,15 @@ export default {
 
     if (url.pathname.startsWith('/api/')) {
       let body = {};
-      if (!['GET', 'HEAD'].includes(request.method)) { try { body = await request.json(); } catch { body = {}; } }
+      if (url.pathname === '/api/stripe/webhook') {
+        // Stripe signs the exact bytes it sent, so the body is passed on untouched together with the signature header.
+        body = { raw: await request.text(), sig: request.headers.get('stripe-signature') || '' };
+      } else if (!['GET', 'HEAD'].includes(request.method)) { try { body = await request.json(); } catch { body = {}; } }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) body = {};
+      if (['/api/login', '/api/forgot'].includes(url.pathname)) { // never trust these from the caller
+        body.ip = request.headers.get('cf-connecting-ip') || ''; body.ua = request.headers.get('user-agent') || '';
+        if (url.pathname === '/api/forgot') body.appUrl = url.origin;
+      }
       if (url.pathname === '/api/trial') body.ip = request.headers.get('cf-connecting-ip') || '';
       if (url.pathname === '/api/trial' && body && typeof body === 'object' && !body.appUrl) body.appUrl = url.origin;
       const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');

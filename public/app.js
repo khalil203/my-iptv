@@ -1,5 +1,6 @@
 import { createBackend } from './core.js';
 import { loadLogos, logosReady, findLogo } from './logos.js';
+import { siteHtml } from './site.js';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js';
 
 // ---------------- helpers ----------------
@@ -91,7 +92,7 @@ async function api(method, path, body) {
   if (status === 409 && path.includes('/api/xtream')) { location.reload(); }
   if (status >= 400) {
     if (status === 401 && state.token && !path.includes('/login')) { setSession(null); route(); }
-    throw Object.assign(new Error(json.error || 'Error'), { status });
+    throw Object.assign(new Error(json.error || 'Error'), { status, data: json });
   }
   return json;
 }
@@ -143,6 +144,8 @@ async function boot() {
     return;
   }
   // The browser upgraded our http:// switch back to https:// — remember it and never loop.
+  if (hp.get('reset')) { state.resetToken = hp.get('reset'); state.showLogin = true; history.replaceState(null, '', location.pathname); }
+  if (location.hash === '#login') state.showLogin = true;
   if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
   if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
   setLang(detectLang());
@@ -159,6 +162,7 @@ async function boot() {
   }
   applyBranding(state.config.branding);
   route();
+  if (state.resetToken && !state.token) showReset();
 }
 
 function route() {
@@ -167,7 +171,7 @@ function route() {
   if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
-  if (!state.token) return renderLogin();
+  if (!state.token) return wantsSite() ? renderSite() : renderLogin();
   if (isAdminUI()) return renderAdmin();
   return renderUser();
 }
@@ -195,12 +199,14 @@ function loginCard(b, { preview = false, error = '' } = {}) {
         <label class="field"><span>${t('password')}</span><div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" data-act="pw-eye">👁</button></div></label>
         <button class="btn primary block" ${preview ? 'type="button"' : ''}>${t('signIn')}</button>
       </form>
+      ${preview ? '' : `<div class="login-foot" style="margin-top:10px"><a href="#" data-act="forgot">${t('forgot')}</a></div>`}
       ${state.config?.trial?.enabled ? `<button class="btn block" style="margin-top:10px;border-color:var(--accent);color:var(--accent)" ${preview ? '' : 'data-act="trial"'}>🎁 ${t('startTrial', { hours: state.config.trial.hours })}</button>` : ''}
       ${preview ? '' : `<a class="btn block ghost" href="download.html" style="margin-top:8px">📲 ${t('getApp')}</a>`}
       ${preview ? '' : `<div class="login-foot"><a data-act="theme" style="cursor:pointer;text-decoration:none">🌗</a></div>`}
       ${preview ? '' : `<div class="login-foot lang-sw">${LANGS.map(([k, n]) => `<a data-act="lang" data-lang="${k}" class="${getLang() === k ? 'on' : ''}">${n}</a>`).join(' · ')}</div>`}
       ${waNum(b) ? `<a class="btn block wa-btn" style="margin-top:8px" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: '' })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
       ${b.footerText ? `<div class="login-foot">${esc(b.footerText)}</div>` : ''}
+      ${preview || bridge() ? '' : `<div class="login-foot"><a href="#" data-act="site-page" data-page="home">${t('aboutSite', { app: esc(b.appName) })}</a></div>`}
       ${state.mode === 'demo' && !preview ? `<div class="login-foot"><span class="badge-demo">${t('demo')}</span></div>` : ''}
     </div></div>`;
 }
@@ -236,7 +242,7 @@ const ADMIN_TABS = [
   ['finance', '🏦', 'Banks & balances', 'finance_view'], ['profits', '📈', 'Profits', 'profits'], ['stock', '🎟', 'Credits stock', 'stock'],
   ['plans', '💳', 'Plans & prices', 'plans'], ['trial', '🎁', 'Trial & email', 'settings'], ['userdash', '📱', 'User dashboard', 'settings'],
   ['branding', '🎨', 'Login & branding', 'settings'], ['api', '🔌', 'API settings', 'settings'], ['team', '🛡', 'Team & access', 'owner'],
-  ['security', '🔐', 'My account', null], ['activity', '🧾', 'Activity', 'activity'],
+  ['support', '💬', 'Support', 'customers_view'], ['security', '🔐', 'My account', null], ['activity', '🧾', 'Activity', 'activity'],
 ];
 
 async function renderAdmin() {
@@ -267,7 +273,7 @@ async function renderAdmin() {
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
-    else if (t === 'finance') { body.innerHTML = await adminFinance(s); loadStripe(); }
+    else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
     else if (t === 'trial') body.innerHTML = adminTrial(s);
@@ -275,6 +281,7 @@ async function renderAdmin() {
     else if (t === 'branding') body.innerHTML = adminBranding(s);
     else if (t === 'api') body.innerHTML = adminApi(s);
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
+    else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'activity') body.innerHTML = await adminActivity();
     else if (t === 'team') body.innerHTML = await adminTeam();
     else if (t === 'dups') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminDups(); }
@@ -619,14 +626,14 @@ function adminApi(s) {
 async function adminSecurity(s) {
   const me = state.admin.me;
   if (me.role !== 'owner') return `<form data-form="staff-password" class="card" style="max-width:520px"><h3>My login</h3><p class="muted small">Signed in as <b>${esc(me.username)}</b>. Permissions: ${me.perms.map((p) => `<span class="tagp">${esc((me.allPerms.find((x) => x[0] === p) || [p, p])[1])}</span>`).join(' ') || 'none'}</p>
-    ${field('Current password', 'current', '', { type: 'password', attrs: 'required' })}${field('New password', 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">Change my password</button></form>`;
+    ${field('Current password', 'current', '', { type: 'password', attrs: 'required' })}${field('New password', 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">Change my password</button></form>${twoFactorCard(me)}`;
   return `<div class="grid2" style="gap:16px;align-items:start">
   <form data-form="admin-account" class="card"><h3>Admin login details</h3>
     ${field('Admin username', 'username', me.username, { attrs: 'autocapitalize="none"' })}
     ${field('New password (leave empty to keep)', 'newPassword', '', { type: 'password' })}
     ${field('Current password (required)', 'currentPassword', '', { type: 'password', attrs: 'required' })}
     <button class="btn primary">Update admin login</button></form>
-  <div><form data-form="settings" class="card"><h3>Sessions</h3>
+  <div>${twoFactorCard(me)}<form data-form="settings" class="card"><h3>Sessions</h3>
     ${field('Keep users signed in for (hours)', 'security.sessionHours', s.security.sessionHours, { type: 'number', attrs: 'min="1" max="2160"' })}
     <button class="btn primary">Save</button></form>
   <div class="card"><h3>Backup</h3><p class="small muted">Download all settings and customers, or restore from a backup file.</p>
@@ -931,6 +938,7 @@ async function renderUserTab() {
         <div class="row" style="margin:12px 0;align-items:flex-end"><div><div class="big">${user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</div><div class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</div></div><span class="spacer"></span><div style="text-align:end"><b>${esc(user.isTrial ? t('trial') : user.planName)}</b><div class="small muted">${t('until', { date: fmtDate(user.expiresAt) })}</div><div class="small muted">${t('devices', { n: user.connections })}</div></div></div>${progress(user)}</div>` : ''}
       <div class="tiles">${d.live ? `<div class="tile" data-act="utab" data-tab="live"><span class="ic">📺</span><b>${t('liveTv')}</b></div>` : ''}${d.movies ? `<div class="tile" data-act="utab" data-tab="movies"><span class="ic">🎬</span><b>${t('movies')}</b></div>` : ''}${d.series ? `<div class="tile" data-act="utab" data-tab="series"><span class="ic">🎞</span><b>${t('series')}</b></div>` : ''}${b.supportUrl ? `<a class="tile" href="${esc(b.supportUrl)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="ic">💬</span><b>${esc(b.supportLabel || t('support'))}</b></a>` : ''}</div>
       ${user.isTrial || user.state !== 'active' ? plansCard() : ''}
+      ${libraryHtml()}
       ${favs.length ? `<h3>${t('favorites')}</h3>${itemsGrid(favs)}` : ''}`;
     return;
   }
@@ -939,9 +947,14 @@ async function renderUserTab() {
       <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div><div class="list-item"><span style="flex:1">${t('devicesL')}</span><b>${user.connections}</b></div>
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
       ${plansCard()}
+      <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
+      <div class="card" id="acc-tickets"><div class="row"><h3 style="margin:0;flex:1">${t('supportT')}</h3><button class="btn sm primary" data-act="ticket-new">＋ ${t('newTicket')}</button></div><p class="muted small">${t('loadingDots')}</p></div>
+      <div class="card" id="acc-payments"><h3>${t('paymentsT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
+      ${parentalCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
       <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}${!waNum(b) && b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
+    loadAccountExtras();
     return;
   }
   const blocked = blockedScreen();
@@ -951,18 +964,21 @@ async function renderUserTab() {
   const listAction = { live: 'get_live_streams', movies: 'get_vod_streams', series: 'get_series' }[kind];
   el.innerHTML = `<div class="chips">${'<a style="width:90px">&nbsp;</a>'.repeat(4)}</div><div class="ch-grid">${'<div class="ch sk"><div class="noimg"></div><span>&nbsp;</span></div>'.repeat(12)}</div>`;
   try {
-    const cats = await xt(catAction);
-    const cat = u.cat[kind] ?? (cats[0]?.category_id ?? '');
+    const allCats = await xt(catAction);
+    const hiddenCats = lockedCats(allCats);
+    const cats = (Array.isArray(allCats) ? allCats : []).filter((c) => !hiddenCats.has(String(c.category_id)));
+    let cat = u.cat[kind] ?? (cats[0]?.category_id ?? '');
+    if (hiddenCats.has(String(cat))) cat = cats[0]?.category_id ?? '';
     u.cat[kind] = cat;
     const items = cat === '*' ? await xt(listAction) : await xt(listAction, { category_id: cat });
     const q = u.q.trim().toLowerCase();
-    const list = (Array.isArray(items) ? items : []).filter((i) => !q || String(i.name).toLowerCase().includes(q));
+    const list = (Array.isArray(items) ? items : []).filter((i) => !hiddenCats.has(String(i.category_id)) && (!q || String(i.name).toLowerCase().includes(q)));
     const mapped = list.map((i) => kind === 'live'
       ? { kind: 'live', id: i.stream_id, name: i.name, icon: i.stream_icon }
       : kind === 'movies' ? { kind: 'movie', id: i.stream_id, name: i.name, icon: i.stream_icon, ext: i.container_extension }
       : { kind: 'series', id: i.series_id, name: i.name, icon: i.cover });
     el.innerHTML = `${d.search ? `<input placeholder="${t('search')}" value="${esc(u.q)}" data-input="u-search" style="margin-bottom:12px">` : ''}
-      <div class="chips">${kind === 'live' ? `<a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>` : ''}${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}</div>
+      <div class="chips">${kind === 'live' ? `<a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>` : ''}${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}${hiddenCats.size ? `<a data-act="pin-unlock">${t('locked')}</a>` : ''}</div>
       <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
   } catch (e) { if (e.switching) return; el.innerHTML = e.direct ? appsCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
@@ -1143,6 +1159,7 @@ function streamUrl(kind, id, ext) {
 const loadHls = () => window.Hls ? Promise.resolve() : new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
 function play(title, kind, id, ext, extraHtml = '') {
   if (blockedScreen()) return toast(t('notAvailable'), true);
+  recordWatch({ kind: kind === 'series' ? 'episode' : kind, id, name: title, ext, icon: state.user.lastIcon || '' });
   let url, isHls;
   if (isDirect()) {
     const st = state.user.me.stream; const b = bridge();
@@ -1217,6 +1234,12 @@ function openPlayer({ title, url, isHls, kind, id, extraHtml }) {
   v.addEventListener('pause', () => { playB.textContent = '▶'; vp.classList.add('show'); });
   v.addEventListener('canplay', () => (spin.style.display = 'none'));
   v.addEventListener('error', () => { if (!hls) { if (retries++ < 2) setTimeout(start, 1500); else fail(); } });
+  if (!live) {
+    const hk = kind === 'series' ? 'episode' : kind; let lastSave = 0;
+    v.addEventListener('loadedmetadata', () => { const h = getHist().find((x) => x.kind === hk && String(x.id) === String(id)); if (h && h.pos > 30 && isFinite(v.duration) && h.pos < v.duration - 60) { v.currentTime = h.pos; toast(t('resumed', { t: fmtT(h.pos) })); } }, { once: true });
+    v.addEventListener('timeupdate', () => { if (isFinite(v.duration) && Date.now() - lastSave > 10000) { lastSave = Date.now(); savePos(hk, id, v.currentTime, v.duration); } });
+    v.addEventListener('pause', () => { if (isFinite(v.duration)) savePos(hk, id, v.currentTime, v.duration); });
+  }
   v.addEventListener('timeupdate', () => { if (!live && seek && isFinite(v.duration)) { if (!seek.dragging) seek.value = Math.round((v.currentTime / v.duration) * 1000); timeEl.textContent = `${fmtT(v.currentTime)} / ${fmtT(v.duration)}`; } });
   v.addEventListener('volumechange', saveVol);
   if (seek) { seek.addEventListener('input', () => { seek.dragging = true; timeEl.textContent = `${fmtT((seek.value / 1000) * v.duration)} / ${fmtT(v.duration)}`; }); seek.addEventListener('change', () => { seek.dragging = false; if (isFinite(v.duration)) v.currentTime = (seek.value / 1000) * v.duration; }); }
@@ -1291,6 +1314,8 @@ async function loadEpg(id) {
 }
 
 async function openItem(i) {
+  state.user.lastIcon = i.icon || '';
+  if (i.kind === 'episode') return play(i.name, 'series', i.id, i.ext);
   if (i.kind === 'live') return play(i.name, 'live', i.id, 'm3u8', '<div id="epg"></div>');
   if (i.kind === 'movie') {
     const body = modal(esc(i.name), '<div class="spinner"></div>', { wide: true });
@@ -1556,7 +1581,7 @@ const actions = {
     const order = ['auto', 'light', 'dark']; const next = order[(order.indexOf(themeMode()) + 1) % 3];
     localStorage.setItem('tvp_theme', next); applyTheme(); toast('Theme: ' + themeLabel());
   },
-  lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else renderLogin(); },
+  lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else route(); },
   trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
   'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
   'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast('Deleted'); renderAdmin(); },
@@ -1747,8 +1772,11 @@ const forms = {
     const btn = f.querySelector('button.primary'); btn.disabled = true;
     try {
       const r = await api('POST', '/api/login', { username: f.username.value, password: f.password.value });
-      setSession(r.token, r.role); route();
-    } catch (e) { renderLogin(e.message); }
+      localStorage.setItem('tvp_known', '1'); setSession(r.token, r.role); route();
+    } catch (e) {
+      if (e.data?.need2fa) { btn.disabled = false; state.pendingLogin = { username: f.username.value, password: f.password.value }; const b = modal('🔐 ' + t('code2faTitle'), `<p class="muted" style="margin-top:0">${t('code2faText')}</p><form data-form="login-code">${field(t('code2fa'), 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" dir="ltr"' })}<div id="code-err"></div><button class="btn primary block">${t('verify')}</button></form>`); b.querySelector('input').focus(); return; }
+      renderLogin(e.message);
+    }
   },
   async setup(f) {
     try { const r = await api('POST', '/api/setup', { username: f.username.value, password: f.password.value }); setSession(r.token, r.role); await refreshConfig(); state.admin.tab = 'api'; route(); }
@@ -1870,4 +1898,205 @@ document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && el && el.hasAttribute('data-act') && el.tagName !== 'BUTTON' && !(el.tagName === 'A' && el.hasAttribute('href'))) { e.preventDefault(); el.click(); }
   if ((e.key === 'Escape' || e.key === 'Backspace' && !/INPUT|TEXTAREA/.test(el?.tagName || '')) && $('#modal-root').innerHTML) { e.preventDefault(); closeModal(); }
 });
+// =====================================================================
+// Public website, sign-in help, account portal, library, parental PIN,
+// admin support desk, two-factor login and automatic Stripe payments
+// =====================================================================
+
+// ---------------- public website ----------------
+const isStandalone = () => { try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch { return false; } };
+// Visitors see the website. The installed apps, and devices that have signed in before, open the sign-in screen directly.
+const wantsSite = () => !bridge() && (state.forceSite || (!state.showLogin && !isStandalone() && !localStorage.getItem('tvp_known')));
+function renderSite() {
+  setWaFab(null);
+  $('#app').innerHTML = siteHtml({ config: state.config, lang: getLang(), langs: LANGS, page: state.sitePage || 'home' });
+}
+
+// ---------------- watch history (kept on this device only) ----------------
+const histKey = () => 'tvp_hist_' + (state.user.me?.user?.username || '');
+const getHist = () => { try { return JSON.parse(localStorage.getItem(histKey())) || []; } catch { return []; } };
+const putHist = (l) => { try { localStorage.setItem(histKey(), JSON.stringify(l.slice(0, 60))); } catch {} };
+function recordWatch(i) {
+  const l = getHist(); const old = l.find((x) => x.kind === i.kind && String(x.id) === String(i.id));
+  putHist([{ ...old, ...i, icon: i.icon || old?.icon || '', at: Date.now() }, ...l.filter((x) => x !== old)]);
+}
+function savePos(kind, id, pos, dur) {
+  const l = getHist(); const h = l.find((x) => x.kind === kind && String(x.id) === String(id)); if (!h) return;
+  h.pos = Math.floor(pos); h.dur = Math.floor(dur); h.at = Date.now(); putHist(l);
+}
+function libraryHtml() {
+  if (blockedScreen()) return '';
+  const l = getHist();
+  const cont = l.filter((x) => x.kind !== 'live' && x.pos > 30 && x.dur && x.pos < x.dur * 0.95).slice(0, 8);
+  const recent = l.filter((x) => x.kind === 'live').slice(0, 12);
+  if (!cont.length && !recent.length) return '';
+  const row = (x) => `<div class="cw" data-act="open-item" data-item="${esc(JSON.stringify({ kind: x.kind, id: x.id, name: x.name, icon: x.icon, ext: x.ext }))}" tabindex="0"><div class="cw-play">▶</div><div style="flex:1;min-width:0"><b>${esc(x.name)}</b><div class="prog" style="margin-top:8px"><i style="width:${Math.round((x.pos / x.dur) * 100)}%;animation:none"></i></div><div class="small muted" dir="ltr">${fmtT(x.pos)} / ${fmtT(x.dur)}</div></div></div>`;
+  return `${cont.length ? `<h3>${t('continueW')}</h3><div class="cw-list">${cont.map(row).join('')}</div>` : ''}
+    ${recent.length ? `<h3>${t('recentCh')}</h3>${itemsGrid(recent.map((x) => ({ kind: 'live', id: x.id, name: x.name, icon: x.icon })))}` : ''}
+    <p style="margin:-4px 0 16px"><a href="#" class="small muted" data-act="hist-clear">${t('clearHist')}</a></p>`;
+}
+
+// ---------------- parental PIN (kept on this device only) ----------------
+const pinKey = () => 'tvp_pin_' + (state.user.me?.user?.username || '');
+const getPin = () => localStorage.getItem(pinKey()) || '';
+const ADULT = /adult|xxx|18\s*\+|\+\s*18|porn|erot|للكبار|بالغين/i;
+function lockedCats(cats) {
+  if (!getPin() || state.user.unlocked) return new Set();
+  return new Set((Array.isArray(cats) ? cats : []).filter((c) => ADULT.test(String(c.category_name))).map((c) => String(c.category_id)));
+}
+function parentalCard() {
+  const on = !!getPin();
+  return `<form class="card" data-form="${on ? 'pin-off' : 'pin-on'}"><h3>${t('parentalT')}</h3><p class="muted small" style="margin-top:0">${on ? t('pinOnText') : t('parentalText')}</p>
+    ${field(on ? t('enterPin') : t('pin'), 'pin', '', { type: 'password', attrs: 'required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" dir="ltr"' })}
+    <button class="btn ${on ? '' : 'primary'}">${on ? t('removePin') : t('setPin')}</button></form>`;
+}
+
+// ---------------- account portal: devices, support, payments ----------------
+function devName(ua) {
+  ua = String(ua || '');
+  const os = /Android/.test(ua) ? (/TV|AFT|BRAVIA|SHIELD|Box|MiBOX/i.test(ua) ? 'Android TV' : 'Android') : /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  const br = /; wv\)|Electron/.test(ua) ? 'App' : /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  return [os, br].filter(Boolean).join(' · ') || 'Device';
+}
+const tpill = (st) => `<span class="pill st-${st}">${isAdminUI() ? st : t('st_' + st)}</span>`;
+async function loadAccountExtras() {
+  const dv = $('#acc-devices'), tk = $('#acc-tickets'), pm = $('#acc-payments');
+  const fill = async (el, fn) => { if (!el) return; try { await fn(); } catch (e) { const p = el.querySelector('p.muted'); if (p) p.textContent = e.message; } };
+  fill(dv, async () => {
+    const list = await api('GET', '/api/me/devices');
+    if (!$('#acc-devices')) return;
+    dv.innerHTML = `<h3>${t('devicesT')}</h3>${list.length ? list.map((d) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(devName(d.ua))}</b>${d.current ? ` <span class="tagp">${t('thisDevice')}</span>` : ''}<div class="small muted">${t('signedInOn', { date: fmtDate(d.at) })}</div></div>${d.current ? '' : `<button class="btn sm" data-act="dev-remove" data-did="${esc(d.did)}">${t('signOutDev')}</button>`}</div>`).join('') : `<p class="muted small">${t('noDevices')}</p>`}`;
+  });
+  fill(tk, async () => {
+    const list = await api('GET', '/api/me/tickets'); state.user.tickets = list;
+    if (!$('#acc-tickets')) return;
+    tk.querySelector('p.muted')?.remove(); tk.querySelectorAll('.list-item').forEach((x) => x.remove());
+    tk.insertAdjacentHTML('beforeend', list.length ? list.map((x) => `<div class="list-item" data-act="ticket-open" data-id="${esc(x.id)}" style="cursor:pointer" tabindex="0"><div style="flex:1;min-width:0"><b>${esc(x.subject)}</b><div class="small muted">${fmtDate(x.updatedAt)} · ${x.messages.length}</div></div>${tpill(x.status)}</div>`).join('') : `<p class="muted small">${t('noTickets')}</p>`);
+  });
+  fill(pm, async () => {
+    const list = await api('GET', '/api/me/payments'); state.user.payments = list;
+    if (!$('#acc-payments')) return;
+    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(x.plan)}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') : `<p class="muted small">${t('noPayments')}</p>`}`;
+  });
+}
+function ticketThread(x, admin) {
+  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div></div>`).join('')}</div>`;
+}
+function openTicket(id) {
+  const x = (state.user.tickets || []).find((k) => k.id === id); if (!x) return;
+  modal(esc(x.subject), `<div style="margin-bottom:10px">${tpill(x.status)}</div>${ticketThread(x, false)}
+    ${x.status === 'closed' ? '' : `<form data-form="ticket-reply" data-id="${esc(x.id)}">${field(t('reply'), 'text', '', { type: 'textarea', rows: 3, ph: t('writeReply'), attrs: 'required maxlength="2000"' })}<button class="btn primary">${t('send')}</button></form>`}`);
+}
+function openReceipt(id) {
+  const x = (state.user.payments || []).find((k) => k.id === id); if (!x) return; const me = state.user.me;
+  modal('🧾 ' + t('receipt'), `<div class="receipt" id="receipt"><h2 style="margin:0">${esc(me.branding.appName)}</h2><p class="muted small" style="margin:2px 0 16px">${t('receipt')} · ${esc(String(x.id).toUpperCase())}</p>
+    <div class="list-item"><span style="flex:1">${t('receiptFor')}</span><b>${esc(me.user.name)} (${esc(me.user.username)})</b></div>
+    <div class="list-item"><span style="flex:1">${t('paidOn')}</span><b>${fmtDate(x.at)}</b></div>
+    <div class="list-item"><span style="flex:1">${t('item')}</span><b>${esc(x.plan)} · ${esc(x.days)}d</b></div>
+    <div class="list-item"><span style="flex:1">${t('amount')}</span><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b></div></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn primary" data-act="print">🖨 ${t('print')}</button></div>`);
+}
+function showReset() {
+  modal('🔑 ' + t('resetTitle'), `<form data-form="reset">${field(t('newPw'), 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<div id="reset-err"></div><button class="btn primary block">${t('updatePw')}</button></form>`);
+}
+
+// ---------------- admin: support desk ----------------
+async function adminSupport() {
+  const list = await api('GET', '/api/admin/tickets'); state.admin.tickets = list;
+  const f = state.admin.tkFilter || 'open';
+  const shown = list.filter((x) => f === 'all' || x.status === f);
+  const count = (st) => list.filter((x) => x.status === st).length;
+  return `<div class="chips">${[['open', `Waiting for reply (${count('open')})`], ['answered', `Answered (${count('answered')})`], ['closed', `Closed (${count('closed')})`], ['all', `All (${list.length})`]].map(([k, n]) => `<a class="${f === k ? 'on' : ''}" data-act="tk-filter" data-f="${k}">${n}</a>`).join('')}</div>
+    <div class="card">${shown.length ? shown.map((x) => `<div class="list-item" data-act="tk-open" data-id="${esc(x.id)}" style="cursor:pointer" tabindex="0"><div class="avatar">${esc(initials(x.name))}</div><div style="flex:1;min-width:0"><b>${esc(x.subject)}</b>${x.priority === 'high' ? ' <span class="pill st-expired">high</span>' : ''}<div class="small muted">${esc(x.name)} · ${esc(x.username)} · ${fmtDT(x.updatedAt)} · ${x.messages.length} message${x.messages.length > 1 ? 's' : ''}</div></div>${tpill(x.status)}</div>`).join('') : `<div class="empty"><span class="ic">💬</span>${list.length ? 'Nothing in this list.' : 'No support requests yet. Customers open them from Account → Support in the app.'}</div>`}</div>`;
+}
+function adminTicketModal(id) {
+  const x = (state.admin.tickets || []).find((k) => k.id === id); if (!x) return;
+  modal(esc(x.subject), `<p class="small muted" style="margin-top:0">${esc(x.name)} · ${esc(x.username)} · opened ${fmtDT(x.createdAt)} ${tpill(x.status)}</p>${ticketThread(x, true)}
+    <form data-form="tk-reply" data-id="${esc(x.id)}" data-perm="customers_edit">${field('Your answer', 'text', '', { type: 'textarea', rows: 4, ph: 'Write the answer the customer will read in the app…', attrs: 'maxlength="2000"' })}
+      <div class="grid2">${field('Status after saving', 'status', x.status === 'closed' ? 'closed' : 'answered', { type: 'select', options: [['answered', 'Answered'], ['open', 'Still waiting for reply'], ['closed', 'Closed']] })}${field('Priority', 'priority', x.priority, { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Save</button></div></form>`, { wide: true });
+}
+
+// ---------------- admin: two-factor login ----------------
+function twoFactorCard(me) {
+  return `<div class="card" style="max-width:520px"><h3>Two-step sign-in</h3>
+    <p class="small muted" style="margin-top:0">${me.twoFactor ? 'On. Signing in to this account needs your password and a 6-digit code from your authenticator app.' : 'Adds a 6-digit code from an authenticator app (Google Authenticator, Authy, 1Password…) on top of your password.'}</p>
+    ${me.twoFactor ? `<span class="pill st-active">on</span> <button class="btn sm danger" data-act="tfa-off" style="margin-inline-start:8px">Turn off</button>` : `<button class="btn primary" data-act="tfa-setup">Turn on</button>`}</div>`;
+}
+
+// ---------------- admin: automatic Stripe payments ----------------
+async function adminAutoPay(s) {
+  let p = { list: [], configured: false }; try { p = await api('GET', '/api/admin/payments'); } catch {}
+  const url = location.origin + '/api/stripe/webhook';
+  const tone = { activated: 'st-active', unmatched: 'st-expiring', needs_attention: 'st-expired' };
+  return `<div class="card"><h3>Automatic activation from Stripe</h3>
+    <p class="small muted" style="margin-top:0">When a customer pays through one of your Stripe payment links, Stripe tells this app and the subscription is extended by itself. A payment is only accepted when Stripe's signature matches your signing secret, and it is never applied twice.</p>
+    <div class="notice ${p.configured ? 'success' : 'warning'}">${p.configured ? '✅ Connected. Verified payments activate automatically.' : '⚠️ Not connected yet. Follow the three steps below for each Stripe account.'}</div>
+    <ol class="small" style="padding-inline-start:18px;line-height:1.7"><li>In Stripe: <b>Developers → Webhooks → Add endpoint</b>, with this address:<div class="code" style="margin:6px 0">${esc(url)}</div></li><li>Choose the event <b>checkout.session.completed</b>.</li><li>Copy the endpoint's <b>Signing secret</b> (starts with <code>whsec_</code>) and paste it here, one per line if you use several Stripe accounts.</li></ol>
+    <form data-form="settings">${field('Signing secrets', 'finance.stripeWebhookSecrets', s.finance.stripeWebhookSecrets || '', { type: 'textarea', rows: 3, ph: 'whsec_…', attrs: 'autocapitalize="none" spellcheck="false"' })}<button class="btn primary">Save</button></form>
+    <h3 style="margin-top:18px">Payments received from Stripe</h3>
+    ${p.list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Customer</th><th>Amount</th><th>Result</th></tr></thead><tbody>${p.list.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td>${esc(x.username || x.email || '—')}<div class="small muted">${esc(x.pkg || '')}</div></td><td>${esc(x.amount)} ${esc(x.currency)}</td><td><span class="pill ${tone[x.status] || ''}">${esc(String(x.status).replace('_', ' '))}</span><div class="small muted">${esc(x.note || '')}</div></td></tr>`).join('')}</tbody></table></div>` : `<p class="muted small">No Stripe payments recorded yet.</p>`}</div>`;
+}
+
+Object.assign(actions, {
+  'site-login': () => { state.showLogin = true; state.forceSite = false; route(); window.scrollTo(0, 0); },
+  'site-page': (el) => { state.forceSite = true; state.sitePage = el.dataset.page; route(); window.scrollTo(0, 0); },
+  'site-jump': (el) => { document.getElementById(el.dataset.to)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
+  forgot: () => { modal('🔑 ' + t('forgot'), `<p class="muted" style="margin-top:0">${t('forgotText')}</p><form data-form="forgot">${field(t('loginOrEmail'), 'login', '', { attrs: 'required autocapitalize="none" dir="ltr"' })}<button class="btn primary block">${t('sendLink')}</button></form>`); },
+  'hist-clear': () => { localStorage.removeItem(histKey()); toast(t('histCleared')); renderUserTab(); },
+  'pin-unlock': () => { const b = modal('🔒 ' + t('parentalT'), `<form data-form="pin-unlock">${field(t('enterPin'), 'pin', '', { type: 'password', attrs: 'required inputmode="numeric" maxlength="4" autocomplete="off" dir="ltr"' })}<button class="btn primary block">${t('unlock')}</button></form>`); b.querySelector('input').focus(); },
+  'dev-remove': async (el) => { if (!confirm(t('signOutDev') + '?')) return; await api('POST', '/api/me/devices/remove', { did: el.dataset.did }); toast(t('devOut')); loadAccountExtras(); },
+  'ticket-new': () => { modal('💬 ' + t('newTicket'), `<form data-form="ticket-new">${field(t('subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}${field(t('message'), 'text', '', { type: 'textarea', rows: 5, attrs: 'required minlength="5" maxlength="2000"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">${t('send')}</button></div></form>`); },
+  'ticket-open': (el) => openTicket(el.dataset.id),
+  receipt: (el) => openReceipt(el.dataset.id),
+  print: () => window.print(),
+  'tk-filter': async (el) => { state.admin.tkFilter = el.dataset.f; $('#admin-body').innerHTML = await adminSupport(); },
+  'tk-open': (el) => adminTicketModal(el.dataset.id),
+  'tfa-setup': async () => {
+    const r = await api('POST', '/api/admin/2fa/setup', {});
+    modal('🔐 Turn on two-step sign-in', `<ol style="padding-inline-start:18px;line-height:1.7;margin-top:0"><li>Open your authenticator app and add a new account.</li><li>On this phone, tap <a href="${esc(r.uri)}" data-keep>Add to my authenticator app</a>. On another device, choose “enter a setup key” and type this key:<div class="code" style="margin:8px 0;font-size:1rem;letter-spacing:.08em">${esc(r.secret.match(/.{1,4}/g).join(' '))}</div></li><li>Type the 6-digit code the app shows:</li></ol>
+      <form data-form="tfa-enable">${field('6-digit code', 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" maxlength="7"' })}<p class="small muted">Keep the setup key somewhere safe. If you lose your phone, it is the only way to add the account to a new authenticator.</p><button class="btn primary block">Turn on</button></form>`);
+  },
+  'tfa-off': () => { modal('Turn off two-step sign-in', `<form data-form="tfa-off">${field('Current password', 'password', '', { type: 'password', attrs: 'required' })}<button class="btn danger block">Turn off</button></form>`); },
+});
+Object.assign(forms, {
+  async 'login-code'(f) {
+    const p = state.pendingLogin; if (!p) return closeModal();
+    try { const r = await api('POST', '/api/login', { ...p, code: f.code.value }); state.pendingLogin = null; localStorage.setItem('tvp_known', '1'); closeModal(); setSession(r.token, r.role); route(); }
+    catch (e) { $('#code-err').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; f.code.select(); }
+  },
+  async forgot(f) {
+    const btn = f.querySelector('button'); btn.disabled = true;
+    try { await api('POST', '/api/forgot', { login: f.login.value, appUrl: location.origin + location.pathname.replace(/index\.html$/, '').replace(/\/$/, '') }); f.outerHTML = `<div class="notice success">✅ ${t('forgotSent')}</div>`; }
+    catch (e) { btn.disabled = false; toast(tErr(e.message), true); }
+  },
+  async reset(f) {
+    try { await api('POST', '/api/reset', { t: state.resetToken, password: f.password.value }); state.resetToken = null; closeModal(); toast(t('resetDone')); }
+    catch (e) { $('#reset-err').innerHTML = `<div class="err-box">${esc(tErr(e.message))}</div>`; }
+  },
+  'pin-on'(f) { const pin = f.pin.value.trim(); if (!/^\d{4}$/.test(pin)) return toast(t('pinNeeds'), true); localStorage.setItem(pinKey(), pin); state.user.unlocked = false; state.user.cache = {}; toast(t('pinSaved')); renderUserTab(); },
+  'pin-off'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); localStorage.removeItem(pinKey()); toast(t('pinRemoved')); renderUserTab(); },
+  'pin-unlock'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); state.user.unlocked = true; closeModal(); renderUserTab(); },
+  async 'ticket-new'(f) {
+    try { await api('POST', '/api/me/tickets', { subject: f.subject.value, text: f.text.value }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
+    catch (e) { toast(tErr(e.message), true); }
+  },
+  async 'ticket-reply'(f) {
+    try { await api('POST', '/api/me/tickets/reply', { id: f.dataset.id, text: f.text.value }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
+    catch (e) { toast(tErr(e.message), true); }
+  },
+  async 'tk-reply'(f) {
+    try { await api('POST', '/api/admin/tickets/reply', { id: f.dataset.id, text: f.text.value, status: f.status.value, priority: f.priority.value }); closeModal(); toast('Saved ✓'); $('#admin-body').innerHTML = await adminSupport(); }
+    catch (e) { toast(e.message, true); }
+  },
+  async 'tfa-enable'(f) {
+    try { await api('POST', '/api/admin/2fa/enable', { code: f.code.value }); state.admin.me = null; closeModal(); toast('Two-step sign-in is on ✓'); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
+  async 'tfa-off'(f) {
+    try { await api('POST', '/api/admin/2fa/disable', { password: f.password.value }); state.admin.me = null; closeModal(); toast('Two-step sign-in is off'); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
+});
+
 boot();

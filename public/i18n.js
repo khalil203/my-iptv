@@ -83,6 +83,48 @@ const D = {
   },
 };
 
+
+// ---- account portal, library and sign-in help ----
+Object.assign(D.en, {
+  forgot: 'Forgot password?', forgotText: 'Enter your username or your email. If the account has an email address, we send a link to choose a new password.', loginOrEmail: 'Username or email', sendLink: 'Send the link', forgotSent: 'If the account exists and has an email address, the link is on its way. It works for 30 minutes.',
+  resetTitle: 'Choose a new password', resetDone: 'Password changed. You can sign in now.', reset_bad: 'This link is not valid any more. Ask for a new one.', aboutSite: 'About {app}',
+  code2fa: '6-digit code', code2faTitle: 'Two-step sign-in', code2faText: 'Open your authenticator app and enter the code for this account.', verify: 'Verify',
+  devicesT: 'My devices', thisDevice: 'This device', signedInOn: 'Signed in {date}', signOutDev: 'Sign out', noDevices: 'No devices are signed in.', devOut: 'Device signed out.',
+  supportT: 'Support requests', newTicket: 'New request', subject: 'Subject', message: 'Message', send: 'Send', reply: 'Reply', writeReply: 'Write a reply…',
+  ticket_short: 'Please write a subject and a longer message.', ticket_limit: 'You can open 3 requests per day. Please reply inside an existing one.', ticket_full: 'This request is full. Please open a new one.',
+  noTickets: 'No requests yet. Tell us what you need help with.', st_open: 'Waiting for us', st_answered: 'Answered', st_closed: 'Closed', ticketSent: 'Sent. We answer here.', you: 'You', supportTeam: 'Support',
+  paymentsT: 'Payments', noPayments: 'No payments yet.', receipt: 'Receipt', print: 'Print', receiptFor: 'Receipt for', paidOn: 'Paid on', amount: 'Amount', item: 'Item', reference: 'Reference',
+  continueW: 'Continue watching', recentCh: 'Recently watched', clearHist: 'Clear history', histCleared: 'History cleared.', resumed: 'Resumed from {t}',
+  parentalT: 'Parental controls', parentalText: 'Hide adult categories on this device until the PIN is entered.', pin: '4-digit PIN', setPin: 'Turn on', pinOnText: 'Adult categories are hidden on this device.', removePin: 'Turn off', enterPin: 'Enter the PIN', wrongPin: 'Wrong PIN.', pinNeeds: 'The PIN needs 4 digits.', unlock: 'Unlock', locked: '🔒 Locked', pinSaved: 'Parental controls are on.', pinRemoved: 'Parental controls are off.',
+  libraryT: 'My library', loadingDots: 'Loading…',
+});
+Object.assign(D.fr, {
+  forgot: 'Mot de passe oublié ?', forgotText: 'Saisissez votre nom d’utilisateur ou votre e-mail. Si le compte a une adresse e-mail, nous envoyons un lien pour choisir un nouveau mot de passe.', loginOrEmail: 'Nom d’utilisateur ou e-mail', sendLink: 'Envoyer le lien', forgotSent: 'Si le compte existe et a une adresse e-mail, le lien est en route. Il est valable 30 minutes.',
+  resetTitle: 'Choisir un nouveau mot de passe', resetDone: 'Mot de passe modifié. Vous pouvez vous connecter.', reset_bad: 'Ce lien n’est plus valable. Demandez-en un nouveau.', aboutSite: 'À propos de {app}',
+  code2fa: 'Code à 6 chiffres', code2faTitle: 'Connexion en deux étapes', code2faText: 'Ouvrez votre application d’authentification et saisissez le code de ce compte.', verify: 'Vérifier',
+  devicesT: 'Mes appareils', thisDevice: 'Cet appareil', signedInOn: 'Connecté le {date}', signOutDev: 'Déconnecter', noDevices: 'Aucun appareil connecté.', devOut: 'Appareil déconnecté.',
+  supportT: 'Demandes d’assistance', newTicket: 'Nouvelle demande', subject: 'Sujet', message: 'Message', send: 'Envoyer', reply: 'Répondre', writeReply: 'Écrire une réponse…',
+  ticket_short: 'Écrivez un sujet et un message plus long.', ticket_limit: 'Vous pouvez ouvrir 3 demandes par jour. Répondez dans une demande existante.', ticket_full: 'Cette demande est pleine. Ouvrez-en une nouvelle.',
+  noTickets: 'Aucune demande. Dites-nous comment vous aider.', st_open: 'En attente de notre réponse', st_answered: 'Répondu', st_closed: 'Fermée', ticketSent: 'Envoyé. Nous répondons ici.', you: 'Vous', supportTeam: 'Assistance',
+  paymentsT: 'Paiements', noPayments: 'Aucun paiement.', receipt: 'Reçu', print: 'Imprimer', receiptFor: 'Reçu pour', paidOn: 'Payé le', amount: 'Montant', item: 'Article', reference: 'Référence',
+  continueW: 'Reprendre la lecture', recentCh: 'Vus récemment', clearHist: 'Effacer l’historique', histCleared: 'Historique effacé.', resumed: 'Reprise à {t}',
+  parentalT: 'Contrôle parental', parentalText: 'Masquer les catégories pour adultes sur cet appareil jusqu’à la saisie du code PIN.', pin: 'Code PIN à 4 chiffres', setPin: 'Activer', pinOnText: 'Les catégories pour adultes sont masquées sur cet appareil.', removePin: 'Désactiver', enterPin: 'Saisissez le code PIN', wrongPin: 'Code PIN incorrect.', pinNeeds: 'Le code PIN doit avoir 4 chiffres.', unlock: 'Déverrouiller', locked: '🔒 Verrouillé', pinSaved: 'Contrôle parental activé.', pinRemoved: 'Contrôle parental désactivé.',
+  libraryT: 'Ma bibliothèque', loadingDots: 'Chargement…',
+});
+Object.assign(D.ar, {
+  forgot: 'نسيت كلمة المرور؟', forgotText: 'أدخل اسم المستخدم أو البريد الإلكتروني. إذا كان للحساب بريد إلكتروني نرسل رابطاً لاختيار كلمة مرور جديدة.', loginOrEmail: 'اسم المستخدم أو البريد الإلكتروني', sendLink: 'إرسال الرابط', forgotSent: 'إذا كان الحساب موجوداً وله بريد إلكتروني فالرابط في الطريق. صالح لمدة 30 دقيقة.',
+  resetTitle: 'اختر كلمة مرور جديدة', resetDone: 'تم تغيير كلمة المرور. يمكنك تسجيل الدخول الآن.', reset_bad: 'هذا الرابط لم يعد صالحاً. اطلب رابطاً جديداً.', aboutSite: 'عن {app}',
+  code2fa: 'رمز من 6 أرقام', code2faTitle: 'الدخول بخطوتين', code2faText: 'افتح تطبيق المصادقة وأدخل رمز هذا الحساب.', verify: 'تحقق',
+  devicesT: 'أجهزتي', thisDevice: 'هذا الجهاز', signedInOn: 'تم الدخول في {date}', signOutDev: 'تسجيل الخروج', noDevices: 'لا توجد أجهزة مسجّلة.', devOut: 'تم تسجيل خروج الجهاز.',
+  supportT: 'طلبات الدعم', newTicket: 'طلب جديد', subject: 'الموضوع', message: 'الرسالة', send: 'إرسال', reply: 'رد', writeReply: 'اكتب رداً…',
+  ticket_short: 'اكتب موضوعاً ورسالة أطول.', ticket_limit: 'يمكنك فتح 3 طلبات في اليوم. يرجى الرد داخل طلب موجود.', ticket_full: 'هذا الطلب ممتلئ. افتح طلباً جديداً.',
+  noTickets: 'لا توجد طلبات. أخبرنا كيف نساعدك.', st_open: 'بانتظار ردّنا', st_answered: 'تم الرد', st_closed: 'مغلق', ticketSent: 'تم الإرسال. نرد عليك هنا.', you: 'أنت', supportTeam: 'الدعم',
+  paymentsT: 'المدفوعات', noPayments: 'لا توجد مدفوعات.', receipt: 'إيصال', print: 'طباعة', receiptFor: 'إيصال لـ', paidOn: 'تاريخ الدفع', amount: 'المبلغ', item: 'البند', reference: 'المرجع',
+  continueW: 'متابعة المشاهدة', recentCh: 'شوهد مؤخراً', clearHist: 'مسح السجل', histCleared: 'تم مسح السجل.', resumed: 'تمت المتابعة من {t}',
+  parentalT: 'الرقابة الأبوية', parentalText: 'إخفاء فئات البالغين على هذا الجهاز حتى إدخال رمز PIN.', pin: 'رمز PIN من 4 أرقام', setPin: 'تفعيل', pinOnText: 'فئات البالغين مخفية على هذا الجهاز.', removePin: 'إيقاف', enterPin: 'أدخل رمز PIN', wrongPin: 'رمز PIN غير صحيح.', pinNeeds: 'يجب أن يتكون رمز PIN من 4 أرقام.', unlock: 'فتح', locked: '🔒 مقفل', pinSaved: 'تم تفعيل الرقابة الأبوية.', pinRemoved: 'تم إيقاف الرقابة الأبوية.',
+  libraryT: 'مكتبتي', loadingDots: 'جارٍ التحميل…',
+});
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

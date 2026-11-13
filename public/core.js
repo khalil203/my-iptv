@@ -123,7 +123,7 @@ export const DEFAULT_SETTINGS = () => ({
       { id: 'redotpay', name: 'RedotPay', currency: 'USDT', opening: 0, color: '#ef4444' },
       { id: 'stripe', name: 'Stripe', currency: 'USD', opening: 0, color: '#635bff' },
     ],
-    stripeKey: '', stripeAccountId: 'stripe',
+    stripeKey: '', stripeAccountId: 'stripe', stripeWebhookSecrets: '', // one signing secret (whsec_…) per Stripe account, one per line
   },
   stock: { packCredits: 120, packPrice: 90, lowCreditsAlert: 20 },
   security: { sessionHours: 72, proxySecret: '' },
@@ -162,7 +162,9 @@ export const PERMS = [
 ];
 const PERM_KEYS = PERMS.map((p) => p[0]);
 function permFor(method, path, body) {
-  if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path)) return null;
+  if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
+  if (path.startsWith('/api/admin/tickets')) return method === 'GET' ? 'customers_view' : 'customers_edit';
+  if (path === '/api/admin/payments') return 'finance_view';
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
@@ -195,6 +197,44 @@ function permFor(method, path, body) {
 export function cleanEmail(x) {
   const m = String(x || '').toLowerCase().match(/[a-z0-9._%+\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}/);
   return m ? m[0] : '';
+}
+// Full HMAC (hex) with SHA-256 or SHA-1 — used for Stripe webhook signatures and two-factor codes.
+async function hmacRaw(keyBytes, msgBytes, hash = 'SHA-256') {
+  const k = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, msgBytes));
+}
+const sameText = (a, b) => { a = String(a); b = String(b); if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
+// Checks a Stripe "Stripe-Signature" header against the raw request body. Returns true only for a fresh, correctly signed event.
+export async function stripeSigOk(raw, header, secret, now = Date.now(), toleranceSec = 300) {
+  const parts = String(header || '').split(',').map((x) => x.trim().split('='));
+  const ts = (parts.find((x) => x[0] === 't') || [])[1];
+  const sigs = parts.filter((x) => x[0] === 'v1').map((x) => x[1]);
+  if (!ts || !sigs.length || !secret || Math.abs(now / 1000 - Number(ts)) > toleranceSec) return false;
+  const want = hex(await hmacRaw(enc.encode(secret), enc.encode(`${ts}.${raw}`)));
+  return sigs.some((g) => sameText(g, want));
+}
+export async function stripeSign(raw, secret, ts = Math.floor(Date.now() / 1000)) { return `t=${ts},v1=${hex(await hmacRaw(enc.encode(secret), enc.encode(`${ts}.${raw}`)))}`; }
+// Two-factor codes (TOTP, RFC 6238): 6 digits, 30 seconds — works with Google Authenticator, Authy, 1Password…
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+export function b32encode(bytes) { let bits = 0, val = 0, out = ''; for (const b of bytes) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; } } if (bits) out += B32[(val << (5 - bits)) & 31]; return out; }
+export function b32decode(str) { let bits = 0, val = 0; const out = []; for (const ch of String(str).toUpperCase().replace(/[^A-Z2-7]/g, '')) { val = (val << 5) | B32.indexOf(ch); bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; } } return new Uint8Array(out); }
+export async function totp(secret, at = Date.now(), step = 0) {
+  let c = Math.floor(at / 30000) + step; const msg = new Uint8Array(8);
+  for (let i = 7; i >= 0; i--) { msg[i] = c & 255; c = Math.floor(c / 256); }
+  const h = await hmacRaw(b32decode(secret), msg, 'SHA-1'); const o = h[19] & 15;
+  return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1000000).padStart(6, '0');
+}
+export async function totpOk(secret, code, at = Date.now()) {
+  code = String(code || '').replace(/\D/g, ''); if (code.length !== 6 || !secret) return false;
+  for (const st of [0, -1, 1]) if (sameText(await totp(secret, at, st), code)) return true;
+  return false;
+}
+// Stripe pay links: tell Stripe which customer is paying, so the payment can activate the right account.
+export function payUrlFor(url, c) {
+  if (!c || !/^https:\/\/(buy|checkout)\.stripe\.com\//.test(String(url || ''))) return url;
+  const u = new URL(url); u.searchParams.set('client_reference_id', c.id);
+  const em = cleanEmail(c.email); if (em) u.searchParams.set('prefilled_email', em);
+  return u.toString();
 }
 export const toUsd = (amount, cur, rates) => (Number(amount) || 0) / (Number((rates || {})[cur]) || 1);
 export const fromUsd = (usd, cur, rates) => (Number(usd) || 0) * (Number((rates || {})[cur]) || 1);
@@ -357,7 +397,7 @@ export function orderEmail(s, c, pkg, appUrl, chosen) {
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
   const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
-  const link = pl?.url || site; const al = L.dir === 'rtl' ? 'right' : 'left';
+  const link = (pl?.url ? payUrlFor(pl.url, c) : '') || site; const al = L.dir === 'rtl' ? 'right' : 'left';
   const html = `<!DOCTYPE html><html lang="${lang}" dir="${L.dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${v('subject')}</title>
 <style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}img{border:0;height:auto;outline:none;text-decoration:none}body{margin:0!important;padding:0!important;width:100%!important;background:#f4f7fa;font-family:'Segoe UI',Roboto,Helvetica,Arial,Tahoma,sans-serif;color:#334155}
 @media screen and (max-width:620px){.container{width:100%!important;border-radius:0!important}.mobile-pad{padding:24px 20px!important}.header-title{font-size:22px!important}.cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important}}</style></head>
@@ -679,11 +719,66 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     await store.put('log', l.slice(0, 300));
   }
   const log = (type, msg) => baseLog(type, msg, 'system');
-  async function newSession(role, id, s) {
-    const token = uid(24);
+  async function newSession(role, id, s, meta = {}) {
+    const token = uid(24); const did = uid(5);
     const hours = Math.max(1, Number(s.security.sessionHours) || 72);
-    await store.put('session:' + token, { role, id, exp: Date.now() + hours * 3600000 }, hours * 3600);
+    const exp = Date.now() + hours * 3600000;
+    await store.put('session:' + token, { role, id, exp, did }, hours * 3600);
+    if (role === 'user') { // remember the device so the customer can see it and sign it out
+      const devs = (await getDevices(id)).slice(-19);
+      devs.push({ did, token, ua: String(meta.ua || '').slice(0, 200), ip: String(meta.ip || '').slice(0, 60), at: Date.now(), exp });
+      await store.put('devs:' + id, devs, hours * 3600);
+    }
     return token;
+  }
+  const getDevices = async (id) => ((await store.get('devs:' + id)) || []).filter((d) => d.exp > Date.now());
+  // ---- sign-in protection: too many wrong tries locks the network / the username for 15 minutes
+  const RL_MAX = 8, RL_TTL = 900;
+  const rlCount = async (k) => Number(await store.get('rl:' + k)) || 0;
+  const rlBump = async (k) => store.put('rl:' + k, (await rlCount(k)) + 1, RL_TTL);
+  const getTickets = async () => (await store.get('tickets')) || [];
+  const saveTickets = (l) => { const open = l.filter((x) => x.status !== 'closed'); const closed = l.filter((x) => x.status === 'closed').sort((a, b) => b.updatedAt - a.updatedAt); return store.put('tickets', [...open, ...closed].slice(0, 400)); };
+  const cleanText = (x, n) => String(x || '').replace(/[\u0000-\u0008\u000b-\u001f]/g, '').trim().slice(0, n);
+  const getPayments = async () => (await store.get('payments')) || [];
+  // A verified Stripe payment: find the customer and the package, extend the subscription, keep a record. Never runs twice for one payment.
+  async function applyStripePayment(s, event) {
+    const ses = event.data && event.data.object || {};
+    const pays = await getPayments();
+    if (pays.some((p) => p.id === ses.id)) return { duplicate: true };
+    const amount = (Number(ses.amount_total) || 0) / 100; const currency = String(ses.currency || '').toUpperCase();
+    const email = cleanEmail(ses.customer_details && ses.customer_details.email);
+    const rec = { id: ses.id, eventId: event.id, at: Date.now(), amount, currency, email, ref: String(ses.client_reference_id || ''), status: 'unmatched', note: '' };
+    const done = async (status, note) => { rec.status = status; rec.note = note || ''; pays.unshift(rec); await store.put('payments', pays.slice(0, 500)); await log('payment', `Stripe payment ${amount} ${currency}${email ? ' <' + email + '>' : ''}: ${status}${note ? ' — ' + note : ''}`); return rec; };
+    const list = await getCustomers();
+    let c = rec.ref ? list.find((x) => x.id === rec.ref) : null;
+    if (!c && email) { const m = list.filter((x) => cleanEmail(x.email) === email); if (m.length === 1) c = m[0]; }
+    if (!c) return done('unmatched', 'No customer matches this payment. Renew the customer by hand.');
+    rec.customerId = c.id; rec.username = c.username;
+    const pkgs = s.orderPackages || [];
+    let pk = pkgs.find((p) => p.id === (ses.metadata && ses.metadata.package));
+    if (!pk) { const m = pkgs.filter((p) => Math.round(Number(p.price) * 100) === Number(ses.amount_total)); if (m.length === 1) pk = m[0]; }
+    if (!pk) return done('needs_attention', 'Customer found, but the package is unclear. Renew by hand.');
+    rec.pkg = pk.title;
+    const days = Number(pk.days) || 30; const devices = Number(pk.devices) || 1;
+    const plan = s.plans.find((p) => Number(p.days) === days && (Number(p.connections) || 1) === devices) || s.plans.find((p) => Number(p.days) === days);
+    if (s.reseller.enabled && s.reseller.autoSync !== false) {
+      if (!plan) return done('needs_attention', `Paid for "${pk.title}", but no plan with ${days} days exists to renew the line on the panel.`);
+      const panel = await panelCall(s, 'renew', panelVars(c, s, { days, package: plan.package }));
+      if (!panel.ok && !panel.skipped) return done('needs_attention', 'Paid, but the panel refused the renewal: ' + panel.error);
+    }
+    const base = Math.max(Date.now(), c.expiresAt);
+    if (c.expiresAt < Date.now()) c.startAt = Date.now();
+    c.expiresAt = base + days * DAY; c.connections = Math.max(Number(c.connections) || 1, devices);
+    if (plan) c.planId = plan.id;
+    const wasTrial = !!c.isTrial; c.isTrial = false;
+    const credits = plan ? planCredits(plan) : Math.max(1, Math.round(days / 30));
+    c.renewals = c.renewals || [];
+    const acc = s.finance.accounts.find((a) => a.id === s.finance.stripeAccountId && a.currency === currency);
+    const inMain = acc ? amount : fromUsd(toUsd(amount, currency, s.finance.rates), s.currency, s.finance.rates);
+    c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Math.round(inMain * 100) / 100, credits, stripe: ses.id });
+    await saveCustomers(list);
+    await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: acc ? amount : Math.round(inMain * 100) / 100, accountId: acc ? acc.id : '', by: 'Stripe (automatic)' });
+    return done('activated', `${c.username} +${days} days (${pk.title})`);
   }
   async function getSession(token) {
     if (!token) return null;
@@ -773,7 +868,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       // ---------- public ----------
       if (R('GET', '/api/config')) {
         await getAdmin();
-        return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours } });
+        const cur = s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
+        return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail),
+          packages: (s.orderPackages || []).filter((p) => p.title && Number(p.price) > 0).map((p) => ({ title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur })) });
       }
       if (R('POST', '/api/trial')) {
         actorName = 'trial sign-up';
@@ -831,6 +928,57 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const okTok = await verifyProxyToken(s.security.proxySecret, query.t);
         return ok({ ok: !!okTok, ua: s.player.userAgent || 'IPTVSmartersPro' });
       }
+      if (R('POST', '/api/stripe/webhook')) { // called by Stripe; trusted only when the signature matches one of your signing secrets
+        const secrets = String(s.finance.stripeWebhookSecrets || '').split(/[\s,]+/).filter((x) => x.startsWith('whsec_'));
+        if (!secrets.length) return err(400, 'Stripe webhook is not set up.');
+        const raw = String(body.raw || ''); let good = false;
+        for (const sec of secrets) if (await stripeSigOk(raw, body.sig, sec)) { good = true; break; }
+        if (!good) { await log('payment', 'Rejected a Stripe webhook call with a wrong signature'); return err(400, 'Bad signature.'); }
+        let event; try { event = JSON.parse(raw); } catch { return err(400, 'Bad payload.'); }
+        if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) return ok({ ok: true, ignored: event.type });
+        if (!event.data || !event.data.object || event.data.object.payment_status !== 'paid') return ok({ ok: true, ignored: 'not paid yet' });
+        if (await store.get('stripeevt:' + event.id)) return ok({ ok: true, duplicate: true });
+        await store.put('stripeevt:' + event.id, 1, 30 * 86400);
+        actorName = 'Stripe';
+        const r = await applyStripePayment(s, event);
+        return ok({ ok: true, result: r.duplicate ? 'duplicate' : r.status });
+      }
+      if (R('POST', '/api/forgot')) { // always answers the same, so nobody can test which accounts exist
+        const login = String(body.login || '').trim().toLowerCase(); const ip = String(body.ip || '');
+        if (ip && (await rlCount('forgot:' + ip)) >= 5) return err(429, 'Too many tries. Please wait 15 minutes.');
+        if (ip) await rlBump('forgot:' + ip);
+        const list = await getCustomers();
+        let c = list.find((x) => x.username.toLowerCase() === login);
+        if (!c && login.includes('@')) { const m = list.filter((x) => cleanEmail(x.email) === cleanEmail(login)); if (m.length === 1) c = m[0]; }
+        const to = c && c.status !== 'disabled' ? cleanEmail(c.email) : '';
+        if (to) {
+          const k = 'resetday:' + c.id; const n = Number(await store.get(k)) || 0;
+          if (n < 3) {
+            await store.put(k, n + 1, 86400);
+            const tk = uid(20); await store.put('reset:' + tk, { id: c.id }, 1800);
+            const base = String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, '');
+            const L = { en: ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'], fr: ['Réinitialiser votre mot de passe', 'Appuyez sur le bouton pour choisir un nouveau mot de passe. Le lien est valable 30 minutes.', 'Choisir un nouveau mot de passe', "Si vous n'avez rien demandé, ignorez cet e-mail."], ar: ['إعادة تعيين كلمة المرور', 'اضغط على الزر لاختيار كلمة مرور جديدة. الرابط صالح لمدة 30 دقيقة.', 'اختيار كلمة مرور جديدة', 'إذا لم تطلب ذلك، تجاهل هذه الرسالة.'] }[c.lang] || null;
+            const T = L || ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'];
+            const app = escHtml(s.branding.appName || 'IPTV');
+            const html = `<div dir="${c.lang === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p style="font-size:16px"><b>${T[0]}</b></p><p>${T[1]}</p><p style="margin:24px 0"><a href="${base}/#reset=${tk}" style="background:#8065FF;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold;display:inline-block">${T[2]}</a></p><p style="color:#5A6478;font-size:13px">${T[3]}</p></div>`;
+            const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
+            await log('customer', `Password reset link for ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`);
+          }
+        }
+        return ok({ ok: true });
+      }
+      if (R('POST', '/api/reset')) {
+        const tk = String(body.t || ''); const rec = /^[0-9a-f]{20,}$/.test(tk) ? await store.get('reset:' + tk) : null;
+        if (!rec) return err(400, 'reset_bad');
+        if (String(body.password || '').length < 6) return err(400, 'New password needs 6+ characters.');
+        const list = await getCustomers(); const c = list.find((x) => x.id === rec.id); if (!c) return err(400, 'reset_bad');
+        c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); delete c.loginPassword;
+        await saveCustomers(list); await store.del('reset:' + tk);
+        for (const d of await getDevices(c.id)) await store.del('session:' + d.token); // signs out every device
+        await store.del('devs:' + c.id);
+        await log('customer', `${c.username} reset their password by email`);
+        return ok({ ok: true });
+      }
       if (R('POST', '/api/setup')) {
         if (await store.get('admin')) return err(403, 'Admin already exists.');
         const username = String(body.username || '').trim();
@@ -843,29 +991,46 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/login')) {
         const username = String(body.username || '').trim().toLowerCase();
         const password = String(body.password || '');
+        const ip = String(body.ip || ''); const meta = { ip, ua: body.ua };
+        const keys = [ip && 'login:' + ip, username && 'login:u:' + username.slice(0, 60)].filter(Boolean);
+        for (const k of keys) if ((await rlCount(k)) >= RL_MAX) return err(429, 'Too many wrong tries. Please wait 15 minutes and try again.');
+        const wrong = async (msg) => { for (const k of keys) await rlBump(k); return err(401, msg || 'Wrong username or password.'); };
+        // second step for admin and staff accounts that turned on two-factor login
+        const second = async (acct) => {
+          if (!acct.totp || !acct.totp.on) return null;
+          if (!body.code) return { status: 401, json: { error: 'Enter the 6-digit code from your authenticator app.', need2fa: true } };
+          if (!(await totpOk(acct.totp.secret, body.code))) { for (const k of keys) await rlBump(k); return { status: 401, json: { error: 'That code is not right. Try the newest code.', need2fa: true } }; }
+          return null;
+        };
         const admin = await getAdmin();
         if (admin && admin.username.toLowerCase() === username) {
-          if ((await hashPassword(password, admin.salt)) !== admin.hash) return err(401, 'Wrong username or password.');
-          return ok({ token: await newSession('admin', 'admin', s), role: 'admin' });
+          if ((await hashPassword(password, admin.salt)) !== admin.hash) return wrong();
+          const st = await second(admin); if (st) return st;
+          return ok({ token: await newSession('admin', 'admin', s, meta), role: 'admin' });
         }
         const team = await getTeam();
         const m = team.find((x) => x.username.toLowerCase() === username);
         if (m) {
-          if ((await hashPassword(password, m.salt)) !== m.hash) return err(401, 'Wrong username or password.');
+          if ((await hashPassword(password, m.salt)) !== m.hash) return wrong();
           if (m.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
+          const st = await second(m); if (st) return st;
           m.lastLogin = Date.now(); await store.put('team', team);
-          return ok({ token: await newSession('staff', m.id, s), role: 'staff' });
+          return ok({ token: await newSession('staff', m.id, s, meta), role: 'staff' });
         }
         const list = await getCustomers();
         const c = list.find((x) => x.username.toLowerCase() === username);
-        if (!c || (await hashPassword(password, c.salt)) !== c.passwordHash) return err(401, 'Wrong username or password.');
+        if (!c || (await hashPassword(password, c.salt)) !== c.passwordHash) return wrong();
         if (c.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
         c.lastLogin = Date.now();
         await saveCustomers(list);
-        return ok({ token: await newSession('user', c.id, s), role: 'user' });
+        return ok({ token: await newSession('user', c.id, s, meta), role: 'user' });
       }
       if (R('POST', '/api/logout')) {
-        if (token) await store.del('session:' + token);
+        if (token) {
+          const old = await store.get('session:' + token);
+          if (old && old.role === 'user') { const devs = await getDevices(old.id); await store.put('devs:' + old.id, devs.filter((d) => d.token !== token), 90 * 86400); }
+          await store.del('session:' + token);
+        }
         return ok({ ok: true });
       }
 
@@ -899,7 +1064,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({
             user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
-            orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: pl.url, cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
+            orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: payUrlFor(pl.url, c), cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email),
             stream: canWatch && s.player.serverUrl ? {
               server: trimSlash(s.player.serverUrl), u: lineUsername, p: linePassword,
@@ -919,6 +1084,45 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const params = { action };
           for (const k of ['category_id', 'series_id', 'vod_id', 'stream_id', 'limit']) if (rest[k]) params[k] = rest[k];
           return ok(await xtream(s, c, params));
+        }
+        if (R('GET', '/api/me/devices')) {
+          return ok((await getDevices(c.id)).map((d) => ({ did: d.did, ua: d.ua, at: d.at, current: d.did === ses.did })).reverse());
+        }
+        if (R('POST', '/api/me/devices/remove')) {
+          const devs = await getDevices(c.id); const d = devs.find((x) => x.did === String(body.did || ''));
+          if (!d) return err(404, 'Device not found.');
+          await store.del('session:' + d.token);
+          await store.put('devs:' + c.id, devs.filter((x) => x !== d), 90 * 86400);
+          await log('customer', `${c.username} signed out a device`);
+          return ok({ ok: true, self: d.did === ses.did });
+        }
+        if (R('GET', '/api/me/payments')) {
+          const sales = (await getSales()).filter((x) => x.customerId === c.id && Number(x.amount) > 0);
+          return ok(sales.sort((a, b) => b.at - a.at).slice(0, 50).map((x) => ({ id: x.id, at: x.at, plan: x.planName, days: x.days, amount: x.amount, currency: x.currency, type: x.type })));
+        }
+        if (R('GET', '/api/me/tickets')) {
+          return ok((await getTickets()).filter((x) => x.customerId === c.id).sort((a, b) => b.updatedAt - a.updatedAt).map(({ customerId, ...x }) => x));
+        }
+        if (R('POST', '/api/me/tickets')) {
+          const subject = cleanText(body.subject, 120); const text = cleanText(body.text, 2000);
+          if (subject.length < 3 || text.length < 5) return err(400, 'ticket_short');
+          const k = 'ticketday:' + c.id; const n = Number(await store.get(k)) || 0;
+          if (n >= 3) return err(429, 'ticket_limit');
+          await store.put(k, n + 1, 86400);
+          const all = await getTickets(); const now = Date.now();
+          const tk = { id: uid(5), customerId: c.id, username: c.username, name: c.name, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: c.name || c.username, at: now, text }] };
+          all.unshift(tk); await saveTickets(all);
+          await log('support', `New ticket from ${c.username}: ${subject}`);
+          return ok({ ok: true, id: tk.id });
+        }
+        if (R('POST', '/api/me/tickets/reply')) {
+          const all = await getTickets(); const tk = all.find((x) => x.id === String(body.id || '') && x.customerId === c.id);
+          if (!tk) return err(404, 'Ticket not found.');
+          const text = cleanText(body.text, 2000); if (text.length < 2) return err(400, 'ticket_short');
+          if (tk.messages.length >= 40) return err(400, 'ticket_full');
+          tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text }); tk.status = 'open'; tk.updatedAt = Date.now();
+          await saveTickets(all);
+          return ok({ ok: true });
         }
         if (R('POST', '/api/me/password')) {
           if (!s.userDashboard.allowPasswordChange) return err(403, 'Password change is turned off.');
@@ -949,9 +1153,46 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (need && need !== 'owner' && !can(need)) return err(403, 'You do not have permission for this.');
 
       if (R('GET', '/api/admin/me')) {
-        if (isOwner) { const a = await getAdmin(); return ok({ role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, allPerms: PERMS, mode }); }
-        return ok({ role: 'staff', name: member.name, username: member.username, isDefault: false, perms, allPerms: PERMS, mode });
+        if (isOwner) { const a = await getAdmin(); return ok({ role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, allPerms: PERMS, mode, twoFactor: !!(a.totp && a.totp.on) }); }
+        return ok({ role: 'staff', name: member.name, username: member.username, isDefault: false, perms, allPerms: PERMS, mode, twoFactor: !!(member.totp && member.totp.on) });
       }
+      if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
+        const team = isOwner ? null : await getTeam();
+        const acct = isOwner ? await getAdmin() : team.find((x) => x.id === ses.id);
+        const save = () => (isOwner ? store.put('admin', acct) : store.put('team', team));
+        if (R('POST', '/api/admin/2fa/setup')) {
+          if (acct.totp && acct.totp.on) return err(400, 'Two-factor login is already on.');
+          const bytes = new Uint8Array(20); crypto.getRandomValues(bytes);
+          acct.totp = { secret: b32encode(bytes), on: false }; await save();
+          const label = encodeURIComponent(`${s.branding.appName || 'IPTV'}:${acct.username}`);
+          return ok({ secret: acct.totp.secret, uri: `otpauth://totp/${label}?secret=${acct.totp.secret}&issuer=${encodeURIComponent(s.branding.appName || 'IPTV')}` });
+        }
+        if (R('POST', '/api/admin/2fa/enable')) {
+          if (!acct.totp || !acct.totp.secret) return err(400, 'Start the setup first.');
+          if (!(await totpOk(acct.totp.secret, body.code))) return err(400, 'That code is not right. Check the time on your phone and try the newest code.');
+          acct.totp.on = true; await save(); await log('security', 'Two-factor login turned on');
+          return ok({ ok: true });
+        }
+        if (R('POST', '/api/admin/2fa/disable')) {
+          if ((await hashPassword(body.password || '', acct.salt)) !== acct.hash) return err(400, 'Current password is wrong.');
+          delete acct.totp; await save(); await log('security', 'Two-factor login turned off');
+          return ok({ ok: true });
+        }
+        return err(404, 'Not found');
+      }
+      if (R('GET', '/api/admin/tickets')) return ok((await getTickets()).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || b.updatedAt - a.updatedAt));
+      if (R('POST', '/api/admin/tickets/reply')) {
+        const all = await getTickets(); const tk = all.find((x) => x.id === String(body.id || ''));
+        if (!tk) return err(404, 'Ticket not found.');
+        const text = cleanText(body.text, 2000);
+        if (text) { tk.messages.push({ from: 'staff', by: actorName.replace(' (owner)', ''), at: Date.now(), text }); tk.status = 'answered'; }
+        if (['open', 'answered', 'closed'].includes(body.status)) tk.status = body.status;
+        if (['low', 'normal', 'high'].includes(body.priority)) tk.priority = body.priority;
+        tk.updatedAt = Date.now(); await saveTickets(all);
+        await log('support', `Ticket "${tk.subject}" (${tk.username}): ${text ? 'answered' : tk.status}`);
+        return ok({ ok: true, ticket: tk });
+      }
+      if (R('GET', '/api/admin/payments')) return ok({ list: (await getPayments()).slice(0, 100), configured: /whsec_/.test(String(s.finance.stripeWebhookSecrets || '')) });
       if (R('POST', '/api/admin/me/password')) {
         if (isOwner) return err(400, 'Use Account & backup.');
         const team = await getTeam(); const me = team.find((x) => x.id === member.id);
@@ -993,10 +1234,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('GET', '/api/admin/settings')) {
         if (can('settings')) return ok(s);
-        return ok({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } });
+        return ok({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } });
       }
       if (R('PUT', '/api/admin/settings')) {
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
+        if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
         const next = deepMerge(s, body || {});
         next.security.proxySecret = s.security.proxySecret;
         next.branding.whatsapp = String(next.branding.whatsapp || '').replace(/\D/g, '');
