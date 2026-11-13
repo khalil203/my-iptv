@@ -184,6 +184,11 @@ Object.assign(D.en, { trial_typo: 'Please check your email address. Did you mean
 Object.assign(D.fr, { trial_typo: 'Vérifiez votre adresse e-mail. Vouliez-vous dire {s} ?', trial_bademail: 'Cette adresse e-mail ne peut pas recevoir de messages. Vérifiez-la.', useIt: 'Utiliser' });
 Object.assign(D.ar, { trial_typo: 'تحقق من بريدك الإلكتروني. هل تقصد {s}؟', trial_bademail: 'هذا البريد الإلكتروني لا يمكنه استقبال الرسائل. تحقق منه.', useIt: 'استعماله' });
 
+
+Object.assign(D.en, { countryCode: 'Country code', trial_phone: 'Choose your country code and enter your full phone number.', trial_panel: 'Your request is saved, but the trial could not start yet. Please contact support.', trialPending: 'Your request is received ✅ Your account is ready and we are preparing your TV line now. You will get an email as soon as it is active. Keep these details:', copy: 'Copy', copied: 'Copied ✓', pendingTitle: 'Your line is being prepared', pendingText: 'We received your request. You will get an email as soon as your TV line is active. It usually does not take long.' });
+Object.assign(D.fr, { countryCode: 'Indicatif du pays', trial_phone: 'Choisissez l’indicatif de votre pays et saisissez votre numéro complet.', trial_panel: 'Votre demande est enregistrée, mais l’essai n’a pas encore pu démarrer. Contactez l’assistance.', trialPending: 'Votre demande est reçue ✅ Votre compte est prêt et nous préparons votre ligne TV. Vous recevrez un e-mail dès qu’elle sera active. Gardez ces informations :', copy: 'Copier', copied: 'Copié ✓', pendingTitle: 'Votre ligne est en préparation', pendingText: 'Nous avons bien reçu votre demande. Vous recevrez un e-mail dès que votre ligne TV sera active.' });
+Object.assign(D.ar, { countryCode: 'رمز الدولة', trial_phone: 'اختر رمز بلدك وأدخل رقم هاتفك كاملاً.', trial_panel: 'تم حفظ طلبك، لكن لم تبدأ التجربة بعد. يرجى التواصل مع الدعم.', trialPending: 'تم استلام طلبك ✅ حسابك جاهز ونحن نجهّز خط البث الآن. ستصلك رسالة بريد فور تفعيله. احتفظ بهذه البيانات:', copy: 'نسخ', copied: 'تم النسخ ✓', pendingTitle: 'جارٍ تجهيز خطك', pendingText: 'استلمنا طلبك. ستصلك رسالة بريد فور تفعيل خط البث.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

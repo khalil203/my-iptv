@@ -218,9 +218,9 @@ function trialForm() {
   return `<p class="muted" style="margin-top:0">${t('trialIntro')}</p><form data-form="trial">
     ${field(t('fullName'), 'name', '', { attrs: 'required autocomplete="name"' })}
     ${field(t('email'), 'email', '', { type: 'email', attrs: 'required autocomplete="email" autocapitalize="none" dir="ltr"' })}
-    ${field(t('phone'), 'phone', '', { type: 'tel', attrs: 'required autocomplete="tel" dir="ltr" placeholder="+212 6…"' })}
+    ${phoneField(t('phone'), 'phone')}
     ${toggle(t('sameWhatsapp'), 'same', true)}
-    <div id="wa-field" style="display:none">${field(t('whatsapp'), 'whatsapp', '', { type: 'tel', attrs: 'dir="ltr"' })}</div>
+    <div id="wa-field" style="display:none">${phoneField(t('whatsapp'), 'whatsapp', false)}</div>
     <div id="trial-err"></div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">🎁 ${t('getTrial')}</button></div>
   </form>`;
@@ -297,7 +297,7 @@ async function renderAdmin() {
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
-    else if (t === 'trial') body.innerHTML = adminTrial(s);
+    else if (t === 'trial') body.innerHTML = (await adminPool()) + adminTrial(s);
     else if (t === 'userdash') body.innerHTML = adminUserDash(s);
     else if (t === 'branding') body.innerHTML = adminBranding(s);
     else if (t === 'api') body.innerHTML = adminApi(s);
@@ -407,6 +407,8 @@ function customerForm(c) {
   c = c || { planId: s.plans[0]?.id, connections: s.plans[0]?.connections || 1, startAt: Date.now() };
   const planOpts = [...s.plans.map((p) => [p.id, `${p.name} · ${p.days} days · ${p.price} ${s.currency}`]), ['custom', 'Custom dates']];
   return `<form data-form="customer" data-id="${c.id || ''}">
+    ${c.pendingLine ? `<div class="notice warning">⏳ This trial is waiting for a line. Paste the M3U link from your panel below and save: the trial starts and the login email is sent.</div>` : ''}
+    ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
     <div class="grid3">${field('Phone', 'phone', c.phone || '', { type: 'tel' })}${field('WhatsApp', 'whatsapp', c.whatsapp || '', { type: 'tel', ph: 'same as phone' })}${field('Email language', 'lang', c.lang || 'fr', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '')}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
@@ -943,6 +945,7 @@ function blockedScreen() {
   const { user, dashboard: d, branding: b } = state.user.me;
   if (d.maintenance) return `<div class="block-screen"><div class="ic">🛠</div><h2>${t('maintTitle')}</h2><p class="muted">${esc(d.maintenanceMessage)}</p></div>`;
   if (user.state === 'expired') return `<div class="block-screen"><div class="ic">⏰</div><h2>${t('expiredTitle')}</h2><p class="muted">${t('expiredText', { date: fmtDate(user.expiresAt) })}</p>${b.supportUrl ? `<a class="btn primary ${waNum(b) ? 'wa-btn' : ''}" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">${waNum(b) ? '💬 ' + t('whatsapp') : esc(b.supportLabel || t('support'))}</a>` : ''}</div>${orderCard()}`;
+  if (state.user.me.user.pendingLine) return `<div class="block-screen"><div class="ic">⏳</div><h2>${t('pendingTitle')}</h2><p class="muted">${t('pendingText')}</p>${waNum(state.user.me.branding) ? `<a class="btn wa-btn" href="${esc(waUrl(state.user.me.branding, t('waMsg', { app: state.user.me.branding.appName, u: state.user.me.user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`;
   if (!state.user.me.stream) return `<div class="block-screen"><div class="ic">📡</div><h2>${t('notReady')}</h2><p class="muted">${t('notReadyText')}</p></div>`;
   return '';
 }
@@ -1445,7 +1448,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
       <div id="wa-pkg">${field('Package', 'pkg', pick, { type: 'select', options: [...s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`])] })}
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['ALL', 'Random € or $'], ['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
@@ -1806,14 +1809,19 @@ const forms = {
   },
   async trial(f) {
     const o = formToObj(f);
-    const body = { name: o.name, email: o.email, phone: o.phone, whatsapp: o.same ? o.phone : o.whatsapp, lang: getLang(), appUrl: location.origin + location.pathname.replace(/index\.html$/, '') };
+    const phone = fullPhone(f, 'phone'); const wa2 = o.same ? phone : fullPhone(f, 'whatsapp');
+    if (!phone || (!o.same && !wa2)) { $('#trial-err').innerHTML = `<div class="err-box">${t('trial_phone')}</div>`; return; }
+    const body = { name: o.name, email: o.email, phone, whatsapp: wa2, lang: getLang(), appUrl: location.origin + location.pathname.replace(/index\.html$/, '') };
     const btn = f.querySelector('button.primary'); btn.disabled = true;
     try {
       const r = await api('POST', '/api/trial', body);
       const box = $('.modal-body');
-      box.innerHTML = r.username
-        ? `<p>${t('trialShown')}</p><div class="code" dir="ltr">${t('username')}: ${esc(r.username)}\n${t('password')}: ${esc(r.password)}</div>${r.emailed ? `<p class="small muted">${t('trialSent', { email: esc(o.email) })}</p>` : ''}<button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>`
-        : `<div class="notice success">${t('trialSent', { email: esc(o.email) })}</div><button class="btn block" data-act="close-modal">${t('haveAccount')}</button>`;
+      const lines = [`${t('username')}: ${r.username}`, `${t('password')}: ${r.password}`, ...(r.dns ? [`DNS: ${r.dns}`] : []), ...(r.m3u ? [`M3U: ${r.m3u}`] : [])].join('\n');
+      const b0 = state.config.branding;
+      box.innerHTML = `<p>${r.pending ? t('trialPending') : t('trialShown')}</p><div class="code" dir="ltr" id="trial-creds" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(lines)}</div>
+        <div class="row" style="margin-top:10px"><button type="button" class="btn" data-act="copy-el" data-el="trial-creds" style="flex:1">📋 ${t('copy')}</button>${waNum(b0) ? `<a class="btn wa-btn" style="flex:1" href="${esc(waUrl(b0, t('waMsg', { app: b0.appName, u: r.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>
+        ${r.emailed ? `<p class="small muted">${t('trialSent', { email: esc(o.email) })}</p>` : ''}
+        <button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>`;
     } catch (e) { $('#trial-err').innerHTML = e.data?.suggest ? `<div class="err-box">${t('trial_typo', { s: esc(e.data.suggest) })} <button type="button" class="btn sm" data-act="trial-fix" data-email="${esc(e.data.suggest)}">${t('useIt')}</button></div>` : `<div class="err-box">${esc(t(e.message))}</div>`; btn.disabled = false; }
   },
   async tx(f) {
@@ -2384,6 +2392,7 @@ const custCsv = (list) => toCsv(['Name', 'Username', 'Email', 'Phone', 'WhatsApp
 
 // ---------------- alerts: who needs attention, in groups the owner can tune ----------------
 const ALERT_DEFS = [
+  ['pendingLine', '🆘', 'Waiting for a line', (c) => !!c.pendingLine, () => 'These customers asked for a trial and the panel did not create it. Tap Edit, paste the M3U link from your panel and save.'],
   ['trialEnding', '⏳', 'Trials ending soon', (c, a) => c.isTrial && c.state !== 'expired' && c.status !== 'disabled' && c.hoursLeft <= a.trialHours, (a) => `Free trials with ${a.trialHours} hours or less left. A good moment to send the payment link.`],
   ['expiring', '📅', 'Subscriptions ending soon', (c, a) => !c.isTrial && c.state !== 'expired' && c.status !== 'disabled' && c.daysLeft <= a.expiringDays, (a) => `Paid subscriptions ending within ${a.expiringDays} days.`],
   ['expired', '⛔', 'Expired, not renewed', (c, a) => !c.isTrial && c.state === 'expired' && c.daysLeft >= -a.expiredDays, (a) => `Subscriptions that ended in the last ${a.expiredDays} days.`],
@@ -2481,7 +2490,7 @@ const TPL_GROUPS = [
   ['RM', 'renewal', '🔁 Renewal offer email', 'Sent to customers whose subscription or trial has ended.', '{name} {app} {site} {coupon}'],
   ['OM', 'order', '💳 Package order email', 'Sent with the Stripe pay link for a package.', '{name} {app} {pkg} {price} {d} {n}'],
 ];
-const WA_NAMES = { pay: '💳 Payment link', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
+const WA_NAMES = { pay: '💳 Payment link (place an order)', trial: '🎁 Free trial details', thanks: '🙏 Thank you for your purchase', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
 const LANG3 = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 const nice = (k) => k.replace(/([A-Z0-9])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 async function adminTemplates() {
@@ -2584,6 +2593,61 @@ Object.assign(forms, {
     let v; try { v = JSON.parse(f.json.value); } catch (e) { $('#data-err').innerHTML = `<div class="err-box">This is not valid yet: ${esc(e.message)}</div>`; return; }
     try { await dataApply(f.dataset.k, v); closeModal(); toast('Saved ✓'); } catch (e) { $('#data-err').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
   },
+});
+
+// =====================================================================
+// Phone numbers with country code, ready trial lines, line link paste
+// =====================================================================
+const DIAL = 'MA212 DZ213 TN216 EG20 LY218 MR222 SA966 AE971 QA974 KW965 BH973 OM968 JO962 LB961 IQ964 SY963 PS970 YE967 SD249 FR33 BE32 NL31 DE49 ES34 IT39 PT351 GB44 IE353 CH41 AT43 LU352 SE46 NO47 DK45 FI358 PL48 RO40 GR30 TR90 RU7 UA380 US1 CA1 MX52 BR55 AR54 CO57 CL56 IN91 PK92 BD880 TH66 MY60 SG65 ID62 PH63 VN84 CN86 JP81 KR82 AU61 NZ64 ZA27 NG234 SN221 CI225 CM237 ML223 GH233 KE254 IL972 IR98'.split(' ').map((x) => [x.slice(0, 2), x.slice(2)]);
+const TZ_CC = { 'Africa/Casablanca': 'MA', 'Africa/Algiers': 'DZ', 'Africa/Tunis': 'TN', 'Africa/Cairo': 'EG', 'Europe/Paris': 'FR', 'Europe/Brussels': 'BE', 'Europe/Amsterdam': 'NL', 'Europe/Berlin': 'DE', 'Europe/Madrid': 'ES', 'Europe/Rome': 'IT', 'Europe/London': 'GB', 'Europe/Istanbul': 'TR', 'Asia/Riyadh': 'SA', 'Asia/Dubai': 'AE', 'Asia/Qatar': 'QA', 'Asia/Bangkok': 'TH', 'America/New_York': 'US', 'America/Toronto': 'CA' };
+function guessCountry() {
+  try { const tz = TZ_CC[Intl.DateTimeFormat().resolvedOptions().timeZone]; if (tz) return tz; } catch {}
+  for (const l of navigator.languages || []) { const r = (l.split('-')[1] || '').toUpperCase(); if (DIAL.some((d) => d[0] === r)) return r; }
+  return '';
+}
+const flag = (cc) => String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+let regionNames = null; const countryName = (cc) => { try { regionNames ||= new Intl.DisplayNames([getLang()], { type: 'region' }); return regionNames.of(cc); } catch { return cc; } };
+function phoneField(label, name, required = true) {
+  const g = guessCountry();
+  return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" ${required ? 'required' : ''} inputmode="tel" autocomplete="tel-national" dir="ltr" placeholder="612345678" pattern="[0-9 +().-]{6,20}"></div></label>`;
+}
+// "+212612345678" from the country code and the number typed (a leading 0 is dropped; a full +number typed by hand is kept).
+function fullPhone(f, name) {
+  const raw = String(f[name]?.value || '').trim(); const cc = f[name + '_cc']?.value || '';
+  const digits = raw.replace(/\D/g, '');
+  const full = raw.startsWith('+') || raw.startsWith('00') ? digits.replace(/^00/, '') : cc && digits.startsWith(cc) && digits.length > 10 ? digits : cc ? cc + digits.replace(/^0+/, '') : '';
+  return /^\d{8,15}$/.test(full) ? '+' + full : '';
+}
+function parseLineLinkClient(link) {
+  const m = String(link || '').match(/https?:\/\/[^\s"'<>]+/i); if (!m) return null; let u; try { u = new URL(m[0]); } catch { return null; }
+  let user = u.searchParams.get('username') || '', pass = u.searchParams.get('password') || '';
+  if (!user || !pass) { const p = u.pathname.split('/').filter(Boolean); const i = ['live', 'movie', 'series'].includes(p[0]) ? 1 : 0; if (p.length >= i + 2) { user = decodeURIComponent(p[i]); pass = decodeURIComponent(p[i + 1]); } }
+  return user && pass && !/\.(php|m3u8?|ts)$/i.test(user) ? { u: user, p: pass, dns: u.origin } : null;
+}
+document.addEventListener('input', (e) => {
+  if (e.target.dataset?.input !== 'm3u-paste') return;
+  const f = e.target.form; const ln = parseLineLinkClient(e.target.value); if (!f || !ln) return;
+  if (f.username && !f.username.value) f.username.value = ln.u;
+  if (f.password && !f.password.value) f.password.value = ln.p;
+  if (f.lineUsername) f.lineUsername.value = ln.u; if (f.linePassword) f.linePassword.value = ln.p;
+  if (f.lineSame && f.lineSame.checked) { f.lineSame.checked = false; const lf = $('#line-fields'); if (lf) lf.style.display = ''; }
+  toast(`Line found: ${ln.u} on ${ln.dns}`);
+});
+async function adminPool() {
+  let d = { lines: [] }; try { d = await api('GET', '/api/admin/trialpool'); } catch { return ''; }
+  return `<div class="card" id="pool"><div class="row"><h3 style="margin:0;flex:1">🎟 Ready trial lines <span class="pill ${d.lines.length > 2 ? 'st-active' : 'st-expired'}">${d.lines.length} left</span></h3></div>
+    <p class="small muted">Make trial lines on your panel, then paste their M3U links here, one per line. Each new free trial takes one, so the customer gets the login on screen and by email at once, even when the panel API is not answering. When none are left, the request goes to Alerts → “Waiting for a line” and you get an email.</p>
+    <form data-form="pool-add">${field('M3U links, one per line', 'add', '', { type: 'textarea', rows: 4, ph: 'http://your-dns.com:8080/get.php?username=AAA&password=BBB&type=m3u_plus\nhttp://your-dns.com:8080/get.php?username=CCC&password=DDD&type=m3u_plus', attrs: 'required spellcheck="false" autocapitalize="none" dir="ltr"' })}<div class="row"><button class="btn primary">Add lines</button>${d.lines.length ? `<button type="button" class="btn" data-act="pool-export">⬇ Export list</button><button type="button" class="btn danger" data-act="pool-clear">Remove all</button>` : ''}</div></form>
+    ${d.lines.length ? `<div style="margin-top:12px">${d.lines.slice(0, 30).map((x) => `<div class="list-item"><div style="flex:1;min-width:0" dir="ltr"><b>${esc(x.u)}</b><div class="small muted">${esc(x.dns)}</div></div><button class="btn sm" data-act="pool-del" data-u="${esc(x.u)}">Remove</button></div>`).join('')}${d.lines.length > 30 ? `<p class="small muted">…and ${d.lines.length - 30} more.</p>` : ''}</div>` : ''}</div>`;
+}
+Object.assign(actions, {
+  'copy-el': async (el) => { const txt = document.getElementById(el.dataset.el)?.textContent || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
+  'pool-del': async (el) => { await api('POST', '/api/admin/trialpool/remove', { u: el.dataset.u }); renderAdmin(); },
+  'pool-clear': async () => { if (!confirm('Remove every ready trial line?')) return; await api('POST', '/api/admin/trialpool/remove', { all: true }); renderAdmin(); },
+  'pool-export': async () => { const d = await api('GET', '/api/admin/trialpool'); download(`trial-lines-${isoDay(Date.now())}.csv`, toCsv(['Username', 'Server'], d.lines.map((x) => [x.u, x.dns])), 'text/csv'); },
+});
+Object.assign(forms, {
+  async 'pool-add'(f) { try { const r = await api('POST', '/api/admin/trialpool', { add: f.add.value }); toast(`${r.added} line(s) added${r.skipped ? ' · ' + r.skipped + ' skipped (not a line link, or already used)' : ''}`, !r.added); renderAdmin(); } catch (e) { toast(e.message, true); } },
 });
 
 boot();

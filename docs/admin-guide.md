@@ -25,3 +25,10 @@ The public website (home, pricing, FAQ, privacy, terms) is shown to visitors who
 - **Message templates**: reword every email (trial and welcome, expiry reminder, renewal offer, package order) and WhatsApp message in English, French and Arabic; add your own WhatsApp messages; preview before saving; *Back to the original* undoes a change; export and import as a file.
 - **Emails & bounces**: paused addresses with filters, search, bulk allow and export; customers without a usable email; the last 100 emails from Resend with their status.
 - **Import & export**: full backup, customers as CSV or JSON, and each settings part (plans, packages, templates, alerts, branding…) to export, import, or edit by hand.
+
+## Free trials that never fail
+- **Ready trial lines** (Trial & email setup, top card): paste M3U links of trial lines you made on your panel. Each new trial takes one; the customer sees the login on screen (with a Copy button) and gets the email at the same moment.
+- When the panel API does not answer and no ready line is left, the customer's account is still created and they are told the line is being prepared. You get an email with what the panel answered, and the customer appears in **Alerts → Waiting for a line**. Tap Edit, paste the M3U link, save: the trial starts and the login email goes out.
+- **Any customer**: the customer form has an *M3U link from your panel* box. Paste the link and username, password and server are filled in.
+- Trial sign-up asks for a country code and a full phone number.
+- WhatsApp messages now include *Free trial details* and *Thank you for your purchase*; edit them in Message templates.

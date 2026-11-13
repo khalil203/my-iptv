@@ -248,7 +248,7 @@ test('bounced emails: typos are caught, bounces are pulled from Resend, paused a
   assert.match((await mk({ email: 'a@gmial.com' })).json.error, /Did you mean a@gmail.com/);
   assert.match((await mk({ email: 'a@nosuchdomain.example' })).json.error, /does not exist/);
   assert.equal((await mk()).status, 200);
-  const typo = await call('POST', '/api/trial', { name: 'New Person', email: 'new@hotmial.com', phone: '0612345678' }); assert.equal(typo.status, 400); assert.equal(typo.json.suggest, 'new@hotmail.com');
+  const typo = await call('POST', '/api/trial', { name: 'New Person', email: 'new@hotmial.com', phone: '+212612345678' }); assert.equal(typo.status, 400); assert.equal(typo.json.suggest, 'new@hotmail.com');
   const sync = await call('POST', '/api/admin/email/bounces/sync', {}, tok); assert.equal(sync.json.added, 1); assert.equal(sync.json.checked, 2);
   assert.equal((await call('POST', '/api/admin/email/bounces/sync', {}, tok)).json.added, 0, 'not added twice');
   const list = (await call('GET', '/api/admin/email/bounces', {}, tok)).json.list; assert.equal(list.length, 1); assert.equal(list[0].customers[0].username, 'testuser');
@@ -280,4 +280,45 @@ test('templates: the owner can reword emails and WhatsApp, preview unsaved text,
   await x.call('PUT', '/api/admin/settings', { mailTexts: {}, waTemplates: {} }, tok);
   const t2 = (await x.call('GET', '/api/admin/templates', {}, tok)).json; assert.deepEqual(t2.custom, {}); assert.deepEqual(t2.wa, {});
   assert.doesNotMatch((await x.call('POST', '/api/admin/templates/preview', { kind: 'trial', lang: 'en' }, tok)).json.html, /Saved title/, 'the original wording is back');
+});
+
+import { parseLineLink } from '../public/core.js';
+test('line links from the panel are read correctly', () => {
+  assert.deepEqual(parseLineLink('http://tv.example.com:8080/get.php?username=abc12&password=xy_99&type=m3u_plus&output=ts'), { dns: 'http://tv.example.com:8080', u: 'abc12', p: 'xy_99' });
+  assert.deepEqual(parseLineLink('  m3u: https://tv.example.com/live/abc12/xy_99/55.ts '), { dns: 'https://tv.example.com', u: 'abc12', p: 'xy_99' });
+  assert.deepEqual(parseLineLink('http://tv.example.com/player_api.php?username=u1&password=p1'), { dns: 'http://tv.example.com', u: 'u1', p: 'p1' });
+  assert.equal(parseLineLink('http://tv.example.com/get.php'), null); assert.equal(parseLineLink('hello'), null);
+});
+test('free trial: never blocked by the panel; uses a ready line, else waits; phone needs a country code; admin can activate by pasting a link', async () => {
+  const db = new Map(); const mails = [];
+  const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  const fetchFn = async (url, init) => { url = String(url);
+    if (url.startsWith('https://api.resend.com/emails')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm' }) }; }
+    if (url.startsWith('http://panel.example')) return { ok: false, status: 500, text: async () => '{"status":"error","message":"Not enough credits"}' };
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
+  const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
+  const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  await call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' }, trial: { enabled: true }, reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' }, player: { serverUrl: 'http://tv.example.com:8080' } }, tok);
+  assert.equal((await call('POST', '/api/trial', { name: 'No Code', email: 'a@example.com', phone: '0612345678' })).json.error, 'trial_phone');
+  const add = await call('POST', '/api/admin/trialpool', { add: 'http://tv.example.com:8080/get.php?username=ready1&password=pw1&type=m3u_plus\nnot a link\nhttp://tv.example.com:8080/get.php?username=ready1&password=pw1' }, tok);
+  assert.equal(add.json.added, 1); assert.equal(add.json.skipped, 2);
+  const one = await call('POST', '/api/trial', { name: 'First Person', email: 'first@example.com', phone: '+212612345678', ip: '1.1.1.1' });
+  assert.equal(one.status, 200); assert.equal(one.json.username, 'ready1'); assert.equal(one.json.password, 'pw1'); assert.equal(one.json.pending, false); assert.match(one.json.m3u, /username=ready1/); assert.equal(one.json.emailed, true);
+  assert.ok(mails.some((m) => m.to[0] === 'first@example.com')); assert.ok(mails.some((m) => m.to[0] === 'owner@example.com' && /ready trial line/.test(m.subject)), 'owner is told the pool is running low');
+  assert.equal((await call('POST', '/api/login', { username: 'ready1', password: 'pw1' })).status, 200, 'the customer can sign in at once');
+  const two = await call('POST', '/api/trial', { name: 'Second Person', email: 'second@example.com', phone: '+33698765432', ip: '2.2.2.2' });
+  assert.equal(two.status, 200); assert.equal(two.json.pending, true); assert.ok(two.json.username && two.json.password);
+  const note = mails.find((m) => m.to[0] === 'owner@example.com' && /waiting/i.test(m.subject)); assert.ok(note); assert.match(note.html, /Not enough credits/, 'the owner sees what the panel answered');
+  assert.ok(!mails.some((m) => m.to[0] === 'second@example.com'), 'no login email before the line exists');
+  const u2 = (await call('POST', '/api/login', { username: two.json.username, password: two.json.password })).json.token;
+  const me = (await call('GET', '/api/me', {}, u2)).json; assert.ok(me.user.pendingLine); assert.equal(me.stream, null);
+  const waiting = (await call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.email === 'second@example.com');
+  assert.match((await call('PUT', `/api/admin/customers/${waiting.id}`, { m3u: 'nonsense' }, tok)).json.error, /line link/);
+  const act = await call('PUT', `/api/admin/customers/${waiting.id}`, { m3u: 'http://tv.example.com:8080/get.php?username=manual7&password=mpw&type=m3u_plus' }, tok);
+  assert.equal(act.json.activated, true); assert.equal(act.json.emailed, true); assert.equal(act.json.username, 'manual7'); assert.ok(!act.json.pendingLine);
+  assert.ok(mails.some((m) => m.to[0] === 'second@example.com'));
+  const u3 = (await call('POST', '/api/login', { username: 'manual7', password: 'mpw' })).json.token;
+  assert.equal((await call('GET', '/api/me', {}, u3)).json.stream.u, 'manual7');
+  const made = await call('POST', '/api/admin/customers', { name: 'Pasted Only', m3u: 'http://tv.example.com:8080/get.php?username=paste1&password=ppw99', planId: 'p1' }, tok);
+  assert.equal(made.status, 200); assert.equal((made.json.customer || made.json).username, 'paste1');
 });

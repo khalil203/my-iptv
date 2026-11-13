@@ -195,7 +195,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
   if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/email/recent') return 'customers_view';
-  if (path.startsWith('/api/admin/templates')) return 'settings';
+  if (path.startsWith('/api/admin/templates') || path.startsWith('/api/admin/trialpool')) return 'settings';
   return 'owner';
 }
 
@@ -203,6 +203,15 @@ function permFor(method, path, body) {
 export function cleanEmail(x) {
   const m = String(x || '').toLowerCase().match(/[a-z0-9._%+\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}/);
   return m ? m[0] : '';
+}
+// Reads the server, username and password out of a line link copied from the panel (get.php, player_api.php or /live/user/pass/…).
+export function parseLineLink(link) {
+  const m = String(link || '').trim().match(/https?:\/\/[^\s"'<>]+/i); if (!m) return null;
+  let u; try { u = new URL(m[0]); } catch { return null; }
+  let user = u.searchParams.get('username') || '', pass = u.searchParams.get('password') || '';
+  if (!user || !pass) { const parts = u.pathname.split('/').filter(Boolean); const i = ['live', 'movie', 'series'].includes(parts[0]) ? 1 : 0; if (parts.length >= i + 2) { user = decodeURIComponent(parts[i]); pass = decodeURIComponent(parts[i + 1]); } }
+  if (!user || !pass || /\.(php|m3u8?|ts)$/i.test(user)) return null;
+  return { dns: u.origin, u: user, p: pass };
 }
 // Finds the credit balance in a panel answer: the path from API settings first, then the usual field names.
 const CREDIT_KEYS = ['credits', 'credit', 'balance', 'credit_balance', 'available_credits', 'reseller_credits', 'points'];
@@ -517,6 +526,16 @@ export const WA_TPL = {
     fr: 'Bonjour {name} 👋\n\nMerci d\'avoir choisi *{app}* 🎉\nVoici votre formule :\n\n📺 *{package}*\n⏳ {days} jours · {devices} appareil(s)\n💶 *{price}*\n\n🔒 Payez en toute sécurité ici :\n{link}\n\nActivation immédiate après le paiement. Une question ? Répondez ici 😊',
     ar: 'مرحبًا {name} 👋\n\nشكرًا لاختيارك *{app}* 🎉\nهذه باقتك:\n\n📺 *{package}*\n⏳ {days} يوم · {devices} جهاز\n💶 *{price}*\n\n🔒 ادفع بأمان من هنا:\n{link}\n\nالتفعيل فوري بعد الدفع. لأي سؤال، رد هنا 😊',
   },
+  trial: {
+    en: 'Hello {name} 👋\n\nYour free *{app}* trial is ready 🎁\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n⏳ Valid until: {expires}\n\n📋 M3U link:\n{m3u}\n\n📲 Watch in our app: {appUrl}\n\nEnjoy, and tell us what you think! When you are ready, we will send you the best offer.',
+    fr: 'Bonjour {name} 👋\n\nVotre essai gratuit *{app}* est prêt 🎁\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n⏳ Valable jusqu’au : {expires}\n\n📋 Lien M3U :\n{m3u}\n\n📲 Regardez dans notre application : {appUrl}\n\nBon visionnage, et dites-nous ce que vous en pensez ! Quand vous serez prêt, nous vous enverrons la meilleure offre.',
+    ar: 'مرحبًا {name} 👋\n\nتجربتك المجانية في *{app}* جاهزة 🎁\n\n👤 اسم المستخدم: {username}\n🔑 كلمة المرور: {password}\n🌐 DNS: {dns}\n⏳ صالحة حتى: {expires}\n\n📋 رابط M3U:\n{m3u}\n\n📲 شاهد في تطبيقنا: {appUrl}\n\nمشاهدة ممتعة، وأخبرنا برأيك! عندما تكون جاهزًا نرسل لك أفضل عرض.',
+  },
+  thanks: {
+    en: 'Hello {name} 👋\n\nThank you for your purchase 🎉 Your *{app}* subscription is active.\n\n📺 {package}\n📅 Valid until: {expires}\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n\n📲 Watch in our app: {appUrl}\n\nNeed anything? Just reply to this message.',
+    fr: 'Bonjour {name} 👋\n\nMerci pour votre achat 🎉 Votre abonnement *{app}* est actif.\n\n📺 {package}\n📅 Valable jusqu’au : {expires}\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n\n📲 Regardez dans notre application : {appUrl}\n\nBesoin d’aide ? Répondez simplement à ce message.',
+    ar: 'مرحبًا {name} 👋\n\nشكرًا على شرائك 🎉 اشتراكك في *{app}* مفعّل.\n\n📺 {package}\n📅 صالح حتى: {expires}\n\n👤 اسم المستخدم: {username}\n🔑 كلمة المرور: {password}\n🌐 DNS: {dns}\n\n📲 شاهد في تطبيقنا: {appUrl}\n\nتحتاج أي شيء؟ فقط رد على هذه الرسالة.',
+  },
   login: {
     en: 'Hello {name} 👋\n\nYour *{app}* subscription is ready ✅\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n📅 Expires: {expires}\n\n📋 M3U link:\n{m3u}\n\n📲 Watch in our app: {appUrl}\nEnjoy! 🍿',
     fr: 'Bonjour {name} 👋\n\nVotre abonnement *{app}* est prêt ✅\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n📅 Expire le : {expires}\n\n📋 Lien M3U :\n{m3u}\n\n📲 Regardez dans notre application : {appUrl}\nBon visionnage ! 🍿',
@@ -795,6 +814,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (typeof image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) throw new Error('att_bad');
     const id = uid(8); await store.put('att:' + id, image, 90 * 86400); return id;
   };
+  // A short plain email to the owner about something a customer did. Never blocks the customer's action.
+  async function notifyAdmin(s, subject, text) {
+    const to = cleanEmail(s.email.adminEmail); if (!to || !s.email.resendKey) return;
+    const k = 'adminmail:' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0; if (n >= 40) return; await store.put(k, n + 1, 2 * 86400);
+    const app = s.branding.appName || 'IPTV'; const url = String(s.email.appUrl || '').replace(/\/+$/, '');
+    try { await sendEmail(s, to, `[${app}] ${subject}`, `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#121726"><h3 style="margin:0 0 12px">${escHtml(subject)}</h3><p style="white-space:pre-line;line-height:1.5">${escHtml(text)}</p>${url ? `<p><a href="${escHtml(url)}" style="background:#7C4DFF;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:bold;display:inline-block">Open the dashboard</a></p>` : ''}</div>`); } catch {}
+  }
   async function panelCredits(s, force) {
     const r = await panelCall(force ? { ...s, reseller: { ...s.reseller, enabled: true } } : s, 'credits', {});
     const credits = r.ok && !r.skipped ? findCredits(r.data, s.reseller.creditsPath) : null;
@@ -832,7 +858,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const e = cleanEmail(email); if (!e) return '';
     const fix = emailTypo(e); if (fix) return `This email address looks mistyped. Did you mean ${fix}?`;
     try {
-      const r = await fetchFn('https://cloudflare-dns.com/dns-query?type=MX&name=' + encodeURIComponent(e.split('@')[1]), { headers: { accept: 'application/dns-json' } });
+      const ac = typeof AbortController === 'function' ? new AbortController() : null; const tm = ac ? setTimeout(() => ac.abort(), 2500) : 0; // never slows a sign-up by more than a moment
+      const r = await fetchFn('https://cloudflare-dns.com/dns-query?type=MX&name=' + encodeURIComponent(e.split('@')[1]), { headers: { accept: 'application/dns-json' }, ...(ac ? { signal: ac.signal } : {}) }).finally(() => tm && clearTimeout(tm));
       const d = await r.json(); if (d && d.Status === 3) return `This email address cannot receive mail: the domain "${e.split('@')[1]}" does not exist.`;
     } catch {}
     return '';
@@ -999,7 +1026,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const email = String(body.email || '').trim().toLowerCase().slice(0, 120);
         const phone = String(body.phone || '').replace(/[^\d+]/g, '').slice(0, 20);
         const whatsapp = String(body.whatsapp || phone).replace(/[^\d+]/g, '').slice(0, 20);
-        if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || phone.replace(/\D/g, '').length < 8) return err(400, 'trial_invalid');
+        if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err(400, 'trial_invalid');
+        if (!/^\+\d{8,15}$/.test(phone) || (whatsapp && !/^\+?\d{8,15}$/.test(whatsapp))) return err(400, 'trial_phone');
         { const typo = emailTypo(email); if (typo) return { status: 400, json: { error: 'trial_typo', suggest: typo } }; if (await emailProblem(email)) return err(400, 'trial_bademail'); }
         const list = await getCustomers();
         const digits = (x) => String(x || '').replace(/\D/g, '').slice(-9);
@@ -1020,23 +1048,39 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const salt = uid(8);
         const now = Date.now();
+        let lineReady = false; let panelError = '';
         const c = { loginPassword: password, id: uid(8), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         if (s.reseller.enabled) {
           const panel = await panelCall(s, 'trial', { username, password, line_id: '', package: s.trial.package, connections: c.connections, days: 1, months: 1, hours: s.trial.hours, name, phone, note: 'trial' });
-          if (!panel.ok && !panel.skipped) { await log('trial', `Trial for ${email} failed on panel: ${panel.error}`); return err(502, 'trial_panel'); }
-          if (!panel.skipped) {
+          if (!panel.ok && !panel.skipped) { panelError = panel.error || 'unknown error'; await log('trial', `Trial for ${email}: the panel refused (${panelError}). Using a ready line or the waiting list instead.`); }
+          else if (!panel.skipped) {
+            lineReady = true;
             const got = applyPanelCreds(s, c, panel.data);
             if (got.u && !list.some((x) => x.username.toLowerCase() === got.u.toLowerCase())) username = c.username = got.u;
             if (got.p) { password = got.p; c.loginPassword = password; c.salt = uid(8); c.passwordHash = await hashPassword(password, c.salt); }
           }
         }
+        if (!lineReady) { // a line you prepared in advance (Trial & email setup → Ready trial lines)
+          const pool = (await store.get('trialpool')) || []; const line = pool.shift();
+          if (line) {
+            await store.put('trialpool', pool); lineReady = true;
+            c.lineUsername = line.u; c.linePassword = line.p; if (line.dns) c.dns = line.dns;
+            if (!list.some((x) => x.username.toLowerCase() === line.u.toLowerCase())) username = c.username = line.u;
+            password = line.p; c.loginPassword = password; c.salt = uid(8); c.passwordHash = await hashPassword(password, c.salt);
+            if (pool.length <= 2) await notifyAdmin(s, `Only ${pool.length} ready trial line(s) left`, `A free trial just used one of your ready lines. ${pool.length} left. Add more in Trial & email setup → Ready trial lines.`);
+          }
+        }
+        if (!lineReady) c.pendingLine = now; // waits for you to paste a line; the customer is told and you are notified
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
-        const m = accessEmail(s, c, password, 'trial', body.appUrl);
-        const sent = await sendEmail(s, email, m.subject, m.html);
-        await log('trial', `Free trial ${username} for ${name} <${email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}`);
-        const showOnScreen = !sent.ok || s.trial.showCredentialsOnScreen;
-        return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, ...(showOnScreen ? { username, password } : {}) });
+        let sent = { ok: false };
+        if (lineReady) { const m = accessEmail(s, c, password, 'trial', body.appUrl); sent = await sendEmail(s, email, m.subject, m.html); }
+        await log('trial', `Free trial ${username} for ${name} <${email}>${lineReady ? (sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')) : ' · WAITING for a line'}`);
+        const who = `${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}\nApp login: ${username}`;
+        if (!lineReady) await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for a line.\n\n${who}\n\n${panelError ? 'The panel API answered: ' + panelError + '\n\n' : ''}Open Customers → Alerts → “Waiting for a line”, tap Edit, paste the M3U link from your panel and save. The customer then gets the login email automatically.`);
+        else if (s.trial.notifyAdmin !== false) await notifyAdmin(s, `New free trial: ${name}`, `A free trial was created.\n\n${who}`);
+        const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
+        return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, username, password, pending: !lineReady, ...(lineReady && dns ? { dns, m3u: `${dns}/get.php?username=${encodeURIComponent(c.lineUsername)}&password=${encodeURIComponent(c.linePassword)}&type=m3u_plus&output=ts` } : {}) });
       }
       if (R('POST', '/api/unsub')) { // public: link from newsletter footer
         const [id, sig] = String(body.t || '').split('.');
@@ -1167,7 +1211,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!c) return err(401, 'Account not found.');
         if (c.status === 'disabled') return err(401, 'This account is disabled.');
         const v = view(c, s);
-        const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance;
+        const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance && !c.pendingLine;
 
         if (R('POST', '/api/me/order')) { // customer picks a package: get a pay link, and optionally the payment email
           const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
@@ -1189,8 +1233,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: payUrlFor(pl.url, c), cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email),
-            stream: canWatch && s.player.serverUrl ? {
-              server: trimSlash(s.player.serverUrl), u: lineUsername, p: linePassword,
+            stream: canWatch && (s.player.serverUrl || c.dns) ? {
+              server: trimSlash(s.player.serverUrl || c.dns), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
               mode: s.player.mode === 'direct' ? 'direct' : 'proxy', userAgent: s.player.userAgent || 'IPTVSmartersPro',
               relay: String(s.player.relayUrl || '').trim().replace(/\/+$/, ''),
@@ -1441,6 +1485,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('POST', '/api/admin/customers')) {
         const list = await getCustomers();
+        const ln0 = body.m3u ? parseLineLink(body.m3u) : null;
+        if (body.m3u && !ln0) return err(400, 'This does not look like a line link from the panel. Paste the full M3U link (it contains username= and password=).');
+        if (ln0) { if (!String(body.username || '').trim()) body.username = ln0.u; if (!body.password) body.password = ln0.p; }
         const username = String(body.username || '').trim();
         if (username.length < 3) return err(400, 'Login username needs 3+ characters.');
         if (String(body.password || '').length < 4) return err(400, 'Login password needs 4+ characters.');
@@ -1463,8 +1510,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           startAt, expiresAt, status: 'active', createdAt: Date.now(), lastLogin: null,
           renewals: [{ at: Date.now(), type: 'new', planId: plan ? plan.id : 'custom', days: Math.round((expiresAt - startAt) / DAY), price: Number(body.price) || 0, credits: plan ? planCredits(plan) : Number(body.credits) || 0 }],
         };
+        if (ln0) { c.lineUsername = ln0.u; c.linePassword = ln0.p; c.dns = ln0.dns; }
         let panel = null;
-        if (body.createOnPanel) {
+        if (body.createOnPanel && !ln0) {
           panel = await panelCall(s, 'create', panelVars(c, s));
           if (!panel.ok && !panel.skipped) return err(502, 'Panel: ' + panel.error);
           if (!panel.skipped) applyPanelCreds(s, c, panel.data);
@@ -1491,6 +1539,17 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.email && cleanEmail(body.email) !== cleanEmail(c.email) && !body.emailAnyway) { const prob = await emailProblem(body.email); if (prob) return err(400, prob); }
           for (const k of ['name', 'phone', 'note', 'lineUsername', 'linePassword', 'lineId', 'planId', 'email', 'whatsapp', 'lang']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.email !== undefined) c.email = cleanEmail(body.email) || String(body.email).trim();
+          let activated = false;
+          if (body.m3u) {
+            const ln = parseLineLink(body.m3u); if (!ln) return err(400, 'This does not look like a line link from the panel. Paste the full M3U link (it contains username= and password=).');
+            c.lineUsername = ln.u; c.linePassword = ln.p; c.dns = ln.dns;
+            if (c.pendingLine) { // a trial that was waiting: it starts now, signs in with the line details, and gets the email
+              delete c.pendingLine; activated = true;
+              if (c.isTrial) { c.startAt = Date.now(); c.expiresAt = Date.now() + (Number(s.trial.hours) || 24) * 3600000; }
+              if (!list.some((x) => x !== c && x.username.toLowerCase() === ln.u.toLowerCase())) c.username = ln.u;
+              c.loginPassword = ln.p; c.salt = uid(8); c.passwordHash = await hashPassword(ln.p, c.salt);
+            }
+          }
           if (body.connections !== undefined) c.connections = Number(body.connections) || 1;
           if (body.username && body.username !== c.username) {
             const u = String(body.username).trim();
@@ -1502,7 +1561,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.expiresAt) c.expiresAt = new Date(body.expiresAt).getTime() + DAY - 1000;
           if (body.startAt) c.startAt = new Date(body.startAt).getTime();
           await saveCustomers(list);
-          await log('customer', `Updated ${c.username}`);
+          await log('customer', `Updated ${c.username}${activated ? ' · line added, trial started' : ''}`);
+          if (activated && cleanEmail(c.email)) { const m = accessEmail(s, c, c.loginPassword, c.isTrial ? 'trial' : 'sub', s.email.appUrl || body.appUrl); const r = await sendEmail(s, c.email, m.subject, m.html); await log('customer', `Login email to ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`); return ok({ ...view(c, s), activated: true, emailed: !!r.ok }); }
           return ok(view(c, s));
         }
         if (method === 'DELETE' && !sub) {
@@ -1752,6 +1812,18 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           totals: { sales: sales.length, revenueUsd: sum((x) => x.amountUsd || 0), costUsd: sum((x) => x.costUsd || 0), profitUsd: sum((x) => (x.amountUsd || 0) - (x.costUsd || 0)) },
           recent: sales.slice().sort((a, x) => x.at - a.at).slice(0, 60).map((x) => ({ ...x, profitUsd: (x.amountUsd || 0) - (x.costUsd || 0) })),
         });
+      }
+      if (path.startsWith('/api/admin/trialpool')) { // lines you made on the panel in advance, handed to new trials one by one
+        const pool = (await store.get('trialpool')) || [];
+        if (R('GET', '/api/admin/trialpool')) return ok({ lines: pool.map((x) => ({ u: x.u, dns: x.dns })) });
+        if (R('POST', '/api/admin/trialpool')) {
+          const used = new Set((await getCustomers()).map((c) => String(c.lineUsername || '').toLowerCase())); let added = 0, skipped = 0;
+          for (const row of String(body.add || '').split(/\r?\n/)) { if (!row.trim()) continue; const ln = parseLineLink(row); if (!ln || used.has(ln.u.toLowerCase()) || pool.some((x) => x.u === ln.u)) { skipped++; continue; } pool.push(ln); added++; }
+          if (added) { await store.put('trialpool', pool.slice(0, 500)); await log('settings', `Added ${added} ready trial line(s)`); }
+          return ok({ added, skipped, count: pool.length });
+        }
+        if (R('POST', '/api/admin/trialpool/remove')) { const next = body.all ? [] : pool.filter((x) => x.u !== String(body.u || '')); await store.put('trialpool', next); return ok({ count: next.length }); }
+        return err(404, 'Not found');
       }
       if (R('GET', '/api/admin/templates')) return ok({ defaults: tplDefaults(), custom: s.mailTexts || {}, waDefaults: WA_TPL, wa: s.waTemplates || {}, waCustom: s.waCustom || [] });
       if (R('POST', '/api/admin/templates/preview')) { // shows an email with wording that is not saved yet, using a made-up customer
