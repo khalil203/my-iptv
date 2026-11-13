@@ -166,7 +166,7 @@ export const PERMS = [
 const PERM_KEYS = PERMS.map((p) => p[0]);
 function permFor(method, path, body) {
   if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
-  if (path.startsWith('/api/admin/tickets')) return method === 'GET' ? 'customers_view' : 'customers_edit';
+  if (path.startsWith('/api/admin/tickets') || path.startsWith('/api/admin/chat')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/payments') return 'finance_view';
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
@@ -814,6 +814,24 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (typeof image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) throw new Error('att_bad');
     const id = uid(8); await store.put('att:' + id, image, 90 * 86400); return id;
   };
+  // ---- live chat: one running conversation per customer ----
+  const getChats = async () => (await store.get('chats')) || [];
+  const getChat = async (id) => (await store.get('chat:' + id)) || { messages: [], ua: 0, uc: 0, at: 0 };
+  async function chatAdd(c, from, by, text) {
+    const ch = await getChat(c.id); const now = Date.now(); const quiet = now - (ch.at || 0) > 30 * 60000;
+    ch.messages.push({ from, by, at: now, text }); ch.messages = ch.messages.slice(-200); ch.at = now;
+    if (from === 'c') ch.ua = (ch.ua || 0) + 1; else ch.uc = (ch.uc || 0) + 1;
+    await store.put('chat:' + c.id, ch);
+    const idx = (await getChats()).filter((x) => x.id !== c.id);
+    idx.unshift({ id: c.id, name: c.name, username: c.username, last: text.slice(0, 80), from, at: now, ua: ch.ua || 0, uc: ch.uc || 0 });
+    await store.put('chats', idx.slice(0, 300));
+    return { ch, quiet };
+  }
+  async function chatRead(id, who) { // who: 'a' admin opened it, 'c' customer opened it
+    const ch = await getChat(id); const k = who === 'a' ? 'ua' : 'uc';
+    if (ch[k]) { ch[k] = 0; await store.put('chat:' + id, ch); const idx = await getChats(); const e = idx.find((x) => x.id === id); if (e) { e[k] = 0; await store.put('chats', idx); } }
+    return ch;
+  }
   // A short plain email to the owner about something a customer did. Never blocks the customer's action.
   async function notifyAdmin(s, subject, text) {
     const to = cleanEmail(s.email.adminEmail); if (!to || !s.email.resendKey) return;
@@ -1232,7 +1250,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: payUrlFor(pl.url, c), cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
-            orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email),
+            orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
               server: trimSlash(s.player.serverUrl || c.dns), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
@@ -1297,6 +1315,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'open'; tk.updatedAt = Date.now();
           await saveTickets(all);
           return ok({ ok: true });
+        }
+        if (R('GET', '/api/me/chat')) { const ch = await chatRead(c.id, 'c'); return ok({ messages: ch.messages.map(({ from, at, text }) => ({ from, at, text })) }); }
+        if (R('POST', '/api/me/chat')) {
+          const text = cleanText(body.text, 1000); if (!text) return err(400, 'chat_empty');
+          const k = 'chatrate:' + c.id; const n = Number(await store.get(k)) || 0; if (n >= 30) return err(429, 'chat_slow'); await store.put(k, n + 1, 600);
+          const { ch, quiet } = await chatAdd(c, 'c', c.name || c.username, text);
+          if (quiet) await notifyAdmin(s, `New chat message from ${c.name || c.username}`, `${c.name || ''} (${c.username}) wrote in the live chat:\n\n${text}\n\nAnswer in the dashboard: Customers → Live chat.`);
+          return ok({ messages: ch.messages.map(({ from, at, text: t }) => ({ from, at, text: t })) });
         }
         if (R('POST', '/api/me/email/send')) { // sends a 6-digit code to the address on the account
           const to = cleanEmail(c.email); if (!to) return err(400, 'em_none');
@@ -1397,6 +1423,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ ok: true });
         }
         return err(404, 'Not found');
+      }
+      if (R('GET', '/api/admin/chats')) return ok(await getChats());
+      if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
+      if (R('POST', '/api/admin/chat')) {
+        const cu = (await getCustomers()).find((x) => x.id === body.id); if (!cu) return err(404, 'Customer not found.');
+        const text = cleanText(body.text, 1000); if (!text) return err(400, 'Write a message first.');
+        const { ch } = await chatAdd(cu, 's', actorName.replace(' (owner)', ''), text);
+        return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages });
       }
       if (R('GET', '/api/admin/tickets')) return ok((await getTickets()).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || b.updatedAt - a.updatedAt));
       if (R('GET', '/api/admin/tickets/att')) { const data = /^[0-9a-f]+$/.test(String(query.id || '')) ? await store.get('att:' + query.id) : null; return data ? ok({ data }) : err(404, 'This picture is no longer stored.'); }

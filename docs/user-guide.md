@@ -10,3 +10,4 @@
 - **My playlists** (Account): add your own provider with Xtream Codes or an M3U playlist. The details stay on your device.
 - **Two-step sign-in** and **Verify email** (Account): extra protection for your account.
 - **Support requests** can include one picture per message.
+- **Chat with support**: the round chat button opens a live conversation with us.

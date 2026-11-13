@@ -99,7 +99,7 @@ async function api(method, path, body) {
   return json;
 }
 function setSession(token, role) {
-  state.token = token; state.role = role;
+  state.token = token; state.role = role; if (!token || role !== 'user') document.getElementById('chat-fab')?.remove();
   if (token) { localStorage.setItem('tvp_token', token); localStorage.setItem('tvp_role', role); }
   else { localStorage.removeItem('tvp_token'); localStorage.removeItem('tvp_role'); }
   state.user = { tab: 'home', me: null, cache: {}, cat: {}, q: '', limit: 120 };
@@ -246,7 +246,8 @@ const ADMIN_TABS = [
   ['alerts', '🔔', 'Alerts', 'customers_view', 'Customers', 'expiring expired trials attention reminders follow up'],
   ['subs', '📅', 'Subscriptions', 'customers_view', 'Customers', 'tracker csv expiry'],
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
-  ['support', '💬', 'Support', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['chat', '🗨', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
+  ['support', '💬', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
@@ -262,7 +263,7 @@ const ADMIN_TABS = [
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
   ['activity', '🧾', 'Activity', 'activity', 'System', 'log audit history'],
 ];
-const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}</a>`).join(''); };
+const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
 
 async function renderAdmin() {
@@ -304,6 +305,7 @@ async function renderAdmin() {
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
+    else if (t === 'chat') { body.innerHTML = await adminChat(); chatScroll(); }
     else if (t === 'templates') body.innerHTML = await adminTemplates(s);
     else if (t === 'emails') body.innerHTML = await adminEmails();
     else if (t === 'data') body.innerHTML = await adminData(s);
@@ -368,6 +370,7 @@ function custActions(c) {
     ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
     ${c.twoFactor ? `<button class="btn sm" data-act="cust-tfa-off" data-perm="customers_edit" data-id="${c.id}" title="Two-step sign-in is on. Tap to turn it off (lost phone).">🔐</button>` : ''}
+    <button class="btn sm" data-act="chat-with" data-id="${c.id}" title="Open the live chat with this customer" aria-label="Live chat">🗨</button>
     <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
 }
 function customerListHtml() {
@@ -933,6 +936,7 @@ async function renderUser() {
     applyBranding(u.me.branding);
   }
   const { user, dashboard: d, branding: b } = u.me;
+  setChatFab(u.me.chatUnread || 0);
   const tabs = [['home', ic('home'), t('home')], d.live && ['live', ic('tv'), t('live')], d.movies && ['movies', ic('film'), t('movies')], d.series && ['series', ic('series'), t('series')], ['account', ic('user'), t('account')]].filter(Boolean);
   if (!tabs.some((t) => t[0] === u.tab)) u.tab = 'home';
   $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
@@ -2648,6 +2652,64 @@ Object.assign(actions, {
 });
 Object.assign(forms, {
   async 'pool-add'(f) { try { const r = await api('POST', '/api/admin/trialpool', { add: f.add.value }); toast(`${r.added} line(s) added${r.skipped ? ' · ' + r.skipped + ' skipped (not a line link, or already used)' : ''}`, !r.added); renderAdmin(); } catch (e) { toast(e.message, true); } },
+});
+
+// =====================================================================
+// Live chat between a customer and the dashboard
+// =====================================================================
+const chatBubbles = (msgs, mine) => msgs.length ? msgs.map((m) => `<div class="msg ${m.from === mine ? 'mine' : ''}"><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${m.by && m.from !== mine ? esc(m.by) + ' · ' : ''}${fmtDT(m.at)}</div></div>`).join('') : `<p class="muted small" style="text-align:center;margin:24px 0">${isAdminUI() ? 'No messages yet. Write the first one.' : t('chatEmpty')}</p>`;
+const chatScroll = () => { const el = $('#chat-thread'); if (el) el.scrollTop = el.scrollHeight; };
+function chatPaint(msgs, mine) { const el = $('#chat-thread'); if (!el) return; if (Number(el.dataset.n) === msgs.length) return; const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80 || !el.dataset.n; el.dataset.n = msgs.length; el.innerHTML = chatBubbles(msgs, mine); if (atEnd) chatScroll(); }
+// customer side
+function setChatFab(unread) {
+  let el = document.getElementById('chat-fab');
+  if (!el) { el = document.createElement('button'); el.id = 'chat-fab'; el.className = 'chat-fab'; el.dataset.act = 'chat-open'; el.setAttribute('aria-label', t('chatT')); document.body.appendChild(el); }
+  el.innerHTML = `${ic('chat', 26)}${unread ? `<b>${unread > 9 ? '9+' : unread}</b>` : ''}`;
+}
+async function openChat() {
+  modal('🗨 ' + t('chatT'), `<div class="thread chat" id="chat-thread"><div class="spinner"></div></div><form data-form="chat-send" class="chat-form"><input name="text" maxlength="1000" autocomplete="off" placeholder="${t('chatPh')}" aria-label="${t('chatPh')}" required><button class="btn primary" aria-label="${t('send')}">${ic('play', 18)}</button></form>`);
+  try { const r = await api('GET', '/api/me/chat'); chatPaint(r.messages, 'c'); setChatFab(0); state.user.me.chatUnread = 0; } catch (e) { toast(tErr(e.message), true); }
+  $('.chat-form input')?.focus();
+}
+// admin side
+async function adminChat() {
+  const ui = (state.admin.ch ||= { id: '', q: '' });
+  const list = await api('GET', '/api/admin/chats'); ui.list = list;
+  let thread = null; if (ui.id) { try { thread = await api('GET', '/api/admin/chat?id=' + encodeURIComponent(ui.id)); const e = list.find((x) => x.id === ui.id); if (e) e.ua = 0; } catch { ui.id = ''; } }
+  chatBadge(list);
+  const q = ui.q.trim().toLowerCase(); const shown = list.filter((x) => !q || (x.name + ' ' + x.username + ' ' + x.last).toLowerCase().includes(q));
+  return `<div class="chat-wrap ${ui.id ? 'has-open' : ''}"><div class="card chat-list"><input type="search" placeholder="🔎 Search chats…" value="${esc(ui.q)}" data-input="ch-search" style="margin-bottom:10px">
+      <div id="chat-items">${chatItems(shown, ui.id)}</div></div>
+    <div class="card chat-pane">${thread ? `<div class="row" style="margin-bottom:10px"><button class="btn sm chat-back" data-act="chat-back">←</button><div class="avatar">${esc(initials(thread.name))}</div><div style="flex:1;min-width:0"><b>${esc(thread.name)}</b><div class="small muted">${esc(thread.username)}</div></div><button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${esc(thread.id)}">Customer</button></div>
+      <div class="thread chat" id="chat-thread" data-n="${thread.messages.length}">${chatBubbles(thread.messages, 's')}</div>
+      <form data-form="chat-reply" class="chat-form" data-perm="customers_edit"><input name="text" maxlength="1000" autocomplete="off" placeholder="Write a message…" aria-label="Message" required><button class="btn primary">Send</button></form>` : `<div class="empty"><span class="ic">🗨</span>${list.length ? 'Choose a chat on the left.' : 'No chats yet. Customers start one with the chat button in their app, or tap 🗨 on a customer to write first.'}</div>`}</div></div>`;
+}
+const chatItems = (list, cur) => list.length ? list.map((x) => `<div class="list-item chat-item ${x.id === cur ? 'on' : ''}" data-act="chat-pick" data-id="${esc(x.id)}" tabindex="0"><div class="avatar">${esc(initials(x.name))}</div><div style="flex:1;min-width:0"><b>${esc(x.name)}</b><div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.from === 's' ? 'You: ' : ''}${esc(x.last)}</div></div><div style="text-align:end"><div class="small muted">${fmtDate(x.at)}</div>${x.ua ? `<b class="nav-badge">${x.ua}</b>` : ''}</div></div>`).join('') : '<p class="muted small">No chats.</p>';
+function chatBadge(list) { const n = list.reduce((a, x) => a + (x.ua || 0), 0); document.querySelectorAll('#chat-badge').forEach((b) => { b.hidden = !n; b.textContent = n > 99 ? '99+' : n; }); }
+// One light timer keeps open chats fresh: every 5 seconds while a chat is on screen, every 30 seconds for the menu badge.
+let chatN = 0;
+setInterval(async () => {
+  if (document.hidden || !state.token) return; chatN++;
+  try {
+    if (state.role === 'user') { if ($('#chat-thread') && $('form[data-form=chat-send]')) { const r = await api('GET', '/api/me/chat'); chatPaint(r.messages, 'c'); } return; }
+    if (!isAdminUI() || !can('customers_view')) return;
+    if (state.admin.tab === 'chat' && $('.chat-wrap')) {
+      const ui = state.admin.ch;
+      if (ui.id && $('#chat-thread')) { const r = await api('GET', '/api/admin/chat?id=' + encodeURIComponent(ui.id)); chatPaint(r.messages, 's'); }
+      if (chatN % 2 === 0) { const list = await api('GET', '/api/admin/chats'); ui.list = list; const q = ui.q.trim().toLowerCase(); const el = $('#chat-items'); if (el) el.innerHTML = chatItems(list.filter((x) => !q || (x.name + ' ' + x.username + ' ' + x.last).toLowerCase().includes(q)), ui.id); chatBadge(list); }
+    } else if (chatN % 6 === 0) chatBadge(await api('GET', '/api/admin/chats'));
+  } catch {}
+}, 5000);
+document.addEventListener('input', (e) => { if (e.target.dataset?.input !== 'ch-search') return; state.admin.ch.q = e.target.value; const q = e.target.value.trim().toLowerCase(); const el = $('#chat-items'); if (el) el.innerHTML = chatItems((state.admin.ch.list || []).filter((x) => !q || (x.name + ' ' + x.username + ' ' + x.last).toLowerCase().includes(q)), state.admin.ch.id); });
+Object.assign(actions, {
+  'chat-open': () => openChat(),
+  'chat-pick': async (el) => { state.admin.ch.id = el.dataset.id; $('#admin-body').innerHTML = await adminChat(); chatScroll(); $('.chat-form input')?.focus(); },
+  'chat-back': async () => { state.admin.ch.id = ''; $('#admin-body').innerHTML = await adminChat(); },
+  'chat-with': (el) => { closeModal(); (state.admin.ch ||= { id: '', q: '' }).id = el.dataset.id; state.admin.tab = 'chat'; renderAdmin(); },
+});
+Object.assign(forms, {
+  async 'chat-send'(f) { const text = f.text.value.trim(); if (!text) return; f.text.value = ''; try { const r = await api('POST', '/api/me/chat', { text }); const el = $('#chat-thread'); if (el) el.dataset.n = ''; chatPaint(r.messages, 'c'); chatScroll(); } catch (e) { f.text.value = text; toast(tErr(e.message), true); } f.text.focus(); },
+  async 'chat-reply'(f) { const text = f.text.value.trim(); if (!text) return; f.text.value = ''; try { const r = await api('POST', '/api/admin/chat', { id: state.admin.ch.id, text }); const el = $('#chat-thread'); if (el) el.dataset.n = ''; chatPaint(r.messages, 's'); chatScroll(); } catch (e) { f.text.value = text; toast(e.message, true); } f.text.focus(); },
 });
 
 boot();

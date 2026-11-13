@@ -32,3 +32,4 @@ The public website (home, pricing, FAQ, privacy, terms) is shown to visitors who
 - **Any customer**: the customer form has an *M3U link from your panel* box. Paste the link and username, password and server are filled in.
 - Trial sign-up asks for a country code and a full phone number.
 - WhatsApp messages now include *Free trial details* and *Thank you for your purchase*; edit them in Message templates.
+- **Live chat** (Customers → Live chat): one running conversation per customer. Customers open it with the round chat button in their app. New messages show a red count in the menu, and you get an email when a quiet chat starts again. Tap 🗨 on any customer to write first.

@@ -189,6 +189,11 @@ Object.assign(D.en, { countryCode: 'Country code', trial_phone: 'Choose your cou
 Object.assign(D.fr, { countryCode: 'Indicatif du pays', trial_phone: 'Choisissez l’indicatif de votre pays et saisissez votre numéro complet.', trial_panel: 'Votre demande est enregistrée, mais l’essai n’a pas encore pu démarrer. Contactez l’assistance.', trialPending: 'Votre demande est reçue ✅ Votre compte est prêt et nous préparons votre ligne TV. Vous recevrez un e-mail dès qu’elle sera active. Gardez ces informations :', copy: 'Copier', copied: 'Copié ✓', pendingTitle: 'Votre ligne est en préparation', pendingText: 'Nous avons bien reçu votre demande. Vous recevrez un e-mail dès que votre ligne TV sera active.' });
 Object.assign(D.ar, { countryCode: 'رمز الدولة', trial_phone: 'اختر رمز بلدك وأدخل رقم هاتفك كاملاً.', trial_panel: 'تم حفظ طلبك، لكن لم تبدأ التجربة بعد. يرجى التواصل مع الدعم.', trialPending: 'تم استلام طلبك ✅ حسابك جاهز ونحن نجهّز خط البث الآن. ستصلك رسالة بريد فور تفعيله. احتفظ بهذه البيانات:', copy: 'نسخ', copied: 'تم النسخ ✓', pendingTitle: 'جارٍ تجهيز خطك', pendingText: 'استلمنا طلبك. ستصلك رسالة بريد فور تفعيل خط البث.' });
 
+
+Object.assign(D.en, { chatT: 'Chat with support', chatPh: 'Write a message…', chatEmpty: 'Write to us here. We answer in this chat.', chat_empty: 'Write a message first.', chat_slow: 'You are writing very fast. Please wait a few minutes.' });
+Object.assign(D.fr, { chatT: 'Discuter avec l’assistance', chatPh: 'Écrire un message…', chatEmpty: 'Écrivez-nous ici. Nous répondons dans cette discussion.', chat_empty: 'Écrivez d’abord un message.', chat_slow: 'Vous écrivez très vite. Patientez quelques minutes.' });
+Object.assign(D.ar, { chatT: 'محادثة مع الدعم', chatPh: 'اكتب رسالة…', chatEmpty: 'راسلنا هنا. نرد عليك في هذه المحادثة.', chat_empty: 'اكتب رسالة أولاً.', chat_slow: 'أنت تكتب بسرعة كبيرة. انتظر بضع دقائق.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

@@ -322,3 +322,21 @@ test('free trial: never blocked by the panel; uses a ready line, else waits; pho
   const made = await call('POST', '/api/admin/customers', { name: 'Pasted Only', m3u: 'http://tv.example.com:8080/get.php?username=paste1&password=ppw99', planId: 'p1' }, tok);
   assert.equal(made.status, 200); assert.equal((made.json.customer || made.json).username, 'paste1');
 });
+
+test('live chat: both sides see the messages, unread counts work, customers cannot read other chats', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const a = await addCustomer(x, tok); await addCustomer(x, tok, { username: 'other1', email: 'other@example.com', name: 'Other' });
+  const ua = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  const ub = (await x.call('POST', '/api/login', { username: 'other1', password: 'secret12' })).json.token;
+  assert.equal((await x.call('POST', '/api/me/chat', { text: '   ' }, ua)).status, 400);
+  assert.equal((await x.call('POST', '/api/me/chat', { text: 'Hello, my channel list is empty' }, ua)).json.messages.length, 1);
+  const idx = (await x.call('GET', '/api/admin/chats', {}, tok)).json; assert.equal(idx.length, 1); assert.equal(idx[0].ua, 1); assert.equal(idx[0].username, 'testuser');
+  assert.equal((await x.call('GET', '/api/admin/chat', {}, tok, { id: a.id })).json.messages[0].text, 'Hello, my channel list is empty');
+  assert.equal((await x.call('GET', '/api/admin/chats', {}, tok)).json[0].ua, 0, 'opening the chat marks it read');
+  assert.equal((await x.call('POST', '/api/admin/chat', { id: a.id, text: 'Please sign out and in again.' }, tok)).json.messages.length, 2);
+  assert.equal((await x.call('GET', '/api/me', {}, ua)).json.chatUnread, 1);
+  const mine = (await x.call('GET', '/api/me/chat', {}, ua)).json.messages; assert.equal(mine.length, 2); assert.equal(mine[1].from, 's'); assert.ok(!('by' in mine[1]), 'staff names are not sent to customers');
+  assert.equal((await x.call('GET', '/api/me', {}, ua)).json.chatUnread, 0);
+  assert.equal((await x.call('GET', '/api/me/chat', {}, ub)).json.messages.length, 0, 'another customer sees only their own chat');
+  assert.notEqual((await x.call('GET', '/api/admin/chats', {}, ua)).status, 200);
+});

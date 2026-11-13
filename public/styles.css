@@ -752,3 +752,17 @@ svg.i { flex: none; vertical-align: -5px; }
 /* phone number with country code */
 .phone-row { display: grid; grid-template-columns: minmax(118px, 42%) 1fr; gap: 8px; } .phone-row select, .phone-row input { min-width: 0; width: 100%; }
 [dir=rtl] .phone-row { direction: ltr; }
+
+/* live chat */
+.chat-fab { position: fixed; inset-inline-start: 16px; bottom: calc(82px + var(--safe-b)); z-index: 9; width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 80%, #fff), var(--primary)); box-shadow: 0 10px 28px -8px color-mix(in srgb, var(--primary) 90%, transparent); }
+.chat-fab b { position: absolute; top: -4px; inset-inline-end: -4px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--bad); color: #fff; font-size: .75rem; display: grid; place-items: center; }
+@media (min-width: 1000px) { .chat-fab { bottom: 24px; inset-inline-start: 244px; } }
+.thread.chat { height: min(52vh, 460px); max-height: none; padding: 4px; }
+.chat-form { display: flex; gap: 8px; } .chat-form input { flex: 1; min-width: 0; } .chat-form .btn { flex: none; }
+.nav-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-inline-start: auto; border-radius: 10px; background: var(--bad); color: #fff; font-size: .72rem; font-weight: 700; }
+.nav-badge[hidden] { display: none; }
+.chat-wrap { display: grid; grid-template-columns: minmax(240px, 320px) 1fr; gap: 12px; align-items: start; }
+.chat-wrap .card { margin: 0; } .chat-list { max-height: 78vh; overflow: auto; }
+.chat-item { cursor: pointer; border-radius: 12px; padding-inline: 8px; } .chat-item.on { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.chat-back { display: none; }
+@media (max-width: 760px) { .chat-wrap { grid-template-columns: 1fr; } .chat-wrap.has-open .chat-list { display: none; } .chat-wrap:not(.has-open) .chat-pane { display: none; } .chat-back { display: inline-flex; } .thread.chat { height: 56vh; } }
