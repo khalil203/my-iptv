@@ -174,6 +174,11 @@ Object.assign(D.en, { attAdd: 'Add a picture (optional)', attShow: 'Show picture
 Object.assign(D.fr, { attAdd: 'Ajouter une image (facultatif)', attShow: 'Afficher l’image', att_bad: 'Cette image ne peut pas être utilisée. Choisissez une photo plus petite ou une capture d’écran.', att_gone: 'Cette image n’est plus enregistrée.' });
 Object.assign(D.ar, { attAdd: 'إضافة صورة (اختياري)', attShow: 'عرض الصورة', att_bad: 'تعذّر استعمال هذه الصورة. اختر صورة أصغر أو لقطة شاشة.', att_gone: 'هذه الصورة لم تعد محفوظة.' });
 
+
+Object.assign(D.en, { channelsV: 'Channels', noGuide: 'No programme information' });
+Object.assign(D.fr, { channelsV: 'Chaînes', noGuide: 'Pas d’information sur les programmes' });
+Object.assign(D.ar, { channelsV: 'القنوات', noGuide: 'لا توجد معلومات عن البرامج' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

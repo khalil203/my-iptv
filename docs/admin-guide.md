@@ -11,3 +11,8 @@
 - **Activity**: the audit log.
 
 The public website (home, pricing, FAQ, privacy, terms) is shown to visitors who are not signed in. Devices that have signed in before, and the installed apps, open the sign-in screen directly.
+
+## Added later
+- **Customers list**: the WhatsApp button is outlined until a message was sent to that customer, then solid green with a tick. A 🔐 button appears for customers who turned on two-step sign-in; use it only when they lost their phone.
+- **User dashboard**: *Customers can add their own playlists* switches the Xtream / M3U feature on or off.
+- **Support**: customers and staff can attach one picture per message (kept 90 days).

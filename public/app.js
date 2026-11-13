@@ -997,8 +997,10 @@ async function renderUserTab() {
       : { kind: 'series', id: i.series_id, name: i.name, icon: i.cover });
     el.innerHTML = `${d.search ? `<input placeholder="${t('search')}" value="${esc(u.q)}" data-input="u-search" style="margin-bottom:12px">` : ''}
       <div class="chips">${kind === 'live' ? `<a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>` : ''}${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}${hiddenCats.size ? `<a data-act="pin-unlock">${t('locked')}</a>` : ''}</div>
-      <div id="items">${mapped.length ? itemsGrid(mapped.slice(0, u.limit)) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
+      ${kind === 'live' && d.epg && !state.user.me.stream?.m3u && mapped.length ? `<div class="seg" role="tablist"><button class="${u.guide ? '' : 'on'}" data-act="guide-mode" data-on="">${ic('tv', 18)} ${t('channelsV')}</button><button class="${u.guide ? 'on' : ''}" data-act="guide-mode" data-on="1">${ic('clock', 18)} ${t('tvGuide')}</button></div>` : ''}
+      <div id="items">${mapped.length ? (kind === 'live' && u.guide && d.epg ? guideHtml(mapped.slice(0, Math.min(u.limit, 40))) : itemsGrid(mapped.slice(0, u.limit))) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
+    if (kind === 'live' && u.guide && d.epg && mapped.length) fillGuide(mapped.slice(0, Math.min(u.limit, 40)));
   } catch (e) { if (e.switching) return; el.innerHTML = e.direct ? appsCard() : `<div class="err-box">⚠️ ${esc(e.message)}</div>${e.line ? `<div class="card">${state.user.me.branding.supportUrl ? `<a class="btn primary" href="${esc(state.user.me.branding.supportUrl)}" target="_blank" rel="noopener">💬 ${t('support')}</a>` : ''} <button class="btn" data-act="retry">⟳ ${t('retry')}</button></div>` : `<button class="btn" data-act="retry">⟳ ${t('retry')}</button>`}`; }
 }
 
@@ -2296,5 +2298,33 @@ Object.assign(actions, {
     catch (e) { el.disabled = false; toast(tErr(e.message), true); }
   },
 });
+
+// ---------------- TV guide grid: channels down the side, the next hours across ----------------
+const G_MIN = 5;            // pixels per minute
+const G_SPAN = 180;         // minutes shown
+const guideStart = () => { const d = new Date(); d.setMinutes(d.getMinutes() < 30 ? 0 : 30, 0, 0); return d.getTime(); };
+function guideHtml(chs) {
+  const start = guideStart(); const now = Date.now();
+  const ticks = Array.from({ length: G_SPAN / 30 }, (_, i) => `<span style="width:${30 * G_MIN}px">${new Date(start + i * 1800000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`).join('');
+  return `<div class="guide" dir="ltr" data-start="${start}"><div class="g-row g-head"><div class="g-ch"></div><div class="g-line" style="width:${G_SPAN * G_MIN}px">${ticks}</div></div>
+    ${chs.map((c) => `<div class="g-row"><div class="g-ch" data-act="open-item" data-item="${esc(JSON.stringify(c))}" tabindex="0"><b>${esc(c.name)}</b></div><div class="g-line" id="g-${esc(c.id)}" style="width:${G_SPAN * G_MIN}px"><span class="g-wait">…</span></div></div>`).join('')}
+    <i class="g-now" style="left:calc(var(--g-ch) + ${Math.round(((now - start) / 60000) * G_MIN)}px)"></i></div>`;
+}
+async function fillGuide(chs) {
+  const start = guideStart(); const end = start + G_SPAN * 60000; const token = (state.user.guideRun = Math.random());
+  const queue = chs.slice();
+  const work = async () => {
+    for (let c; (c = queue.shift());) {
+      if (state.user.guideRun !== token) return;
+      let list = []; try { list = (await xt('get_short_epg', { stream_id: c.id, limit: 6 }))?.epg_listings || []; } catch {}
+      const row = document.getElementById('g-' + c.id); if (!row || state.user.guideRun !== token) continue;
+      const blocks = list.map((e) => ({ a: Number(e.start_timestamp) * 1000, b: Number(e.stop_timestamp) * 1000, title: b64(e.title) })).filter((e) => e.b > start && e.a < end && e.b > e.a);
+      row.innerHTML = blocks.length ? blocks.map((e) => { const a = Math.max(e.a, start), b = Math.min(e.b, end); const live = e.a <= Date.now() && e.b > Date.now();
+        return `<div class="g-prog ${live ? 'on' : ''}" data-act="open-item" data-item="${esc(JSON.stringify(c))}" tabindex="0" style="left:${Math.round(((a - start) / 60000) * G_MIN)}px;width:${Math.max(24, Math.round(((b - a) / 60000) * G_MIN) - 4)}px" title="${esc(e.title)}"><b>${esc(e.title)}</b><span>${new Date(e.a).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>`; }).join('') : `<span class="g-wait">${t('noGuide')}</span>`;
+    }
+  };
+  await Promise.all([work(), work(), work(), work()]);
+}
+Object.assign(actions, { 'guide-mode': (el) => { state.user.guide = !!el.dataset.on; renderUserTab(); } });
 
 boot();
