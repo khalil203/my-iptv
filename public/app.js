@@ -1219,6 +1219,21 @@ function streamUrl(kind, id, ext) {
   return raw;
 }
 
+const loadMpegts = () => window.mpegts ? Promise.resolve() : new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+// Every way a stream can be played, best first. The player tries the next one when one fails.
+//  hls  = .m3u8 (works everywhere, also iPhone)   ts = raw MPEG-TS via mpegts.js (Chrome, Edge, Firefox, Android, iPad, iPhone iOS 17.1+)   file = mp4 / mkv / webm directly
+function playVariants(rawUrl, kind) {
+  const u = String(rawUrl); const q = u.match(/[?#].*$/)?.[0] || ''; const path = u.slice(0, u.length - q.length);
+  const ext = (path.match(/\.([a-z0-9]{2,5})$/i) || [])[1]?.toLowerCase() || '';
+  const xt = path.match(/^(https?:\/\/[^/]+)\/(?:(live|movie|series)\/)?([^/]+)\/([^/]+)\/(\d+)(?:\.[a-z0-9]+)?$/i);
+  const out = []; const add = (url, type) => { if (!out.some((x) => x.url === url && x.type === type)) out.push({ url, type }); };
+  if (xt && (kind === 'live' || xt[2] === 'live' || !xt[2])) { const b = `${xt[1]}/live/${xt[3]}/${xt[4]}/${xt[5]}`; add(b + '.m3u8' + q, 'hls'); add(b + '.ts' + q, 'ts'); if (!xt[2]) add(u, 'ts'); return out; }
+  if (ext === 'm3u8' || ext === 'm3u') { add(u, 'hls'); return out; }
+  if (ext === 'ts' || (!ext && kind === 'live')) { add(u, 'ts'); add(u, 'hls'); add(u, 'file'); return out; }
+  add(u, 'file');
+  if (xt && (xt[2] === 'movie' || xt[2] === 'series')) add(`${xt[1]}/${xt[2]}/${xt[3]}/${xt[4]}/${xt[5]}.m3u8${q}`, 'hls');
+  return out;
+}
 const loadHls = () => window.Hls ? Promise.resolve() : new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
 function play(title, kind, id, ext, extraHtml = '') {
   if (blockedScreen()) return toast(t('notAvailable'), true);
@@ -1229,30 +1244,35 @@ function play(title, kind, id, ext, extraHtml = '') {
     const st = state.user.me.stream; const it = (state.user.m3u?.[st.m3u] || [])[id]; const b = bridge();
     if (!it) return toast(t('streamFail'), true);
     if (b && !b.inline) { noteNative(hk, id, it.url); return b.play(it.url, title, st.userAgent); }
-    url = it.url; const base = state.user.me._stream;
-    if (location.protocol === 'https:' && url.startsWith('http:')) { if (base?.relay) url = `${base.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(base.proxyToken)}`; else return modal(esc(title), `<div class="notice warning">${t('srcNeedApp')}</div><a class="btn primary" href="download.html">${t('getApp')}</a>`); }
-    return openPlayer({ title, url, isHls: /\.m3u8(\?|$)/i.test(it.url) || (kind === 'live' && !/\.(ts|mp4|mkv)(\?|$)/i.test(it.url)), kind, id, extraHtml: '' });
+    const base = state.user.me._stream; const needRelay = location.protocol === 'https:' && it.url.startsWith('http:');
+    if (needRelay && !base?.relay) return modal(esc(title), `<div class="notice warning">${t('srcNeedApp')}</div><a class="btn primary" href="download.html">${t('getApp')}</a>`);
+    const wrap = (x) => (needRelay ? `${base.relay}/x?u=${encodeURIComponent(x)}&t=${encodeURIComponent(base.proxyToken)}` : x);
+    const alts = playVariants(it.url, kind).map((x) => ({ ...x, url: wrap(x.url) }));
+    return openPlayer({ title, url: alts[0].url, isHls: alts[0].type === 'hls', alts, kind, id, extraHtml: '' });
   }
   if (isDirect()) {
     const st = state.user.me.stream; const b = bridge();
     const raw = (e) => kind === 'live' ? `${st.server}/live/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${e}`
       : `${st.server}/${kind}/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${ext || 'mp4'}`;
     if (b && !b.inline) { noteNative(hk, id, raw('ts')); return b.play(raw('ts'), title, st.userAgent); } // Android / TV: native player (remembers the position itself)
-    if (b && b.inline) { url = raw('m3u8'); }                          // Windows / Mac app: plays here, direct
-    else if (httpOK()) { url = raw('m3u8'); }                         // any browser on the http:// address: direct
-    else if (st.relay) { url = `${st.relay}/x?u=${encodeURIComponent(raw('m3u8'))}&t=${encodeURIComponent(st.proxyToken)}`; } // iPhone / browsers: secure relay
+    let wrap;
+    if (b && b.inline) wrap = (x) => x;                                 // Windows / Mac app: plays here, direct
+    else if (httpOK()) wrap = (x) => x;                                 // any browser on the http:// address: direct
+    else if (st.relay) wrap = (x) => `${st.relay}/x?u=${encodeURIComponent(x)}&t=${encodeURIComponent(st.proxyToken)}`; // iPhone / browsers: secure relay
     else if (canSwitchHttp()) { closeModal(); return goHttp(); }
     else return modal(esc(title), appsCard(), { wide: true });
-    isHls = kind === 'live' || ext === 'm3u8';
+    const alts = playVariants(raw(kind === 'live' ? 'm3u8' : ext || 'mp4'), kind).map((x) => ({ ...x, url: wrap(x.url) }));
+    return openPlayer({ title, url: alts[0].url, isHls: alts[0].type === 'hls', alts, kind, id, extraHtml });
   } else { url = streamUrl(kind, id, ext); isHls = kind === 'live' || ext === 'm3u8'; }
   openPlayer({ title, url, isHls, kind, id, extraHtml });
 }
 
 // ---------------- advanced player ----------------
 const fmtT = (x) => { if (!isFinite(x)) return '0:00'; x = Math.max(0, Math.floor(x)); const h = Math.floor(x / 3600), m = Math.floor((x % 3600) / 60), sec = String(x % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`; };
-function openPlayer({ title, url, isHls, kind, id, extraHtml }) {
+function openPlayer({ title, url, isHls, kind, id, extraHtml, alts }) {
   const live = kind === 'live';
-  let hls = null, hideT = null, retries = 0;
+  let hls = null, ts = null, hideT = null, retries = 0, alt = 0;
+  alts = alts?.length ? alts : [{ url, type: isHls ? 'hls' : 'file' }];
   const body = modal(esc(title), `<div class="vp" id="vp" tabindex="0">
       <video id="vid" playsinline autoplay preload="auto"></video>
       <div class="vp-spin" id="vp-spin"><div class="spinner"></div></div>
@@ -1274,7 +1294,7 @@ function openPlayer({ title, url, isHls, kind, id, extraHtml }) {
         </div>
       </div>
       <div class="vp-menu" id="vp-menu"></div>
-    </div>${extraHtml}`, { wide: true, onClose: () => { clearTimeout(hideT); document.removeEventListener('keydown', onKey, true); if (hls) hls.destroy(); const v = $('#vid'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } });
+    </div>${extraHtml}`, { wide: true, onClose: () => { clearTimeout(hideT); document.removeEventListener('keydown', onKey, true); if (hls) hls.destroy(); if (ts) { try { ts.destroy(); } catch {} } const v = $('#vid'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } });
   const vp = $('#vp', body), v = $('#vid', body), spin = $('#vp-spin', body), msg = $('#pl-msg', body), big = $('#vp-big', body), menu = $('#vp-menu', body);
   const vol = $('#vp-vol', body), muteB = $('#vp-mute', body), playB = body.querySelector('[data-vp=play]'), seek = $('#vp-seek', body), timeEl = $('#vp-time', body);
   // remembered volume
@@ -1283,29 +1303,47 @@ function openPlayer({ title, url, isHls, kind, id, extraHtml }) {
   const saveVol = () => { localStorage.setItem('tvp_vol', JSON.stringify({ v: v.volume, m: v.muted })); muteB.textContent = v.muted || v.volume === 0 ? '🔇' : v.volume < .5 ? '🔉' : '🔊'; vol.value = v.muted ? 0 : Math.round(v.volume * 100); };
   saveVol();
   const show = () => { vp.classList.add('show'); clearTimeout(hideT); hideT = setTimeout(() => { if (!v.paused && !menu.classList.contains('open')) vp.classList.remove('show'); }, 3500); };
-  const fail = (m) => { spin.style.display = 'none'; msg.innerHTML = `${m || t('streamFail')} <button class="btn sm" data-vp="retry">⟳ ${t('retry')}</button>`; };
+  const fail = (m) => { spin.style.display = 'none'; const app = bridge() ? '' : ` <a class="btn sm" href="download.html">📲 ${t('getApp')}</a>`; msg.innerHTML = `${m || t('streamFail')} <button class="btn sm" data-vp="retry">⟳ ${t('retry')}</button>${app}`; };
+  const hasMSE = () => !!(window.MediaSource || window.ManagedMediaSource || window.WebKitMediaSource);
+  // a source failed for good: try the next way of playing it, then give up
+  const next = () => { if (alt < alts.length - 1) { alt++; retries = 0; return start(); } fail(); };
+  let hadPlay = false;
   const start = () => {
     msg.innerHTML = ''; spin.style.display = '';
     if (hls) { hls.destroy(); hls = null; }
-    if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && window.Hls && window.Hls.isSupported()) {
-      hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: live ? 20 : 40, startFragPrefetch: true, manifestLoadingMaxRetry: 4, fragLoadingMaxRetry: 6 });
+    if (ts) { try { ts.destroy(); } catch {} ts = null; }
+    v.removeAttribute('src');
+    const cur = alts[alt]; url = cur.url;
+    if (cur.type === 'ts') {
+      if (!hasMSE()) return next();
+      if (!window.mpegts) return loadMpegts().then(start).catch(next);
+      if (!window.mpegts.isSupported()) return next();
+      ts = window.mpegts.createPlayer({ type: 'mpegts', isLive: live, url }, { enableWorker: true, liveBufferLatencyChasing: false, lazyLoad: !live, autoCleanupSourceBuffer: true, stashInitialSize: 384 * 1024 });
+      ts.attachMediaElement(v); ts.load();
+      ts.on(window.mpegts.Events.ERROR, () => { if (retries++ < 1 && hadPlay) return setTimeout(start, 1500); next(); });
+    } else if (cur.type === 'hls' && !v.canPlayType('application/vnd.apple.mpegurl')) {
+      if (!window.Hls) return loadHls().then(start).catch(next);
+      if (!window.Hls.isSupported()) return next();
+      hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: live ? 20 : 40, startFragPrefetch: true, manifestLoadingMaxRetry: 3, fragLoadingMaxRetry: 6, levelLoadingMaxRetry: 3 });
       hls.loadSource(url); hls.attachMedia(v);
       hls.on(window.Hls.Events.ERROR, (_, d) => {
         if (!d.fatal) return;
-        if (d.type === window.Hls.ErrorTypes.MEDIA_ERROR) return hls.recoverMediaError();
-        if (retries++ < 3) return setTimeout(start, 1500);
-        fail();
+        if (d.type === window.Hls.ErrorTypes.MEDIA_ERROR && retries++ < 2) return hls.recoverMediaError();
+        if (hadPlay && retries++ < 3) return setTimeout(start, 1500);
+        next();
       });
     } else { v.src = url; }
     v.play().catch(() => { big.style.display = 'grid'; });
   };
-  if (isHls && !v.canPlayType('application/vnd.apple.mpegurl') && !window.Hls) loadHls().then(start).catch(() => fail()); else start();
+  start();
   // video events
   v.addEventListener('waiting', () => (spin.style.display = ''));
-  v.addEventListener('playing', () => { spin.style.display = 'none'; big.style.display = 'none'; msg.innerHTML = ''; retries = 0; playB.textContent = '❚❚'; show(); });
+  v.addEventListener('playing', () => { hadPlay = true; spin.style.display = 'none'; big.style.display = 'none'; msg.innerHTML = ''; retries = 0; playB.textContent = '❚❚'; show(); });
   v.addEventListener('pause', () => { playB.textContent = '▶'; vp.classList.add('show'); });
   v.addEventListener('canplay', () => (spin.style.display = 'none'));
-  v.addEventListener('error', () => { if (!hls) { if (retries++ < 2) setTimeout(start, 1500); else fail(); } });
+  v.addEventListener('error', () => { if (!hls && !ts) { if (hadPlay && retries++ < 2) setTimeout(start, 1500); else next(); } });
+  // stuck: no picture after 15 s on this source → try the next one
+  const stuckT = setTimeout(function chk() { if (!document.body.contains(v)) return; if (!hadPlay && v.readyState < 2 && alt < alts.length - 1) next(); }, 15000);
   if (!live) {
     const hk = kind === 'series' ? 'episode' : kind; let lastSave = 0;
     v.addEventListener('loadedmetadata', () => { const h = getHist().find((x) => x.kind === hk && String(x.id) === String(id)); if (h && h.pos > 30 && isFinite(v.duration) && h.pos < v.duration - 60) { v.currentTime = h.pos; toast(t('resumed', { t: fmtT(h.pos) })); } }, { once: true });
@@ -1354,7 +1392,7 @@ function openPlayer({ title, url, isHls, kind, id, extraHtml }) {
     if (a === 'fs') fullscreen();
     if (a === 'pip') (document.pictureInPictureElement ? document.exitPictureInPicture() : v.requestPictureInPicture()).catch(() => {});
     if (a === 'menu') menu.classList.contains('open') && menu.dataset.m === b.dataset.m ? menu.classList.remove('open') : (menu.dataset.m = b.dataset.m, openMenu(b.dataset.m));
-    if (a === 'retry') { retries = 0; start(); }
+    if (a === 'retry') { retries = 0; alt = 0; hadPlay = false; start(); }
   });
   // keyboard & TV remote
   function onKey(e) {
