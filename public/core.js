@@ -1374,6 +1374,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await saveTickets(all);
           return ok({ ok: true });
         }
+        if (R('POST', '/api/me/report')) { // the app tells us the TV server refused something; kept on the customer for the owner to see
+          const k = 'playerr:' + c.id; if (await store.get(k)) return ok({ ok: true }); await store.put(k, 1, 600);
+          c.playErr = { at: Date.now(), action: cleanText(body.action, 40), status: Number(body.status) || 0, message: cleanText(body.message, 120), route: cleanText(body.route, 10) };
+          await saveCustomers(list);
+          await log('customer', `${c.username} could not load ${c.playErr.action}: server code ${c.playErr.status || '—'} (${c.playErr.message}) via ${c.playErr.route}`);
+          return ok({ ok: true });
+        }
         if (R('GET', '/api/me/receipts')) return ok((await getReceipts()).filter((x) => x.customerId === c.id).map(({ customerId, att, ...x }) => x));
         if (R('POST', '/api/me/receipt')) {
           const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'rc_pkg');

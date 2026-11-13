@@ -1051,7 +1051,7 @@ const bridge = () => window.IPTVBridge;
 const isDirect = () => state.user.me?.stream?.mode === 'direct' || (!!bridge() && !!state.user.me?.stream);
 window.__bcb = {};
 window.addEventListener('message', (e) => { if (e.data && e.data.__iptv && window.__bridgeCb) window.__bridgeCb(e.data.id, e.data.status, e.data.body); });
-window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(new Error(status === 403 ? 'The server refused the connection (403).' : 'Server error ' + status)); };
+window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(Object.assign(new Error(status === 403 ? 'The server refused the connection (403).' : t('srvCode', { n: status })), { status })); };
 const bridgeFetch = (url, ua) => new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); window.__bcb[id] = { res, rej }; bridge().fetch(id, url, ua); });
 const XT_TTL = 6 * 3600000;
 function xtCacheGet(k) { try { const v = JSON.parse(localStorage.getItem('tvp_xt_' + k)); return v; } catch { return null; } }
@@ -1087,22 +1087,37 @@ async function xtFetch(action, params = {}) {
   if (isDirect()) {
     const st = state.user.me.stream;
     const url = `${st.server}/player_api.php?${new URLSearchParams({ username: st.u, password: st.p, ...Object.fromEntries(q) })}`;
-    let txt;
-    if (bridge()) txt = await bridgeFetch(url, st.userAgent);
-    else if (httpOK()) {
-      const r = await fetch(url).catch(() => null);
-      if (!r) throw new Error(t('lineBad'));
-      if (!r.ok) throw new Error(r.status === 403 ? t('lineInactive') : `Server error ${r.status}`);
-      txt = await r.text();
-    } else if (st.relay) { // secure relay: works in every browser (the free relay may need ~1 min to wake up)
-      let r = null;
-      for (let i = 0; i < 3 && !r; i++) { r = await fetch(`${st.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(st.proxyToken)}`).catch(() => null); if (!r) await new Promise((ok) => setTimeout(ok, 4000)); }
-      if (!r) throw new Error(t('relayDown'));
-      if (!r.ok) throw new Error(r.status === 403 ? t('relayDown') : `Server error ${r.status}`);
-      txt = await r.text();
-    } else if (canSwitchHttp()) { goHttp(); throw Object.assign(new Error('switching'), { switching: true }); }
-    else throw Object.assign(new Error('direct'), { direct: true });
-    let data; try { data = JSON.parse(txt); } catch { throw new Error(t('lineBad')); }
+    const fail = (r, msg) => Object.assign(new Error(msg || t('srvCode', { n: r.status })), { status: r.status });
+    // one try, by the best route this device has
+    const once = async () => {
+      if (bridge()) return bridgeFetch(url, st.userAgent);
+      if (httpOK()) {
+        const r = await fetch(url).catch(() => null);
+        if (!r) throw Object.assign(new Error(t('lineBad')), { net: true });
+        if (!r.ok) throw fail(r, r.status === 403 ? t('lineInactive') : '');
+        return r.text();
+      }
+      if (st.relay) { // secure relay: works in every browser (the free relay may need ~1 min to wake up)
+        let r = null;
+        for (let i = 0; i < 3 && !r; i++) { r = await fetch(`${st.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(st.proxyToken)}`).catch(() => null); if (!r) await new Promise((ok) => setTimeout(ok, 4000)); }
+        if (!r) throw Object.assign(new Error(t('relayDown')), { net: true });
+        if (!r.ok) throw fail(r, r.status === 403 ? t('relayDown') : '');
+        return r.text();
+      }
+      if (canSwitchHttp()) { goHttp(); throw Object.assign(new Error('switching'), { switching: true }); }
+      throw Object.assign(new Error('direct'), { direct: true });
+    };
+    // Servers sometimes answer a busy or protection code (5xx, like 512) when asked too fast: wait and ask again, twice.
+    let txt, lastErr;
+    for (let i = 0; i < 3 && txt === undefined; i++) {
+      try { txt = await once(); } catch (e) { lastErr = e; if (e.switching || e.direct || !(e.status >= 500 || e.status === 429)) break; await new Promise((ok) => setTimeout(ok, 900 * (i + 1))); }
+    }
+    // Last route: ask through the app's own server.
+    if (txt === undefined && !lastErr.switching && !lastErr.direct && !st.custom && (lastErr.status >= 500 || lastErr.net)) {
+      try { const d = await api('GET', '/api/xtream?' + q); return (c[key] = d); } catch {}
+    }
+    if (txt === undefined) { reportPlayErr(action, lastErr); throw lastErr; }
+    let data; try { data = JSON.parse(txt); } catch { reportPlayErr(action, { message: 'not JSON' }); throw new Error(t('lineBad')); }
     if (data && data.user_info && Number(data.user_info.auth) === 0) throw Object.assign(new Error(t('lineInactive')), { line: true });
     if (action.startsWith('get_') && action.endsWith('categories') && !Array.isArray(data)) throw Object.assign(new Error(t('lineInactive')), { line: true });
     return (c[key] = data);
@@ -2408,6 +2423,7 @@ const custCsv = (list) => toCsv(['Name', 'Username', 'Email', 'Phone', 'WhatsApp
 
 // ---------------- alerts: who needs attention, in groups the owner can tune ----------------
 const ALERT_DEFS = [
+  ['playErr', '⚠️', 'TV server refused the app', (c) => !!c.playErr && Date.now() - c.playErr.at < 3 * 86400000, () => 'In the last 3 days the TV server refused a request from these customers. The small text under each name shows the code it answered.'],
   ['lineBad', '📡', 'Line not working on the panel', (c) => !!c.lineBad, () => 'The panel says these lines do not exist or are not active, so these customers cannot watch. Create or fix the line on the panel, then tap Edit and paste its M3U link.'],
   ['renewPending', '🔁', 'Paid: renew on the panel', (c) => !!c.renewPending, () => 'You approved a payment, and the line still has to be renewed on the panel. This clears by itself after the next sync once the panel shows the new end date.'],
   ['pendingLine', '🆘', 'Waiting for a line', (c) => !!c.pendingLine, () => 'These customers asked for a trial and the panel did not create it. Tap Edit, paste the M3U link from your panel and save.'],
@@ -2435,7 +2451,7 @@ async function adminAlerts(s) {
     <div class="chips"><a class="${ui.f ? '' : 'on'}" data-act="al-f" data-f="">All · ${total}</a>${groups.map((g) => `<a class="${ui.f === g.k ? 'on' : ''}" data-act="al-f" data-f="${g.k}">${g.icn} ${g.name} · ${g.list.length}</a>`).join('')}</div>
     ${shown.length ? shown.map((g) => { const all = ui.open[g.k] || ui.f === g.k; const rows = all ? g.list : g.list.slice(0, 5);
       return `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${g.icn} ${g.name} <span class="pill ${g.list.length ? 'st-expiring' : 'st-active'}">${g.list.length}</span></h3>${g.list.length ? `<button class="btn sm" data-act="al-csv" data-k="${g.k}">⬇ CSV</button>` : ''}</div><p class="small muted" style="margin:4px 0 10px">${esc(g.why)}</p>
-        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + fmtDate(c.expiresAt) : c.isTrial ? c.hoursLeft + ' h left' : c.daysLeft + ' days left'}${c.email ? ' · ' + esc(c.email) : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
+        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + fmtDate(c.expiresAt) : c.isTrial ? c.hoursLeft + ' h left' : c.daysLeft + ' days left'}${c.email ? ' · ' + esc(c.email) : ''}${c.playErr && Date.now() - c.playErr.at < 3 * 86400000 ? `<br>⚠️ ${fmtDT(c.playErr.at)} · ${esc(c.playErr.action)} · code ${esc(c.playErr.status || '—')} · via ${esc(c.playErr.route)}` : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
         ${g.list.length > 5 && !all ? `<div style="text-align:center;margin-top:10px"><button class="btn sm" data-act="al-more" data-k="${g.k}">Show all ${g.list.length}</button></div>` : ''}</div>`; }).join('') : `<div class="empty"><span class="ic">✅</span>${q ? 'No alert matches your search.' : 'Nothing needs your attention right now.'}</div>`}`;
 }
 
@@ -2770,5 +2786,13 @@ Object.assign(forms, {
   async 'rc-approve'(f) { try { const r = await api('POST', '/api/admin/receipts/decide', { id: f.dataset.id, action: 'approve', days: f.days.value, amount: f.amount.value, accountId: f.accountId.value }); closeModal(); toast('Approved · customer told ✓'); if (r.panelNote) toast('Renew the line on your panel too: the panel answered “' + r.panelNote + '”', true); $('#admin-body').innerHTML = await adminReceipts(); } catch (e) { toast(e.message, true); } },
   async 'rc-reject'(f) { try { await api('POST', '/api/admin/receipts/decide', { id: f.dataset.id, action: 'reject', reason: f.reason.value }); closeModal(); toast('Rejected · customer told'); $('#admin-body').innerHTML = await adminReceipts(); } catch (e) { toast(e.message, true); } },
 });
+
+// Tells the dashboard when the TV server refuses a request, so the owner sees the real reason (at most once every 10 minutes).
+let lastPlayReport = 0;
+function reportPlayErr(action, e) {
+  if (!e || e.switching || e.direct || state.user.me?.stream?.custom || Date.now() - lastPlayReport < 600000) return; lastPlayReport = Date.now();
+  const route = bridge() ? 'app' : location.protocol === 'http:' ? 'direct' : state.user.me?.stream?.relay ? 'relay' : 'none';
+  api('POST', '/api/me/report', { action, status: e.status || 0, message: String(e.message || '').slice(0, 120), route }).catch(() => {});
+}
 
 boot();

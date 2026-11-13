@@ -199,6 +199,11 @@ Object.assign(D.en, { lineBadTitle: 'Your TV line is not active', lineBadText: '
 Object.assign(D.fr, { lineBadTitle: 'Votre ligne TV n’est pas active', lineBadText: 'Le serveur ne reconnaît pas votre ligne pour le moment. Écrivez-nous et nous corrigeons cela rapidement.', rcBtn: 'J’ai payé : envoyer mon reçu', rcTitle: 'Envoyer un reçu de paiement', rcPkg: 'Offre payée', rcFile: 'Photo ou capture du reçu', rcNote: 'Note (facultatif)', rcSent: 'Reçu envoyé ✓ Nous le vérifions et activons votre abonnement. Vous serez informé dans la discussion et par e-mail.', rc_pkg: 'Choisissez l’offre payée.', rc_image: 'Ajoutez une photo du reçu.', rc_limit: 'Vous avez envoyé 3 reçus aujourd’hui. Écrivez-nous dans la discussion.', rc_pending: 'En vérification', rc_approved: 'Approuvé', rc_rejected: 'Non accepté' });
 Object.assign(D.ar, { lineBadTitle: 'خط البث غير مفعّل', lineBadText: 'الخادم لا يتعرّف على خطك حالياً. راسلنا وسنصلح ذلك بسرعة.', rcBtn: 'لقد دفعت: إرسال الإيصال', rcTitle: 'إرسال إيصال الدفع', rcPkg: 'الباقة التي دفعت ثمنها', rcFile: 'صورة أو لقطة شاشة للإيصال', rcNote: 'ملاحظة (اختياري)', rcSent: 'تم إرسال الإيصال ✓ سنتحقق منه ونفعّل اشتراكك. سنخبرك في المحادثة وعبر البريد.', rc_pkg: 'اختر الباقة التي دفعت ثمنها.', rc_image: 'أضف صورة الإيصال.', rc_limit: 'أرسلت 3 إيصالات اليوم. راسلنا في المحادثة.', rc_pending: 'قيد التحقق', rc_approved: 'تمت الموافقة', rc_rejected: 'غير مقبول' });
 
+
+Object.assign(D.en, { srvCode: 'The TV server did not accept this request (code {n}). Please try again in a moment.' });
+Object.assign(D.fr, { srvCode: 'Le serveur TV n’a pas accepté cette demande (code {n}). Réessayez dans un instant.' });
+Object.assign(D.ar, { srvCode: 'لم يقبل خادم البث هذا الطلب (الرمز {n}). حاول مجدداً بعد لحظات.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');
