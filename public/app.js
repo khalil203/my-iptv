@@ -307,13 +307,13 @@ async function adminOverview() {
   const pwWarn = me.isDefault ? `<div class="notice danger">🔐 You are using the default admin login (<b>Iptv / Iptv</b>). Anyone who knows it can control your app. <a data-act="atab" data-tab="security" style="cursor:pointer">Change it now →</a></div>` : '';
   return `${pwWarn}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
   <div class="stats">
-    <div class="stat"><span>Customers</span><b>${st.total}</b></div>
-    <div class="stat c-ok"><span>Active</span><b>${st.active}</b></div>
-    <div class="stat c-warn"><span>Expiring soon</span><b>${st.expiring}</b></div>
-    <div class="stat c-bad"><span>Expired</span><b>${st.expired}</b></div>
-    <div class="stat"><span>Free trials</span><b>${st.trials}</b></div>
-    ${st.revenueTotal !== null ? `<div class="stat c-acc"><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
-    <div class="stat"><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
+    <div class="stat"><i class="st-ic">${ic('user', 20)}</i><span>Customers</span><b>${st.total}</b></div>
+    <div class="stat c-ok"><i class="st-ic">${ic('check', 20)}</i><span>Active</span><b>${st.active}</b></div>
+    <div class="stat c-warn"><i class="st-ic">${ic('clock', 20)}</i><span>Expiring soon</span><b>${st.expiring}</b></div>
+    <div class="stat c-bad"><i class="st-ic">${ic('logout', 20)}</i><span>Expired</span><b>${st.expired}</b></div>
+    <div class="stat"><i class="st-ic">${ic('star', 20)}</i><span>Free trials</span><b>${st.trials}</b></div>
+    ${st.revenueTotal !== null ? `<div class="stat c-acc"><i class="st-ic">${ic('card', 20)}</i><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
+    <div class="stat"><i class="st-ic">${ic('crown', 20)}</i><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
     <div class="stat ${panelLow ? 'c-bad' : ''}"><span>Panel credits (API)</span><b>${cr.enabled ? (cr.ok ? esc(cr.credits ?? '—') : '⚠️') : 'off'}</b></div>
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
     ${st.totalBalanceUsd !== null && st.totalBalanceUsd !== undefined ? `<div class="stat c-ok" data-act="atab" data-tab="finance" style="cursor:pointer"><span>All banks (total)</span><b>${usd(st.totalBalanceUsd)}</b><span>${mad(st.totalBalanceUsd * st.madRate)}</span></div>` : ''}

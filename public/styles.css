@@ -685,3 +685,14 @@ svg.i { flex: none; vertical-align: -5px; }
 [data-theme=light] .chip-ic, [data-theme=light] .s-ic, [data-theme=light] .quick a svg, [data-theme=light] .s-tile svg { color: var(--primary); }
 [data-theme=light] .dash-plan { background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 22%, #fff), #fff 80%); }
 [data-theme=light] .bnav a.on .ic { color: var(--primary); }
+
+/* admin: analytics cards with icon chips */
+.stat { padding-inline-end: 60px; min-height: 92px; }
+.stat .st-ic { position: absolute; top: 14px; inset-inline-end: 14px; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: color-mix(in srgb, var(--primary) 22%, transparent); color: color-mix(in srgb, var(--primary) 55%, #fff); }
+.stat.c-ok .st-ic { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.stat.c-warn .st-ic { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.stat.c-bad .st-ic { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.stat.c-acc .st-ic { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.side { border-inline-end: 1px solid var(--border); } .side .nav a { font-weight: 600; }
+.bars i { background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 70%, #fff), var(--primary)); border-radius: 6px 6px 0 0; }
+[data-theme=light] .stat .st-ic { color: var(--primary); }
