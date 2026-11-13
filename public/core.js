@@ -1742,7 +1742,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           let panel = null;
           if (body.syncPanel) {
             panel = await panelCall(s, 'renew', panelVars(c, s, { days, package: plan && plan.package }));
-            if (!panel.ok && !panel.skipped) return err(502, 'Panel: ' + panel.error);
+            // The renewal is kept even when the panel refuses; the customer is listed under Alerts until the line is renewed there.
+            if (!panel.ok && !panel.skipped) { c.renewPending = Date.now(); await log('renewal', `Panel did not renew ${c.username}: ${panel.error}`); }
           }
           const base = Math.max(Date.now(), c.expiresAt);
           if (c.expiresAt < Date.now()) c.startAt = Date.now();
@@ -2084,7 +2085,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           for (const p of s.orderPackages) {
             if (p.link || (p.links || []).length) continue;
             const price = await st('prices', { currency: cur, unit_amount: String(Math.round(p.price * 100)), 'product_data[name]': `${s.branding.appName || 'IPTV'} — ${p.title}` });
-            const pl = await st('payment_links', { 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1', 'phone_number_collection[enabled]': 'true', 'metadata[package]': p.id });
+            const back = String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''); // after paying, Stripe sends the customer back into the app
+            const pl = await st('payment_links', { 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1', 'phone_number_collection[enabled]': 'true', 'metadata[package]': p.id, ...(/^https:\/\//.test(back) ? { 'after_completion[type]': 'redirect', 'after_completion[redirect][url]': back + '/#paid' } : {}) });
             p.link = pl.url; made++;
           }
         } catch (e) { if (made) await saveSettings(s); return err(502, `Stripe: ${e.message}${made ? ` (${made} links were created)` : ''}`); }

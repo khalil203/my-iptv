@@ -204,6 +204,11 @@ Object.assign(D.en, { srvCode: 'The TV server did not accept this request (code 
 Object.assign(D.fr, { srvCode: 'Le serveur TV n’a pas accepté cette demande (code {n}). Réessayez dans un instant.' });
 Object.assign(D.ar, { srvCode: 'لم يقبل خادم البث هذا الطلب (الرمز {n}). حاول مجدداً بعد لحظات.' });
 
+
+Object.assign(D.en, { paidTitle: 'Thank you for your payment', paidText: 'Your subscription is being activated. It usually updates within a minute; if not, send us your receipt and we activate it by hand.', paidBackTitle: 'Did you finish paying?', paidBackText: 'If you paid, your subscription updates shortly. If it does not, send us your receipt here.' });
+Object.assign(D.fr, { paidTitle: 'Merci pour votre paiement', paidText: 'Votre abonnement est en cours d’activation. La mise à jour prend généralement moins d’une minute ; sinon, envoyez-nous votre reçu et nous l’activons manuellement.', paidBackTitle: 'Avez-vous terminé le paiement ?', paidBackText: 'Si vous avez payé, votre abonnement se met à jour sous peu. Sinon, envoyez-nous votre reçu ici.' });
+Object.assign(D.ar, { paidTitle: 'شكرًا على الدفع', paidText: 'جارٍ تفعيل اشتراكك. يتم التحديث عادة خلال دقيقة؛ وإن لم يحدث، أرسل لنا الإيصال ونفعّله يدويًا.', paidBackTitle: 'هل أكملت الدفع؟', paidBackText: 'إذا دفعت، سيتم تحديث اشتراكك قريبًا. وإن لم يحدث، أرسل لنا الإيصال من هنا.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

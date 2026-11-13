@@ -146,6 +146,9 @@ async function boot() {
     return;
   }
   // The browser upgraded our http:// switch back to https:// — remember it and never loop.
+  if (location.hash === '#paid') { state.justPaid = 'done'; history.replaceState(null, '', location.pathname); }
+  else { try { if (Date.now() - Number(localStorage.getItem('tvp_paying_at') || 0) < 30 * 60000) state.justPaid = 'back'; } catch {} }
+  try { localStorage.removeItem('tvp_paying_at'); sessionStorage.removeItem('tvp_paying'); } catch {}
   if (hp.get('reset')) { state.resetToken = hp.get('reset'); state.showLogin = true; history.replaceState(null, '', location.pathname); }
   if (location.hash === '#login') state.showLogin = true;
   if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
@@ -940,6 +943,7 @@ async function renderUser() {
   }
   const { user, dashboard: d, branding: b } = u.me;
   setChatFab(u.me.chatUnread || 0);
+  if (state.justPaid) { const how = state.justPaid; state.justPaid = null; setTimeout(() => modal(how === 'done' ? '✅ ' + t('paidTitle') : '💳 ' + t('paidBackTitle'), `<p>${how === 'done' ? t('paidText') : t('paidBackText')}</p><div class="row"><button class="btn primary" data-act="close-modal" style="flex:1">OK</button><button class="btn" data-act="rc-new" style="flex:1">🧾 ${t('rcBtn')}</button></div>`), 400); }
   const tabs = [['home', ic('home'), t('home')], d.live && ['live', ic('tv'), t('live')], d.movies && ['movies', ic('film'), t('movies')], d.series && ['series', ic('series'), t('series')], ['account', ic('user'), t('account')]].filter(Boolean);
   if (!tabs.some((t) => t[0] === u.tab)) u.tab = 'home';
   $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
@@ -1139,7 +1143,7 @@ function orderCard() {
   const me = state.user.me; const op = me.orderPackages || []; if (!op.length) return '';
   const u = me.user.username; const app = me.branding.appName;
   return `<div class="card"><h3>💎 ${t('buyTitle')}</h3><div class="plans-grid">${op.map((p) => { const pr = priceTxt(p.price, p.cur); const wa = waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u })); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div><div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
-    <a class="btn sm primary block" style="margin-top:8px" href="${esc(p.url)}" target="_blank" rel="noopener" data-keep data-act="pay-click" data-pkg="${esc(p.id)}">${t('payNow')}</a>
+    <a class="btn sm primary block" style="margin-top:8px" href="${esc(p.url)}" rel="noopener" data-keep data-act="pay-click" data-pkg="${esc(p.id)}">${t('payNow')}</a>
     <div class="row" style="margin-top:6px;gap:6px">${me.hasEmail ? `<button class="btn sm" style="flex:1" data-act="pay-email" data-pkg="${esc(p.id)}">${t('emailMe')}</button>` : ''}${wa ? `<a class="btn sm wa-btn" style="flex:1" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div></div>`; }).join('')}</div><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
@@ -1460,7 +1464,7 @@ const actions = {
     try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, appUrl: location.origin }); toast('Package email sent ✓'); closeModal(); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; } }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
-  'pay-click': (el) => { api('POST', '/api/me/order', { pkg: el.dataset.pkg }).catch(() => {}); },
+  'pay-click': (el) => { try { sessionStorage.setItem('tvp_paying', el.dataset.pkg || '1'); localStorage.setItem('tvp_paying_at', String(Date.now())); } catch {} api('POST', '/api/me/order', { pkg: el.dataset.pkg }).catch(() => {}); },
   'pay-email': async (el) => {
     el.disabled = true;
     try { const r = await api('POST', '/api/me/order', { pkg: el.dataset.pkg, email: true, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast(t('offerSent', { email: r.email })); }
@@ -1908,6 +1912,7 @@ const forms = {
     try {
       const r = await api('POST', `/api/admin/customers/${f.dataset.id}/renew`, o);
       toast(`Renewed until ${fmtDate(r.customer.expiresAt)} ✓`); closeModal(); renderAdmin();
+      if (r.panel && r.panel.ok === false) modal('Renewed in the app', `<div class="notice warning">⚠️ The subscription is renewed here, but <b>the panel did not renew the line</b>: ${esc(r.panel.error || 'unknown error')}<br>Renew the line on your panel too. Until then this customer is listed in Alerts → “Paid: renew on the panel”.</div><button class="btn block" data-act="close-modal">OK</button>`);
     } catch (e) { toast(e.message, true); btn.disabled = false; }
   },
   async 'admin-account'(f) {

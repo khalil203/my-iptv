@@ -416,3 +416,16 @@ test('login details are the real line details; either set signs in; emails are E
   await x.call('POST', '/api/forgot', { login: 'NEWline5', appUrl: 'https://app.example' });
   assert.match(x.mails.at(-1).subject, /Réinitialiser/, 'own language when the owner chooses that');
 });
+
+test('renewing a customer is not blocked when the panel answers an error; the customer is flagged for a manual renewal', async () => {
+  const db = new Map();
+  const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  const fetchFn = async (url) => (String(url).startsWith('http://panel.example') ? { ok: false, status: 400, text: async () => 'Bad Request' } : { ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
+  const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
+  const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  await call('PUT', '/api/admin/settings', { reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' } }, tok);
+  const c = (await call('POST', '/api/admin/customers', { name: 'Test Person', username: 'testuser', password: 'secret12', planId: 'p1' }, tok)).json.customer;
+  const r = await call('POST', `/api/admin/customers/${c.id}/renew`, { planId: 'p3', syncPanel: true, price: 25 }, tok);
+  assert.equal(r.status, 200); assert.equal(r.json.panel.ok, false); assert.match(r.json.panel.error, /400/);
+  assert.equal(Math.round((r.json.customer.expiresAt - c.expiresAt) / 86400000), 90); assert.ok(r.json.customer.renewPending);
+});

@@ -145,10 +145,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean paying = false;   // true while a Stripe payment is open inside the app
+
     private boolean openOutside(Uri uri) {
         String host = Uri.parse(appUrl).getHost();
         String scheme = uri.getScheme() == null ? "" : uri.getScheme();
-        if ((scheme.equals("http") || scheme.equals("https")) && host != null && host.equals(uri.getHost()) && !uri.getPath().endsWith(".apk")) return false;
+        String h = uri.getHost() == null ? "" : uri.getHost();
+        boolean isWeb = scheme.equals("http") || scheme.equals("https");
+        if (isWeb && host != null && host.equals(h) && uri.getPath() != null && !uri.getPath().endsWith(".apk")) { paying = false; return false; }
+        // Payments stay inside the app: the Stripe page, and the bank's confirmation pages it may pass through.
+        if (isWeb && (h.equals("stripe.com") || h.endsWith(".stripe.com"))) { paying = true; return false; }
+        if (isWeb && paying) return false;
         try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) {}
         return true;
     }
