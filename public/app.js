@@ -1,4 +1,5 @@
 import { createBackend } from './core.js';
+import { loadLogos, logosReady, findLogo } from './logos.js';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js';
 
 // ---------------- helpers ----------------
@@ -1065,18 +1066,45 @@ function appsCard() {
     <a class="btn primary" href="download.html">${t('getApp')}</a></div>`;
 }
 
-// Logo loading: direct first (apps), then through the relay, then the initials tile.
+// Logo loading: the panel's logo first (direct, then through the relay), then the channel's real logo
+// from the logo index (logos.js), and only then the initials tile.
 // A logo server is only skipped after 4 failures with no success at all.
 window.__logoStat = {}; window.__deadLogo = new Set();
 const logoHost = (u) => { try { return new URL(u).host; } catch { return ''; } };
-window.__logoOk = (img) => { const h = logoHost(img.dataset.src); (window.__logoStat[h] ||= { ok: 0, bad: 0 }).ok++; };
+const proxiedImg = (u) => { const st = state.user.me?.stream; return st?.proxyToken && state.mode === 'server' ? `/img?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}` : ''; };
+window.__logoOk = (img) => { if (img.dataset.db) return; const h = logoHost(img.dataset.src); (window.__logoStat[h] ||= { ok: 0, bad: 0 }).ok++; };
 window.__logoFail = (img) => {
-  const alt = img.dataset.alt;
-  if (alt && img.src !== alt && !img.dataset.tried) { img.dataset.tried = '1'; img.src = alt; return; }
-  const h = logoHost(img.dataset.src); const st = (window.__logoStat[h] ||= { ok: 0, bad: 0 }); st.bad++;
-  if (st.bad >= 4 && !st.ok) window.__deadLogo.add(h);
-  img.replaceWith(img.nextElementSibling.content.cloneNode(true));
+  const d = img.dataset;
+  if (!d.db) {
+    if (d.alt && img.src !== d.alt && !d.tried) { d.tried = '1'; img.src = d.alt; return; }
+    const h = logoHost(d.src); const st = (window.__logoStat[h] ||= { ok: 0, bad: 0 }); st.bad++;
+    if (st.bad >= 4 && !st.ok) window.__deadLogo.add(h);
+    const real = d.name ? findLogo(d.name) : '';
+    if (real && real !== d.src) { d.db = '1'; d.real = real; img.referrerPolicy = 'no-referrer'; img.src = real; return; }
+  } else if (d.db === '1') {
+    const via = proxiedImg(d.real);
+    if (via) { d.db = '2'; img.src = via; return; }
+  }
+  const tile = img.nextElementSibling.content.cloneNode(true);
+  if (d.db && tile.firstElementChild) tile.firstElementChild.dataset.lx = '1'; // real logo already tried
+  img.nextElementSibling.remove(); img.replaceWith(tile);
 };
+// Channels shown with an initials tile get their real logo as soon as the logo index is loaded.
+function upgradeLogos() {
+  if (!logosReady()) return;
+  for (const tile of document.querySelectorAll('.noimg[data-ln]:not([data-lx])')) {
+    tile.dataset.lx = '1';
+    const real = findLogo(tile.dataset.ln);
+    if (!real) continue;
+    const img = new Image();
+    img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+    img.onerror = () => { const via = proxiedImg(real); if (via && !img.dataset.db) { img.dataset.db = '2'; img.src = via; } else img.replaceWith(tile); };
+    img.src = real;
+    tile.replaceWith(img);
+  }
+}
+let logoTimer = 0;
+new MutationObserver(() => { if (!logoTimer) logoTimer = setTimeout(() => { logoTimer = 0; upgradeLogos(); }, 60); }).observe(document.getElementById('app'), { childList: true, subtree: true });
 function relayImg(u) { const st = state.user.me?.stream; return st?.relay && /^http:/.test(u) ? `${st.relay}/x?u=${encodeURIComponent(u)}&t=${encodeURIComponent(st.proxyToken)}` : ''; }
 function imgSrc(u) {
   if (!u || !/^https?:/.test(u)) return '';
@@ -1092,14 +1120,15 @@ function initialsTile(name, big) {
   const n = String(name || '?').replace(/#+/g, ' ').replace(/^\s*[|[(]?[A-Z]{2,3}[|\])]?\s*[-:|]\s*/i, '').replace(/^\s*\|[^|]*\|\s*/, '').trim() || String(name || '?');
   const ini = (n.match(/[\p{L}\p{N}]+/gu) || ['?']).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return `<div class="noimg${big ? ' big' : ''}" style="background:linear-gradient(135deg,hsl(${h} 70% 40%),hsl(${(h + 40) % 360} 70% 25%))">${esc(ini)}</div>`;
+  return `<div class="noimg${big ? ' big' : ''}"${big ? '' : ` data-ln="${esc(name)}"`} style="background:linear-gradient(135deg,hsl(${h} 70% 40%),hsl(${(h + 40) % 360} 70% 25%))">${esc(ini)}</div>`;
 }
 function itemsGrid(items) {
   const d = state.user.me.dashboard;
   const live = items.filter((i) => i.kind === 'live');
   const vod = items.filter((i) => i.kind !== 'live');
+  if (live.length && !logosReady()) loadLogos().then(upgradeLogos);
   const favBtn = (i) => d.favorites ? `<button class="fav ${isFav(i.kind, i.id) ? 'on' : ''}" data-act="fav" data-item="${esc(JSON.stringify(i))}">★</button>` : '';
-  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" data-alt="${esc(relayImg(i.icon))}" loading="lazy" decoding="async" alt="" onload="__logoOk(this)" onerror="__logoFail(this)"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
+  return `${live.length ? `<div class="ch-grid" style="margin-bottom:14px">${live.map((i) => `<div class="ch" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" data-alt="${esc(relayImg(i.icon))}" data-name="${esc(i.name)}" loading="lazy" decoding="async" alt="" onload="__logoOk(this)" onerror="__logoFail(this)"><template>${initialsTile(i.name)}</template>` : initialsTile(i.name)}<span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}
     ${vod.length ? `<div class="poster-grid">${vod.map((i) => `<div class="poster" data-act="open-item" data-item="${esc(JSON.stringify(i))}">${favBtn(i)}<div class="img">${imgSrc(i.icon) ? `<img src="${esc(imgSrc(i.icon))}" data-src="${esc(i.icon)}" data-alt="${esc(relayImg(i.icon))}" loading="lazy" decoding="async" alt="" onload="__logoOk(this)" onerror="__logoFail(this)"><template>${initialsTile(i.name, true)}</template>` : initialsTile(i.name, true)}</div><span>${esc(i.name)}</span></div>`).join('')}</div>` : ''}`;
 }
 

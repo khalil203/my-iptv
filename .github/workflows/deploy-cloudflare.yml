@@ -55,6 +55,9 @@ jobs:
         with:
           name: apk
           path: public/apk
+      - name: Refresh the channel logo index (keeps the saved one if this fails)
+        continue-on-error: true
+        run: node tools/build-logos.mjs
       - name: Check secrets
         id: check
         run: |
