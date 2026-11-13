@@ -395,3 +395,24 @@ test('payment receipts: upload, owner approves, subscription extends, customer i
   await x.call('POST', '/api/admin/receipts/decide', { id: rc2.id, action: 'reject', reason: 'Amount does not match' }, tok);
   assert.equal((await x.call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.id === cust.id).expiresAt, after.expiresAt);
 });
+
+test('login details are the real line details; either set signs in; emails are English unless changed', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>' } }, tok);
+  const made = await x.call('POST', '/api/admin/customers', { name: 'Line Person', username: 'appname1', password: 'apppass1', email: 'line.person@example.com', lang: 'fr', planId: 'p1', lineSame: false, lineUsername: 'REALuser77', linePassword: 'REALpass88' }, tok);
+  const c = made.json.customer; assert.equal(c.username, 'REALuser77', 'the account uses the panel username');
+  assert.equal((await x.call('POST', '/api/login', { username: 'realuser77', password: 'REALpass88' })).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: 'REALuser77', password: 'wrong' })).status, 401);
+  const edit = await x.call('PUT', `/api/admin/customers/${c.id}`, { m3u: 'http://tv.example.com:8080/get.php?username=NEWline5&password=NEWpw6&type=m3u_plus' }, tok);
+  assert.equal(edit.json.username, 'NEWline5'); assert.equal((await x.call('POST', '/api/login', { username: 'NEWline5', password: 'NEWpw6' })).status, 200);
+  const old = await addCustomer(x, tok, { username: 'older1', email: 'older@example.com', lineSame: false, lineUsername: 'panelU', linePassword: 'panelP', password: 'secret12' });
+  // an account made before this change keeps working with either set of details
+  const raw = JSON.parse(JSON.stringify(await x.store.get('customers'))); const o = raw.find((k) => k.id === old.id); o.username = 'older1'; await x.store.put('customers', raw);
+  assert.equal((await x.call('POST', '/api/login', { username: 'panelU', password: 'panelP' })).status, 200, 'the line details sign in even when the app username is different');
+  const en = (await x.call('POST', '/api/admin/templates/preview', { kind: 'welcome', lang: 'fr' }, tok)).json; assert.match(en.html, /Abonnement|abonnement/, 'preview follows the language picked');
+  const before = x.mails.length; await x.call('POST', '/api/forgot', { login: 'NEWline5', appUrl: 'https://app.example' });
+  assert.match(x.mails[before].subject, /Reset your password/, 'a French customer still gets English by default');
+  await x.call('PUT', '/api/admin/settings', { email: { lang: 'customer' } }, tok);
+  await x.call('POST', '/api/forgot', { login: 'NEWline5', appUrl: 'https://app.example' });
+  assert.match(x.mails.at(-1).subject, /Réinitialiser/, 'own language when the owner chooses that');
+});

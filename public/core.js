@@ -108,7 +108,7 @@ export const DEFAULT_SETTINGS = () => ({
   orderAccounts: [], // Stripe accounts the pay links come from: { id, name, enabled }
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
-  email: { resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
+  email: { lang: 'en', resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
   finance: {
     autoRates: true, ratesUpdatedAt: 0,
     rates: { USD: 1, USDT: 1, MAD: 9.3, EUR: 0.86, THB: 32.5 },
@@ -204,6 +204,10 @@ export function cleanEmail(x) {
   const m = String(x || '').toLowerCase().match(/[a-z0-9._%+\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}/);
   return m ? m[0] : '';
 }
+// Language of emails: one language for everyone (English unless changed in Trial & email setup), or each customer's own.
+let MAIL_LANG = 'en';
+export const setMailLang = (v) => { MAIL_LANG = ['en', 'fr', 'ar', 'customer'].includes(v) ? v : 'en'; };
+const ml = (c) => (MAIL_LANG !== 'customer' ? MAIL_LANG : ['en', 'fr', 'ar'].includes(c && c.lang) ? c.lang : 'en');
 // Reads the server, username and password out of a line link copied from the panel (get.php, player_api.php or /live/user/pass/…).
 export function parseLineLink(link) {
   const m = String(link || '').trim().match(/https?:\/\/[^\s"'<>]+/i); if (!m) return null;
@@ -348,7 +352,7 @@ export function applyMailTexts(custom) {
   }
 }
 export function accessEmail(s, c, password, kind, appUrl) {
-  const lang = AM[c.lang] ? c.lang : 'en'; const L = AM[lang]; const e = escHtml;
+  const lang = ml(c); const L = AM[lang]; const e = escHtml;
   const app = s.branding.appName || 'IPTV';
   const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, n) => (n === 'app' ? e(app) : e(x[n] ?? '')));
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
@@ -443,7 +447,7 @@ export function pickPayLink(s, pkg) {
   return pkg.link ? { url: pkg.link, acc: '' } : null;
 }
 export function orderEmail(s, c, pkg, appUrl, chosen) {
-  const lang = OM[c?.lang] ? c.lang : 'en'; const L = OM[lang]; const e = escHtml;
+  const lang = ml(c); const L = OM[lang]; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const pl = chosen || pickPayLink(s, pkg);
   const cur = s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR';
   const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
@@ -548,7 +552,7 @@ export const WA_TPL = {
   },
 };
 export function renewalEmail(s, c, appUrl) {
-  const lang = RM[c.lang] ? c.lang : 'en'; const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
+  const lang = ml(c); const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
   const app = s.branding.appName || 'IPTV';
   const site = String(o.url || s.email.website || s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const siteTxt = site.replace(/^https?:\/\//, '');
@@ -611,7 +615,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const oldLook = [['#12bfd8', '#7cf0ff'], ['#7c5cff', '#22d3ee'], ['#8065ff', '#19d5b1']].some(([p, a]) => String(s.branding.primary).toLowerCase() === p && String(s.branding.accent).toLowerCase() === a);
     if (oldLook) s.branding = { ...s.branding, primary: '#7C4DFF', accent: '#19D5B1', background: '#07081A' };
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
-    applyMailTexts(s.mailTexts);
+    applyMailTexts(s.mailTexts); setMailLang(s.email.lang);
     sCache = s; sAt = Date.now();
     return s;
   }
@@ -631,7 +635,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       return false;
     });
   }
-  async function saveSettings(s) { await store.put('settings', s); applyMailTexts(s.mailTexts); sCache = s; sAt = Date.now(); }
+  async function saveSettings(s) { await store.put('settings', s); applyMailTexts(s.mailTexts); setMailLang(s.email.lang); sCache = s; sAt = Date.now(); }
   const getCustomers = async () => (await store.get('customers')) || [];
   const saveCustomers = (c) => store.put('customers', c);
   const getTx = async () => (await store.get('tx')) || [];
@@ -709,7 +713,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return accessEmail(s, c, password, kind === 'trial' ? 'trial' : 'sub', s.email.appUrl);
   }
   function oldLoginMail(s, c, password, kind) {
-    const lang = ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en';
+    const lang = ml(c);
     const hours = s.trial.hours;
     const exp = new Date(c.expiresAt).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
     const rows = [[mt(lang, 'user'), c.username], [mt(lang, 'pass'), password], [mt(lang, 'expires'), exp]];
@@ -852,6 +856,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     }
     if (auth && c.panel.max) c.connections = c.panel.max;
     return before !== JSON.stringify([c.expiresAt, c.connections, c.lineBad || '', c.renewPending || 0, c.panel.status, c.panel.error]);
+  }
+  // The app login becomes the real line username and password from the panel, so the customer has one set of details everywhere.
+  async function adoptLine(list, c) {
+    const u = String(c.lineUsername || '').trim(), p = String(c.linePassword || '');
+    if (!u || !p) return;
+    const admin = await getAdmin(); const taken = list.some((x) => x !== c && x.username.toLowerCase() === u.toLowerCase()) || (admin && admin.username.toLowerCase() === u.toLowerCase()) || (await getTeam()).some((x) => x.username.toLowerCase() === u.toLowerCase());
+    if (!taken) c.username = u;
+    c.loginPassword = p; c.salt = uid(8); c.passwordHash = await hashPassword(p, c.salt); delete c.ownPassword;
   }
   const getReceipts = async () => (await store.get('receipts')) || [];
   // ---- live chat: one running conversation per customer ----
@@ -1038,7 +1050,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
 
   async function xtream(s, c, params) {
-    const server = trimSlash(s.player.serverUrl);
+    const server = trimSlash(c.dns || s.player.serverUrl); // the server the line itself came from wins
     if (!server) throw httpErr(400, 'The streaming server is not set up yet.');
     const q = new URLSearchParams({ username: c.lineUsername, password: c.linePassword, ...params });
     const res = await fetchFn(`${server}/player_api.php?${q}`, { headers: { 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' } });
@@ -1180,10 +1192,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             await store.put(k, n + 1, 86400);
             const tk = uid(20); await store.put('reset:' + tk, { id: c.id }, 1800);
             const base = String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, '');
-            const L = { en: ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'], fr: ['Réinitialiser votre mot de passe', 'Appuyez sur le bouton pour choisir un nouveau mot de passe. Le lien est valable 30 minutes.', 'Choisir un nouveau mot de passe', "Si vous n'avez rien demandé, ignorez cet e-mail."], ar: ['إعادة تعيين كلمة المرور', 'اضغط على الزر لاختيار كلمة مرور جديدة. الرابط صالح لمدة 30 دقيقة.', 'اختيار كلمة مرور جديدة', 'إذا لم تطلب ذلك، تجاهل هذه الرسالة.'] }[c.lang] || null;
+            const L = { en: ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'], fr: ['Réinitialiser votre mot de passe', 'Appuyez sur le bouton pour choisir un nouveau mot de passe. Le lien est valable 30 minutes.', 'Choisir un nouveau mot de passe', "Si vous n'avez rien demandé, ignorez cet e-mail."], ar: ['إعادة تعيين كلمة المرور', 'اضغط على الزر لاختيار كلمة مرور جديدة. الرابط صالح لمدة 30 دقيقة.', 'اختيار كلمة مرور جديدة', 'إذا لم تطلب ذلك، تجاهل هذه الرسالة.'] }[ml(c)] || null;
             const T = L || ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'];
             const app = escHtml(s.branding.appName || 'IPTV');
-            const html = `<div dir="${c.lang === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p style="font-size:16px"><b>${T[0]}</b></p><p>${T[1]}</p><p style="margin:24px 0"><a href="${base}/#reset=${tk}" style="background:#8065FF;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold;display:inline-block">${T[2]}</a></p><p style="color:#5A6478;font-size:13px">${T[3]}</p></div>`;
+            const html = `<div dir="${ml(c) === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p style="font-size:16px"><b>${T[0]}</b></p><p>${T[1]}</p><p style="margin:24px 0"><a href="${base}/#reset=${tk}" style="background:#8065FF;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold;display:inline-block">${T[2]}</a></p><p style="color:#5A6478;font-size:13px">${T[3]}</p></div>`;
             const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
             await log('customer', `Password reset link for ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`);
           }
@@ -1195,7 +1207,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!rec) return err(400, 'reset_bad');
         if (String(body.password || '').length < 6) return err(400, 'New password needs 6+ characters.');
         const list = await getCustomers(); const c = list.find((x) => x.id === rec.id); if (!c) return err(400, 'reset_bad');
-        c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); delete c.loginPassword;
+        c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); delete c.loginPassword; c.ownPassword = true;
         if (cleanEmail(c.email)) c.emailVerified = cleanEmail(c.email);
         await saveCustomers(list); await store.del('reset:' + tk);
         for (const d of await getDevices(c.id)) await store.del('session:' + d.token); // signs out every device
@@ -1242,8 +1254,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ token: await newSession('staff', m.id, s, meta), role: 'staff' });
         }
         const list = await getCustomers();
-        const c = list.find((x) => x.username.toLowerCase() === username);
-        if (!c || (await hashPassword(password, c.salt)) !== c.passwordHash) return wrong();
+        // a customer can sign in with the app details or with the line username and password from the panel
+        let c = null;
+        for (const cand of [list.find((x) => x.username.toLowerCase() === username), ...list.filter((x) => String(x.lineUsername || '').toLowerCase() === username)]) {
+          if (cand && ((await hashPassword(password, cand.salt)) === cand.passwordHash || (!cand.ownPassword && cand.linePassword && sameText(password, cand.linePassword)))) { c = cand; break; }
+        }
+        if (!c) return wrong();
         if (c.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
         { const st = await second(c); if (st) return st; }
         c.lastLogin = Date.now();
@@ -1294,7 +1310,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             orderPackages: (s.orderPackages || []).map((p) => ({ p, pl: pickPayLink(s, p) })).filter((x) => x.pl).map(({ p, pl }) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, url: payUrlFor(pl.url, c), cur: s.orderCurrency === 'ALL' ? pl.cur || 'EUR' : s.orderCurrency === 'USDT' ? 'USDT' : s.orderCurrency || 'EUR' })),
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
-              server: trimSlash(s.player.serverUrl || c.dns), u: lineUsername, p: linePassword,
+              server: trimSlash(c.dns || s.player.serverUrl), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
               mode: s.player.mode === 'direct' ? 'direct' : 'proxy', userAgent: s.player.userAgent || 'IPTVSmartersPro',
               relay: String(s.player.relayUrl || '').trim().replace(/\/+$/, ''),
@@ -1389,8 +1405,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
           c.emailCode = { hash: await sha256(code + c.salt), exp: Date.now() + 15 * 60000, tries: 0 }; await saveCustomers(list);
           const app = escHtml(s.branding.appName || 'IPTV');
-          const T = { fr: ['Votre code de vérification', 'Saisissez ce code dans l’application. Il est valable 15 minutes.'], ar: ['رمز التحقق', 'أدخل هذا الرمز في التطبيق. صالح لمدة 15 دقيقة.'] }[c.lang] || ['Your verification code', 'Enter this code in the app. It works for 15 minutes.'];
-          const html = `<div dir="${c.lang === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p><b>${T[0]}</b></p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;margin:16px 0" dir="ltr">${code}</p><p style="color:#5A6478">${T[1]}</p></div>`;
+          const T = { fr: ['Votre code de vérification', 'Saisissez ce code dans l’application. Il est valable 15 minutes.'], ar: ['رمز التحقق', 'أدخل هذا الرمز في التطبيق. صالح لمدة 15 دقيقة.'] }[ml(c)] || ['Your verification code', 'Enter this code in the app. It works for 15 minutes.'];
+          const html = `<div dir="${ml(c) === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p><b>${T[0]}</b></p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;margin:16px 0" dir="ltr">${code}</p><p style="color:#5A6478">${T[1]}</p></div>`;
           const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
           if (!r.ok) return err(502, 'em_fail');
           return ok({ ok: true });
@@ -1428,7 +1444,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!s.userDashboard.allowPasswordChange) return err(403, 'Password change is turned off.');
           if ((await hashPassword(body.current || '', c.salt)) !== c.passwordHash) return err(400, 'Current password is wrong.');
           if (String(body.next || '').length < 6) return err(400, 'New password needs 6+ characters.');
-          c.salt = uid(8); c.passwordHash = await hashPassword(body.next, c.salt); delete c.loginPassword;
+          c.salt = uid(8); c.passwordHash = await hashPassword(body.next, c.salt); delete c.loginPassword; c.ownPassword = true; // their own password now: the line password no longer signs in
           await saveCustomers(list);
           await log('customer', `${c.username} changed their password`);
           return ok({ ok: true });
@@ -1485,7 +1501,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const all = await getReceipts(); const rc = all.find((x) => x.id === String(body.id || '')); if (!rc) return err(404, 'Receipt not found.');
         if (rc.status !== 'pending') return err(400, 'This receipt was already ' + rc.status + '.');
         const list = await getCustomers(); const c = list.find((x) => x.id === rc.customerId); if (!c) return err(404, 'This customer no longer exists.');
-        const lang = c.lang; let panelNote = '';
+        const lang = ml(c); let panelNote = '';
         if (body.action === 'approve') {
           const days = Math.max(1, Number(body.days) || Number(rc.days) || 30); const devices = Number(rc.devices) || 1;
           const plan = s.plans.find((p) => Number(p.days) === days && (Number(p.connections) || 1) === devices) || s.plans.find((p) => Number(p.days) === days);
@@ -1648,8 +1664,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           panel = await panelCall(s, 'create', panelVars(c, s));
           // The customer is saved even when the panel refuses, so nothing typed is lost; the dashboard shows what the panel answered.
           if (!panel.ok && !panel.skipped) await log('customer', `Panel did not create the line for ${c.username}: ${panel.error}`);
-          else if (!panel.skipped) applyPanelCreds(s, c, panel.data);
+          else if (!panel.skipped) { const got = applyPanelCreds(s, c, panel.data); if (got.u || got.p) await adoptLine(list, c); }
         }
+        if (ln0 || (body.lineSame === false && c.lineUsername && c.linePassword)) await adoptLine(list, c);
         const dup = findMatches(list, c);
         if (dup.length) await logAttempt({ kind: 'new customer', name: c.name, email: c.email, phone: c.phone, whatsapp: c.whatsapp, by: actorName, newUsername: c.username, matches: dup.slice(0, 5).map((m) => ({ id: m.c.id, username: m.c.username, name: m.c.name, why: m.why })) });
         list.push(c);
@@ -1672,6 +1689,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.email && cleanEmail(body.email) !== cleanEmail(c.email) && !body.emailAnyway) { const prob = await emailProblem(body.email); if (prob) return err(400, prob); }
           for (const k of ['name', 'phone', 'note', 'lineUsername', 'linePassword', 'lineId', 'planId', 'email', 'whatsapp', 'lang']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.email !== undefined) c.email = cleanEmail(body.email) || String(body.email).trim();
+          const lineWas = c.lineUsername + '\n' + c.linePassword;
           let activated = false;
           if (body.m3u) {
             const ln = parseLineLink(body.m3u); if (!ln) return err(400, 'This does not look like a line link from the panel. Paste the full M3U link (it contains username= and password=).');
@@ -1679,10 +1697,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             if (c.pendingLine) { // a trial that was waiting: it starts now, signs in with the line details, and gets the email
               delete c.pendingLine; activated = true;
               if (c.isTrial) { c.startAt = Date.now(); c.expiresAt = Date.now() + (Number(s.trial.hours) || 24) * 3600000; }
-              if (!list.some((x) => x !== c && x.username.toLowerCase() === ln.u.toLowerCase())) c.username = ln.u;
-              c.loginPassword = ln.p; c.salt = uid(8); c.passwordHash = await hashPassword(ln.p, c.salt);
             }
           }
+          if (c.lineUsername + '\n' + c.linePassword !== lineWas && !body.password) await adoptLine(list, c);
           if (body.connections !== undefined) c.connections = Number(body.connections) || 1;
           if (body.username && body.username !== c.username) {
             const u = String(body.username).trim();
@@ -1962,7 +1979,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/templates/preview')) { // shows an email with wording that is not saved yet, using a made-up customer
         const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en';
         const sample = { id: 'sample', name: 'Sara Example', username: 'sara2026', lang, email: 'sara@example.com', lineUsername: 'sara2026', linePassword: 'Pass1234', expiresAt: Date.now() + 30 * DAY, startAt: Date.now(), isTrial: body.kind === 'trial', connections: 1, planId: (s.plans[0] || {}).id };
-        applyMailTexts(cleanMailTexts(body.mailTexts));
+        applyMailTexts(cleanMailTexts(body.mailTexts)); setMailLang('customer');
         let out;
         try {
           const url = String(s.email.appUrl || body.appUrl || '');
@@ -1970,7 +1987,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           else if (body.kind === 'order') out = orderEmail(s, sample, (s.orderPackages || [])[0] || { id: 'x', title: '1 Month', days: 30, devices: 1, price: 29.99 }, url);
           else if (body.kind === 'expiry') out = { subject: mt(lang, 'expirySubject', { days: 3 }), html: mailHtml(s, lang, [[mt(lang, 'user'), sample.username], [mt(lang, 'expires'), new Date(sample.expiresAt).toLocaleDateString()]], mt(lang, 'expiryBody', { date: new Date(sample.expiresAt).toLocaleDateString() }), sample.name) };
           else out = accessEmail(s, sample, 'Pass1234', body.kind === 'trial' ? 'trial' : 'sub', url);
-        } finally { applyMailTexts(s.mailTexts); }
+        } finally { applyMailTexts(s.mailTexts); setMailLang(s.email.lang); }
         return ok({ subject: out.subject, html: out.html });
       }
       if (R('GET', '/api/admin/email/recent')) { // the latest emails Resend sent for this account, with their delivery status
@@ -2265,7 +2282,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       for (const c of list) {
         const left = Math.ceil((c.expiresAt - Date.now()) / DAYMS);
         if (c.email && !c.isTrial && c.status !== 'disabled' && left > 0 && left <= days && c.remindedFor !== c.expiresAt) {
-          const lang = c.lang || 'en';
+          const lang = ml(c);
           const date = new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium' });
           const r = await sendEmail(s, c.email, mt(lang, 'expirySubject', { days: left }), mailHtml(s, lang, [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), date]], mt(lang, 'expiryBody', { date }), c.name));
           if (r.ok) { c.remindedFor = c.expiresAt; changed = true; out.reminders++; }

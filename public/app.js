@@ -416,7 +416,7 @@ function customerForm(c) {
     ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
     <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
-    <div class="grid3">${field('Email language', 'lang', c.lang || 'fr', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
+    <div class="grid3">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '')}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
     <div class="grid3">${field('Address', 'address', c.address || '')}${field('Server', 'server', c.server || '', { ph: 'MEGA, DINO…' })}${field('Panel', 'panel', c.panel || '')}</div>
     <h3 style="margin-top:6px">App login details</h3>
@@ -897,7 +897,7 @@ function adminTrial(s) {
       <p class="small muted">The panel call for trials is the <b>trial</b> action in API settings.</p>
     </div>
     <div class="card"><h3>✉️ Email (Resend)</h3>
-      ${field('Resend API key', 'email.resendKey', e.resendKey, { type: 'password', attrs: 'autocomplete="off"', ph: 're_…', help: 'From resend.com → API Keys. Stored on the server only.' })}
+      ${field('Language of emails', 'email.lang', s.email.lang || 'en', { type: 'select', options: [['en', 'English for everyone'], ['fr', 'French for everyone'], ['ar', 'Arabic for everyone'], ['customer', 'Each customer’s own language']], help: 'Used for login, trial, reminder, renewal, order and confirmation emails.' })}${field('Resend API key', 'email.resendKey', e.resendKey, { type: 'password', attrs: 'autocomplete="off"', ph: 're_…', help: 'From resend.com → API Keys. Stored on the server only.' })}
       ${field('Send from', 'email.from', e.from, { ph: 'My IPTV <noreply@yourdomain.com>', help: 'Must use a domain verified in Resend. For a quick test use <code>onboarding@resend.dev</code> (only sends to your own Resend email).' })}
       ${field('App link in emails', 'email.appUrl', e.appUrl || location.origin, { attrs: 'autocapitalize="none"' })}
       ${field('DNS / Portal shown to customers', 'email.dns', e.dns, { ph: s.player.serverUrl || 'http://line.yourdns.com', attrs: 'autocapitalize="none"', help: 'Used in the email for Username / Password / DNS and the M3U links. Empty = your streaming server URL.' })}

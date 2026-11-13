@@ -37,3 +37,8 @@ The public website (home, pricing, FAQ, privacy, terms) is shown to visitors who
 ## Sync with the panel, and payment receipts
 - **Sync with panel** (Customers and Alerts pages): asks your streaming server about every line and updates each customer's end date and devices. Lines the panel does not know, or has banned or expired, are tagged and listed in **Alerts → Line not working on the panel**. It also runs by itself: when a customer opens the app (at most every 30 minutes) and for 20 customers a day in the background. It only needs the streaming server address in API settings, not the reseller API.
 - **Payment receipts** (Money): customers tap *I have paid: send my receipt* under the packages and upload a photo. You get an email. Open the receipt, tap **Approve**: the subscription is extended and the customer is told by email and in the chat. If the panel could not be renewed automatically, the customer appears in **Alerts → Paid: renew on the panel** until you renew the line there.
+
+## Login details and email language
+- A customer's app login is the **real line username and password from the panel**. Pasting an M3U link, or typing the line details, sets the login to match. Signing in works with either the app details or the line details, unless the customer chose their own password.
+- When a line was pasted from an M3U link, the app plays from **that link's server**, even if the general server address in API settings is different.
+- **Language of emails** (Trial & email setup): English for everyone by default; you can pick French, Arabic, or each customer's own language.
