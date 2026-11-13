@@ -125,6 +125,33 @@ Object.assign(D.ar, {
   libraryT: 'مكتبتي', loadingDots: 'جارٍ التحميل…',
 });
 
+
+// ---- dashboard home, own playlists, requests ----
+Object.assign(D.en, {
+  overview: 'Here is your account overview.', activePlan: 'Active plan', expiresOn: 'Expires on', connectedDev: 'Connected devices', quick: 'Quick actions', managePlan: 'Manage plan', contactSup: 'Contact support',
+  srcT: 'My playlists', srcText: 'Add your own IPTV provider with Xtream Codes or an M3U playlist. The details are saved on this device only.', srcMain: '{app} subscription', srcActive: 'In use', srcUse: 'Use', srcRemove: 'Remove',
+  srcName: 'Name', srcServer: 'Server address', srcUrl: 'Playlist address', srcFile: 'Or choose a playlist file', srcCheckAdd: 'Check and add', srcTesting: 'Checking…', srcSaved: 'Added: {n}', srcChannels: '{n} items',
+  srcBadUrl: 'Enter an address that starts with http:// or https://', srcBadLogin: 'The provider refused this username or password.', srcExpired: 'This account is not active at the provider.', srcUnreachable: 'The provider could not be reached. Check the address and try again.', srcEmpty: 'No channels were found in this playlist.',
+  srcNeedApp: 'This playlist cannot be opened in the browser. Use the Android, TV or desktop app.', srcNow: 'Now watching: {name}', srcBack: 'Back to {app}', srcOnlyYours: 'Only add providers you have the right to use.',
+  refundAsk: 'Ask for a refund', refundSubj: 'Refund request', delAsk: 'Ask to delete my account', delSubj: 'Please delete my account', delText: 'I would like my account and my data to be deleted.',
+});
+Object.assign(D.fr, {
+  overview: 'Voici l’aperçu de votre compte.', activePlan: 'Offre active', expiresOn: 'Expire le', connectedDev: 'Appareils connectés', quick: 'Actions rapides', managePlan: 'Gérer l’offre', contactSup: 'Contacter l’assistance',
+  srcT: 'Mes playlists', srcText: 'Ajoutez votre propre fournisseur IPTV avec Xtream Codes ou une playlist M3U. Les informations restent sur cet appareil.', srcMain: 'Abonnement {app}', srcActive: 'Utilisée', srcUse: 'Utiliser', srcRemove: 'Supprimer',
+  srcName: 'Nom', srcServer: 'Adresse du serveur', srcUrl: 'Adresse de la playlist', srcFile: 'Ou choisissez un fichier playlist', srcCheckAdd: 'Vérifier et ajouter', srcTesting: 'Vérification…', srcSaved: 'Ajoutée : {n}', srcChannels: '{n} éléments',
+  srcBadUrl: 'Saisissez une adresse commençant par http:// ou https://', srcBadLogin: 'Le fournisseur a refusé ce nom d’utilisateur ou ce mot de passe.', srcExpired: 'Ce compte n’est pas actif chez le fournisseur.', srcUnreachable: 'Fournisseur injoignable. Vérifiez l’adresse et réessayez.', srcEmpty: 'Aucune chaîne trouvée dans cette playlist.',
+  srcNeedApp: 'Cette playlist ne peut pas s’ouvrir dans le navigateur. Utilisez l’application Android, TV ou ordinateur.', srcNow: 'En cours : {name}', srcBack: 'Revenir à {app}', srcOnlyYours: 'N’ajoutez que des fournisseurs que vous avez le droit d’utiliser.',
+  refundAsk: 'Demander un remboursement', refundSubj: 'Demande de remboursement', delAsk: 'Demander la suppression de mon compte', delSubj: 'Merci de supprimer mon compte', delText: 'Je souhaite que mon compte et mes données soient supprimés.',
+});
+Object.assign(D.ar, {
+  overview: 'هذه نظرة عامة على حسابك.', activePlan: 'الباقة الحالية', expiresOn: 'تنتهي في', connectedDev: 'الأجهزة المتصلة', quick: 'إجراءات سريعة', managePlan: 'إدارة الباقة', contactSup: 'تواصل مع الدعم',
+  srcT: 'قوائمي', srcText: 'أضف مزوّد IPTV الخاص بك عبر Xtream Codes أو قائمة M3U. تُحفظ البيانات على هذا الجهاز فقط.', srcMain: 'اشتراك {app}', srcActive: 'مستعملة', srcUse: 'استعمال', srcRemove: 'حذف',
+  srcName: 'الاسم', srcServer: 'عنوان الخادم', srcUrl: 'عنوان القائمة', srcFile: 'أو اختر ملف قائمة', srcCheckAdd: 'تحقق وأضف', srcTesting: 'جارٍ التحقق…', srcSaved: 'تمت الإضافة: {n}', srcChannels: '{n} عنصر',
+  srcBadUrl: 'أدخل عنواناً يبدأ بـ http:// أو https://', srcBadLogin: 'رفض المزوّد اسم المستخدم أو كلمة المرور.', srcExpired: 'هذا الحساب غير نشط لدى المزوّد.', srcUnreachable: 'تعذّر الوصول إلى المزوّد. تحقق من العنوان وحاول مجدداً.', srcEmpty: 'لم يتم العثور على قنوات في هذه القائمة.',
+  srcNeedApp: 'لا يمكن فتح هذه القائمة في المتصفح. استعمل تطبيق Android أو التلفاز أو الحاسوب.', srcNow: 'تشاهد الآن: {name}', srcBack: 'العودة إلى {app}', srcOnlyYours: 'أضف فقط المزوّدين الذين يحق لك استعمالهم.',
+  refundAsk: 'طلب استرجاع المبلغ', refundSubj: 'طلب استرجاع', delAsk: 'طلب حذف حسابي', delSubj: 'يرجى حذف حسابي', delText: 'أرغب في حذف حسابي وبياناتي.',
+});
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

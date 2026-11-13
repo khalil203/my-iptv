@@ -1,0 +1,25 @@
+// icons.js — one small line-icon set used by the website and the app (no emoji, no brand logos).
+const P = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/>',
+  tv: '<rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="m8 2 4 4 4-4"/><path d="m10.5 9.8 4 2.2-4 2.2z" fill="currentColor"/>',
+  film: '<rect x="3" y="8" width="18" height="12" rx="2.5"/><path d="m3.5 8 16-4 .8 3.2"/><path d="m8 6.8 2 3M13 5.6l2 3"/>',
+  series: '<rect x="6" y="9" width="15" height="11" rx="2.5"/><path d="M3 16V6.5A2.5 2.5 0 0 1 5.5 4H17"/><path d="m12 12.6 3.4 1.9-3.4 1.9z" fill="currentColor"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 20.5c1.2-3.6 4.3-5.5 8-5.5s6.8 1.9 8 5.5"/>',
+  star: '<path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 16.9 6.6 19.8l1.1-6.1L3.2 9.4l6.1-.8z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>',
+  chat: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4v-4.2A2.5 2.5 0 0 1 4 13.5z"/>',
+  devices: '<rect x="2.5" y="4" width="13" height="10" rx="2"/><path d="M6 18h6M9 14v4"/><rect x="16.5" y="9" width="5" height="11" rx="1.5"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  laptop: '<rect x="4.5" y="5" width="15" height="10" rx="2"/><path d="M2.5 19h19"/>',
+  shield: '<path d="M12 3 5 6v5.5c0 4.3 2.9 7.6 7 9.5 4.1-1.9 7-5.2 7-9.5V6z"/><path d="m9 11.8 2.2 2.2 4-4.2"/>',
+  card: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h4"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  crown: '<path d="m4 8 4 4 4-6 4 6 4-4-1.5 10h-13z"/>',
+  play: '<path d="m8 5 11 7-11 7z" fill="currentColor"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+  remote: '<rect x="8" y="2.5" width="8" height="19" rx="3"/><circle cx="12" cy="8" r="1.8"/><path d="M12 13v.01M12 16.5v.01"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16 7l2.5 2.5M19 4l1.5 1.5"/>',
+  logout: '<path d="M10 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20H10"/><path d="M15 8l4 4-4 4M19 12H9"/>',
+};
+export const ic = (name, size = 22) => `<svg class="i" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;

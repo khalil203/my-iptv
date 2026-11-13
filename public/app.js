@@ -1,6 +1,8 @@
 import { createBackend } from './core.js';
 import { loadLogos, logosReady, findLogo } from './logos.js';
 import { siteHtml } from './site.js';
+import { ic } from './icons.js';
+import { parseM3U, m3uAnswer } from './m3u.js';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js';
 
 // ---------------- helpers ----------------
@@ -106,9 +108,9 @@ function setSession(token, role) {
 
 function applyBranding(b) {
   const r = document.documentElement.style;
-  r.setProperty('--b-primary', b.primary || '#8065FF');
+  r.setProperty('--b-primary', b.primary || '#7C4DFF');
   r.setProperty('--b-accent', b.accent || '#19D5B1');
-  r.setProperty('--brand-bg', b.background || '#080C16');
+  r.setProperty('--brand-bg', b.background || '#07081A');
   document.title = b.appName || 'IPTV';
   applyTheme();
 }
@@ -126,7 +128,7 @@ function currentTheme() {
 function applyTheme() {
   const th = currentTheme();
   document.documentElement.dataset.theme = th;
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', th === 'light' ? '#F4F5FA' : '#080C16');
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', th === 'light' ? '#F4F5FA' : '#07081A');
   document.querySelectorAll('[data-act=theme]').forEach((b) => { b.textContent = themeMode() === 'auto' ? '🌗' : th === 'light' ? '☀️' : '🌙'; b.title = themeLabel(); });
 }
 const themeLabel = () => { const m = themeMode(); return m === 'auto' ? `Auto (${currentTheme() === 'light' ? 'day' : 'night'} · ${tzName()})` : m === 'light' ? 'Day' : 'Night'; };
@@ -336,7 +338,7 @@ function custActions(c) {
   return `<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
-    <button class="btn sm ${c.whatsapp || c.phone ? 'wa-btn' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="WhatsApp message${c.waSentAt ? ' (last ' + fmtDate(c.waSentAt) + ')' : ''}">💬</button>
+    <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
     ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
     ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}">💳</button>` : ''}
     ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
@@ -559,6 +561,7 @@ function adminUserDash(s) {
   return `<form data-form="settings" class="card"><h3>What customers can see</h3>
     ${toggle('📺 Live TV', 'userDashboard.live', d.live)}${toggle('🎬 Movies', 'userDashboard.movies', d.movies)}${toggle('🎞 Series', 'userDashboard.series', d.series)}
     ${toggle('🗓 TV guide (EPG) under live channels', 'userDashboard.epg', d.epg)}${toggle('🔎 Search', 'userDashboard.search', d.search)}${toggle('⭐ Favorites', 'userDashboard.favorites', d.favorites)}
+    ${toggle('📡 Customers can add their own playlists (Xtream Codes / M3U)', 'userDashboard.ownPlaylists', d.ownPlaylists !== false, 'Saved on the customer\'s device only. Turn off to keep the app for your own service.')}
     ${toggle('📅 Subscription card with expiry & days left', 'userDashboard.showSubscription', d.showSubscription)}${toggle('🔑 Customers can change their own password', 'userDashboard.allowPasswordChange', d.allowPasswordChange)}
     <div class="grid2" style="margin-top:12px">${field('Show "expiring soon" warning (days before)', 'userDashboard.expiryWarningDays', d.expiryWarningDays, { type: 'number', attrs: 'min="1" max="60"' })}</div>
     <h3 style="margin-top:10px">Announcement banner</h3>
@@ -896,14 +899,14 @@ function toggleFav(item) {
 
 async function renderUser() {
   const u = state.user;
-  if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify(u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); } catch { return; } }
+  if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify('_stream' in u.me ? u.me._stream : u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); applySource(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); } catch { return; }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); applySource(); } catch { return; }
     applyBranding(u.me.branding);
   }
   const { user, dashboard: d, branding: b } = u.me;
-  const tabs = [['home', '🏠', t('home')], d.live && ['live', '📺', t('live')], d.movies && ['movies', '🎬', t('movies')], d.series && ['series', '🎞', t('series')], ['account', '👤', t('account')]].filter(Boolean);
+  const tabs = [['home', ic('home'), t('home')], d.live && ['live', ic('tv'), t('live')], d.movies && ['movies', ic('film'), t('movies')], d.series && ['series', ic('series'), t('series')], ['account', ic('user'), t('account')]].filter(Boolean);
   if (!tabs.some((t) => t[0] === u.tab)) u.tab = 'home';
   $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
     <div class="ubody" id="ubody"></div>
@@ -928,18 +931,27 @@ async function renderUserTab() {
     const favs = d.favorites ? getFavs() : [];
     const renew = b.supportUrl ? `<a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${t('renewNow')}</a>` : t('contactRenew');
     const trialLeft = user.isTrial && user.state !== 'expired';
-    el.innerHTML = `<h2>${t('hello', { name: esc(user.name.split(' ')[0]) })}</h2>
+    pullNativePos();
+    el.innerHTML = `<div class="welcome"><h2>${t('hello', { name: esc(user.name.split(' ')[0]) })}</h2><p class="muted">${t('overview')}</p></div>
       ${d.maintenance ? `<div class="notice warning">🛠 ${esc(d.maintenanceMessage)}</div>` : ''}
       ${d.announcement ? `<div class="notice ${esc(d.announcementType)}">📣 ${esc(d.announcement)}</div>` : ''}
       ${trialLeft ? `<div class="notice info">🎁 ${t('trialEnds', { n: user.hoursLeft })} ${renew}</div>` : ''}
       ${user.state === 'expiring' && !user.isTrial ? `<div class="notice warning">⏳ ${t('expiringSoon', { n: user.daysLeft })} ${renew}</div>` : ''}
       ${user.state === 'expired' ? `<div class="notice danger">⏰ ${t('expiredOn', { date: fmtDate(user.expiresAt) })} ${renew}</div>` : ''}
-      ${d.showSubscription ? `<div class="sub-card"><div class="row"><span class="muted small" style="font-weight:700">${t('mySub')}</span><span class="spacer"></span>${pill(user.state)}</div>
-        <div class="row" style="margin:12px 0;align-items:flex-end"><div><div class="big">${user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</div><div class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</div></div><span class="spacer"></span><div style="text-align:end"><b>${esc(user.isTrial ? t('trial') : user.planName)}</b><div class="small muted">${t('until', { date: fmtDate(user.expiresAt) })}</div><div class="small muted">${t('devices', { n: user.connections })}</div></div></div>${progress(user)}</div>` : ''}
-      <div class="tiles">${d.live ? `<div class="tile" data-act="utab" data-tab="live"><span class="ic">📺</span><b>${t('liveTv')}</b></div>` : ''}${d.movies ? `<div class="tile" data-act="utab" data-tab="movies"><span class="ic">🎬</span><b>${t('movies')}</b></div>` : ''}${d.series ? `<div class="tile" data-act="utab" data-tab="series"><span class="ic">🎞</span><b>${t('series')}</b></div>` : ''}${b.supportUrl ? `<a class="tile" href="${esc(b.supportUrl)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="ic">💬</span><b>${esc(b.supportLabel || t('support'))}</b></a>` : ''}</div>
+      ${srcBanner()}
+      <div class="dash">
+        ${d.showSubscription ? `<div class="dash-plan" data-act="utab" data-tab="account" tabindex="0"><div class="dp-top"><div><span class="dp-l">${t('activePlan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="dp-r"><span class="dp-l">${t('expiresOn')}</span><b>${fmtDate(user.expiresAt)}</b></div></div>
+          <div class="dp-days"><span class="big">${user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</span><span class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</span><span class="spacer"></span>${pill(user.state)}</div>${progress(user)}</div>` : ''}
+        <div class="dash-mini" data-act="goto-acc" data-to="acc-devices" tabindex="0"><span class="chip-ic ok">${ic('devices')}</span><div><span class="dp-l">${t('connectedDev')}</span><b id="dash-dev">– / ${esc(user.connections)}</b></div></div>
+        <div class="dash-mini" data-act="goto-acc" data-to="acc-tickets" tabindex="0"><span class="chip-ic">${ic('chat')}</span><div><span class="dp-l">${t('supportT')}</span><b id="dash-tk">–</b></div></div>
+      </div>
+      <div class="tiles big">${d.live ? `<div class="tile t-live" data-act="utab" data-tab="live" tabindex="0">${ic('tv', 34)}<b>${t('liveTv')}</b></div>` : ''}${d.movies ? `<div class="tile t-movies" data-act="utab" data-tab="movies" tabindex="0">${ic('film', 34)}<b>${t('movies')}</b></div>` : ''}${d.series ? `<div class="tile t-series" data-act="utab" data-tab="series" tabindex="0">${ic('series', 34)}<b>${t('series')}</b></div>` : ''}</div>
+      <h3>${t('quick')}</h3>
+      <div class="quick"><a data-act="utab" data-tab="account" tabindex="0">${ic('card')}<span>${t('managePlan')}</span></a><a data-act="goto-acc" data-to="acc-devices" tabindex="0">${ic('devices')}<span>${t('devicesT')}</span></a><a data-act="ticket-new" tabindex="0">${ic('chat')}<span>${t('contactSup')}</span></a>${d.ownPlaylists !== false ? `<a data-act="goto-acc" data-to="acc-sources" tabindex="0">${ic('list')}<span>${t('srcT')}</span></a>` : ''}</div>
       ${user.isTrial || user.state !== 'active' ? plansCard() : ''}
       ${libraryHtml()}
       ${favs.length ? `<h3>${t('favorites')}</h3>${itemsGrid(favs)}` : ''}`;
+    loadDashCounts();
     return;
   }
   if (u.tab === 'account') {
@@ -950,11 +962,14 @@ async function renderUserTab() {
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-tickets"><div class="row"><h3 style="margin:0;flex:1">${t('supportT')}</h3><button class="btn sm primary" data-act="ticket-new">＋ ${t('newTicket')}</button></div><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-payments"><h3>${t('paymentsT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
+      ${d.ownPlaylists !== false ? sourcesCard() : ''}
       ${parentalCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
-      <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}${!waNum(b) && b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>`;
+      <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}${!waNum(b) && b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>
+      <p style="margin-top:16px"><a href="#" class="small muted" data-act="del-ask">${t('delAsk')}</a></p>`;
     loadAccountExtras();
+    if (u.scrollTo) { const to = u.scrollTo; u.scrollTo = null; setTimeout(() => document.getElementById(to)?.scrollIntoView({ block: 'start' }), 60); }
     return;
   }
   const blocked = blockedScreen();
@@ -1011,7 +1026,7 @@ async function xt(action, params = {}) {
   if (c[key]) return c[key];
   // Lists (not EPG / details) are kept on the device: shown instantly, refreshed in the background.
   const cacheable = /^get_(live|vod|series)_(categories|streams)$|^get_series$/.test(action);
-  const dkey = (state.user.me?.stream?.u || '') + ':' + key;
+  const dkey = (state.user.me?.stream?.custom || '') + (state.user.me?.stream?.u || '') + ':' + key;
   if (cacheable) {
     const hit = xtCacheGet(dkey);
     if (hit && hit.data) {
@@ -1027,6 +1042,7 @@ async function xt(action, params = {}) {
 }
 async function xtFetch(action, params = {}) {
   const c = {}; const key = 'x';
+  if (state.user.me?.stream?.m3u) return m3uAnswer(await m3uItems(state.user.me.stream.m3u), action, params);
   const q = new URLSearchParams({ action, ...params });
   if (isDirect()) {
     const st = state.user.me.stream;
@@ -1161,11 +1177,20 @@ function play(title, kind, id, ext, extraHtml = '') {
   if (blockedScreen()) return toast(t('notAvailable'), true);
   recordWatch({ kind: kind === 'series' ? 'episode' : kind, id, name: title, ext, icon: state.user.lastIcon || '' });
   let url, isHls;
+  const hk = kind === 'series' ? 'episode' : kind;
+  if (state.user.me.stream?.m3u) {
+    const st = state.user.me.stream; const it = (state.user.m3u?.[st.m3u] || [])[id]; const b = bridge();
+    if (!it) return toast(t('streamFail'), true);
+    if (b && !b.inline) { noteNative(hk, id, it.url); return b.play(it.url, title, st.userAgent); }
+    url = it.url; const base = state.user.me._stream;
+    if (location.protocol === 'https:' && url.startsWith('http:')) { if (base?.relay) url = `${base.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(base.proxyToken)}`; else return modal(esc(title), `<div class="notice warning">${t('srcNeedApp')}</div><a class="btn primary" href="download.html">${t('getApp')}</a>`); }
+    return openPlayer({ title, url, isHls: /\.m3u8(\?|$)/i.test(it.url) || (kind === 'live' && !/\.(ts|mp4|mkv)(\?|$)/i.test(it.url)), kind, id, extraHtml: '' });
+  }
   if (isDirect()) {
     const st = state.user.me.stream; const b = bridge();
     const raw = (e) => kind === 'live' ? `${st.server}/live/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${e}`
       : `${st.server}/${kind}/${encodeURIComponent(st.u)}/${encodeURIComponent(st.p)}/${id}.${ext || 'mp4'}`;
-    if (b && !b.inline) return b.play(raw('ts'), title, st.userAgent); // Android / TV: native player
+    if (b && !b.inline) { noteNative(hk, id, raw('ts')); return b.play(raw('ts'), title, st.userAgent); } // Android / TV: native player (remembers the position itself)
     if (b && b.inline) { url = raw('m3u8'); }                          // Windows / Mac app: plays here, direct
     else if (httpOK()) { url = raw('m3u8'); }                         // any browser on the http:// address: direct
     else if (st.relay) { url = `${st.relay}/x?u=${encodeURIComponent(raw('m3u8'))}&t=${encodeURIComponent(st.proxyToken)}`; } // iPhone / browsers: secure relay
@@ -1416,7 +1441,7 @@ const actions = {
     if (!phone) return toast('Enter the WhatsApp number with country code.', true);
     if (phone.startsWith('0')) return toast('Add the country code instead of the first 0 (Thailand 66…, Morocco 212…).', true);
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
-    api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
+    api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { const sent = state.admin.customers.find((x) => x.id === el.dataset.id); if (sent) sent.waSentAt = Date.now(); document.querySelectorAll(`[data-act="wa-one"][data-id="${el.dataset.id}"]`).forEach((b) => { b.classList.remove('wa-todo'); b.classList.add('wa-sent'); b.title = 'WhatsApp message sent ' + fmtDate(Date.now()) + ' — tap to send another'; }); if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
   },
   'nl-open': async () => {
     const st = await api('GET', '/api/admin/newsletter'); const s = state.admin.settings;
@@ -1976,7 +2001,7 @@ async function loadAccountExtras() {
   fill(pm, async () => {
     const list = await api('GET', '/api/me/payments'); state.user.payments = list;
     if (!$('#acc-payments')) return;
-    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(x.plan)}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') : `<p class="muted small">${t('noPayments')}</p>`}`;
+    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(x.plan)}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') + `<p style="margin:10px 0 0"><a href="#" class="small muted" data-act="refund-ask">${t('refundAsk')}</a></p>` : `<p class="muted small">${t('noPayments')}</p>`}`;
   });
 }
 function ticketThread(x, admin) {
@@ -2096,6 +2121,121 @@ Object.assign(forms, {
   async 'tfa-off'(f) {
     try { await api('POST', '/api/admin/2fa/disable', { password: f.password.value }); state.admin.me = null; closeModal(); toast('Two-step sign-in is off'); renderAdmin(); }
     catch (e) { toast(e.message, true); }
+  },
+});
+
+// =====================================================================
+// Own playlists (Xtream / M3U), native resume, dashboard counters, requests
+// =====================================================================
+const uname = () => state.user.me?.user?.username || '';
+const getSources = () => { try { return JSON.parse(localStorage.getItem('tvp_sources_' + uname())) || []; } catch { return []; } };
+const putSources = (l) => localStorage.setItem('tvp_sources_' + uname(), JSON.stringify(l));
+const activeSrc = () => localStorage.getItem('tvp_src_' + uname()) || '';
+// Points the player at the customer's own provider when they picked one. Their details stay on this device.
+function applySource() {
+  const me = state.user.me; if (!me) return;
+  if (!('_stream' in me)) me._stream = me.stream;
+  const src = me.dashboard.ownPlaylists === false ? null : getSources().find((x) => x.id === activeSrc());
+  if (!src) { me.stream = me._stream; return; }
+  const base = me._stream || {}; const ua = base.userAgent || 'IPTVSmartersPro';
+  me.stream = src.type === 'xtream'
+    ? { ...base, server: src.server, u: src.u, p: src.p, mode: 'direct', useProxy: false, userAgent: ua, custom: src.id, dns: src.server }
+    : { ...base, server: '', u: 'm3u', p: '', mode: 'direct', useProxy: false, userAgent: ua, custom: src.id, m3u: src.id };
+}
+async function fetchText(url) {
+  const ua = state.user.me?.stream?.userAgent || 'IPTVSmartersPro';
+  if (bridge()) return bridgeFetch(url, ua);
+  if (url.startsWith('https:') || location.protocol === 'http:') { try { const r = await fetch(url); if (r.ok) return await r.text(); } catch {} }
+  const base = state.user.me?._stream;
+  if (base?.relay) { const r = await fetch(`${base.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(base.proxyToken)}`).catch(() => null); if (r && r.ok) return r.text(); if (r) throw new Error(t('srcUnreachable')); }
+  throw new Error(t('srcNeedApp'));
+}
+async function m3uItems(id, force) {
+  state.user.m3u ||= {};
+  if (state.user.m3u[id] && !force) return state.user.m3u[id];
+  const src = getSources().find((x) => x.id === id); if (!src) return [];
+  let saved = null; try { saved = JSON.parse(localStorage.getItem('tvp_m3u_' + id)); } catch {}
+  if (saved && !force && (!src.url || Date.now() - saved.at < 12 * 3600000)) return (state.user.m3u[id] = saved.items);
+  if (!src.url) return (state.user.m3u[id] = saved ? saved.items : []);
+  let items;
+  try { items = parseM3U(await fetchText(src.url)); } catch (e) { if (saved) return (state.user.m3u[id] = saved.items); throw e; }
+  if (!items.length) { if (saved) return (state.user.m3u[id] = saved.items); throw new Error(t('srcEmpty')); }
+  saveM3u(id, items);
+  return (state.user.m3u[id] = items);
+}
+function saveM3u(id, items) { try { localStorage.setItem('tvp_m3u_' + id, JSON.stringify({ at: Date.now(), items })); } catch { try { localStorage.removeItem('tvp_m3u_' + id); } catch {} } }
+function useSource(id) {
+  if (id) localStorage.setItem('tvp_src_' + uname(), id); else localStorage.removeItem('tvp_src_' + uname());
+  const u = state.user; u.cache = {}; u.cat = {}; u.q = ''; u.unlocked = false; applySource();
+}
+function srcBanner() {
+  const src = getSources().find((x) => x.id === activeSrc()); const me = state.user.me;
+  if (!src || me.dashboard.ownPlaylists === false) return '';
+  return `<div class="notice info row"><span style="flex:1">${ic('list', 18)} ${t('srcNow', { name: esc(src.name) })}</span><button class="btn sm" data-act="src-use" data-id="">${t('srcBack', { app: esc(me.branding.appName) })}</button></div>`;
+}
+function sourcesCard() {
+  const list = getSources(); const act = activeSrc(); const app = state.user.me.branding.appName;
+  const row = (id, name, tag, canDel) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(name)}</b>${tag ? ` <span class="tagp">${tag}</span>` : ''}</div>${act === id ? `<span class="pill st-active">${t('srcActive')}</span>` : `<button class="btn sm" data-act="src-use" data-id="${esc(id)}">${t('srcUse')}</button>`}${canDel ? `<button class="btn sm ghost" data-act="src-del" data-id="${esc(id)}" aria-label="${t('srcRemove')}">✕</button>` : ''}</div>`;
+  return `<div class="card" id="acc-sources"><h3>${t('srcT')}</h3><p class="muted small" style="margin-top:0">${t('srcText')}</p>
+    ${row('', t('srcMain', { app }), '', false)}${list.map((x) => row(x.id, x.name, x.type === 'xtream' ? 'Xtream' : 'M3U', true)).join('')}
+    <div class="row" style="margin-top:12px"><button class="btn" data-act="src-add" data-type="xtream">＋ Xtream Codes</button><button class="btn" data-act="src-add" data-type="m3u">＋ M3U</button></div></div>`;
+}
+// Android / TV app: the native player remembers the position; this brings it back for "Continue watching".
+function noteNative(kind, id, url) { try { localStorage.setItem('tvp_lastnative', JSON.stringify({ kind, id, url })); } catch {} }
+function pullNativePos() {
+  const b = bridge(); if (!b || !b.lastPos) return;
+  try { const r = JSON.parse(b.lastPos() || '{}'); const n = JSON.parse(localStorage.getItem('tvp_lastnative') || 'null'); if (r.url && n && n.url === r.url && r.dur > 0) savePos(n.kind, n.id, r.pos, r.dur); } catch {}
+}
+async function loadDashCounts() {
+  const u = state.user;
+  if (!u.counts || Date.now() - u.counts.at > 60000) {
+    try { const [dv, tk] = await Promise.all([api('GET', '/api/me/devices'), api('GET', '/api/me/tickets')]); u.counts = { at: Date.now(), dev: dv.length, open: tk.filter((x) => x.status !== 'closed').length, answered: tk.filter((x) => x.status === 'answered').length }; u.tickets = tk; } catch { return; }
+  }
+  const a = $('#dash-dev'), b = $('#dash-tk');
+  if (a) a.textContent = `${u.counts.dev} / ${u.me.user.connections}`;
+  if (b) b.textContent = u.counts.answered ? `${u.counts.open} · ${t('st_answered')}` : String(u.counts.open);
+}
+const srcForm = (type) => type === 'xtream'
+  ? `<form data-form="src-xtream">${field(t('srcName'), 'name', '', { attrs: 'required maxlength="40"' })}${field(t('srcServer'), 'server', '', { ph: 'http://example.com:8080', attrs: 'required inputmode="url" autocapitalize="none" dir="ltr"' })}${field(t('username'), 'u', '', { attrs: 'required autocapitalize="none" autocomplete="off" dir="ltr"' })}${field(t('password'), 'p', '', { type: 'password', attrs: 'required autocomplete="off" dir="ltr"' })}<div id="src-err"></div><p class="small muted">${t('srcOnlyYours')}</p><button class="btn primary block">${t('srcCheckAdd')}</button></form>`
+  : `<form data-form="src-m3u">${field(t('srcName'), 'name', '', { attrs: 'required maxlength="40"' })}${field(t('srcUrl'), 'url', '', { ph: 'https://example.com/playlist.m3u', attrs: 'inputmode="url" autocapitalize="none" dir="ltr"' })}<label class="field"><span>${t('srcFile')}</span><input type="file" name="file" accept=".m3u,.m3u8,.txt,audio/x-mpegurl"></label><div id="src-err"></div><p class="small muted">${t('srcOnlyYours')}</p><button class="btn primary block">${t('srcCheckAdd')}</button></form>`;
+const srcFail = (f, msg) => { const b = f.querySelector('button'); b.disabled = false; b.textContent = t('srcCheckAdd'); $('#src-err').innerHTML = `<div class="err-box">${esc(msg)}</div>`; };
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.role === 'user' && state.user.me && state.user.tab === 'home' && bridge()?.lastPos) { pullNativePos(); renderUserTab(); } });
+
+Object.assign(actions, {
+  'goto-acc': (el) => { state.user.tab = 'account'; state.user.scrollTo = el.dataset.to; renderUser(); },
+  'src-add': (el) => { modal(el.dataset.type === 'xtream' ? '＋ Xtream Codes' : '＋ M3U', srcForm(el.dataset.type)); },
+  'src-use': (el) => { useSource(el.dataset.id); state.user.tab = 'home'; window.scrollTo(0, 0); renderUser(); },
+  'src-del': (el) => { if (!confirm(t('srcRemove') + '?')) return; if (activeSrc() === el.dataset.id) useSource(''); putSources(getSources().filter((x) => x.id !== el.dataset.id)); localStorage.removeItem('tvp_m3u_' + el.dataset.id); renderUserTab(); },
+  'refund-ask': () => { actions['ticket-new'](); const f = $('form[data-form=ticket-new]'); if (f) { f.subject.value = t('refundSubj'); f.text.focus(); } },
+  'del-ask': () => { actions['ticket-new'](); const f = $('form[data-form=ticket-new]'); if (f) { f.subject.value = t('delSubj'); f.text.value = t('delText'); } },
+});
+Object.assign(forms, {
+  async 'src-xtream'(f) {
+    const server = f.server.value.trim().replace(/\/+$/, '').replace(/\/player_api\.php.*$/i, '');
+    if (!/^https?:\/\/[^\s/]+/i.test(server)) return srcFail(f, t('srcBadUrl'));
+    const b = f.querySelector('button'); b.disabled = true; b.textContent = t('srcTesting');
+    let data;
+    try { data = JSON.parse(await fetchText(`${server}/player_api.php?${new URLSearchParams({ username: f.u.value.trim(), password: f.p.value })}`)); }
+    catch (e) { return srcFail(f, /srcNeedApp|browser|navigateur|المتصفح/.test(e.message) || e.message === t('srcNeedApp') ? t('srcNeedApp') : t('srcUnreachable')); }
+    const info = data && data.user_info;
+    if (!info || Number(info.auth) === 0) return srcFail(f, t('srcBadLogin'));
+    if (info.status && !/^active$/i.test(info.status)) return srcFail(f, t('srcExpired'));
+    const id = Math.random().toString(36).slice(2, 9);
+    putSources([...getSources(), { id, type: 'xtream', name: f.name.value.trim(), server, u: f.u.value.trim(), p: f.p.value }]);
+    useSource(id); closeModal(); toast(t('srcSaved', { n: f.name.value.trim() })); state.user.tab = 'home'; renderUser();
+  },
+  async 'src-m3u'(f) {
+    const url = f.url.value.trim(); const file = f.file.files[0];
+    if (!file && !/^https?:\/\/[^\s/]+/i.test(url)) return srcFail(f, t('srcBadUrl'));
+    const b = f.querySelector('button'); b.disabled = true; b.textContent = t('srcTesting');
+    let items;
+    try { items = parseM3U(file ? await file.text() : await fetchText(url)); } catch (e) { return srcFail(f, e.message === t('srcNeedApp') ? e.message : t('srcUnreachable')); }
+    if (!items.length) return srcFail(f, t('srcEmpty'));
+    const id = Math.random().toString(36).slice(2, 9);
+    putSources([...getSources(), { id, type: 'm3u', name: f.name.value.trim(), url: file ? '' : url }]);
+    saveM3u(id, items); (state.user.m3u ||= {})[id] = items;
+    useSource(id); closeModal(); toast(`${t('srcSaved', { n: f.name.value.trim() })} · ${t('srcChannels', { n: items.length })}`); state.user.tab = 'home'; renderUser();
   },
 });
 

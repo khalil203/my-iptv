@@ -2,8 +2,11 @@
 // Pages: home (features, devices, pricing, setup, FAQ, contact), about, privacy, terms.
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
+import { ic } from './icons.js';
+
 const T = {
   en: {
+    hl: 'Live TV', start: 'Get started', inc: 'Live TV, movies and series', tiles: [['Live TV', 'By category'], ['Movies & Series', 'On demand'], ['Multi devices', 'Phone, TV, computer'], ['Support', 'Inside the app']],
     nav: ['Features', 'Devices', 'Pricing', 'Setup', 'FAQ', 'Contact'], signIn: 'Sign in', trial: 'Start free {h}h trial', seePlans: 'See plans',
     h1: 'Live TV, movies and series in one simple app', sub: 'Sign in once and watch on your phone, your TV or your computer. Manage your subscription yourself, with support when you need it.',
     prev: ['Live TV', 'Movies', 'Series', 'Continue watching', 'Now playing'],
@@ -21,6 +24,7 @@ const T = {
     legalNote: 'Last updated: {d}',
   },
   fr: {
+    hl: 'TV en direct', start: 'Commencer', inc: 'TV en direct, films et séries', tiles: [['TV en direct', 'Par catégorie'], ['Films et séries', 'À la demande'], ['Multi-appareils', 'Téléphone, TV, ordinateur'], ['Assistance', 'Dans l’application']],
     nav: ['Fonctions', 'Appareils', 'Tarifs', 'Installation', 'FAQ', 'Contact'], signIn: 'Se connecter', trial: 'Essai gratuit de {h} h', seePlans: 'Voir les offres',
     h1: 'TV en direct, films et séries dans une seule application', sub: 'Connectez-vous une fois et regardez sur votre téléphone, votre TV ou votre ordinateur. Gérez votre abonnement vous-même, avec une assistance quand vous en avez besoin.',
     prev: ['TV en direct', 'Films', 'Séries', 'Reprendre la lecture', 'En cours'],
@@ -38,6 +42,7 @@ const T = {
     legalNote: 'Dernière mise à jour : {d}',
   },
   ar: {
+    hl: 'البث المباشر', start: 'ابدأ الآن', inc: 'بث مباشر وأفلام ومسلسلات', tiles: [['البث المباشر', 'حسب الفئة'], ['أفلام ومسلسلات', 'عند الطلب'], ['أجهزة متعددة', 'هاتف، تلفاز، حاسوب'], ['الدعم', 'داخل التطبيق']],
     nav: ['المزايا', 'الأجهزة', 'الأسعار', 'التثبيت', 'الأسئلة', 'اتصل بنا'], signIn: 'تسجيل الدخول', trial: 'تجربة مجانية {h} ساعة', seePlans: 'عرض الباقات',
     h1: 'البث المباشر والأفلام والمسلسلات في تطبيق واحد بسيط', sub: 'سجّل الدخول مرة واحدة وشاهد على هاتفك أو تلفازك أو حاسوبك. أدِر اشتراكك بنفسك، مع دعم عند الحاجة.',
     prev: ['البث المباشر', 'أفلام', 'مسلسلات', 'متابعة المشاهدة', 'يُعرض الآن'],
@@ -61,6 +66,9 @@ const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fill = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
 const IDS = ['features', 'devices', 'pricing', 'setup', 'faq', 'contact'];
 
+// The highlighted plan: the first one the owner gave a badge, otherwise the middle one.
+const pkIdx = (pk) => { const i = pk.findIndex((p) => p.badge); return i >= 0 ? i : Math.floor((pk.length - 1) / 2); };
+
 export function siteHtml({ config, lang, langs, page }) {
   const L = T[lang] || T.en; const b = config.branding || {}; const app = esc(b.appName || 'IPTV');
   const trialOn = !!config.trial?.enabled; const h = config.trial?.hours || 24;
@@ -68,7 +76,7 @@ export function siteHtml({ config, lang, langs, page }) {
   const logo = `<img src="${esc(b.logoUrl || 'logo.png')}" alt="" width="40" height="40">`;
   const head = `<header class="s-nav"><a class="s-brand" data-act="site-page" data-page="home" href="#">${logo}<b>${app}</b></a>
     <nav class="s-links" aria-label="Sections">${page === 'home' ? L.nav.map((n, i) => `<a href="#${IDS[i]}" data-act="site-jump" data-to="${IDS[i]}">${n}</a>`).join('') : ''}</nav>
-    <button class="btn primary" data-act="site-login">${L.signIn}</button></header>`;
+    <div class="s-navbtns"><button class="btn" data-act="site-login">${L.signIn}</button>${trialOn ? `<button class="btn primary s-hide-sm" data-act="trial">${L.start}</button>` : ''}</div></header>`;
   const foot = `<footer class="s-foot"><div class="s-footrow">${['about', 'privacy', 'terms'].map((p, i) => `<a href="#" data-act="site-page" data-page="${p}">${L.foot[i]}</a>`).join('')}<a href="download.html">${L.getApp}</a></div>
     <div class="s-footrow lang-sw">${langs.map(([k, n]) => `<a href="#" data-act="lang" data-lang="${k}" class="${lang === k ? 'on' : ''}">${n}</a>`).join('')}</div>
     <p class="muted small">© ${new Date().getFullYear()} ${app}. ${L.rights}</p></footer>`;
@@ -78,22 +86,26 @@ export function siteHtml({ config, lang, langs, page }) {
       : (page === 'privacy' ? L.priv : L.terms).map(([t, d]) => `<h3>${esc(t)}</h3><p>${esc(d)}</p>`).join('') + `<p class="muted small">${fill(L.legalNote, { d: UPDATED })}</p>`;
     return `<div class="site">${head}<main class="s-doc"><a href="#" class="s-back" data-act="site-page" data-page="home">${L.back}</a><h1>${title}</h1>${body}</main>${foot}</div>`;
   }
-  const cards = (list, cls = '') => `<div class="s-grid ${cls}">${list.map(([t, d]) => `<div class="s-card"><h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join('')}</div>`;
+  const cards = (list, cls = '', icons = []) => `<div class="s-grid ${cls}">${list.map(([t, d], i) => `<div class="s-card">${icons[i] ? `<span class="s-ic">${ic(icons[i], 24)}</span>` : ''}<h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join('')}</div>`;
+  const h1 = esc(L.h1).replace(esc(L.hl), `<span class="grad">${esc(L.hl)}</span>`);
+  const featIdx = Math.max(0, pkIdx(config.packages || []));
   const pk = config.packages || [];
   const price = (p) => `${SIGN[p.cur] ?? p.cur + ' '}${Number(p.price).toLocaleString(undefined, { minimumFractionDigits: Number(p.price) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
   const cta = trialOn ? `<button class="btn primary lg" data-act="trial">${fill(L.trial, { h })}</button><a class="btn lg" href="#pricing" data-act="site-jump" data-to="pricing">${L.seePlans}</a>`
     : `<a class="btn primary lg" href="#pricing" data-act="site-jump" data-to="pricing">${L.seePlans}</a><button class="btn lg" data-act="site-login">${L.signIn}</button>`;
   return `<div class="site">${head}<main>
-    <section class="s-hero"><div><h1>${esc(L.h1)}</h1><p class="s-sub">${esc(L.sub)}</p><div class="s-cta">${cta}</div></div>
-      <div class="s-preview" aria-hidden="true"><div class="s-pv-top"><span></span><span></span><span></span></div>
-        <div class="s-pv-now"><small>${esc(L.prev[4])}</small><b>${esc(L.prev[0])}</b><i></i></div>
-        <div class="s-pv-tabs"><span class="on">${esc(L.prev[0])}</span><span>${esc(L.prev[1])}</span><span>${esc(L.prev[2])}</span></div>
-        <small class="muted">${esc(L.prev[3])}</small><div class="s-pv-row"><i></i><i></i><i></i></div></div></section>
-    <section><h2>${esc(L.whyT)}</h2>${cards(L.why, 'four')}</section>
-    <section id="features"><h2>${esc(L.featT)}</h2>${cards(L.feat)}</section>
-    <section id="devices"><h2>${esc(L.devT)}</h2>${cards(L.dev, 'four')}<p><a class="btn" href="download.html">${L.getApp}</a></p></section>
-    <section id="pricing"><h2>${esc(L.priceT)}</h2><p class="s-sub">${esc(pk.length ? L.priceSub : L.noPlans)}</p>
-      ${pk.length ? `<div class="s-grid plans">${pk.map((p) => `<div class="s-card s-plan">${p.badge ? `<span class="s-badge">${esc(p.badge)}</span>` : ''}<h3>${esc(p.title)}</h3><div class="s-price">${esc(price(p))}</div><p class="muted">${fill(L.days, { n: esc(p.days) })} · ${Number(p.devices) > 1 ? fill(L.devN, { n: esc(p.devices) }) : L.dev1}</p><button class="btn block" data-act="site-login">${L.choose}</button></div>`).join('')}</div>` : ''}
+    <section class="s-hero"><div><h1>${h1}</h1><p class="s-sub">${esc(L.sub)}</p><div class="s-cta">${cta}</div></div>
+      <div class="s-tiles">${L.tiles.map(([t, d], i) => `<div class="s-tile">${ic(['tv', 'film', 'devices', 'chat'][i], 30)}<b>${esc(t)}</b><span>${esc(d)}</span></div>`).join('')}</div></section>
+    <section class="s-show" aria-hidden="true"><div class="s-preview"><div class="s-pv-bar"><span></span><span></span><span></span><b>${app}</b></div>
+        <div class="s-pv-tiles"><div class="t-live">${ic('tv', 30)}<b>${esc(L.prev[0])}</b></div><div class="t-movies">${ic('film', 30)}<b>${esc(L.prev[1])}</b></div><div class="t-series">${ic('series', 30)}<b>${esc(L.prev[2])}</b></div></div>
+        <div class="s-pv-sub"><span>${ic('chat', 16)} ${esc(L.tiles[3][0])}</span><span>${ic('clock', 16)} ${esc(L.prev[3])}</span><span>${ic('list', 16)} M3U · Xtream</span></div></div></section>
+    <section><h2>${esc(L.whyT)}</h2>${cards(L.why, 'four', ['key', 'remote', 'user', 'chat'])}</section>
+    <section id="features"><h2>${esc(L.featT)}</h2>${cards(L.feat, '', ['tv', 'film', 'play', 'shield', 'chat', 'clock'])}</section>
+    <section id="devices"><h2>${esc(L.devT)}</h2>${cards(L.dev, 'four', ['phone', 'tv', 'phone', 'laptop'])}<p style="margin-top:16px"><a class="btn" href="download.html">${L.getApp}</a></p></section>
+    <section id="pricing" class="s-pricing"><h2>${esc(L.priceT)}</h2><p class="s-sub">${esc(pk.length ? L.priceSub : L.noPlans)}</p>
+      ${pk.length ? `<div class="s-grid plans">${pk.map((p, i) => `<div class="s-card s-plan ${i === featIdx ? 'feat' : ''}">${p.badge ? `<span class="s-badge">${esc(p.badge)}</span>` : ''}<h3>${ic('crown', 20)} ${esc(p.title)}</h3><div class="s-price">${esc(price(p))}</div>
+        <ul class="s-list"><li>${ic('check', 18)} ${fill(L.days, { n: esc(p.days) })}</li><li>${ic('check', 18)} ${Number(p.devices) > 1 ? fill(L.devN, { n: esc(p.devices) }) : L.dev1}</li><li>${ic('check', 18)} ${esc(L.inc)}</li></ul>
+        <button class="btn block ${i === featIdx ? 'primary' : ''}" data-act="site-login">${L.start}</button></div>`).join('')}</div>` : ''}
       ${trialOn ? `<p class="s-note">${fill(esc(L.trialNote), { h })} <a href="#" data-act="trial">${fill(L.trial, { h })}</a></p>` : ''}</section>
     <section id="setup"><h2>${esc(L.setupT)}</h2><ol class="s-steps">${L.setup.map(([t, d]) => `<li><h3>${esc(t)}</h3><p>${esc(d)}</p></li>`).join('')}</ol></section>
     <section id="faq"><h2>${esc(L.faqT)}</h2><div class="s-faq">${L.faq.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div></section>

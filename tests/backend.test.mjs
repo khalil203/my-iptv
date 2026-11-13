@@ -136,3 +136,23 @@ test('helpers: signature check and customer pay link', async () => {
   assert.equal(payUrlFor('https://buy.stripe.com/abc', { id: 'c1', email: 'A@b.co' }), 'https://buy.stripe.com/abc?client_reference_id=c1&prefilled_email=a%40b.co');
   assert.equal(payUrlFor('https://example.com/pay', { id: 'c1' }), 'https://example.com/pay');
 });
+
+// ---- own playlists ----
+import { parseM3U, m3uAnswer } from '../public/m3u.js';
+test('M3U playlists: names, groups, logos, movies, and messy files', () => {
+  const text = ['#EXTM3U url-tvg="http://epg.example/x.xml"', '', '#EXTINF:-1 tvg-id="one.fr" tvg-name="One" tvg-logo="https://img.example/one.png" group-title="News, World",One, the first HD',
+    'http://tv.example/live/u/p/1.ts', '#EXTINF:-1,Plain', '#EXTVLCOPT:http-user-agent=X', 'http://tv.example/live/u/p/2.m3u8', '#EXTINF:0 group-title="Films",A Film (2020)', 'http://tv.example/movie/u/p/9.mkv',
+    'garbage line', '#EXTINF:-1,No address follows', '#EXTINF:-1 tvg-logo="notaurl",Last', '#EXTGRP:Sport', 'https://tv.example/last/stream', 'http://tv.example/bare/file.ts'].join('\r\n');
+  const items = parseM3U(text);
+  assert.equal(items.length, 5);
+  assert.deepEqual({ ...items[0] }, { name: 'One, the first HD', logo: 'https://img.example/one.png', group: 'News, World', tid: 'one.fr', url: 'http://tv.example/live/u/p/1.ts', vod: false });
+  assert.equal(items[1].name, 'Plain'); assert.equal(items[2].vod, true);
+  assert.equal(items[3].name, 'Last'); assert.equal(items[3].group, 'Sport'); assert.equal(items[3].logo, '');
+  assert.equal(items[4].name, 'file');
+  assert.deepEqual(m3uAnswer(items, 'get_live_categories').map((c) => c.category_name), ['News, World', '—', 'Sport']);
+  assert.equal(m3uAnswer(items, 'get_live_streams', { category_id: 'Sport' })[0].stream_id, 3);
+  assert.equal(m3uAnswer(items, 'get_vod_streams')[0].container_extension, 'mkv');
+  assert.deepEqual(m3uAnswer(items, 'get_series'), []);
+  assert.deepEqual(parseM3U('<html>not a playlist</html>'), []);
+  assert.equal(parseM3U(text, 2).length, 2);
+});

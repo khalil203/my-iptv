@@ -35,6 +35,8 @@ public class PlayerActivity extends Activity {
     private SeekBar volBar;
     private SharedPreferences prefs;
     private int zoom = 0;
+    private String mediaUrl = "";   // movies and episodes continue from where they were stopped
+    private boolean resumed = false;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -69,6 +71,7 @@ public class PlayerActivity extends Activity {
         DefaultLoadControl load = new DefaultLoadControl.Builder().setBufferDurationsMs(15000, 50000, 1000, 2000).build();
         player = new ExoPlayer.Builder(this).setLoadControl(load).build();
         prefs = getSharedPreferences("player", MODE_PRIVATE);
+        mediaUrl = url == null ? "" : url;
         player.setVolume(prefs.getFloat("vol", 1f));
 
         // top-right controls: mute, volume, fit/zoom (shown together with the player controls)
@@ -97,7 +100,15 @@ public class PlayerActivity extends Activity {
         view.setKeepScreenOn(true);
         player.setMediaSource(source);
         player.addListener(new Player.Listener() {
-            @Override public void onPlaybackStateChanged(int state) { if (state == Player.STATE_READY) msg.setText(""); }
+            @Override public void onPlaybackStateChanged(int state) {
+                if (state != Player.STATE_READY) return;
+                msg.setText("");
+                if (resumed || player == null) return;
+                resumed = true;
+                long dur = player.getDuration();
+                long pos = prefs.getLong(posKey(), 0);
+                if (!player.isCurrentMediaItemLive() && dur > 0 && pos > 30000 && pos < dur - 60000) player.seekTo(pos);
+            }
             @Override public void onPlayerError(PlaybackException e) {
                 msg.setText("⚠️ This stream could not be played.\n" + e.getErrorCodeName() + "\n\nPress Back to choose another channel.");
             }
@@ -120,6 +131,20 @@ public class PlayerActivity extends Activity {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_MUTE && player != null) { player.setVolume(player.getVolume() > 0 ? 0f : 1f); syncVol(); return true; }
         if (keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && player != null) { player.setPlayWhenReady(!player.getPlayWhenReady()); return true; }
         return super.onKeyDown(keyCode, event);
+    }
+
+    private String posKey() { return "pos_" + Integer.toHexString(mediaUrl.hashCode()); }
+
+    /** Remembers the position of a movie or episode (not live TV), for this player and for "Continue watching" in the app. */
+    @Override protected void onPause() {
+        super.onPause();
+        try {
+            if (player != null && resumed && !player.isCurrentMediaItemLive()) {
+                long dur = player.getDuration(); long pos = player.getCurrentPosition();
+                if (dur > 0) prefs.edit().putLong(posKey(), pos >= dur - 60000 ? 0 : pos)
+                    .putString("lastUrl", mediaUrl).putLong("lastPos", pos / 1000).putLong("lastDur", dur / 1000).apply();
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override protected void onStop() { super.onStop(); if (player != null) { player.release(); player = null; } finish(); }

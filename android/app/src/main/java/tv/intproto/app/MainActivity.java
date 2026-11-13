@@ -125,6 +125,19 @@ public class MainActivity extends Activity {
             }).start();
         }
 
+        /** Where the native player last stopped a movie or episode: {"url":…,"pos":seconds,"dur":seconds}. Read once. */
+        @JavascriptInterface public String lastPos() {
+            try {
+                android.content.SharedPreferences p = getSharedPreferences("player", MODE_PRIVATE);
+                String u = p.getString("lastUrl", "");
+                if (u.isEmpty()) return "{}";
+                JSONObject o = new JSONObject();
+                o.put("url", u); o.put("pos", p.getLong("lastPos", 0)); o.put("dur", p.getLong("lastDur", 0));
+                p.edit().remove("lastUrl").apply();
+                return o.toString();
+            } catch (Exception e) { return "{}"; }
+        }
+
         @JavascriptInterface public void play(String url, String title, String ua) {
             Intent i = new Intent(MainActivity.this, PlayerActivity.class);
             i.putExtra("url", url); i.putExtra("title", title); i.putExtra("ua", ua);
