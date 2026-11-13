@@ -126,6 +126,9 @@ export const DEFAULT_SETTINGS = () => ({
     stripeKey: '', stripeAccountId: 'stripe', stripeWebhookSecrets: '', // one signing secret (whsec_…) per Stripe account, one per line
   },
   stock: { packCredits: 120, packPrice: 90, lowCreditsAlert: 20 },
+  alerts: { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {} }, // customer alerts page
+  mailTexts: {}, // owner's own wording for emails: { MAIL|AM|RM|OM: { en|fr|ar: { key: text } } }
+  waCustom: [], // extra WhatsApp messages the owner added: { id, name, text: { en, fr, ar } }
   security: { sessionHours: 72, proxySecret: '' },
 });
 
@@ -191,6 +194,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/log') return 'activity';
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
   if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
+  if (path === '/api/admin/email/recent') return 'customers_view';
   return 'owner';
 }
 
@@ -1722,6 +1726,18 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           totals: { sales: sales.length, revenueUsd: sum((x) => x.amountUsd || 0), costUsd: sum((x) => x.costUsd || 0), profitUsd: sum((x) => (x.amountUsd || 0) - (x.costUsd || 0)) },
           recent: sales.slice().sort((a, x) => x.at - a.at).slice(0, 60).map((x) => ({ ...x, profitUsd: (x.amountUsd || 0) - (x.costUsd || 0) })),
         });
+      }
+      if (R('GET', '/api/admin/email/recent')) { // the latest emails Resend sent for this account, with their delivery status
+        if (!s.email.resendKey) return err(400, 'Email is not set up (Resend key missing).');
+        let res, d; try { res = await fetchFn('https://api.resend.com/emails?limit=100', { headers: { Authorization: 'Bearer ' + s.email.resendKey } }); d = await res.json().catch(() => ({})); } catch (e) { return err(502, 'Could not reach Resend: ' + e.message); }
+        if (!res.ok) return err(400, res.status === 401 || res.status === 403 || /restricted/i.test(d.name || d.message || '') ? 'Your Resend API key can only send. To read the sent emails, create a key with "Full access" in Resend and paste it in Trial & email setup.' : d.message || 'Resend error ' + res.status);
+        return ok({ list: (Array.isArray(d.data) ? d.data : []).map((m) => ({ id: m.id, to: [].concat(m.to || []).join(', '), subject: m.subject || '', at: Date.parse(m.created_at || '') || 0, status: m.last_event || 'sent' })) });
+      }
+      if (R('POST', '/api/admin/email/bounces/clearall')) {
+        const bad = await getBad(); const only = Array.isArray(body.emails) ? body.emails.map(cleanEmail) : null; let n = 0;
+        for (const e of Object.keys(bad)) if (!e.startsWith('ok:') && (!only || only.includes(e))) { delete bad[e]; bad['ok:' + e] = Date.now(); n++; }
+        if (n) { await store.put('badEmails', bad); await log('email', `Allowed ${n} paused email address(es) again`); }
+        return ok({ ok: true, n });
       }
       if (R('GET', '/api/admin/email/bounces')) {
         const bad = await getBad(); const list = await getCustomers();

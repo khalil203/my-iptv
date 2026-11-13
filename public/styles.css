@@ -715,3 +715,29 @@ svg.i { flex: none; vertical-align: -5px; }
 .g-wait { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: .8rem; }
 .g-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); z-index: 1; pointer-events: none; }
 @media (max-width: 520px) { .guide { --g-ch: 104px; } }
+
+/* ================= ADMIN MENU: groups, search, phone drawer ================= */
+.nav-g { margin: 14px 12px 4px; font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.nav-g:first-child { margin-top: 4px; }
+.nav a[hidden], .nav-g[hidden] { display: none; }
+.nav-search { margin: 0 4px 8px; min-height: 40px; border-radius: 12px; font-size: .9rem; width: auto; }
+.nav-none { padding: 12px; }
+.menu-btn { display: none; } .side-bg { display: none; }
+.topbar h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+@media (max-width: 860px) {
+  .menu-btn { display: inline-flex; flex: none; }
+  .tb-logo { display: none; }
+  .side { display: flex; position: fixed; inset: 0 auto 0 0; inset-inline: 0 auto; z-index: 60; width: min(86vw, 320px); height: 100dvh; transform: translateX(-105%); transition: transform .22s var(--ease); box-shadow: 0 0 60px rgba(0,0,0,.6); background: var(--surface); padding-top: calc(14px + env(safe-area-inset-top)); }
+  [dir=rtl] .side { transform: translateX(105%); }
+  .side.open { transform: none; }
+  .side-bg.open { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(4,7,14,.6); }
+  .side .nav a { min-height: 46px; }
+  .mobile-nav a { white-space: nowrap; }
+}
+@media (max-width: 420px) { .topbar .btn[data-act=logout] { padding-inline: 10px; } .topbar { gap: 6px; } }
+
+/* alerts & emails pages */
+.al-row { flex-wrap: wrap; } .al-acts { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 640px) { .al-acts { width: 100%; justify-content: flex-start; } .al-acts .btn.sm { min-height: 40px; } }
+.admin .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding-bottom: 6px; } .admin .chips a { white-space: nowrap; flex: none; }
+.tbl-wrap { overflow-x: auto; }

@@ -239,13 +239,31 @@ function renderSetup() {
 }
 
 // ---------------- ADMIN ----------------
+// Admin menu: [id, icon, name, permission, group, search words]
 const ADMIN_TABS = [
-  ['overview', '📊', 'Overview', null], ['customers', '👥', 'Customers', 'customers_view'], ['subs', '📅', 'Subscriptions', 'customers_view'], ['dups', '🧬', 'Duplicates', 'customers_view'],
-  ['finance', '🏦', 'Banks & balances', 'finance_view'], ['profits', '📈', 'Profits', 'profits'], ['stock', '🎟', 'Credits stock', 'stock'],
-  ['plans', '💳', 'Plans & prices', 'plans'], ['trial', '🎁', 'Trial & email', 'settings'], ['userdash', '📱', 'User dashboard', 'settings'],
-  ['branding', '🎨', 'Login & branding', 'settings'], ['api', '🔌', 'API settings', 'settings'], ['team', '🛡', 'Team & access', 'owner'],
-  ['support', '💬', 'Support', 'customers_view'], ['security', '🔐', 'My account', null], ['activity', '🧾', 'Activity', 'activity'],
+  ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
+  ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
+  ['alerts', '🔔', 'Alerts', 'customers_view', 'Customers', 'expiring expired trials attention reminders follow up'],
+  ['subs', '📅', 'Subscriptions', 'customers_view', 'Customers', 'tracker csv expiry'],
+  ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
+  ['support', '💬', 'Support', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
+  ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
+  ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
+  ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
+  ['templates', '✍️', 'Message templates', 'settings', 'Messages', 'email whatsapp trial reminder renewal order wording text'],
+  ['emails', '📬', 'Emails & bounces', 'customers_view', 'Messages', 'bounced spam delivered sent resend invalid'],
+  ['trial', '🎁', 'Trial & email setup', 'settings', 'Messages', 'resend key sender free trial renewal offer'],
+  ['userdash', '📱', 'User dashboard', 'settings', 'App', 'customer app sections announcement maintenance playlists'],
+  ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name whatsapp number theme'],
+  ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
+  ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
+  ['team', '🛡', 'Team & access', 'owner', 'System', 'staff permissions roles'],
+  ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
+  ['activity', '🧾', 'Activity', 'activity', 'System', 'log audit history'],
 ];
+const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}</a>`).join(''); };
+
 
 async function renderAdmin() {
   setWaFab(null);
@@ -253,18 +271,19 @@ async function renderAdmin() {
   const b = state.config.branding;
   if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
   const me = state.admin.me;
-  const tabs = ADMIN_TABS.filter((x) => can(x[3]));
+  const tabs = ADMIN_TABS.filter((x) => can(x[3]) && READY_TABS(x[0]));
   if (!tabs.some((x) => x[0] === state.admin.tab)) state.admin.tab = tabs[0][0];
   const t = state.admin.tab;
   const title = ADMIN_TABS.find((x) => x[0] === t)?.[2] || '';
   document.body.className = (me.allPerms || []).filter(([p]) => !can(p)).map(([p]) => 'np-' + p).join(' ');
   $('#app').innerHTML = `<div class="admin">
-    <aside class="side">${brandHtml(b, false)}<nav class="nav">${tabs.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}</nav>
+    <div class="side-bg" data-act="menu-close"></div>
+    <aside class="side" id="side">${brandHtml(b, false)}<input class="nav-search" type="search" placeholder="🔎 Find a page…" data-input="nav-search" aria-label="Find a page" autocomplete="off"><nav class="nav" id="nav">${navHtml(tabs, t)}<div class="nav-none muted small" hidden>No page matches.</div></nav>
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <div class="main">
-      <div class="topbar"><img class="tb-logo" src="${esc(b.logoUrl || 'logo.png')}" alt=""><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
-      <div class="mobile-nav">${tabs.map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
+      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </div></div>`;
   try {
@@ -278,12 +297,16 @@ async function renderAdmin() {
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
-    else if (t === 'trial') body.innerHTML = adminTrial(s) + await adminBounces();
+    else if (t === 'trial') body.innerHTML = adminTrial(s);
     else if (t === 'userdash') body.innerHTML = adminUserDash(s);
     else if (t === 'branding') body.innerHTML = adminBranding(s);
     else if (t === 'api') body.innerHTML = adminApi(s);
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'support') body.innerHTML = await adminSupport();
+    else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
+    else if (t === 'templates') body.innerHTML = await adminTemplates(s);
+    else if (t === 'emails') body.innerHTML = await adminEmails();
+    else if (t === 'data') body.innerHTML = await adminData(s);
     else if (t === 'activity') body.innerHTML = await adminActivity();
     else if (t === 'team') body.innerHTML = await adminTeam();
     else if (t === 'dups') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminDups(); }
@@ -1645,6 +1668,8 @@ const actions = {
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
   logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); document.body.className = ''; await refreshConfig(); route(); },
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
+  'menu-open': () => { $('#side')?.classList.add('open'); document.querySelector('.side-bg')?.classList.add('open'); setTimeout(() => $('.nav-search')?.focus(), 50); },
+  'menu-close': () => { $('#side')?.classList.remove('open'); document.querySelector('.side-bg')?.classList.remove('open'); },
   'cust-filter': (el) => { state.admin.filter = el.dataset.f; state.admin.custLimit = 60; $('#admin-body').innerHTML = adminCustomers(); },
   'cust-more': () => { state.admin.custLimit = (state.admin.custLimit || 60) + 100; $('#cust-list').innerHTML = customerListHtml(); },
   'new-customer': () => { modal('Add customer', customerForm(null), { wide: true }); },
@@ -1872,10 +1897,18 @@ document.addEventListener('submit', (e) => {
   Promise.resolve(forms[f.dataset.form]?.(f)).catch((err) => toast(err.message, true));
 });
 let searchT;
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset?.input === 'nav-search') { const first = document.querySelector('#nav a:not([hidden])'); if (first) first.click(); } if (e.key === 'Escape') actions['menu-close']?.(); });
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
+  if (t.dataset.input === 'nav-search') { // menu search: hides pages that do not match, by name, group or keywords
+    const q = t.value.trim().toLowerCase(); let shown = 0;
+    document.querySelectorAll('#nav a').forEach((a) => { const ok = !q || q.split(/\s+/).every((w) => a.dataset.k.includes(w)); a.hidden = !ok; if (ok) shown++; });
+    document.querySelectorAll('#nav .nav-g').forEach((g) => { let n = g.nextElementSibling, any = false; while (n && n.tagName === 'A') { if (!n.hidden) any = true; n = n.nextElementSibling; } g.hidden = !any; });
+    const none = document.querySelector('#nav .nav-none'); if (none) none.hidden = shown > 0;
+    return;
+  }
   if (t.dataset.input === 'u-search') { state.user.q = t.value; clearTimeout(searchT); searchT = setTimeout(() => { const pos = t.selectionStart; renderUserTab().then(() => { const n = $('[data-input=u-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); }, 300); }
   const pf = t.closest('form[data-preview]');
   if (pf) { const o = formToObj(pf).branding; applyBranding(o); $('#login-preview').innerHTML = loginCard(o, { preview: true }); }
@@ -2339,6 +2372,104 @@ Object.assign(actions, {
   'bounce-sync': async (el) => { el.disabled = true; try { const r = await api('POST', '/api/admin/email/bounces/sync', {}); toast(`Checked ${r.checked} emails · ${r.added} new bounced address${r.added === 1 ? '' : 'es'}`); state.admin.customers = null; renderAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'bounce-clear': async (el) => { await api('POST', '/api/admin/email/bounces/clear', { email: el.dataset.email }); toast('Allowed again ✓'); renderAdmin(); },
   'trial-fix': (el) => { const f = $('form[data-form=trial]'); if (f) { f.email.value = el.dataset.email; $('#trial-err').innerHTML = ''; } },
+});
+
+// =====================================================================
+// Admin: Alerts, Emails & bounces
+// =====================================================================
+const READY_TABS = (k) => !['templates', 'data'].includes(k) || typeof window.__adminExtra === 'object';
+const csvCell = (v) => { v = String(v ?? ''); return /[",\n;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+const toCsv = (head, rows) => '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
+const custCsv = (list) => toCsv(['Name', 'Username', 'Email', 'Phone', 'WhatsApp', 'Plan', 'Status', 'Expires', 'Days left'], list.map((c) => [c.name, c.username, c.email || '', c.phone || '', c.whatsapp || '', c.planName, c.state, isoDay(c.expiresAt), c.daysLeft]));
+
+// ---------------- alerts: who needs attention, in groups the owner can tune ----------------
+const ALERT_DEFS = [
+  ['trialEnding', '⏳', 'Trials ending soon', (c, a) => c.isTrial && c.state !== 'expired' && c.status !== 'disabled' && c.hoursLeft <= a.trialHours, (a) => `Free trials with ${a.trialHours} hours or less left. A good moment to send the payment link.`],
+  ['expiring', '📅', 'Subscriptions ending soon', (c, a) => !c.isTrial && c.state !== 'expired' && c.status !== 'disabled' && c.daysLeft <= a.expiringDays, (a) => `Paid subscriptions ending within ${a.expiringDays} days.`],
+  ['expired', '⛔', 'Expired, not renewed', (c, a) => !c.isTrial && c.state === 'expired' && c.daysLeft >= -a.expiredDays, (a) => `Subscriptions that ended in the last ${a.expiredDays} days.`],
+  ['trialEnded', '🎁', 'Trials that ended', (c, a) => c.isTrial && c.state === 'expired' && c.daysLeft >= -a.expiredDays, (a) => `Free trials that ended in the last ${a.expiredDays} days without buying.`],
+  ['notMessaged', '💬', 'Not contacted on WhatsApp yet', (c, a) => !c.waSentAt && (c.whatsapp || c.phone) && c.status !== 'disabled' && (c.state === 'expired' ? c.daysLeft >= -a.expiredDays : c.isTrial || c.daysLeft <= a.expiringDays), () => 'Ending or ended, has a number, and no WhatsApp message was sent from the app.'],
+  ['bounced', '✉️', 'Email bounced', (c) => !!c.emailBad, () => 'Emails to these customers are paused. Correct the address.'],
+  ['noEmail', '📭', 'No email address', (c) => !c.email, () => 'These customers cannot receive login, reminder or offer emails.'],
+  ['noContact', '🚫', 'No way to contact', (c) => !c.email && !c.phone && !c.whatsapp, () => 'No email and no phone number on file.'],
+  ['neverIn', '👻', 'Never signed in', (c) => !c.lastLogin && c.state !== 'expired' && c.status !== 'disabled', () => 'Active accounts that have not opened the app yet. They may need help installing.'],
+  ['disabled', '🔒', 'Disabled accounts', (c) => c.status === 'disabled', () => 'Accounts you switched off.'],
+];
+async function adminAlerts(s) {
+  state.admin.customers = await api('GET', '/api/admin/customers');
+  const a = { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {}, ...(s.alerts || {}) }; const ui = (state.admin.al ||= { f: '', q: '', open: {} });
+  const q = ui.q.trim().toLowerCase();
+  const match = (c) => !q || [c.name, c.username, c.email, c.phone, c.whatsapp].some((x) => String(x || '').toLowerCase().includes(q));
+  const groups = ALERT_DEFS.filter(([k]) => !a.hide[k]).map(([k, icn, name, test, why]) => ({ k, icn, name, why: why(a), list: state.admin.customers.filter((c) => test(c, a) && match(c)).sort((x, y) => x.expiresAt - y.expiresAt) }));
+  state.admin.alGroups = groups;
+  const total = new Set(groups.flatMap((g) => g.list.map((c) => c.id))).size;
+  const shown = groups.filter((g) => (!ui.f || g.k === ui.f) && (ui.f || g.list.length));
+  return `<div class="row" style="margin-bottom:12px"><input style="flex:1;min-width:180px" type="search" placeholder="🔎 Search these alerts…" value="${esc(ui.q)}" data-input="al-search">${can('settings') ? `<button class="btn" data-act="al-custom">⚙️ Customize</button>` : ''}</div>
+    <div class="chips"><a class="${ui.f ? '' : 'on'}" data-act="al-f" data-f="">All · ${total}</a>${groups.map((g) => `<a class="${ui.f === g.k ? 'on' : ''}" data-act="al-f" data-f="${g.k}">${g.icn} ${g.name} · ${g.list.length}</a>`).join('')}</div>
+    ${shown.length ? shown.map((g) => { const all = ui.open[g.k] || ui.f === g.k; const rows = all ? g.list : g.list.slice(0, 5);
+      return `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${g.icn} ${g.name} <span class="pill ${g.list.length ? 'st-expiring' : 'st-active'}">${g.list.length}</span></h3>${g.list.length ? `<button class="btn sm" data-act="al-csv" data-k="${g.k}">⬇ CSV</button>` : ''}</div><p class="small muted" style="margin:4px 0 10px">${esc(g.why)}</p>
+        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + fmtDate(c.expiresAt) : c.isTrial ? c.hoursLeft + ' h left' : c.daysLeft + ' days left'}${c.email ? ' · ' + esc(c.email) : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
+        ${g.list.length > 5 && !all ? `<div style="text-align:center;margin-top:10px"><button class="btn sm" data-act="al-more" data-k="${g.k}">Show all ${g.list.length}</button></div>` : ''}</div>`; }).join('') : `<div class="empty"><span class="ic">✅</span>${q ? 'No alert matches your search.' : 'Nothing needs your attention right now.'}</div>`}`;
+}
+
+// ---------------- emails & bounces ----------------
+async function adminEmails() {
+  const ui = (state.admin.em ||= { f: 'all', q: '', rf: 'all', rq: '', recent: null });
+  let d = { list: [], at: 0 }; try { d = await api('GET', '/api/admin/email/bounces'); } catch {}
+  if (!state.admin.customers) { try { state.admin.customers = await api('GET', '/api/admin/customers'); } catch { state.admin.customers = []; } }
+  const q = ui.q.trim().toLowerCase();
+  const bad = d.list.filter((x) => (ui.f === 'all' || (ui.f === 'spam') === /spam/.test(x.why)) && (!q || x.email.includes(q) || x.customers.some((c) => (c.name + ' ' + c.username).toLowerCase().includes(q))));
+  state.admin.emShown = bad;
+  const noMail = state.admin.customers.filter((c) => !c.email || !/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(c.email));
+  const tone = { delivered: 'st-active', opened: 'st-active', clicked: 'st-active', sent: 'st-open', delivery_delayed: 'st-expiring', queued: 'st-open', bounced: 'st-expired', complained: 'st-expired', suppressed: 'st-expired', failed: 'st-expired', canceled: 'st-closed' };
+  const rq = ui.rq.trim().toLowerCase();
+  const rec = (ui.recent || []).filter((m) => (ui.rf === 'all' || (ui.rf === 'problem' ? ['bounced', 'complained', 'suppressed', 'failed', 'delivery_delayed'].includes(m.status) : m.status === ui.rf)) && (!rq || (m.to + ' ' + m.subject).toLowerCase().includes(rq)));
+  const count = (f) => (ui.recent || []).filter((m) => (f === 'problem' ? ['bounced', 'complained', 'suppressed', 'failed', 'delivery_delayed'].includes(m.status) : m.status === f)).length;
+  return `<div class="stats"><div class="stat c-bad"><i class="st-ic">${ic('logout', 20)}</i><span>Paused addresses</span><b>${d.list.length}</b></div><div class="stat c-warn"><i class="st-ic">${ic('user', 20)}</i><span>Customers without a usable email</span><b>${noMail.length}</b></div><div class="stat"><i class="st-ic">${ic('clock', 20)}</i><span>Last bounce check</span><b style="font-size:1rem">${d.at ? fmtDT(d.at) : 'never'}</b></div></div>
+    <div class="card" id="bounces"><div class="row"><h3 style="margin:0;flex:1">Bounced and spam-marked addresses</h3><button class="btn sm primary" data-act="bounce-sync" data-perm="customers_edit">Check Resend now</button></div>
+      <p class="small muted">No emails are sent to these addresses, which protects your sender reputation. Checked automatically once a day. Correct the customer's email, or allow the address again if it is fine.</p>
+      <div class="row" style="margin-bottom:10px"><input style="flex:1;min-width:160px" type="search" placeholder="🔎 Search address or customer…" value="${esc(ui.q)}" data-input="em-search"></div>
+      <div class="chips">${[['all', 'All'], ['bounced', 'Bounced'], ['spam', 'Marked as spam']].map(([k, n]) => `<a class="${ui.f === k ? 'on' : ''}" data-act="em-f" data-f="${k}">${n} · ${k === 'all' ? d.list.length : d.list.filter((x) => (k === 'spam') === /spam/.test(x.why)).length}</a>`).join('')}</div>
+      ${bad.length ? `<div class="row" style="margin-bottom:8px"><button class="btn sm" data-act="em-csv">⬇ Export these (${bad.length})</button><button class="btn sm" data-act="em-allowall" data-perm="customers_edit">Allow these again</button></div>` : ''}
+      ${bad.length ? bad.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b dir="ltr" style="overflow-wrap:anywhere">${esc(x.email)}</b> <span class="pill st-expired">${esc(/spam/.test(x.why) ? 'spam' : 'bounced')}</span><div class="small muted">${fmtDate(x.at)}${x.customers.length ? ' · ' + x.customers.map((c) => esc(c.name || c.username)).join(', ') : ' · no customer uses it now'}</div></div>${x.customers[0] ? `<button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${esc(x.customers[0].id)}">Edit</button>` : ''}<button class="btn sm" data-act="bounce-clear" data-perm="customers_edit" data-email="${esc(x.email)}">Allow again</button></div>`).join('') : `<p class="muted small">${d.list.length ? 'Nothing matches this filter.' : 'No paused addresses. ✓'}</p>`}</div>
+    <div class="card"><h3>Customers without a usable email (${noMail.length})</h3><p class="small muted">They cannot get login details, reminders or offers by email.</p>
+      ${noMail.slice(0, ui.allNo ? 9999 : 8).map((c) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)}${c.email ? ' · ' + esc(c.email) : ''}${c.whatsapp || c.phone ? ' · ' + esc(c.whatsapp || c.phone) : ''}</div></div><button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Add email</button></div>`).join('') || '<p class="muted small">Every customer has an email address. ✓</p>'}
+      ${noMail.length > 8 && !ui.allNo ? `<div style="text-align:center;margin-top:10px"><button class="btn sm" data-act="em-allno">Show all ${noMail.length}</button></div>` : ''}</div>
+    <div class="card"><div class="row"><h3 style="margin:0;flex:1">Recent emails (from Resend)</h3><button class="btn sm" data-act="em-recent">${ui.recent ? '⟳ Refresh' : 'Load the last 100'}</button></div>
+      ${ui.recent ? `<div class="row" style="margin:10px 0"><input style="flex:1;min-width:160px" type="search" placeholder="🔎 Search address or subject…" value="${esc(ui.rq)}" data-input="em-rsearch"></div>
+        <div class="chips">${[['all', 'All · ' + ui.recent.length], ['delivered', 'Delivered · ' + count('delivered')], ['opened', 'Opened · ' + count('opened')], ['problem', 'Problems · ' + count('problem')]].map(([k, n]) => `<a class="${ui.rf === k ? 'on' : ''}" data-act="em-rf" data-f="${k}">${n}</a>`).join('')}</div>
+        ${rec.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Sent</th><th>To</th><th>Subject</th><th>Status</th></tr></thead><tbody>${rec.map((m) => `<tr><td class="small">${fmtDT(m.at)}</td><td dir="ltr" style="overflow-wrap:anywhere">${esc(m.to)}</td><td>${esc(m.subject)}</td><td><span class="pill ${tone[m.status] || ''}">${esc(m.status.replace('_', ' '))}</span></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nothing matches this filter.</p>'}` : '<p class="small muted">Shows what was sent, to whom, and whether it was delivered, opened or bounced.</p>'}</div>`;
+}
+const reAdmin = async () => { const b = $('#admin-body'); const tb = state.admin.tab; if (!b) return; if (tb === 'alerts') b.innerHTML = await adminAlerts(state.admin.settings); else if (tb === 'emails') b.innerHTML = await adminEmails(); };
+const keepFocus = async (sel, fn) => { const el = $(sel); const pos = el ? el.selectionStart : 0; await fn(); const n = $(sel); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch {} } };
+let alT = 0;
+document.addEventListener('input', (e) => {
+  const k = e.target.dataset?.input; if (!['al-search', 'em-search', 'em-rsearch'].includes(k)) return;
+  if (k === 'al-search') state.admin.al.q = e.target.value; else if (k === 'em-search') state.admin.em.q = e.target.value; else state.admin.em.rq = e.target.value;
+  clearTimeout(alT); alT = setTimeout(() => keepFocus(`[data-input=${k}]`, reAdmin), 250);
+});
+Object.assign(actions, {
+  'al-f': (el) => { state.admin.al.f = el.dataset.f; reAdmin(); },
+  'al-more': (el) => { state.admin.al.open[el.dataset.k] = true; reAdmin(); },
+  'al-csv': (el) => { const g = (state.admin.alGroups || []).find((x) => x.k === el.dataset.k); if (g) download(`alerts-${g.k}-${isoDay(Date.now())}.csv`, custCsv(g.list), 'text/csv'); },
+  'al-custom': () => {
+    const a = { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {}, ...(state.admin.settings.alerts || {}) };
+    modal('⚙️ Customize alerts', `<form data-form="al-custom"><div class="grid3">${field('“Ending soon” means within (days)', 'expiringDays', a.expiringDays, { type: 'number', attrs: 'min="1" max="60" required' })}${field('Keep expired customers listed for (days)', 'expiredDays', a.expiredDays, { type: 'number', attrs: 'min="1" max="365" required' })}${field('“Trial ending” means within (hours)', 'trialHours', a.trialHours, { type: 'number', attrs: 'min="1" max="72" required' })}</div>
+      <h3 style="margin-top:8px">Groups to show</h3>${ALERT_DEFS.map(([k, icn, name]) => toggle(`${icn} ${name}`, 'show_' + k, !a.hide[k])).join('')}
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Save</button></div></form>`, { wide: true });
+  },
+  'em-f': (el) => { state.admin.em.f = el.dataset.f; reAdmin(); },
+  'em-rf': (el) => { state.admin.em.rf = el.dataset.f; reAdmin(); },
+  'em-allno': () => { state.admin.em.allNo = true; reAdmin(); },
+  'em-csv': () => download(`paused-emails-${isoDay(Date.now())}.csv`, toCsv(['Email', 'Reason', 'Date', 'Customers'], (state.admin.emShown || []).map((x) => [x.email, x.why, isoDay(x.at), x.customers.map((c) => c.username).join(' ')])), 'text/csv'),
+  'em-allowall': async () => { const list = state.admin.emShown || []; if (!list.length || !confirm(`Allow emails to these ${list.length} address(es) again?`)) return; await api('POST', '/api/admin/email/bounces/clearall', { emails: list.map((x) => x.email) }); toast('Allowed again ✓'); state.admin.customers = null; reAdmin(); },
+  'em-recent': async (el) => { el.disabled = true; try { state.admin.em.recent = (await api('GET', '/api/admin/email/recent')).list; reAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+});
+Object.assign(forms, {
+  async 'al-custom'(f) {
+    const hide = {}; ALERT_DEFS.forEach(([k]) => { hide[k] = !f['show_' + k].checked; });
+    try { await saveSettings({ alerts: { expiringDays: Number(f.expiringDays.value), expiredDays: Number(f.expiredDays.value), trialHours: Number(f.trialHours.value), hide } }, true); closeModal(); toast('Saved ✓'); state.admin.al.f = ''; reAdmin(); } catch (e) { toast(e.message, true); }
+  },
 });
 
 boot();
