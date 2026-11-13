@@ -179,6 +179,11 @@ Object.assign(D.en, { channelsV: 'Channels', noGuide: 'No programme information'
 Object.assign(D.fr, { channelsV: 'Chaînes', noGuide: 'Pas d’information sur les programmes' });
 Object.assign(D.ar, { channelsV: 'القنوات', noGuide: 'لا توجد معلومات عن البرامج' });
 
+
+Object.assign(D.en, { trial_typo: 'Please check your email address. Did you mean {s}?', trial_bademail: 'This email address cannot receive mail. Please check it.', useIt: 'Use it' });
+Object.assign(D.fr, { trial_typo: 'Vérifiez votre adresse e-mail. Vouliez-vous dire {s} ?', trial_bademail: 'Cette adresse e-mail ne peut pas recevoir de messages. Vérifiez-la.', useIt: 'Utiliser' });
+Object.assign(D.ar, { trial_typo: 'تحقق من بريدك الإلكتروني. هل تقصد {s}؟', trial_bademail: 'هذا البريد الإلكتروني لا يمكنه استقبال الرسائل. تحقق منه.', useIt: 'استعماله' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');

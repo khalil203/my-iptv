@@ -201,3 +201,62 @@ test('support pictures: stored with the message, only readable by the owner and 
   assert.equal((await x.call('GET', '/api/me/tickets/att', {}, b, { id: att })).status, 404, 'another customer cannot open it');
   assert.equal((await x.call('GET', '/api/admin/tickets/att', {}, tok, { id: att })).json.data, image);
 });
+
+// ---- panel credits and bounced emails ----
+import { findCredits, emailTypo } from '../public/core.js';
+test('panel credits are found in the usual answer shapes', () => {
+  assert.equal(findCredits({ credits: 120 }, 'credits'), 120);
+  assert.equal(findCredits({ credits: '87.50' }, 'credits'), 87.5);
+  assert.equal(findCredits({ status: 'success', data: { balance: '45' } }, 'credits'), 45, 'falls back when the configured path is missing');
+  assert.equal(findCredits({ result: true, user: { Credits: 12 } }, ''), 12);
+  assert.equal(findCredits([{ id: 1, credit: '3' }], 'credits'), 3);
+  assert.equal(findCredits('250', 'credits'), 250);
+  assert.equal(findCredits({ message: 'ok' }, 'credits'), null);
+  assert.equal(findCredits({ a: { b: { credits: 7 } } }, 'a.b.credits'), 7);
+});
+test('panel credits: refused by the panel -> retried through the relay; last good value is kept; errors are explained', async () => {
+  const x = setup(); const tok = await adminToken(x); let mode = 'blocked';
+  const realFetch = x.be; const calls = [];
+  // rebuild a backend whose panel refuses direct calls
+  const db = new Map(); const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  const fetchFn = async (url) => { calls.push(String(url));
+    if (String(url).startsWith('https://relay.example/x')) return mode === 'down' ? { ok: false, status: 502, text: async () => 'upstream error' } : { ok: true, status: 200, text: async () => '{"status":"success","data":{"credits":"64"}}' };
+    if (String(url).startsWith('http://panel.example')) return { ok: false, status: 403, text: async () => '<html>Access denied</html>' };
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
+  const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
+  const t2 = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  await call('PUT', '/api/admin/settings', { reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' }, player: { relayUrl: 'https://relay.example' } }, t2);
+  const good = (await call('GET', '/api/admin/panel/credits', {}, t2)).json;
+  assert.equal(good.ok, true); assert.equal(good.credits, 64); assert.ok(calls.some((u) => u.startsWith('https://relay.example/x?u=')));
+  mode = 'down';
+  const bad = (await call('GET', '/api/admin/panel/credits', {}, t2)).json;
+  assert.equal(bad.ok, false); assert.equal(bad.last.v, 64, 'the last good number is still shown'); assert.match(bad.error, /403|refused/);
+});
+test('bounced emails: typos are caught, bounces are pulled from Resend, paused addresses are skipped until allowed', async () => {
+  assert.equal(emailTypo('someone@gmial.com'), 'someone@gmail.com'); assert.equal(emailTypo('someone@gmail.com'), '');
+  const db = new Map(); const mails = []; let listed = [{ id: 'e1', to: ['test.person@example.com'], last_event: 'bounced', created_at: '2026-11-12T10:00:00Z' }, { id: 'e2', to: ['fine@example.com'], last_event: 'delivered', created_at: '2026-11-12T10:00:00Z' }];
+  const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  const fetchFn = async (url, init) => { url = String(url);
+    if (url.startsWith('https://api.resend.com/emails?')) return { ok: true, status: 200, json: async () => ({ data: listed, has_more: false }) };
+    if (url.startsWith('https://api.resend.com/emails')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm' }) }; }
+    if (url.startsWith('https://cloudflare-dns.com')) return { ok: true, status: 200, json: async () => ({ Status: url.includes('nosuchdomain') ? 3 : 0 }) };
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
+  const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
+  const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  await call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>' }, trial: { enabled: true } }, tok);
+  const mk = (extra) => call('POST', '/api/admin/customers', { name: 'Test Person', username: 'testuser', password: 'secret12', email: 'test.person@example.com', planId: 'p1', ...extra }, tok);
+  assert.match((await mk({ email: 'a@gmial.com' })).json.error, /Did you mean a@gmail.com/);
+  assert.match((await mk({ email: 'a@nosuchdomain.example' })).json.error, /does not exist/);
+  assert.equal((await mk()).status, 200);
+  const typo = await call('POST', '/api/trial', { name: 'New Person', email: 'new@hotmial.com', phone: '0612345678' }); assert.equal(typo.status, 400); assert.equal(typo.json.suggest, 'new@hotmail.com');
+  const sync = await call('POST', '/api/admin/email/bounces/sync', {}, tok); assert.equal(sync.json.added, 1); assert.equal(sync.json.checked, 2);
+  assert.equal((await call('POST', '/api/admin/email/bounces/sync', {}, tok)).json.added, 0, 'not added twice');
+  const list = (await call('GET', '/api/admin/email/bounces', {}, tok)).json.list; assert.equal(list.length, 1); assert.equal(list[0].customers[0].username, 'testuser');
+  assert.equal((await call('GET', '/api/admin/customers', {}, tok)).json[0].emailBad, 'bounced');
+  const before = mails.length;
+  const u = (await call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  assert.equal((await call('POST', '/api/me/email/send', {}, u)).status, 502, 'nothing is sent to a paused address'); assert.equal(mails.length, before);
+  await call('POST', '/api/admin/email/bounces/clear', { email: 'test.person@example.com' }, tok);
+  assert.equal((await call('POST', '/api/admin/email/bounces/sync', {}, tok)).json.added, 0, 'an allowed address is not paused again by the same old bounce');
+  assert.equal((await call('POST', '/api/me/email/send', {}, u)).status, 200); assert.equal(mails.length, before + 1);
+});

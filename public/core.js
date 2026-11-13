@@ -190,6 +190,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/profits') return 'profits';
   if (path === '/api/admin/log') return 'activity';
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
+  if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   return 'owner';
 }
 
@@ -198,6 +199,26 @@ export function cleanEmail(x) {
   const m = String(x || '').toLowerCase().match(/[a-z0-9._%+\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}/);
   return m ? m[0] : '';
 }
+// Finds the credit balance in a panel answer: the path from API settings first, then the usual field names.
+const CREDIT_KEYS = ['credits', 'credit', 'balance', 'credit_balance', 'available_credits', 'reseller_credits', 'points'];
+const toNum = (v) => { if (typeof v === 'number' && isFinite(v)) return v; if (typeof v === 'string') { const m = v.replace(/,/g, '').match(/-?\d+(\.\d+)?/); if (m && v.length < 40) return Number(m[0]); } return null; };
+export function findCredits(data, path) {
+  const direct = path ? toNum(path.split('.').reduce((o, k) => (o == null ? o : o[k]), data)) : null;
+  if (direct !== null) return direct;
+  if (typeof data === 'string' || typeof data === 'number') return toNum(data);
+  const walk = (o, depth) => {
+    if (!o || typeof o !== 'object' || depth > 3) return null;
+    for (const k of Object.keys(o)) if (CREDIT_KEYS.includes(k.toLowerCase())) { const n = toNum(o[k]); if (n !== null) return n; }
+    for (const k of Object.keys(o)) { const n = walk(o[k], depth + 1); if (n !== null) return n; }
+    return null;
+  };
+  return walk(data, 0);
+}
+// Email addresses that can never receive mail: common typing mistakes in well-known domains.
+const DOMAIN_FIX = { 'gmial.com': 'gmail.com', 'gmai.com': 'gmail.com', 'gmal.com': 'gmail.com', 'gamil.com': 'gmail.com', 'gnail.com': 'gmail.com', 'gmaill.com': 'gmail.com', 'gmail.co': 'gmail.com', 'gmail.con': 'gmail.com', 'gmail.cm': 'gmail.com', 'gmail.om': 'gmail.com', 'gmail.fr': 'gmail.com',
+  'hotmial.com': 'hotmail.com', 'hotmai.com': 'hotmail.com', 'hotmal.com': 'hotmail.com', 'hotmail.con': 'hotmail.com', 'hotmail.co': 'hotmail.com', 'hotmaill.com': 'hotmail.com', 'yahooo.com': 'yahoo.com', 'yaho.com': 'yahoo.com', 'yahoo.con': 'yahoo.com', 'yahoo.co': 'yahoo.com',
+  'outlok.com': 'outlook.com', 'outloo.com': 'outlook.com', 'outlook.con': 'outlook.com', 'outlook.co': 'outlook.com', 'icloud.con': 'icloud.com', 'iclod.com': 'icloud.com', 'icoud.com': 'icloud.com', 'live.con': 'live.com' };
+export function emailTypo(email) { const e = cleanEmail(email); const d = e.split('@')[1] || ''; return DOMAIN_FIX[d] ? e.split('@')[0] + '@' + DOMAIN_FIX[d] : ''; }
 // Full HMAC (hex) with SHA-256 or SHA-1 — used for Stripe webhook signatures and two-factor codes.
 async function hmacRaw(keyBytes, msgBytes, hash = 'SHA-256') {
   const k = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash }, false, ['sign']);
@@ -611,6 +632,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     to = cleanEmail(to);
     if (!to) return { ok: false, error: 'This is not a valid email address.' };
     if (!e.resendKey || !e.from || !to) return { ok: false, skipped: true, error: 'Email is not set up (Resend key / sender missing).' };
+    const paused = (await getBad())[to];
+    if (paused) return { ok: false, bounced: true, error: `Not sent: ${to} ${paused.why} before. Correct the address, or allow it again in Trial & email → Bounced addresses.` };
     try {
       const res = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: e.from, to: [to], subject, html }) });
       const data = await res.json().catch(() => ({}));
@@ -624,7 +647,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (!e.resendKey || !e.from) return { ok: false, error: 'Email is not set up (Resend key / sender missing).' };
     if (!msgs.length) return { ok: true, sent: 0 };
     try {
-      msgs = msgs.map((m) => ({ ...m, to: cleanEmail(m.to) })).filter((m) => m.to);
+      const bad = await getBad();
+      msgs = msgs.map((m) => ({ ...m, to: cleanEmail(m.to) })).filter((m) => m.to && !bad[m.to]);
       if (!msgs.length) return { ok: true, sent: 0 };
       const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: e.from, to: [m.to], subject: m.subject, html: m.html }))) });
       const d = await r.json().catch(() => ({}));
@@ -634,7 +658,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Who can get a renewal email right now
   function renewalTargets(list, onlyRecentDays) {
     const now = Date.now();
-    return list.filter((c) => cleanEmail(c.email) && !c.unsub && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
+    return list.filter((c) => cleanEmail(c.email) && !c.emailBad && !c.unsub && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
   }
   async function sentToday() { const k = 'renewsent:' + new Date().toISOString().slice(0, 10); return { k, n: (await store.get(k)) || 0 }; }
   function loginMail(s, c, password, kind) {
@@ -746,6 +770,48 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (typeof image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) throw new Error('att_bad');
     const id = uid(8); await store.put('att:' + id, image, 90 * 86400); return id;
   };
+  async function panelCredits(s, force) {
+    const r = await panelCall(force ? { ...s, reseller: { ...s.reseller, enabled: true } } : s, 'credits', {});
+    const credits = r.ok && !r.skipped ? findCredits(r.data, s.reseller.creditsPath) : null;
+    const last = await store.get('panelcredits');
+    if (r.ok && credits !== null) { if (!last || last.v !== credits || Date.now() - last.at > 3600000) await store.put('panelcredits', { v: credits, at: Date.now() }); return { ok: true, credits, via: r.via, status: r.status, data: r.data }; }
+    const error = r.ok ? 'The panel answered, but no credit number was found in its answer. Tap "Test API" in API settings to see the answer, then set "Path to credits".' : r.error;
+    return { ok: false, credits: null, error, status: r.status, data: r.data, last: last || null };
+  }
+  // Addresses that bounced or complained: never emailed again until the owner allows it.
+  const getBad = async () => (await store.get('badEmails')) || {};
+  async function syncBounces(s) {
+    if (!s.email.resendKey) return { ok: false, error: 'Email is not set up (Resend key missing).' };
+    const bad = await getBad(); let added = 0, checked = 0, after = '';
+    for (let page = 0; page < 3; page++) {
+      let res, d;
+      try { res = await fetchFn(`https://api.resend.com/emails?limit=100${after ? '&after=' + encodeURIComponent(after) : ''}`, { headers: { Authorization: 'Bearer ' + s.email.resendKey } }); d = await res.json().catch(() => ({})); }
+      catch (e) { return { ok: false, error: 'Could not reach Resend: ' + e.message }; }
+      if (!res.ok) return { ok: false, error: res.status === 401 || res.status === 403 || /restricted/i.test(d.name || d.message || '') ? 'Your Resend API key can only send. To read bounces, create a key with "Full access" in Resend and paste it in Trial & email.' : d.message || 'Resend error ' + res.status };
+      const rows = Array.isArray(d.data) ? d.data : [];
+      for (const m of rows) {
+        checked++;
+        const why = { bounced: 'bounced', complained: 'was marked as spam', suppressed: 'bounced' }[m.last_event];
+        if (!why) continue;
+        for (const to of [].concat(m.to || [])) { const e = cleanEmail(to); if (e && !bad[e] && !(bad['ok:' + e] && bad['ok:' + e] > Date.parse(m.created_at || 0))) { bad[e] = { why, at: Date.parse(m.created_at || '') || Date.now() }; added++; } }
+      }
+      if (!d.has_more || !rows.length) break;
+      after = rows[rows.length - 1].id;
+    }
+    if (added) { await store.put('badEmails', bad); await log('email', `${added} email address(es) bounced and were paused`); }
+    await store.put('bouncesync', Date.now());
+    return { ok: true, added, checked };
+  }
+  // Definitely undeliverable: a typo in a well-known domain, or a domain that does not exist.
+  async function emailProblem(email) {
+    const e = cleanEmail(email); if (!e) return '';
+    const fix = emailTypo(e); if (fix) return `This email address looks mistyped. Did you mean ${fix}?`;
+    try {
+      const r = await fetchFn('https://cloudflare-dns.com/dns-query?type=MX&name=' + encodeURIComponent(e.split('@')[1]), { headers: { accept: 'application/dns-json' } });
+      const d = await r.json(); if (d && d.Status === 3) return `This email address cannot receive mail: the domain "${e.split('@')[1]}" does not exist.`;
+    } catch {}
+    return '';
+  }
   const getPayments = async () => (await store.get('payments')) || [];
   // A verified Stripe payment: find the customer and the package, extend the subscription, keep a record. Never runs twice for one payment.
   async function applyStripePayment(s, event) {
@@ -831,12 +897,34 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         init.headers['Content-Type'] = body.trim().startsWith('{') ? 'application/json' : 'application/x-www-form-urlencoded';
       }
     }
-    let res, text;
-    try { res = await fetchFn(url, init); text = await res.text(); }
-    catch (e) { return { ok: false, error: 'Cannot reach panel: ' + e.message }; }
+    // One try with a 12-second limit, so a slow panel can never hang the dashboard.
+    const once = async (u, i) => { const ac = typeof AbortController === 'function' ? new AbortController() : null; const tm = ac ? setTimeout(() => ac.abort(), 12000) : 0; try { const rs = await fetchFn(u, ac ? { ...i, signal: ac.signal } : i); return { res: rs, text: await rs.text() }; } finally { if (tm) clearTimeout(tm); } };
+    const looksJson = (x) => /^\s*[[{"\d]/.test(String(x || ''));
+    let got = null, failMsg = '', via = '';
+    try { got = await once(url, init); } catch (e) { failMsg = e && e.name === 'AbortError' ? 'the panel did not answer within 12 seconds' : e.message; }
+    // Many panels refuse Cloudflare's servers. For read-only calls, try again through your own relay.
+    const refused = !got || ([403, 451, 520, 521, 522, 523, 524, 525, 526, 530].includes(got.res.status) && !looksJson(got.text));
+    const relay = trimSlash(s.player.relayUrl || '');
+    if (refused && relay && init.method === 'GET') {
+      try {
+        const tk = await makeProxyToken(s.security.proxySecret, 'panel', 1);
+        const viaRelay = await once(`${relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(tk)}`, { method: 'GET', headers: {} });
+        if (viaRelay.res.ok || !got) { got = viaRelay; via = 'relay'; }
+      } catch (e) { if (!got) failMsg = failMsg || e.message; }
+    }
+    if (!got) return { ok: false, error: 'Cannot reach the panel: ' + failMsg + (relay ? '' : '. If the panel blocks Cloudflare, add your relay address in API settings.') };
+    const res = got.res; const text = got.text;
     let data; try { data = JSON.parse(text); } catch { data = text; }
     const failed = !res.ok || (isObj(data) && (data.result === false || data.success === false || data.status === 'error' || data.status === false));
-    return { ok: !failed, status: res.status, data, error: failed ? (isObj(data) && (data.message || data.error)) || `Panel returned HTTP ${res.status}` : undefined };
+    let error;
+    if (failed) {
+      error = (isObj(data) && (data.message || data.error || data.msg)) || '';
+      if (typeof error !== 'string') error = JSON.stringify(error).slice(0, 200);
+      if (!error) error = res.status === 403 ? 'The panel refused the connection (403). It may block Cloudflare servers or the API key may be wrong.' : res.status === 404 ? 'The panel did not find this API address (404). Check the URL of this action in API settings.' : res.status === 401 ? 'The panel rejected the API key (401).' : `The panel answered with error ${res.status}.`;
+    } else if (typeof data === 'string' && /<html|<!doctype/i.test(data)) {
+      return { ok: false, status: res.status, data: data.slice(0, 300), via, error: 'The panel sent back a web page instead of API data. Check the API address in API settings.' };
+    }
+    return { ok: !failed, status: res.status, data, via, error };
   }
 
   async function xtream(s, c, params) {
@@ -887,6 +975,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const phone = String(body.phone || '').replace(/[^\d+]/g, '').slice(0, 20);
         const whatsapp = String(body.whatsapp || phone).replace(/[^\d+]/g, '').slice(0, 20);
         if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || phone.replace(/\D/g, '').length < 8) return err(400, 'trial_invalid');
+        { const typo = emailTypo(email); if (typo) return { status: 400, json: { error: 'trial_typo', suggest: typo } }; if (await emailProblem(email)) return err(400, 'trial_bademail'); }
         const list = await getCustomers();
         const digits = (x) => String(x || '').replace(/\D/g, '').slice(-9);
         const prev = findMatches(list, { email, phone, whatsapp });
@@ -1319,13 +1408,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(next);
       }
 
-      if (R('GET', '/api/admin/customers')) return ok((await getCustomers()).map((c) => view(c, s)));
+      if (R('GET', '/api/admin/customers')) { const bad = await getBad(); return ok((await getCustomers()).map((c) => { const v = view(c, s); const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; })); }
 
       if (R('POST', '/api/admin/customers')) {
         const list = await getCustomers();
         const username = String(body.username || '').trim();
         if (username.length < 3) return err(400, 'Login username needs 3+ characters.');
         if (String(body.password || '').length < 4) return err(400, 'Login password needs 4+ characters.');
+        if (body.email && !body.emailAnyway) { const prob = await emailProblem(body.email); if (prob) return err(400, prob); }
         const admin = await store.get('admin');
         if (list.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (admin && admin.username.toLowerCase() === username.toLowerCase()) || (await getTeam()).some((x) => x.username.toLowerCase() === username.toLowerCase()))
           return err(400, 'This username is already used.');
@@ -1369,6 +1459,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const sub = m[2];
 
         if (method === 'PUT' && !sub) {
+          if (body.email && cleanEmail(body.email) !== cleanEmail(c.email) && !body.emailAnyway) { const prob = await emailProblem(body.email); if (prob) return err(400, prob); }
           for (const k of ['name', 'phone', 'note', 'lineUsername', 'linePassword', 'lineId', 'planId', 'email', 'whatsapp', 'lang']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.email !== undefined) c.email = cleanEmail(body.email) || String(body.email).trim();
           if (body.connections !== undefined) c.connections = Number(body.connections) || 1;
@@ -1583,7 +1674,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/admin/stock')) {
         const info = await stockInfo(s);
         let panel = null;
-        if (s.reseller.enabled && query.panel === '1') { const r = await panelCall(s, 'credits', {}); panel = { ok: r.ok, credits: getPath(r.data, s.reseller.creditsPath), error: r.error }; }
+        if (s.reseller.enabled && query.panel === '1') { const r = await panelCredits(s); panel = { ok: r.ok, credits: r.credits, error: r.error, last: r.last }; }
         return ok({ ...info, panel, settings: s.stock });
       }
       if (R('POST', '/api/admin/stock')) {
@@ -1631,6 +1722,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           totals: { sales: sales.length, revenueUsd: sum((x) => x.amountUsd || 0), costUsd: sum((x) => x.costUsd || 0), profitUsd: sum((x) => (x.amountUsd || 0) - (x.costUsd || 0)) },
           recent: sales.slice().sort((a, x) => x.at - a.at).slice(0, 60).map((x) => ({ ...x, profitUsd: (x.amountUsd || 0) - (x.costUsd || 0) })),
         });
+      }
+      if (R('GET', '/api/admin/email/bounces')) {
+        const bad = await getBad(); const list = await getCustomers();
+        return ok({ at: (await store.get('bouncesync')) || 0, list: Object.entries(bad).filter(([k]) => !k.startsWith('ok:')).map(([email, b]) => ({ email, why: b.why, at: b.at, customers: list.filter((c) => cleanEmail(c.email) === email).map((c) => ({ id: c.id, name: c.name, username: c.username })) })).sort((a, b) => b.at - a.at) });
+      }
+      if (R('POST', '/api/admin/email/bounces/sync')) { const r = await syncBounces(s); return r.ok ? ok(r) : err(400, r.error); }
+      if (R('POST', '/api/admin/email/bounces/clear')) {
+        const bad = await getBad(); const e = cleanEmail(body.email);
+        if (bad[e]) { delete bad[e]; bad['ok:' + e] = Date.now(); await store.put('badEmails', bad); await log('email', `Allowed email again: ${e}`); }
+        return ok({ ok: true });
       }
       if (R('POST', '/api/admin/email/test')) {
         const to = String(body.to || s.email.adminEmail || '').trim();
@@ -1797,8 +1898,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('POST', '/api/admin/panel/test')) {
         if (body.target === 'reseller') {
-          const r = await panelCall({ ...s, reseller: { ...s.reseller, enabled: true } }, 'credits', {});
-          return ok({ ok: r.ok, status: r.status, data: r.data, error: r.error, credits: getPath(r.data, s.reseller.creditsPath) });
+          const r = await panelCredits(s, true);
+          return ok({ ok: r.ok, status: r.status, data: r.data, error: r.error, credits: r.credits, via: r.via === 'relay' ? 'Reached through your relay (the panel refused Cloudflare directly).' : undefined });
         }
         const server = trimSlash(s.player.serverUrl);
         if (!server) return err(400, 'Add the streaming server URL first.');
@@ -1821,8 +1922,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('GET', '/api/admin/panel/credits')) {
         if (!s.reseller.enabled) return ok({ enabled: false });
-        const r = await panelCall(s, 'credits', {});
-        return ok({ enabled: true, ok: r.ok, credits: getPath(r.data, s.reseller.creditsPath), error: r.error });
+        const r = await panelCredits(s);
+        return ok({ enabled: true, ok: r.ok, credits: r.credits, error: r.error, last: r.last, via: r.via });
       }
 
       if (R('POST', '/api/admin/account')) {
@@ -1881,12 +1982,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
   // Daily job (Cloudflare cron): low credit alerts to admin + expiry reminders to customers.
   async function daily() {
+    try { const s0 = await getSettings(); if (s0.email.resendKey) await syncBounces(s0); } catch {}
     const s = await refreshRates(await getSettings(), false);
     const out = { reminders: 0, alert: false };
     if (s.email.lowCreditsAlerts && s.email.adminEmail) {
       const st = await stockInfo(s);
       let panelCredits = null;
-      if (s.reseller.enabled) { const r = await panelCall(s, 'credits', {}); panelCredits = r.ok ? Number(getPath(r.data, s.reseller.creditsPath)) : null; }
+      if (s.reseller.enabled) { const r = await panelCall(s, 'credits', {}); panelCredits = r.ok ? findCredits(r.data, s.reseller.creditsPath) : null; }
       const lim = Number(s.stock.lowCreditsAlert) || 0;
       const lowPanel = panelCredits != null && !isNaN(panelCredits) && panelCredits <= lim;
       if (st.low || lowPanel) {

@@ -278,7 +278,7 @@ async function renderAdmin() {
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
-    else if (t === 'trial') body.innerHTML = adminTrial(s);
+    else if (t === 'trial') body.innerHTML = adminTrial(s) + await adminBounces();
     else if (t === 'userdash') body.innerHTML = adminUserDash(s);
     else if (t === 'branding') body.innerHTML = adminBranding(s);
     else if (t === 'api') body.innerHTML = adminApi(s);
@@ -305,7 +305,8 @@ async function adminOverview() {
   const panelLow = cr.enabled && cr.ok && Number(cr.credits) <= lim;
   const creditWarn = panelLow || st.stock.low ? `<div class="notice warning">🎟 <b>Credits are low</b> — ${panelLow ? `panel has <b>${esc(cr.credits)}</b> credits` : ''}${panelLow && st.stock.low ? ' · ' : ''}${st.stock.low ? `stock has <b>${st.stock.available}</b> credits` : ''}. <a data-act="atab" data-tab="stock" style="cursor:pointer">Buy credits →</a></div>` : '';
   const pwWarn = me.isDefault ? `<div class="notice danger">🔐 You are using the default admin login (<b>Iptv / Iptv</b>). Anyone who knows it can control your app. <a data-act="atab" data-tab="security" style="cursor:pointer">Change it now →</a></div>` : '';
-  return `${pwWarn}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
+  const panelErr = cr.enabled && !cr.ok && can('settings') ? `<div class="notice warning">🎟 <b>Panel credits could not be read.</b> ${esc(cr.error || '')} <a data-act="atab" data-tab="api" style="cursor:pointer">Open API settings →</a></div>` : '';
+  return `${pwWarn}${panelErr}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
   <div class="stats">
     <div class="stat"><i class="st-ic">${ic('user', 20)}</i><span>Customers</span><b>${st.total}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('check', 20)}</i><span>Active</span><b>${st.active}</b></div>
@@ -314,7 +315,7 @@ async function adminOverview() {
     <div class="stat"><i class="st-ic">${ic('star', 20)}</i><span>Free trials</span><b>${st.trials}</b></div>
     ${st.revenueTotal !== null ? `<div class="stat c-acc"><i class="st-ic">${ic('card', 20)}</i><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
     <div class="stat"><i class="st-ic">${ic('crown', 20)}</i><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
-    <div class="stat ${panelLow ? 'c-bad' : ''}"><span>Panel credits (API)</span><b>${cr.enabled ? (cr.ok ? esc(cr.credits ?? '—') : '⚠️') : 'off'}</b></div>
+    <div class="stat ${panelLow ? 'c-bad' : ''}"><span>Panel credits (API)</span><b>${cr.enabled ? (cr.ok ? esc(cr.credits ?? '—') : cr.last ? esc(cr.last.v) : '⚠️') : 'off'}</b>${cr.enabled && !cr.ok ? `<span title="${esc(cr.error || '')}">⚠️ ${cr.last ? 'last known, ' + fmtDate(cr.last.at) : 'not connected'}</span>` : ''}</div>
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
     ${st.totalBalanceUsd !== null && st.totalBalanceUsd !== undefined ? `<div class="stat c-ok" data-act="atab" data-tab="finance" style="cursor:pointer"><span>All banks (total)</span><b>${usd(st.totalBalanceUsd)}</b><span>${mad(st.totalBalanceUsd * st.madRate)}</span></div>` : ''}
   </div>
@@ -335,7 +336,7 @@ function filteredCustomers() {
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
 function custActions(c) {
-  return `<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+  return `${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
@@ -653,7 +654,7 @@ async function adminActivity() {
 }
 
 function showResult(el, r) {
-  el.innerHTML = `<div class="notice ${r.ok ? 'success' : 'danger'}" style="margin-top:12px"><b>${r.ok ? '✅ Connected' : '❌ ' + esc(r.error || 'Failed')}</b>${r.credits != null ? ` · Credits: <b>${esc(r.credits)}</b>` : ''}${r.data != null ? `<div class="code" style="margin-top:8px">${esc(typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2)).slice(0, 3000)}</div>` : ''}</div>`;
+  el.innerHTML = `<div class="notice ${r.ok ? 'success' : 'danger'}" style="margin-top:12px"><b>${r.ok ? '✅ Connected' : '❌ ' + esc(r.error || 'Failed')}</b>${r.credits != null ? ` · Credits: <b>${esc(r.credits)}</b>` : ''}${r.via ? `<div class="small" style="margin-top:6px">${esc(r.via)}</div>` : ''}${r.data != null ? `<div class="code" style="margin-top:8px">${esc(typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2)).slice(0, 3000)}</div>` : ''}</div>`;
 }
 
 // ---------------- animations ----------------
@@ -1788,7 +1789,7 @@ const forms = {
       box.innerHTML = r.username
         ? `<p>${t('trialShown')}</p><div class="code" dir="ltr">${t('username')}: ${esc(r.username)}\n${t('password')}: ${esc(r.password)}</div>${r.emailed ? `<p class="small muted">${t('trialSent', { email: esc(o.email) })}</p>` : ''}<button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>`
         : `<div class="notice success">${t('trialSent', { email: esc(o.email) })}</div><button class="btn block" data-act="close-modal">${t('haveAccount')}</button>`;
-    } catch (e) { $('#trial-err').innerHTML = `<div class="err-box">${esc(t(e.message))}</div>`; btn.disabled = false; }
+    } catch (e) { $('#trial-err').innerHTML = e.data?.suggest ? `<div class="err-box">${t('trial_typo', { s: esc(e.data.suggest) })} <button type="button" class="btn sm" data-act="trial-fix" data-email="${esc(e.data.suggest)}">${t('useIt')}</button></div>` : `<div class="err-box">${esc(t(e.message))}</div>`; btn.disabled = false; }
   },
   async tx(f) {
     try { await api('POST', '/api/admin/tx', formToObj(f)); toast('Saved ✓'); closeModal(); renderAdmin(); }
@@ -2326,5 +2327,18 @@ async function fillGuide(chs) {
   await Promise.all([work(), work(), work(), work()]);
 }
 Object.assign(actions, { 'guide-mode': (el) => { state.user.guide = !!el.dataset.on; renderUserTab(); } });
+
+// ---------------- admin: bounced email addresses ----------------
+async function adminBounces() {
+  let d = { list: [], at: 0 }; try { d = await api('GET', '/api/admin/email/bounces'); } catch { return ''; }
+  return `<div class="card" id="bounces"><div class="row"><h3 style="margin:0;flex:1">Bounced addresses</h3><button class="btn sm primary" data-act="bounce-sync" data-perm="customers_edit">Check Resend now</button></div>
+    <p class="small muted">When an email bounces or is marked as spam, the address is paused here and no more emails are sent to it, which protects your sender reputation. Checked automatically once a day${d.at ? ' · last check ' + fmtDT(d.at) : ''}. Correct the customer's email, or tap “Allow again” if the address is fine.</p>
+    ${d.list.length ? d.list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b dir="ltr" style="overflow-wrap:anywhere">${esc(x.email)}</b><div class="small muted">${esc(x.why)} · ${fmtDate(x.at)}${x.customers.length ? ' · ' + x.customers.map((c) => esc(c.name || c.username)).join(', ') : ''}</div></div>${x.customers[0] ? `<button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${esc(x.customers[0].id)}">Edit</button>` : ''}<button class="btn sm" data-act="bounce-clear" data-perm="customers_edit" data-email="${esc(x.email)}">Allow again</button></div>`).join('') : '<p class="muted small">No paused addresses.</p>'}</div>`;
+}
+Object.assign(actions, {
+  'bounce-sync': async (el) => { el.disabled = true; try { const r = await api('POST', '/api/admin/email/bounces/sync', {}); toast(`Checked ${r.checked} emails · ${r.added} new bounced address${r.added === 1 ? '' : 'es'}`); state.admin.customers = null; renderAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'bounce-clear': async (el) => { await api('POST', '/api/admin/email/bounces/clear', { email: el.dataset.email }); toast('Allowed again ✓'); renderAdmin(); },
+  'trial-fix': (el) => { const f = $('form[data-form=trial]'); if (f) { f.email.value = el.dataset.email; $('#trial-err').innerHTML = ''; } },
+});
 
 boot();
