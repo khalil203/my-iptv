@@ -3392,4 +3392,9 @@ function reportPlayErr(action, e) {
   api('POST', '/api/me/report', { action, status: e.status || 0, message: String(e.message || '').slice(0, 120), route }).catch(() => {});
 }
 
+setTimeout(() => { // Watchdog: if the boot did not finish in 8s, show a clear message instead of an endless spinner
+  if (document.querySelector('#app .boot') || document.querySelector('#app .boot .spinner')) {
+    $('#app').innerHTML = `<div class="block-screen"><div class="ic">📡</div><h2>Can’t reach INTPROTO-TV right now</h2><p class="muted" style="max-width:340px">Please check your internet connection or VPN, then try again. If it keeps happening, your network may be blocking Cloudflare Workers.</p><button class="btn primary" onclick="location.reload()">Retry</button></div>`;
+  }
+}, 8000);
 boot();
