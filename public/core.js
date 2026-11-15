@@ -2268,6 +2268,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (touchesKey && !isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.');
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
+        if (body?.email?.resendKey === '••••') delete body.email.resendKey;
+        if (body?.reseller?.apiKey === '••••') delete body.reseller.apiKey;
+        if (body?.reseller?.password === '••••') delete body.reseller.password;
+        if (body?.reseller?.username === '••••') delete body.reseller.username;
+        if (body?.reseller?.baseUrl === '••••') delete body.reseller.baseUrl;
+        if (body?.panel) for (const k of Object.keys(body.panel)) { const v = body.panel[k]; if (v && typeof v === 'object' && (v.apiKey === '••••' || v.password === '••••' || v.baseUrl === '••••')) { if (v.apiKey === '••••') delete v.apiKey; if (v.password === '••••') delete v.password; if (v.baseUrl === '••••') delete v.baseUrl; } }
+        if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
         const next = deepMerge(s, body || {});
         next.security.proxySecret = s.security.proxySecret;
         next.branding.whatsapp = String(next.branding.whatsapp || '').replace(/\D/g, '');
