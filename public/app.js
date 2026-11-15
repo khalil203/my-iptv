@@ -115,6 +115,8 @@ function applyBranding(b) {
   applyTheme();
 }
 const DAYMS = 86400000;
+const flag = (code) => { const s2 = String(code || '').trim().toUpperCase(); if (!/^[A-Z]{2}$/.test(s2)) return ''; return String.fromCodePoint(...[...s2].map((c) => 0x1F1E6 + c.charCodeAt(0) - 65)); };
+const spendTier = (paid) => { const n = Number(paid) || 0; return n >= 500 ? ['ELITE', 'st-active'] : n >= 100 ? ['VIP', 'st-expiring'] : n > 0 ? ['Regular', 'st-open'] : ['New', 'st-open']; };
 
 // ---------------- day / night theme ----------------
 // Auto (default): day theme 06:00–18:00 in the device's own time zone, night theme otherwise.
@@ -279,6 +281,7 @@ const ADMIN_TABS = [
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
   ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
   ['holidays', '🗓', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
+  ['browser', '🌐', 'In-panel browser', null, 'System', 'browser internet search google sheets drive resend stripe duckduckgo'],
   ['team', '🛡', 'Team & access', 'owner', 'System', 'staff permissions roles'],
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
   ['activity', '🧾', 'Activity', 'activity', 'System', 'log audit history'],
@@ -286,7 +289,41 @@ const ADMIN_TABS = [
 const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
 
+async function renderBylawsGate(me) {
+  setWaFab(null);
+  const T = {
+    en: ['Staff Internal Bylaws', 'Arabic, French and English versions follow. Signing is mandatory — nothing else works until you sign.', '1. Confidentiality: everything you see inside this panel (customer data, finances, payments, API keys, other staff) is strictly confidential. Never share it.', '2. No data export: you may not export, copy, screenshot, download or photograph any data (customers, financials, lists) for any reason, except tasks explicitly assigned to you.', '3. Customer contact: use official channels only (in-app chat, tickets, email, WhatsApp/Telegram from the app). Never give personal phone numbers.', '4. Shift rules: check in and check out. Use live Europe/USA clocks before contacting customers. Use the contact checkboxes (24h auto-reset).', '5. Escalation: something you do not understand, or any technical problem → use the Report a Problem button. Do not guess.', '6. Honesty: you will leave the team exactly as you found it. All actions are logged by name.', 'Signature below: I have read and I agree. I understand violations lead to removal without notice.'],
+    fr: ['Règlement intérieur', 'Versions anglaise, arabe et française ci-dessous. La signature est obligatoire pour accéder au panel.', '1. Confidentialité: tout ce que vous voyez ici (données clients, finances, paiements, clés API, équipe) est strictement confidentiel. Ne le partagez jamais.', '2. Aucune exportation: vous ne pouvez pas exporter, copier, photographier les données (clients, finances, listes).', '3. Contact client: utilisez uniquement les canaux officiels (chat dans l’app, tickets, e-mail, WhatsApp/Telegram depuis l’app).', '4. Horaires: pointage entrée/sortie. Utilisez les horloges Europe/USA avant tout contact client.', '5. Escalade: tout problème technique → bouton Report a Problem (Ne devinez pas).', '6. Honnêteté: vous laissez l’équipe telle que vous l’avez trouvée. Toutes les actions sont enregistrées.', 'Signature ci-dessous: j’ai lu et j’accepte. Les violations mènent au départ immédiat.'],
+    ar: ['النظام الداخلي', 'النسخة العربية هي نفسها الإنجليزية والفرنسية، والتوقيع إلزامي للدخول.', '١. السرية: كل ما تراه داخل هذا اللوحة (بيانات العملاء، المالية، المدفوعات، مفاتيح الـ API، الفريق) سري تمامًا. لا تشاركه أبدًا.', '٢. لا تصدير للبيانات: لا يجوز لك تصدير أو نسخ أو تصوير أي بيانات (عملاء، مالية، قوائم) تحت أي ظرف.', '٣. التواصل مع العملاء: عبر القنوات الرسمية فقط (المحادثة داخل التطبيق، التذاكر، البريد، واتساب/تيليجرام من التطبيق). لا تُعطِ أبدًا رقم هاتفك الشخصي.', '٤. الحضور: سجل الدخول والخروج. استعمل ساعات أوروبا/أمريكا قبل أي تواصل مع العملاء، واستعمل مربعات التواصل (تتجدد كل 24 ساعة).', '٥. التصعيد: أي مشكلة تقنية → زر Report a Problem (لا تخمّن).', '٦. الأمانة: ستغادر الفريق كما وجدته. كل إجراء مسجل باسمك.', 'التوقيع أدناه: قرأت وأوافق؛ المخالفة تؤدي للطرد دون إشعار.'],
+  };
+  const sec = (lang) => `<div data-bylaw-lang="${lang}" style="display:none">${T[lang].map((line, i) => `<p${i === 0 ? ' style="font-size:1.1rem;font-weight:700;margin-bottom:10px"' : ''}>${esc(line)}</p>`).join('')}</div>`;
+  $('#app').innerHTML = `<div class="block-screen" style="max-width:720px">
+    <div class="ic">📜</div><h2>Staff Internal Bylaws</h2>
+    <div class="chips" style="margin:6px 0 12px"><a class="on" data-act="bylaw-lang" data-l="en">English</a><a data-act="bylaw-lang" data-l="fr">Français</a><a data-act="bylaw-lang" data-l="ar">العربية</a></div>
+    <div style="max-height:300px;overflow:auto;text-align:start;background:var(--elevated);border:1px solid var(--line2);border-radius:12px;padding:14px">${sec('en')}${sec('fr')}${sec('ar')}</div>
+    <form data-form="bylaws-sign" style="margin-top:16px;width:100%;max-width:520px;text-align:start">
+      ${field('Your full name (electronic signature)', 'name', (me && me.name) || '', { attrs: 'required maxlength="80"' })}
+      <label class="toggle" style="margin:10px 0"><input type="checkbox" name="accepted" required><i></i><span>I have read and I accept the bylaws in English / French / Arabic, in full.</span></label>
+      <button class="btn primary block">✍️ Sign & continue to the dashboard</button>
+    </form>
+    <p class="small muted" style="margin-top:10px">Signing is recorded with your name, timestamp and IP address, and archived in the owner’s dashboard.</p>
+  </div>`;
+  // show English by default
+  const first = $('[data-bylaw-lang="en"]'); if (first) first.style.display = 'block';
+}
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act="bylaw-lang"]'); if (!el) return;
+  document.querySelectorAll('[data-bylaw-lang]').forEach((x) => { x.style.display = x.dataset.bylawLang === el.dataset.l ? 'block' : 'none'; });
+  el.parentElement.querySelectorAll('a').forEach((a) => a.classList.toggle('on', a === el));
+});
 async function render2faGate() {
+  setWaFab(null);
+  const me = state.admin.me;
+  $('#app').innerHTML = `<div class="block-screen"><div class="ic">🔐</div><h2>Two-factor sign-in required</h2>
+    <p class="muted" style="max-width:440px;margin:6px 0 18px">The dashboard is only available once two-factor sign-in is on for <b>${esc(me?.username || '')}</b>. It protects customer lines, payments and settings (spec §2).</p>
+    <button class="btn primary" data-act="tfa-setup">🔐 Turn on two-step sign-in</button>
+    <p class="small muted" style="margin-top:14px">You will type a setup key into your authenticator app, then enter the 6-digit code it shows.</p></div>`;
+}
   setWaFab(null);
   const me = state.admin.me;
   $('#app').innerHTML = `<div class="block-screen"><div class="ic">🔐</div><h2>Two-factor sign-in required</h2>
@@ -302,7 +339,12 @@ async function renderAdmin() {
   if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
   const me = state.admin.me;
   if (me.mustSetup2fa) { render2faGate(); return; }
-  const tabs = ADMIN_TABS.filter((x) => (x[0] === 'holidays' ? (me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || '')) : can(x[3])) && READY_TABS(x[0]));
+  if (me.mustSignBylaws) { renderBylawsGate(me); return; }
+  const tabs = ADMIN_TABS.filter((x) => {
+    if (x[0] === 'holidays') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || '');
+    if (x[0] === 'api') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || ''); // panel & Resend keys are Nizar/Khalil only (spec §1)
+    return can(x[3]);
+  }).filter((x) => READY_TABS(x[0]));
   if (!tabs.some((x) => x[0] === state.admin.tab)) state.admin.tab = tabs[0][0];
   const t = state.admin.tab;
   const title = ADMIN_TABS.find((x) => x[0] === t)?.[2] || '';
@@ -360,6 +402,7 @@ async function renderAdmin() {
     else if (t === 'chat') { body.innerHTML = await adminChat(); chatScroll(); }
     else if (t === 'templates') body.innerHTML = await adminTemplates(s);
     else if (t === 'emails') body.innerHTML = await adminEmails();
+    else if (t === 'browser') body.innerHTML = adminBrowserPage(s);
     else if (t === 'holidays') body.innerHTML = adminHolidays();
     else if (t === 'data') body.innerHTML = await adminData(s);
     else if (t === 'activity') body.innerHTML = await adminActivity();
@@ -444,14 +487,14 @@ function customerListHtml() {
   if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
       <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + flag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function oldCustomerListHtml() {
   const list = filteredCustomers();
   return `<div class="tbl-wrap cust-table"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + flag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>
     <div class="cust-cards">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
@@ -725,6 +768,7 @@ async function adminSecurity(s) {
     ${toggle('Require two-factor sign-in for owner & staff', 'security.force2fa', s.security.force2fa !== false, 'Every owner and staff member must turn on two-step sign-in before using the dashboard (spec §2)')}
     ${toggle('Require captcha on customer & trial sign-in', 'security.captcha', s.security.captcha !== false, 'A small math question blocks bots; owner and staff use two-step sign-in instead')}
     ${toggle('Email me if the IPTV server is down (daily check)', 'email.uptimeMonitor', s.email.uptimeMonitor !== false, 'The daily health check emails you when the streaming server does not answer')}
+    ${toggle('Auto-clean dead duplicate accounts (same name + phone + email)', 'security.autoDupCleanup', s.security.autoDupCleanup !== false, 'Runs daily: removes expired duplicates with no sign-in or renewal in 6+ months; always keeps the newest and emails you a list')}
     ${field('Discord voice channel link', 'security.discordUrl', s.security.discordUrl || '', { ph: 'https://discord.com/channels/…', attrs: 'autocapitalize="none"', help: 'One-tap team coordination in the dashboard header — for shift handovers and urgent discussions' })}
     ${field('Keep users signed in for (hours)', 'security.sessionHours', s.security.sessionHours, { type: 'number', attrs: 'min="1" max="2160"' })}
     <button class="btn primary">Save</button></form>
@@ -772,6 +816,9 @@ async function adminTeam() {
   const team = await api('GET', '/api/admin/team');
   state.admin.team = team;
   const all = state.admin.me.allPerms;
+  const me = state.admin.me;
+  let sigs = [];
+  if (me.role === 'owner') { try { sigs = (await api('GET', '/api/admin/bylaws')).list || []; } catch {} }
   return `<div class="row" style="margin-bottom:14px"><p class="muted" style="margin:0;flex:1">Give your team their own login. They sign in on the same page, and only see what you allow. Every action is logged with their name.</p><button class="btn primary" data-act="new-member">＋ Add team member</button></div>
   ${team.length ? `<div class="team-grid">${team.map((m) => `<div class="tm ${m.status === 'disabled' ? 'off' : ''}">
     <div class="row"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1;min-width:0"><b>${esc(m.name)}</b><div class="small muted">${esc(m.role || 'Staff')} · @${esc(m.username)}</div></div>${pill(m.status === 'disabled' ? 'disabled' : 'active')}</div>
@@ -781,7 +828,8 @@ async function adminTeam() {
     ${m.traineeUntil && m.traineeUntil > Date.now() ? `<div class="notice warning" style="margin:6px 0">⏳ Unpaid trainee · ${Math.ceil((m.traineeUntil - Date.now()) / 86400000)} day(s) left · view/tasks/attendance only</div>` : ''}
     <div class="small muted">Last sign-in: ${m.lastLogin ? fmtDT(m.lastLogin) : 'never'}</div>
     <div class="row" style="margin-top:10px"><button class="btn sm" data-act="edit-member" data-id="${m.id}">Edit</button>${m.traineeUntil && m.traineeUntil > Date.now() ? `<button class="btn sm primary" data-act="promote-member" data-id="${m.id}">🎓 Promote</button>` : ''}<button class="btn sm" data-act="toggle-member" data-id="${m.id}">${m.status === 'disabled' ? 'Enable' : 'Disable'}</button><button class="btn sm danger" data-act="del-member" data-id="${m.id}">🗑</button></div>
-  </div>`).join('')}</div>` : `<div class="empty card"><span class="ic">🛡</span>No team members yet.</div>`}`;
+  </div>`).join('')}</div>` : `<div class="empty card"><span class="ic">🛡</span>No team members yet.</div>`}
+  ${me.role === 'owner' && sigs.length ? `<div class="card" style="margin-top:16px"><h3>📜 Staff bylaws — signature archive</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Signed by</th><th>Role</th><th>Version</th><th>Date</th><th>IP</th></tr></thead><tbody>${sigs.map((x) => `<tr><td>${esc(x.name)}<div class="small muted">${esc(x.by)}</div></td><td class="small">${esc(x.role || '')}</td><td class="small">${esc(x.version)}</td><td class="small">${fmtDT(x.at)}</td><td class="small">${esc(x.ip || '—')}</td></tr>`).join('')}</tbody></table></div><p class="small muted" style="margin-top:8px">Signatures are archived with username, timestamp and IP. Bylaw violations lead to immediate removal.</p></div>` : ''}`;
 }
 function memberForm(m) {
   const me = state.admin.me; const all = me.allPerms; const isNew = !m;
@@ -1003,13 +1051,35 @@ function toggleFav(item) {
   localStorage.setItem(favKey(), JSON.stringify(f.slice(0, 200)));
 }
 
+async function renderTermsScreen() {
+  setWaFab(null);
+  const me = state.user.me;
+  const b = (me && me.branding) || state.config.branding;
+  const closeLink = `<div class="login-foot"><a data-act="logout">${t('logout')}</a></div>`;
+  const termsHtml = `<style>.terms-doc{max-height:340px;overflow:auto;padding:12px 4px;text-align:start;font-size:13px;line-height:1.55;color:var(--text)}</style>
+  <div class="terms-doc"><p><b>INTPROTO-TV — Terms of Service</b></p>
+  <p><b>1. The service.</b> Intproto-TV (“the Service”) provides access to live TV, movies, and series on the devices included in your subscription. The Service is provided “as is”. We may change channel availability and content at any time.</p>
+  <p><b>2. Accounts.</b> One account, one household, personal use only. Sharing credentials, reselling access, or using the Service for public performance is forbidden and may lead to suspension.</p>
+  <p><b>3. Free trial.</b> One 24-hour free trial per person. Repeated trial requests may be refused. The trial ends automatically; it does not charge you anything.</p>
+  <p><b>4. Payment and renewal.</b> Subscriptions are prepaid and end on the expiry date unless renewed. Renewal links are sent privately (WhatsApp / Telegram / email) only after payment confirmation. You must use renewal links sent to you by the Service; links found elsewhere may be invalid.</p>
+  <p><b>5. Refunds.</b> All payments are final. Refunds are at our absolute discretion and only granted where the Service could not be used at all.</p>
+  <p><b>6. Acceptable use.</b> You agree to use the Service in compliance with the laws of your country. We may suspend accounts used in violation of these terms.</p>
+  <p><b>7. Data.</b> We store your account details, subscription history, and support messages on servers we control. We do not sell your data. We send account, service and marketing emails; marketing emails include an unsubscribe link.</p>
+  <p><b>8. Contact.</b> Support is available in-app (chat, tickets) and on WhatsApp / Telegram in the app. We answer within one working day.</p>
+  <p><b>9. Changes.</b> We may update these terms; the version in the app is always current. Continued use means acceptance.</p></div>`;
+  $('#app').innerHTML = `<div class="block-screen"><div class="ic">📜</div><h2>Terms of Service</h2><p class="muted" style="max-width:460px">Please read and accept the terms to continue using ${esc(b.appName || 'INTPROTO-TV')}.</p>${termsHtml}
+    <button class="btn primary" data-act="terms-agree" style="margin-top:10px">✓ I Agree — continue</button>
+    ${closeLink}</div>`;
+}
 async function renderUser() {
   const u = state.user;
+  if (u.me && u.me.agreed === false) return renderTermsScreen();
   if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify('_stream' in u.me ? u.me._stream : u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); applySource(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
     try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); applySource(); } catch { return; }
     applyBranding(u.me.branding);
+    if (u.me.agreed === false) return renderTermsScreen();
   }
   const { user, dashboard: d, branding: b } = u.me;
   setChatFab(u.me.chatUnread || 0);
@@ -1933,6 +2003,11 @@ const forms = {
     try { await api('POST', '/api/admin/reseller-sale', formToObj(f)); toast('Reseller sale recorded ✓'); closeModal(); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
+  async 'browser-search'(f) {
+    const q = (f.q.value || '').trim(); if (!q) return;
+    const frame = $('#browser-frame iframe');
+    if (frame) frame.src = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q);
+  },
   async member(f) {
     const o = formToObj(f); o.perms = [...f.querySelectorAll('[data-perm-cb]:checked')].map((x) => x.value);
     if (!o.password) delete o.password;
@@ -2035,18 +2110,25 @@ const forms = {
 };
 async function renderAdminBodyOnly() { if (state.admin.tab === 'overview') $('#admin-body').innerHTML = await adminOverview(); }
 
+const inFlight = new Set();
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const fn = actions[el.dataset.act];
-  if (fn) { if (el.tagName === 'A' && !el.hasAttribute('data-keep')) e.preventDefault(); Promise.resolve(fn(el, e)).catch((err) => toast(err.message, true)); }
+  if (!fn) return;
+  const key = el.dataset.act + '|' + (el.dataset.id || el.dataset.k || el.dataset.pkg || el.dataset.f || '');
+  if (inFlight.has(key)) { e.preventDefault(); e.stopImmediatePropagation(); return; } // double-click guard (spec §6)
+  inFlight.add(key);
+  if (el.tagName === 'A' && !el.hasAttribute('data-keep')) e.preventDefault();
+  Promise.resolve(fn(el, e)).catch((err) => toast(err.message, true)).finally(() => inFlight.delete(key));
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.role === 'user' && state.user.me && Date.now() - (state.user.meAt || 0) > 60000) renderUser(); });
 document.addEventListener('submit', (e) => {
   const f = e.target.closest('form[data-form]');
-  if (!f) return;
+  if (!f || f.dataset.busy === '1') { if (f) e.preventDefault(); return; } // duplicate-submit guard (spec §6)
   e.preventDefault();
-  Promise.resolve(forms[f.dataset.form]?.(f)).catch((err) => toast(err.message, true));
+  f.dataset.busy = '1';
+  Promise.resolve(forms[f.dataset.form]?.(f)).catch((err) => toast(err.message, true)).finally(() => { delete f.dataset.busy; });
 });
 let searchT;
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset?.input === 'nav-search') { const first = document.querySelector('#nav a:not([hidden])'); if (first) first.click(); } if (e.key === 'Escape') actions['menu-close']?.(); });
@@ -2246,16 +2328,19 @@ async function adminAutoPay(s) {
   let p = { list: [], configured: false }; try { p = await api('GET', '/api/admin/payments'); } catch {}
   const url = location.origin + '/api/stripe/webhook';
   const tone = { activated: 'st-active', unmatched: 'st-expiring', needs_attention: 'st-expired' };
+  const riskTone = { low: 'st-active', medium: 'st-expiring', high: 'st-expired' };
+  const riskLabel = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' };
   return `<div class="card"><h3>Automatic activation from Stripe</h3>
     <p class="small muted" style="margin-top:0">When a customer pays through one of your Stripe payment links, Stripe tells this app and the subscription is extended by itself. A payment is only accepted when Stripe's signature matches your signing secret, and it is never applied twice.</p>
     <div class="notice ${p.configured ? 'success' : 'warning'}">${p.configured ? '✅ Connected. Verified payments activate automatically.' : '⚠️ Not connected yet. Follow the three steps below for each Stripe account.'}</div>
     <ol class="small" style="padding-inline-start:18px;line-height:1.7"><li>In Stripe: <b>Developers → Webhooks → Add endpoint</b>, with this address:<div class="code" style="margin:6px 0">${esc(url)}</div></li><li>Choose the event <b>checkout.session.completed</b>.</li><li>Copy the endpoint's <b>Signing secret</b> (starts with <code>whsec_</code>) and paste it here, one per line if you use several Stripe accounts.</li></ol>
     <form data-form="settings">${field('Signing secrets', 'finance.stripeWebhookSecrets', s.finance.stripeWebhookSecrets || '', { type: 'textarea', rows: 3, ph: 'whsec_…', attrs: 'autocapitalize="none" spellcheck="false"' })}<button class="btn primary">Save</button></form>
     <h3 style="margin-top:18px">Payments received from Stripe</h3>
-    ${p.list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Customer</th><th>Amount</th><th>Result</th></tr></thead><tbody>${p.list.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td>${esc(x.username || x.email || '—')}<div class="small muted">${esc(x.pkg || '')}</div></td><td>${esc(x.amount)} ${esc(x.currency)}</td><td><span class="pill ${tone[x.status] || ''}">${esc(String(x.status).replace('_', ' '))}</span><div class="small muted">${esc(x.note || '')}</div></td></tr>`).join('')}</tbody></table></div>` : `<p class="muted small">No Stripe payments recorded yet.</p>`}</div>`;
+    ${p.list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Customer</th><th>Amount</th><th>Fraud risk</th><th>Result</th></tr></thead><tbody>${p.list.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td>${esc(x.username || x.email || '—')}<div class="small muted">${esc(x.pkg || '')}</div></td><td>${esc(x.amount)} ${esc(x.currency)}</td><td>${x.risk ? `<span class="pill ${riskTone[x.risk] || ''}" title="${esc(x.riskReason || '')}">${riskLabel[x.risk] || ''}</span>` : ''}</td><td><span class="pill ${tone[x.status] || ''}">${esc(String(x.status).replace('_', ' '))}</span><div class="small muted">${esc(x.note || '')}</div></td></tr>`).join('')}</tbody></table></div>` : `<p class="muted small">No Stripe payments recorded yet.</p>`}</div>`;
 }
 
 Object.assign(actions, {
+  'terms-agree': async () => { try { await api('POST', '/api/me/agree', {}); if (state.user.me) state.user.me.agreed = true; toast('Thank you ✓'); renderUser(); } catch (e) { toast(e.message, true); } },
   'site-login': () => { state.showLogin = true; state.forceSite = false; route(); window.scrollTo(0, 0); },
   'site-page': (el) => { state.forceSite = true; state.sitePage = el.dataset.page; route(); window.scrollTo(0, 0); },
   'site-jump': (el) => { document.getElementById(el.dataset.to)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
@@ -2304,6 +2389,10 @@ Object.assign(forms, {
   },
   async 'tk-reply'(f) {
     try { await api('POST', '/api/admin/tickets/reply', { id: f.dataset.id, text: f.text.value, status: f.status.value, priority: f.priority.value, image: await pickedImage(f) }); closeModal(); toast('Saved ✓'); $('#admin-body').innerHTML = await adminSupport(); }
+    catch (e) { toast(e.message, true); }
+  },
+  async 'bylaws-sign'(f) {
+    try { await api('POST', '/api/admin/bylaws/sign', { name: f.name.value }); const me = state.admin.me; state.admin.me.mustSignBylaws = false; toast('Bylaws signed ✓'); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
   async 'tfa-enable'(f) {
@@ -2991,15 +3080,29 @@ const WD = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri']
 const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const minOf = (v) => { const [h, mm] = String(v || '09:00').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
 async function adminAttendancePage() {
-  const r = await api('GET', '/api/admin/attendance'); let team = [];
+  const r = await api('GET', '/api/admin/attendance'); let team = [], shifts = [];
   try { team = await api('GET', '/api/admin/team'); } catch { team = []; } // staff managers can't list the team; owner can
+  try { shifts = await api('GET', '/api/admin/shifts'); } catch { shifts = []; }
+  const me = state.admin.me; const mine = r.mine || [];
+  const lastMine = mine[0]?.action;
+  const myShift = shifts.find((s) => s.memberId === (me.id || 'owner'));
+  const now = new Date(); const wd = String(now.getDay()); const today = (myShift && myShift.days && myShift.days[wd]) || null;
+  const minsNow = now.getHours() * 60 + now.getMinutes();
+  let shiftBanner = '';
+  if (today && today.on) {
+    const start = today.start, end = today.end;
+    const to = (m) => { const [h, mm] = [Math.floor(m / 60), m % 60]; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
+    if (lastMine !== 'in' && start - minsNow > 0 && start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(start)} — in ${start - minsNow} minute(s). Check in when you begin.`;
+    else if (lastMine === 'in' && minsNow >= start && minsNow < Math.min(end === 0 ? 1440 : end, 1440) && (end === 0 ? 1440 - minsNow : end - minsNow) <= 10 && (end === 0 ? 1440 - minsNow : end - minsNow) >= 0) shiftBanner = `⏰ Your shift ends at ${to(end)} — ${end === 0 ? 1440 - minsNow : end - minsNow} minute(s) left. Do your handover, then Check out.`;
+  }
+  if (shiftBanner && !sessionStorage.getItem('shiftBeeped')) { try { const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC(); const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.setValueAtTime(0.08, ctx.currentTime); o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.6); sessionStorage.setItem('shiftBeeped', '1'); } catch {} }
   const me = state.admin.me; const mine = r.mine || [];
   const lastMine = mine[0]?.action;
   const status = lastMine === 'in' ? 'on shift' : lastMine === 'out' ? 'off duty' : lastMine === 'break_start' ? 'on break' : 'not checked in';
   const nameOf = (id) => (team.find((m) => m.id === id) || {}).name || (id === 'owner' ? 'Owner' : id);
   const summaryRows = Object.entries(r.summary || {}).sort((a, b) => (b[1].workedMs || 0) - (a[1].workedMs || 0)).map(([id, p]) => `<tr><td>${esc(nameOf(id))}</td><td>${p.logins}</td><td>${p.ins}</td><td>${p.outs}</td><td>${Math.round((p.workedMs || 0) / 360000) / 10}h</td><td>${Math.round((p.breaksMs || 0) / 60000)}min</td></tr>`).join('');
   const clock = `<div class="chips" style="margin-bottom:10px"><a class="on tz-clock"><span class="dp-l">🇪🇺 Europe</span><b data-tz="e" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">🇺🇸 US</span><b data-tz="u" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">📍 Local</span><b data-tz="l" style="font-variant-numeric:tabular-nums">--:--:--</b></a></div>`;
-  return `${clock}<div class="grid2" style="gap:16px;align-items:start">
+  return `${shiftBanner ? `<div class="notice warning" style="margin-bottom:12px">${esc(shiftBanner)}</div>` : ''}${clock}<div class="grid2" style="gap:16px;align-items:start">
     <div class="card"><h3>🕒 My attendance</h3><p class="small muted" style="margin-top:0">Status: <b>${esc(status)}</b></p>
       <div class="row" style="gap:8px"><button class="btn primary" data-act="att-in" ${status === 'on shift' ? 'disabled' : ''}>Check in</button><button class="btn" data-act="att-break-start" ${status !== 'on shift' ? 'disabled' : ''}>☕ Break</button><button class="btn" data-act="att-break-end" ${status !== 'on break' ? 'disabled' : ''}>Back</button><button class="btn danger" data-act="att-out" ${status === 'off duty' ? 'disabled' : ''}>Check out</button></div>
       <h3 style="margin-top:14px">My recent events</h3>${mine.length ? `<div style="max-height:220px;overflow:auto">${mine.slice(0, 20).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.action)}</b>${e.note ? ' · ' + esc(e.note) : ''}</span><span class="small muted">${fmtDT(e.at)}</span></div>`).join('')}</div>` : '<p class="muted small">No events yet. Check in to start your shift.</p>'}</div>
@@ -3110,6 +3213,26 @@ function adminHolidays() {
   const regionTone = { US: 'st-open', 'US / EU': 'st-active', EU: 'st-expiring', Intl: 'st-renewed' };
   return `<p class="small muted">For <b>Nizar</b> and <b>Khalil</b> only. Use these dates to plan marketing campaigns and to expect Stripe/bank payout delays (US federal holidays delay ACH/payout by 1–2 days). Moveable feasts (Ramadan, Eid) are approximate — double-check each year.</p>
   <div class="card"><h3>🗓 Upcoming holidays &amp; campaign windows</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Region</th><th>Planning note</th></tr></thead><tbody>${list.map((h) => `<tr><td class="small">${fmtDate(h.at)}</td><td class="small">${new Date(h.at).toLocaleDateString(undefined, { weekday: 'short' })}</td><td><b>${esc(h.name)}</b>${h.at < Date.now() + 30 * DAYMS ? ' <span class="pill st-active">soon</span>' : ''}</td><td><span class="tagp">${esc(h.region)}</span></td><td class="small">${esc(h.tip)}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+// ---------------- In-panel browser (spec §2) ----------------
+function adminBrowserPage(s) {
+  const panel = (s && s.reseller && s.reseller.enabled && s.reseller.baseUrl) ? String(s.reseller.baseUrl) : '';
+  const links = [
+    ['📊', 'Google Sheets', 'https://docs.google.com/spreadsheets'],
+    ['📁', 'Google Drive', 'https://drive.google.com'],
+    ['📬', 'Gmail', 'https://mail.google.com'],
+    ['✉️', 'Resend (email)', 'https://resend.com/emails'],
+    ['💳', 'Stripe', 'https://dashboard.stripe.com'],
+    ['🛡', 'Cloudflare Workers', 'https://dash.cloudflare.com/?to=/:account/workers/overview'],
+    panel && ['🔌', 'TVplus panel', panel],
+  ].filter(Boolean);
+  return `<p class="small muted">Work browser inside the dashboard. Google and others block embedding, so they open in a new tab — it is by design. For quick answers, use the search below (web results from DuckDuckGo).</p>
+    <div class="card"><h3>🔗 Work shortcuts</h3><div class="chips" style="gap:10px;flex-wrap:wrap">${links.map(([i, n, u]) => `<a class="btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${i} ${esc(n)}</a>`).join('')}</div></div>
+    <div class="card"><h3>🔎 Web search (in-panel)</h3><form data-form="browser-search" class="row" style="gap:8px"><input name="q" placeholder="Search the web…" style="flex:1" autocomplete="off"><button type="submit" class="btn primary">Search</button></form>
+      <div id="browser-frame" style="margin-top:14px;border:1px solid var(--line2);border-radius:12px;overflow:hidden;height:60vh"><iframe title="search results" style="width:100%;height:100%;border:0;background:#fff" src="about:blank"></iframe></div>
+      <p class="small muted" style="margin-top:8px">If the results do not load, <a href="https://lite.duckduckgo.com/lite/" target="_blank" rel="noopener">open full search in a new tab →</a></p>
+    </div>`;
 }
 
 // ---------------- Marketing dashboards (spec §8) ----------------

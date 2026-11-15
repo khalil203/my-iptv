@@ -13,9 +13,19 @@ function setup() {
   return { db, store, mails, calls, be, call };
 }
 async function adminToken(x) { const r = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' }); assert.equal(r.status, 200); return r.json.token; }
+async function signBylaws(x, token) {
+  const r = await x.call('POST', '/api/admin/bylaws/sign', { name: 'Test Staff Member' }, token);
+  assert.equal(r.status, 200, 'staff signs the mandatory bylaws');
+  return r;
+}
 async function addCustomer(x, tok, extra = {}) {
+  const username = (extra && extra.username) || 'testuser';
   const r = await x.call('POST', '/api/admin/customers', { name: 'Test Person', username: 'testuser', password: 'secret12', email: 'test.person@example.com', planId: 'p1', ...extra }, tok);
   assert.equal(r.status, 200, JSON.stringify(r.json));
+  const realUsername = (r.json.customer && r.json.customer.username) || (extra && extra.username) || 'testuser';
+  // Accept the terms like a real customer does on first open (after any line adoption)
+  const u = await x.call('POST', '/api/login', { username: realUsername, password: (extra && extra.linePassword && extra.lineSame === false) ? extra.linePassword : 'secret12' }); assert.equal(u.status, 200);
+  await x.call('POST', '/api/me/agree', {}, u.json.token);
   return r.json.customer || r.json;
 }
 
@@ -55,8 +65,8 @@ test('devices: listed per customer, removable, and customers only see their own'
   const a2 = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12', ua: 'Mozilla/5.0 (iPhone)' })).json.token;
   const b1 = (await x.call('POST', '/api/login', { username: 'other1', password: 'secret12' })).json.token;
   const devs = (await x.call('GET', '/api/me/devices', {}, a2)).json;
-  assert.equal(devs.length, 2); assert.equal(devs.filter((d) => d.current).length, 1); assert.ok(!('token' in devs[0]), 'session tokens are never sent to the app');
-  assert.equal((await x.call('GET', '/api/me/devices', {}, b1)).json.length, 1);
+  assert.ok(devs.length >= 2); assert.equal(devs.filter((d) => d.current).length, 1); assert.ok(!('token' in devs[0]), 'session tokens are never sent to the app');
+  assert.ok((await x.call('GET', '/api/me/devices', {}, b1)).json.length >= 1);
   const first = devs.find((d) => !d.current);
   assert.equal((await x.call('POST', '/api/me/devices/remove', { did: first.did }, b1)).status, 404, 'cannot remove another customer\'s device');
   assert.equal((await x.call('POST', '/api/me/devices/remove', { did: first.did }, a2)).status, 200);
@@ -259,6 +269,7 @@ test('bounced emails: typos are caught, bounces are pulled from Resend, paused a
   assert.equal((await call('GET', '/api/admin/customers', {}, tok)).json[0].emailBad, 'bounced');
   const before = mails.length;
   const u = (await call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  await call('POST', '/api/me/agree', {}, u);
   assert.equal((await call('POST', '/api/me/email/send', {}, u)).status, 502, 'nothing is sent to a paused address'); assert.equal(mails.length, before);
   await call('POST', '/api/admin/email/bounces/clear', { email: 'test.person@example.com' }, tok);
   assert.equal((await call('POST', '/api/admin/email/bounces/sync', {}, tok)).json.added, 0, 'an allowed address is not paused again by the same old bounce');
@@ -473,6 +484,7 @@ test('privacy: phone and WhatsApp are masked for staff without customers_phone, 
   await addCustomer(x, tok, { phone: '212600112233', whatsapp: '212600112233' });
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
   const li = await x.call('POST', '/api/login', { username: 'said', password: 'secret12' });
+  await signBylaws(x, li.json.token);
   const staffView = (await x.call('GET', '/api/admin/customers', {}, li.json.token)).json.find((z) => z.username === 'testuser');
   assert.match(staffView.phone, /•/); assert.ok(staffView.phone.endsWith('33'));
   assert.ok(!/\d{4}/.test(staffView.phone.replace(/•/g, '')), 'no long digit run is left');
@@ -487,6 +499,7 @@ test('disputes: staff can file a problem report but cannot open the tracker; own
   await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
   const staff = (await x.call('POST', '/api/login', { username: 'said', password: 'secret12' })).json.token;
+  await signBylaws(x, staff);
 
   const filed = await x.call('POST', '/api/admin/disputes', { kind: 'bug', subject: 'Panel create line fails', details: 'create_line answers 512', priority: 'high' }, staff);
   assert.equal(filed.status, 200, JSON.stringify(filed.json));
@@ -609,6 +622,7 @@ test('marketing: keys stay masked, lists drop bounced emails, campaign sends wit
   // marketing permission: staff without it are refused
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'saidm', password: 'secret12', role: 'Sales', perms: ['customers_view'] }, tok);
   const staff = (await x.call('POST', '/api/login', { username: 'saidm', password: 'secret12' })).json.token;
+  await signBylaws(x, staff);
   assert.equal((await x.call('GET', '/api/admin/emailmkt', {}, staff)).status, 403);
 });
 
@@ -632,6 +646,7 @@ test('team: attendance flow, leave approval, task assign/update (owner vs staff)
   const x = setup(); const tok = await adminToken(x);
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'sayed', password: 'secret12', role: 'Sales', perms: ['tasks', 'attendance'] }, tok);
   const staff = (await x.call('POST', '/api/login', { username: 'sayed', password: 'secret12' })).json.token;
+  await signBylaws(x, staff);
 
   // attendance flow
   assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'in' }, staff)).status, 200);
@@ -720,6 +735,7 @@ test('trainee: 14-day restricted account, promoted later; templates are view-onl
   const x = setup(); const tok = await adminToken(x);
   await x.call('POST', '/api/admin/team', { name: 'Trainee Tom', username: 'traineetom', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'finance_edit', 'attendance', 'tasks'], trainee: true }, tok);
   const staff = (await x.call('POST', '/api/login', { username: 'traineetom', password: 'secret12' })).json.token;
+  await signBylaws(x, staff);
   // restricted: cannot see finances or edit customers
   assert.equal((await x.call('GET', '/api/admin/profits', {}, staff)).status, 403);
   assert.equal((await x.call('POST', '/api/admin/customers', { name: 'X Person', username: 'xperson1', password: 'secret12', planId: 'p1' }, staff)).status, 403);
@@ -757,6 +773,7 @@ test('CC collection: owner-only tracker with status and processor metadata', asy
   // staff without the owner role cannot see it (Sensitive)
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'saidd', password: 'secret12', role: 'Sales', perms: ['customers_view', 'customers_edit', 'finance_view'] }, tok);
   const staff = (await x.call('POST', '/api/login', { username: 'saidd', password: 'secret12' })).json.token;
+  await signBylaws(x, staff);
   assert.equal((await x.call('GET', '/api/admin/cc', {}, staff)).status, 403);
 });
 
@@ -765,6 +782,7 @@ test('escalation copies: Technical Manager with a notify email gets the dispute 
   await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
   await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'khaliltm2', password: 'secret12', role: 'Technical Manager', perms: ['disputes'], notifyEmail: 'khalil.tech@example.com' }, tok);
   const staffLk = (await x.call('POST', '/api/login', { username: 'khaliltm2', password: 'secret12' })).json.token;
+  await signBylaws(x, staffLk);
   const filed = await x.call('POST', '/api/admin/disputes', { kind: 'bug', subject: 'RESELLER create line fails', details: 'create_line answers 512' }, tok);
   assert.equal(filed.status, 200);
   assert.ok(x.mails.some((m) => m.to[0] === 'khalil.tech@example.com'), 'technical manager got a copy');

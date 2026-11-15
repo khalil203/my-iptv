@@ -125,8 +125,8 @@ export const DEFAULT_SETTINGS = () => ({
     stripeKey: '', stripeAccountId: 'stripe', stripeWebhookSecrets: '', // one signing secret (whsec_…) per Stripe account, one per line
   },
   // Multi-account Stripe control panel (spec §6): status, payout schedule, package links, optional read-only key for live balances.
-  stripeAccounts: [
-    { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [] },
+    stripeAccounts: [
+      { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [], bankId: 'mercury' },
     { id: 'waffim', name: 'Waffim Accounting LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
     { id: 'avixcloud', name: 'Avixcloud LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
     { id: 'bussalion', name: 'Bussalion LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
@@ -254,6 +254,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/reports')) return 'attendance_all';
   if (path.startsWith('/api/admin/teamchat')) return null;
   if (path.startsWith('/api/admin/cc')) return 'owner';
+  if (path.startsWith('/api/admin/bylaws')) return null; // every admin can read and sign their own copy
   if (path.startsWith('/api/admin/emailmkt')) return 'marketing';
   if (path.startsWith('/api/admin/seo')) return 'seo';
   if (path.startsWith('/api/admin/gads') || path.startsWith('/api/admin/fb')) return 'ads';
@@ -1023,7 +1024,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
   const getPayments = async () => (await store.get('payments')) || [];
   // A verified Stripe payment: find the customer and the package, extend the subscription, keep a record. Never runs twice for one payment.
-  async function applyStripePayment(s, event) {
+  async function applyStripePayment(s, event, accountId) {
     const ses = event.data && event.data.object || {};
     const pays = await getPayments();
     if (pays.some((p) => p.id === ses.id)) return { duplicate: true };
@@ -1055,7 +1056,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const wasTrial = !!c.isTrial; c.isTrial = false;
     const credits = plan ? planCredits(plan) : Math.max(1, Math.round(days / 30));
     c.renewals = c.renewals || [];
-    const acc = s.finance.accounts.find((a) => a.id === s.finance.stripeAccountId && a.currency === currency);
+    // Auto-balance routing (spec §5): a webhook secret tagged `whsec_xxx:grenapp` routes this payment to that account's bank.
+    const tag = (s.stripeAccounts || []).find((a) => a.id === accountId) || null;
+    const finId = tag ? (tag.bankId || s.finance.stripeAccountId) : s.finance.stripeAccountId;
+    const acc = s.finance.accounts.find((a) => a.id === finId && a.currency === currency) || s.finance.accounts.find((a) => a.id === finId) || s.finance.accounts.find((a) => a.currency === currency) || null;
     const inMain = acc ? amount : fromUsd(toUsd(amount, currency, s.finance.rates), s.currency, s.finance.rates);
     c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Math.round(inMain * 100) / 100, credits, stripe: ses.id });
     await saveCustomers(list);
@@ -1260,11 +1264,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const okTok = await verifyProxyToken(s.security.proxySecret, query.t);
         return ok({ ok: !!okTok, ua: s.player.userAgent || 'IPTVSmartersPro' });
       }
-      if (R('POST', '/api/stripe/webhook')) { // called by Stripe; trusted only when the signature matches one of your signing secrets
-        const secrets = String(s.finance.stripeWebhookSecrets || '').split(/[\s,]+/).filter((x) => x.startsWith('whsec_'));
-        if (!secrets.length) return err(400, 'Stripe webhook is not set up.');
-        const raw = String(body.raw || ''); let good = false;
-        for (const sec of secrets) if (await stripeSigOk(raw, body.sig, sec)) { good = true; break; }
+      if (R('POST', '/api/stripe/webhook')) { // called by Stripe; trusted only when the signature matches one of your signing secrets. Each secret can be `whsec_xxx:accountId` so funds are auto-routed to the right account (spec §5)
+        const rawLines = String(s.finance.stripeWebhookSecrets || '').split(/[\s,]+/).filter((x) => x.startsWith('whsec_'));
+        if (!rawLines.length) return err(400, 'Stripe webhook is not set up.');
+        const secrets = rawLines.map((l) => { const [sec, accountId] = l.split(':'); return { sec, accountId: /^[A-Za-z0-9_-]+$/.test(accountId || '') ? accountId : '' }; });
+        const raw = String(body.raw || ''); let good = null;
+        for (const { sec, accountId } of secrets) if (await stripeSigOk(raw, body.sig, sec)) { good = { accountId }; break; }
         if (!good) { await log('payment', 'Rejected a Stripe webhook call with a wrong signature'); return err(400, 'Bad signature.'); }
         let event; try { event = JSON.parse(raw); } catch { return err(400, 'Bad payload.'); }
         if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) return ok({ ok: true, ignored: event.type });
@@ -1272,7 +1277,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (await store.get('stripeevt:' + event.id)) return ok({ ok: true, duplicate: true });
         await store.put('stripeevt:' + event.id, 1, 30 * 86400);
         actorName = 'Stripe';
-        const r = await applyStripePayment(s, event);
+        const r = await applyStripePayment(s, event, good.accountId);
         return ok({ ok: true, result: r.duplicate ? 'duplicate' : r.status });
       }
       if (R('POST', '/api/forgot')) { // always answers the same, so nobody can test which accounts exist
@@ -1383,8 +1388,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!c) return err(401, 'Account not found.');
         if (c.status === 'disabled') return err(401, 'This account is disabled.');
         if (path === '/api/me' && method === 'GET' && !c.pendingLine && (c.dns || s.player.serverUrl) && Date.now() - (lastLineCheck.get(c.id) || (c.panel && c.panel.at) || 0) > 30 * 60000) { try { if (await syncLine(s, c)) await saveCustomers(list); } catch {} }
+        // Customer terms gate (spec §7): must accept the terms once before seeing the app
+        if (!c.agreedAt && path !== '/api/me' && path !== '/api/me/agree' && path !== '/api/me/password') return err(403, 'terms_required');
         const v = view(c, s);
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance && !c.pendingLine;
+        if (R('POST', '/api/me/agree')) { c.agreedAt = Date.now(); await saveCustomers(list); await log('customer', `${c.username} accepted the terms of service`); return ok({ ok: true, agreed: true }); }
 
         if (R('POST', '/api/me/order')) { // customer asks to buy a package: the admin is told and sends a payment link
           const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
@@ -1401,7 +1409,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const sales = (await getSales()).filter((x) => x.customerId === c.id && Number(x.amount) > 0);
           const totalPaidUsd = Math.round(sales.reduce((a, x) => a + (Number(x.amountUsd) || 0), 0) * 100) / 100;
           return ok({
-            user: pub, totalPaidUsd, paidCount: sales.length, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
+            user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             buyRequest: c.buyRequest || null,
@@ -1590,12 +1598,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!allow) return err(403, '2fa_setup_required');
         }
       }
+      // Mandatory staff bylaws signature (spec §7). Staff must sign once; the owner can list signatures anytime.
+      const BYLAW_VERSION = '2026-01';
+      if (!isOwner && member && member.status !== 'disabled') {
+        const sigs = (await store.get('bylaws')) || [];
+        const signed = sigs.some((x) => x.by === member.id && x.version === BYLAW_VERSION);
+        if (!signed) {
+          const allow = path === '/api/admin/me' || path === '/api/admin/bylaws' || path === '/api/admin/bylaws/sign' || path.startsWith('/api/admin/2fa');
+          if (!allow) return err(403, 'bylaws_required');
+        }
+      }
 
       if (R('GET', '/api/admin/me')) {
         const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa !== false };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
         if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ ...meta, role: 'staff', name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms, mustSetup2fa: must2fa(member), twoFactor: !!(member.totp && member.totp.on) });
+        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -1618,6 +1636,27 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if ((await hashPassword(body.password || '', acct.salt)) !== acct.hash) return err(400, 'Current password is wrong.');
           delete acct.totp; await save(); await log('security', 'Two-factor login turned off');
           return ok({ ok: true });
+        }
+        return err(404, 'Not found');
+      }
+      if (path.startsWith('/api/admin/bylaws')) { // Staff bylaws (spec §7) — trilingual, mandatory for staff, archived with name+IP+timestamp
+        if (R('GET', '/api/admin/bylaws')) {
+          const sigs = (await store.get('bylaws')) || [];
+          const meId = isOwner ? 'owner' : (member ? member.id : '');
+          const my = sigs.find((x) => x.by === meId && x.version === '2026-01');
+          const list = isOwner ? sigs.slice(0, 100) : null; // owner sees the signature archive
+          return ok({ signed: !!my, version: '2026-01', signature: my || null, list });
+        }
+        if (R('POST', '/api/admin/bylaws/sign')) {
+          const meId = isOwner ? 'owner' : (member ? member.id : '');
+          const sigs = (await store.get('bylaws')) || [];
+          if (sigs.some((x) => x.by === meId && x.version === '2026-01')) return ok({ ok: true, already: true });
+          const name = String(body.name || actorName || '').trim().slice(0, 80);
+          if (name.length < 3) return err(400, 'Type your full name to sign.');
+          const rec = { id: uid(6), by: meId, name, role: actorName, version: '2026-01', at: Date.now(), ip: ses.ip || 'unknown', ua: String(ses.ua || '').slice(0, 120) };
+          sigs.unshift(rec); await store.put('bylaws', sigs.slice(0, 200));
+          await log('security', `Bylaws signed (v2026-01) by ${actorName} from ${ses.ip || 'unknown IP'}`);
+          return ok({ ok: true, signature: rec });
         }
         return err(404, 'Not found');
       }
@@ -2113,7 +2152,17 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('support', `Ticket "${tk.subject}" (${tk.username}): ${text ? 'answered' : tk.status}`);
         return ok({ ok: true, ticket: tk });
       }
-      if (R('GET', '/api/admin/payments')) return ok({ list: (await getPayments()).slice(0, 100), configured: /whsec_/.test(String(s.finance.stripeWebhookSecrets || '')) });
+      if (R('GET', '/api/admin/payments')) { // card fraud risk heuristic (spec §2): high = unmatched customer, medium = unclear package or cross-domain email, else low
+        const list = (await getPayments()).slice(0, 100);
+        const withRisk = list.map((p) => {
+          let risk = 'low', riskReason = 'Matched to customer and package';
+          if (p.status === 'unmatched') { risk = 'high'; riskReason = 'No customer matches this payment (chargeback risk)'; }
+          else if (p.status === 'needs_attention') { risk = 'medium'; riskReason = 'Package unclear or panel refused — renewing is manual'; }
+          else if (Number(p.amount) >= 150) { risk = 'medium'; riskReason = 'Large amount — confirm recipient before renewing'; }
+          return { ...p, risk, riskReason };
+        });
+        return ok({ list: withRisk, configured: /whsec_/.test(String(s.finance.stripeWebhookSecrets || '')) });
+      }
       if (R('POST', '/api/admin/me/password')) {
         if (isOwner) return err(400, 'Use Account & backup.');
         const team = await getTeam(); const me = team.find((x) => x.id === member.id);
@@ -2162,10 +2211,26 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('GET', '/api/admin/settings')) {
         const maskStripe = (src) => ({ ...src, stripeAccounts: (src.stripeAccounts || []).map((a) => ({ ...a, rk: a.rk ? '••••' : '' })) });
-        if (can('settings')) return ok(maskStripe(s));
-        return ok(maskStripe({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } }));
+        const maskKeys = (src) => ({
+          ...src,
+          reseller: { ...src.reseller, baseUrl: src.reseller.baseUrl ? '••••' : '', apiKey: src.reseller.apiKey ? '••••' : '', username: src.reseller.username ? '••••' : '', password: src.reseller.password ? '••••' : '', actions: Object.fromEntries(Object.entries(src.reseller.actions || {}).map(([k, v]) => [k, { ...v, url: v.url && /api_key=|\{key\}/.test(v.url) ? '••••' : '••••', headers: '••••' }])) },
+          email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '' },
+          finance: { ...src.finance, stripeKey: src.finance.stripeKey ? '••••' : '', stripeWebhookSecrets: src.finance.stripeWebhookSecrets ? '••••' : '' },
+        });
+        if (can('settings')) {
+          const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
+          if (isTm) return ok(maskStripe(s));          // Nizar & Khalil: full access
+          return ok(maskKeys(maskStripe(s)));          // Other staff with settings access: everything masked
+        }
+        return ok(maskStripe({ ...s, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } }));
       }
       if (R('PUT', '/api/admin/settings')) {
+        // Absolute sovereignty (spec §1): only Nizar (Owner) and Khalil (Technical Manager) may show, add, edit or update
+        // IPTV panel keys, Resend keys, Stripe keys and other API credentials. Everyone else is locked out at the API level.
+        const API_KEY_PATHS = [['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets']];
+        const touchesKey = API_KEY_PATHS.some(([a, b]) => body?.[a] && Object.keys(body[a]).some((k) => k === b));
+        const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
+        if (touchesKey && !isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.');
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
         const next = deepMerge(s, body || {});
@@ -2188,6 +2253,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               currency: ['USD', 'EUR'].includes(String(a.currency || '').toUpperCase()) ? String(a.currency).toUpperCase() : 'USD',
               status: ['active', 'verification', 'closed'].includes(a.status) ? a.status : 'active',
               payoutDays: Number(a.payoutDays) === 2 ? 2 : 7,
+              bankId: String(a.bankId || o.bankId || '').slice(0, 24),
               note: String(a.note || '').slice(0, 200),
               rk: a.rk === '••••' ? (o.rk || '') : String(a.rk || '').slice(0, 200),
               links: (Array.isArray(a.links) ? a.links : []).slice(0, 50).map((l) => ({
@@ -2875,6 +2941,23 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Daily job (Cloudflare cron): low credit alerts to admin + expiry reminders to customers.
   async function daily() {
     try { const s0 = await getSettings(); if (s0.email.resendKey) await syncBounces(s0); } catch {}
+    try { // Automated duplicate cleanup (spec §1): same name + phone + email, expired 90+ days, no sign-in or renewal in months → remove the extras
+      const sC = await getSettings();
+      if (sC.security.autoDupCleanup !== false) {
+        const list = await getCustomers(); const now = Date.now(); const groups = {};
+        for (const c of list) { if (c.isTrial || c.status === 'disabled') continue; const k = normName(c.name) + '|' + normPhone(c.phone || c.whatsapp) + '|' + normEmail(c.email); if (!normName(c.name) || (!normPhone(c.phone) && !normEmail(c.email))) continue; (groups[k] ||= []).push(c); }
+        const cutoff = now - 90 * DAYMS, renewalCutoff = now - 180 * DAYMS;
+        const removed = [];
+        for (const k of Object.keys(groups)) {
+          const g = groups[k]; if (g.length < 2) continue;
+          const stale = g.filter((c) => (c.expiresAt || 0) <= cutoff && (!c.lastLogin || c.lastLogin <= cutoff) && !(c.renewals || []).some((r) => (r.at || 0) >= renewalCutoff));
+          if (stale.length < g.length) continue; // not everyone in the group is dead — leave manual review
+          const keep = stale[0];
+          for (const c of stale) { if (c === keep) continue; removed.push({ name: c.name, username: c.username }); await saveCustomers(list.filter((x) => x !== c)); }
+        }
+        if (removed.length) { await log('customer', `Auto duplicate cleanup removed ${removed.length} dead duplicate account(s)`); await notifyAdmin(sC, 'Duplicate cleanup', `Removed ${removed.length} expired duplicate account(s) (name + phone + email match, no sign-in or renewal in 6+ months):\n` + removed.slice(0, 10).map((x) => `- ${x.name} (${x.username})`).join('\n')); }
+      }
+    } catch {}
     try { // uptime monitor (spec §2/§4): daily probe of the streaming server; email the owner if it is down
       const sU = await getSettings();
       if (sU.player.serverUrl && sU.email.resendKey && sU.email.adminEmail && sU.email.uptimeMonitor !== false) {
