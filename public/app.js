@@ -251,6 +251,9 @@ const ADMIN_TABS = [
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
   ['chat', '🗨', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
   ['support', '💬', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['tasks', '✅', 'Tasks', 'tasks', 'Team', 'tasks daily weekly plan status priority deadline completed delayed blocked assignee'],
+  ['attendance', '🕒', 'Attendance & shifts', 'attendance', 'Team', 'attendance check in out breaks night shift timezone leave days off reports weekly performance clock'],
+  ['teamchat', '💬', 'Team chat', null, 'Team', 'team chat internal handover announcements staff channel'],
   ['trialq', '⚡', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
   ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
@@ -308,6 +311,9 @@ async function renderAdmin() {
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
     else if (t === 'stripe') body.innerHTML = adminStripePage(s);
+    else if (t === 'tasks') body.innerHTML = await adminTasksPage();
+    else if (t === 'attendance') { body.innerHTML = await adminAttendancePage(); startTzClock(); loadShiftsAndLeaves().catch(() => {}); }
+    else if (t === 'teamchat') { body.innerHTML = await adminTeamChatPage(); { const el = $('#tc-thread'); if (el) el.scrollTop = el.scrollHeight; } }
     else if (t === 'mkt') body.innerHTML = await adminMktPage();
     else if (t === 'seo') body.innerHTML = await adminSeoPage();
     else if (t === 'gads') body.innerHTML = await adminGadsPage();
@@ -2909,6 +2915,88 @@ Object.assign(forms, {
   async 'dis-resolve'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, status: 'resolved', resolution: f.resolution.value }); closeModal(); toast('Resolved ✓'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
   async 'dis-note'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Note added'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
 });
+
+// ---------------- Team: attendance, night shifts, leave, tasks, team chat, reports (spec §9) ----------------
+const TZ_OPTS = [['Europe/Paris', 'Europe/Paris (CET)'], ['Europe/Madrid', 'Europe/Madrid (CET)'], ['Europe/London', 'Europe/London (GMT/BST)'], ['Africa/Casablanca', 'Africa/Casablanca (WET)'], ['America/New_York', 'America/New_York (EST)'], ['America/Chicago', 'America/Chicago (CST)'], ['America/Los_Angeles', 'America/Los_Angeles (PST)'], ['Asia/Bangkok', 'Asia/Bangkok (ICT)']];
+const WD = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
+const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const minOf = (v) => { const [h, mm] = String(v || '09:00').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
+async function adminAttendancePage() {
+  const r = await api('GET', '/api/admin/attendance'); let team = [];
+  try { team = await api('GET', '/api/admin/team'); } catch { team = []; } // staff managers can't list the team; owner can
+  const me = state.admin.me; const mine = r.mine || [];
+  const lastMine = mine[0]?.action;
+  const status = lastMine === 'in' ? 'on shift' : lastMine === 'out' ? 'off duty' : lastMine === 'break_start' ? 'on break' : 'not checked in';
+  const nameOf = (id) => (team.find((m) => m.id === id) || {}).name || (id === 'owner' ? 'Owner' : id);
+  const summaryRows = Object.entries(r.summary || {}).sort((a, b) => (b[1].workedMs || 0) - (a[1].workedMs || 0)).map(([id, p]) => `<tr><td>${esc(nameOf(id))}</td><td>${p.logins}</td><td>${p.ins}</td><td>${p.outs}</td><td>${Math.round((p.workedMs || 0) / 360000) / 10}h</td><td>${Math.round((p.breaksMs || 0) / 60000)}min</td></tr>`).join('');
+  const clock = `<div class="chips" style="margin-bottom:10px"><a class="on tz-clock"><span class="dp-l">🇪🇺 Europe</span><b data-tz="e" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">🇺🇸 US</span><b data-tz="u" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">📍 Local</span><b data-tz="l" style="font-variant-numeric:tabular-nums">--:--:--</b></a></div>`;
+  return `${clock}<div class="grid2" style="gap:16px;align-items:start">
+    <div class="card"><h3>🕒 My attendance</h3><p class="small muted" style="margin-top:0">Status: <b>${esc(status)}</b></p>
+      <div class="row" style="gap:8px"><button class="btn primary" data-act="att-in" ${status === 'on shift' ? 'disabled' : ''}>Check in</button><button class="btn" data-act="att-break-start" ${status !== 'on shift' ? 'disabled' : ''}>☕ Break</button><button class="btn" data-act="att-break-end" ${status !== 'on break' ? 'disabled' : ''}>Back</button><button class="btn danger" data-act="att-out" ${status === 'off duty' ? 'disabled' : ''}>Check out</button></div>
+      <h3 style="margin-top:14px">My recent events</h3>${mine.length ? `<div style="max-height:220px;overflow:auto">${mine.slice(0, 20).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.action)}</b>${e.note ? ' · ' + esc(e.note) : ''}</span><span class="small muted">${fmtDT(e.at)}</span></div>`).join('')}</div>` : '<p class="muted small">No events yet. Check in to start your shift.</p>'}</div>
+    <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
+  </div>
+  ${r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>👥 Team attendance (last 30 days)</h3>${summaryRows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Logins</th><th>Check-ins</th><th>Check-outs</th><th>Worked</th><th>Breaks</th></tr></thead><tbody>${summaryRows}</tbody></table></div>` : '<p class="muted small">No attendance recorded yet — the team checks in when they start work.</p>'}</div>
+  <div class="card" style="margin-top:16px"><h3>🌙 Shifts, night shifts &amp; weekly rest days</h3><p class="small muted" style="margin-top:0">Day and night shifts across European and American time zones. Shifts past midnight (e.g. 22:00 → 06:00) are handled correctly. Rest days are never all on the same days for the whole team.</p>
+    <div id="shifts-box"><p class="small muted">Loading members…</p></div></div>
+  <div class="card" style="margin-top:16px"><h3>🗑 Leave requests (approve / reject)</h3><div id="leaves-box"><p class="small muted">Loading…</p></div></div>
+  <div class="card" style="margin-top:16px"><h3>📊 Weekly performance report</h3><div id="reports-box"><p class="small muted">Loading…</p></div></div>` : ''}`;
+}
+const shiftEditorHtml = (m, sh) => { const tz = sh?.tz || 'Europe/Paris'; const days = sh?.days || {}; return `<div class="card" data-member="${esc(m.id)}" data-tz="${esc(tz)}" style="margin-bottom:10px;padding:12px"><div class="row" style="gap:8px"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1"><b>${esc(m.name)}</b><div class="small muted">@${esc(m.username)}</div></div>
+    <select data-k="tz" style="width:auto">${TZ_OPTS.map(([k, n]) => `<option value="${k}" ${tz === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px">${WD.map(([i, n]) => { const d = days[i] || { on: false }; return `<div style="text-align:center"><label class="toggle" style="justify-content:center"><input type="checkbox" data-day="${i}" ${d.on ? 'checked' : ''}><i></i><span>${n}</span></label>${d.on ? `<input type="time" data-start="${i}" value="${fmtMin(d.start ?? 540)}" style="margin-top:4px;width:100%"><input type="time" data-end="${i}" value="${fmtMin(d.end ?? 1080)}" style="margin-top:4px;width:100%">` : '<div class="small muted" style="margin-top:20px">rest</div>'}</div>`; }).join('')}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary sm" data-act="shift-save" data-id="${esc(m.id)}" data-name="${esc(m.name)}">Save shift plan</button></div></div>`; };
+async function loadShiftsAndLeaves() {
+  const box = $('#shifts-box'); const lbox = $('#leaves-box'); if (!box) return;
+  let team = []; try { team = await api('GET', '/api/admin/team'); } catch { box.innerHTML = '<p class="small muted">Only the owner can edit shift plans. The attendance summary above is still yours.</p>'; }
+  let shifts = []; try { shifts = await api('GET', '/api/admin/shifts'); } catch {}
+  if (box && team.length) box.innerHTML = team.filter((m) => m.status !== 'disabled').map((m) => shiftEditorHtml(m, shifts.find((s) => s.memberId === m.id))).join('');
+  if (lbox) { try { const r = await api('GET', '/api/admin/leaves'); const list = r.list || []; lbox.innerHTML = list.length ? `<div style="max-height:260px;overflow:auto">${list.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b> · ${esc(l.kind)}<div class="small muted">${fmtDate(l.from)} → ${fmtDate(l.to)}${l.reason ? ' · ' + esc(l.reason) : ''}</div></span>${l.status === 'pending' ? `<span class="row" style="gap:6px"><button class="btn sm primary" data-act="leave-approve" data-id="${esc(l.id)}">✓</button><button class="btn sm danger" data-act="leave-reject" data-id="${esc(l.id)}">✕</button></span>` : `<span class="pill ${l.status === 'approved' ? 'st-active' : 'st-expired'}">${l.status}</span>`}</div>`).join('')}</div>` : '<p class="muted small">No leave requests.</p>'; } catch (e) { lbox.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; } }
+  const rbox = $('#reports-box'); if (rbox) { try { const r = await api('GET', '/api/admin/reports?days=30'); rbox.innerHTML = (r.list || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Score</th><th>Worked</th><th>Breaks</th><th>Logins</th><th>Tasks done</th><th>Adherence</th></tr></thead><tbody>${r.list.map((m) => `<tr><td>${esc(m.name)}</td><td><b>${m.score === null ? '—' : m.score}</b></td><td>${Math.round((m.workedMs || 0) / 360000) / 10}h</td><td>${Math.round((m.breaksMs || 0) / 60000)}min</td><td>${m.logins}</td><td>${m.completed}/${m.tasksTotal}${m.delayed ? ` · ${m.delayed} delayed` : ''}${m.blocked ? ` · ${m.blocked} blocked` : ''}</td><td>${m.adherence === null ? '—' : m.adherence + '%'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No data yet this month.</p>'; } catch (e) { rbox.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; } }
+}
+const startTzClock = () => { if (window.__tzIv) return; const tick = () => { const now = new Date(); const o = { hour: '2-digit', minute: '2-digit', second: '2-digit' }; const e = now.toLocaleTimeString('en-GB', { ...o, timeZone: 'Europe/Paris' }); const us = now.toLocaleTimeString('en-US', { ...o, timeZone: 'America/New_York' }); const l = now.toLocaleTimeString('en-GB', o); document.querySelectorAll('[data-tz=e]').forEach((x) => { x.textContent = e; }); document.querySelectorAll('[data-tz=u]').forEach((x) => { x.textContent = us; }); document.querySelectorAll('[data-tz=l]').forEach((x) => { x.textContent = l; }); }; window.__tzIv = setInterval(tick, 1000); tick(); };
+async function adminTasksPage() {
+  const r = await api('GET', '/api/admin/tasks'); const list = r.list || []; const mine = r.mine || [];
+  const canAssign = r.scopeAll;
+  let team = []; if (canAssign) { try { team = await api('GET', '/api/admin/team'); } catch {} }
+  const assigneeOpts = [['owner', 'Owner'], ...team.filter((m) => m.status !== 'disabled').map((m) => [m.id, m.name])];
+  const opts = assigneeOpts.map(([v, n]) => `<option value="${esc(v)}">${esc(n)}</option>`).join('');
+  const sts = ['not_started', 'in_progress', 'completed', 'delayed', 'blocked'];
+  const pill = { not_started: 'st-open', in_progress: 'st-expiring', completed: 'st-active', delayed: 'st-expired', blocked: 'st-expired' };
+  const row = (t, own) => `<tr><td><b>${esc(t.name)}</b>${t.desc ? `<div class="small muted">${esc(t.desc)}</div>` : ''}<div class="small muted">${t.deadline ? 'Deadline ' + fmtDate(t.deadline) : ''}${t.priority === 'high' ? ' · <b style="color:var(--bad)">high</b>' : ''}</div></td><td class="small">${esc(t.assigneeName)}</td><td><select data-task="${esc(t.id)}" style="width:auto">${sts.map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}</select></td><td>${r.scopeAll ? `<button class="btn sm danger" data-act="task-del" data-id="${esc(t.id)}">🗑</button>` : ''}</td></tr>`;
+  const byMember = {}; if (r.scopeAll) for (const t of list) (byMember[t.assignee] ||= []).push(t);
+  const plan = r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>📅 Weekly plan</h3>${Object.entries(byMember).map(([id, ts]) => `<div style="margin-bottom:10px"><b>${esc(assigneeOpts.find(([v]) => v === id)?.[1] || id)}</b><ul style="margin:4px 0 0 16px">${ts.filter((t) => t.status !== 'completed').slice(0, 10).map((t) => `<li class="small">${esc(t.name)}${t.deadline ? ' — ' + fmtDate(t.deadline) : ''}</li>`).join('') || '<li class="small muted">All done 🎉</li>'}</ul></div>`).join('')}</div>` : '';
+  return `${canAssign ? `<form data-form="task-add" class="card"><h3>＋ Assign a task</h3><div class="grid2">${field('Task', 'name', '', { attrs: 'required maxlength="160"', ph: 'What needs to be done' })}${field('Assign to', 'assignee', 'owner', { type: 'select', options: assigneeOpts.map(([v, n]) => [v, n]) })}</div>${field('Details', 'desc', '', { type: 'textarea', rows: 2 })}<div class="grid3">${field('Start', 'start', new Date().toISOString().slice(0, 10), { type: 'date' })}${field('Deadline', 'deadline', '', { type: 'date' })}${field('Priority', 'priority', 'normal', { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div><button type="submit" class="btn primary">Assign task</button></form>` : ''}
+  ${mine.length ? `<div class="card" style="margin-top:16px"><h3>My tasks (${mine.length})</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Task</th><th>Assignee</th><th>Status</th><th></th></tr></thead><tbody>${mine.map((t) => row(t, true)).join('')}</tbody></table></div></div>` : ''}
+  ${r.scopeAll && list.length ? `<div class="card" style="margin-top:16px"><h3>All tasks</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Task</th><th>Assignee</th><th>Status</th><th></th></tr></thead><tbody>${list.map((t) => row(t, false)).join('')}</tbody></table></div></div>` : ''}${plan}`;
+}
+async function adminTeamChatPage() {
+  const list = await api('GET', '/api/admin/teamchat'); const me = state.admin.me;
+  return `<p class="small muted">Internal channel for shift handovers and team updates. Not for customers and not for payments.</p>
+    <div class="card"><div class="thread chat" id="tc-thread" style="max-height:56vh;overflow:auto">${list.length ? list.map((m) => `<div class="msg ${m.name === me?.name ? 'mine' : ''}"><b class="small">${esc(m.name)}</b><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${fmtDT(m.at)}</div></div>`).join('') : '<p class="muted small" style="text-align:center;margin:24px 0">No messages yet. Write the first one.</p>'}</div>
+    <form data-form="teamchat-send" class="chat-form"><input name="text" maxlength="1000" autocomplete="off" placeholder="Write to the team…" required><button type="submit" class="btn primary">Send</button></form></div>`;
+}
+Object.assign(actions, {
+  'att-in': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/attendance', { action: 'in' }); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'att-out': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/attendance', { action: 'out' }); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'att-break-start': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/attendance', { action: 'break_start' }); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'att-break-end': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/attendance', { action: 'break_end' }); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'leave-approve': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/leaves/decide', { id: el.dataset.id, action: 'approved' }); await loadShiftsAndLeaves(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'leave-reject': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/leaves/decide', { id: el.dataset.id, action: 'rejected' }); await loadShiftsAndLeaves(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'shift-save': async (el) => {
+    el.disabled = true; const card = el.closest('[data-member]'); const g = (k) => card.querySelector(`[data-k=${k}]`).value;
+    const days = {}; card.querySelectorAll('[data-day]').forEach((cb) => { const i = cb.dataset.day; days[i] = { on: cb.checked, start: minOf(card.querySelector(`[data-start="${i}"]`)?.value) || 540, end: minOf(card.querySelector(`[data-end="${i}"]`)?.value) || 1080 }; });
+    const daysOff = WD.filter(([i]) => !days[i].on).map(([i]) => Number(i));
+    try { await api('PUT', '/api/admin/shifts', { memberId: card.dataset.member, memberName: el.dataset.name, tz: g('tz'), days, daysOff }); toast('Shift plan saved ✓'); el.disabled = false; } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'task-del': async (el) => { if (!confirm('Delete this task?')) return; try { await api('DELETE', '/api/admin/tasks/' + el.dataset.id); $('#admin-body').innerHTML = await adminTasksPage(); } catch (e) { toast(e.message, true); } },
+});
+Object.assign(forms, {
+  async 'leave-request'(f) { try { await api('POST', '/api/admin/leaves', formToObj(f)); toast('Sent for approval ✓'); f.reset(); } catch (e) { toast(e.message, true); } },
+  async 'task-add'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/tasks', o); toast('Task assigned ✓'); f.reset(); $('#admin-body').innerHTML = await adminTasksPage(); } catch (e) { toast(e.message, true); } },
+  async 'teamchat-send'(f) { const t = f.text.value.trim(); if (!t) return; try { await api('POST', '/api/admin/teamchat', { text: t }); f.text.value = ''; $('#tc-thread').innerHTML = (await api('GET', '/api/admin/teamchat')).map((m) => `<div class="msg ${m.name === state.admin.me?.name ? 'mine' : ''}"><b class="small">${esc(m.name)}</b><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${fmtDT(m.at)}</div></div>`).join(''); const th = $('#tc-thread'); th.scrollTop = th.scrollHeight; } catch (e) { toast(e.message, true); } },
+});
+document.addEventListener('change', (e) => { const t = e.target; if (t.dataset?.task && ['not_started', 'in_progress', 'completed', 'delayed', 'blocked'].includes(t.value)) { t.disabled = true; api('PUT', '/api/admin/tasks/' + t.dataset.task, { status: t.value }).then(() => { }).catch((err) => toast(err.message, true)).finally(() => { t.disabled = false; }); } });
 
 // ---------------- Marketing dashboards (spec §8) ----------------
 async function adminMktPage() {

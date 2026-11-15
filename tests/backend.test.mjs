@@ -620,3 +620,42 @@ test('seo/gads/fb trackers: logs entries and rolls up daily spend', async () => 
   const f = await x.call('GET', '/api/admin/fb', {}, tok);
   assert.equal(f.json.ads.length, 1); assert.equal(f.json.total.month, 0);
 });
+
+test('team: attendance flow, leave approval, task assign/update (owner vs staff), team chat, manager-only reports', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'sayed', password: 'secret12', role: 'Sales', perms: ['tasks', 'attendance'] }, tok);
+  const staff = (await x.call('POST', '/api/login', { username: 'sayed', password: 'secret12' })).json.token;
+
+  // attendance flow
+  assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'in' }, staff)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'break_start' }, staff)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'break_end' }, staff)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'out' }, staff)).status, 200);
+  const att = await x.call('GET', '/api/admin/attendance', {}, staff);
+  assert.equal(att.status, 200); assert.ok(att.json.mine.length >= 4);
+  assert.equal((await x.call('GET', '/api/admin/reports', {}, staff)).status, 403, 'sales staff cannot open the owner report');
+
+  // leave request + owner decides; staff cannot decide their own
+  assert.equal((await x.call('POST', '/api/admin/leaves', { kind: 'vacation', from: '2026-12-01', to: '2026-12-05', reason: 'Holiday' }, staff)).status, 200);
+  const pend = await x.call('GET', '/api/admin/leaves', {}, tok); assert.equal(pend.json.pending, 1);
+  const id = pend.json.list[0].id;
+  assert.equal((await x.call('POST', '/api/admin/leaves/decide', { id, action: 'approved' }, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/leaves/decide', { id, action: 'rejected' }, staff)).status, 403);
+
+  // tasks: staff cannot assign, owner assigns, staff can progress own
+  assert.equal((await x.call('POST', '/api/admin/tasks', { name: 'Secret task', assignee: 'owner' }, staff)).status, 403);
+  const teamId = (await x.call('GET', '/api/admin/team', {}, tok)).json[0].id;
+  const t = await x.call('POST', '/api/admin/tasks', { name: 'Renew expired lines', assignee: teamId, assigneeName: 'Said', deadline: '2026-12-31' }, tok);
+  assert.equal(t.status, 200); const tid = t.json.task.id;
+  const mineTasks = await x.call('GET', '/api/admin/tasks', {}, staff);
+  assert.ok(mineTasks.json.mine.some((z) => z.id === tid));
+  assert.equal((await x.call('PUT', `/api/admin/tasks/${tid}`, { status: 'in_progress' }, staff)).status, 200);
+  assert.equal((await x.call('PUT', `/api/admin/tasks/${tid}`, { status: 'in_progress' }, tok)).status, 200, 'owner can edit too');
+  assert.equal((await x.call('GET', '/api/admin/reports', {}, tok)).status, 200);
+
+  // team chat is open to the whole team
+  assert.equal((await x.call('POST', '/api/admin/teamchat', { text: 'Handover: all lines renewed this afternoon' }, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/teamchat', { text: 'Got it — taking over the queue' }, staff)).status, 200);
+  const chat = await x.call('GET', '/api/admin/teamchat', {}, staff);
+  assert.ok(chat.json.some((m) => m.text.includes('Handover')));
+});

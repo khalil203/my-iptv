@@ -771,3 +771,6 @@ svg.i { flex: none; vertical-align: -5px; }
 .sa-link { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .sa-link input { flex: 1; min-width: 110px; }
 .sa-links { display: flex; flex-direction: column; gap: 4px; }
+
+.tz-clock { display: inline-flex; align-items: baseline; gap: 8px; }
+.tz-clock b { font-size: 1.05rem; }

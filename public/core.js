@@ -229,6 +229,12 @@ function permFor(method, path, body) {
   if (path === '/api/admin/stripe/balance') return 'finance_view';
   if (path.startsWith('/api/admin/stripe/account/')) return 'stripe';
   if (path.startsWith('/api/admin/ibo')) return 'ibo';
+  if (path.startsWith('/api/admin/attendance')) return 'attendance';
+  if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
+  if (path.startsWith('/api/admin/leaves')) return method === 'POST' && (path === '/api/admin/leaves' || path.startsWith('/api/admin/leaves/submit')) ? 'attendance' : 'attendance_all';
+  if (path.startsWith('/api/admin/tasks')) return 'tasks';
+  if (path.startsWith('/api/admin/reports')) return 'attendance_all';
+  if (path.startsWith('/api/admin/teamchat')) return null;
   if (path.startsWith('/api/admin/emailmkt')) return 'marketing';
   if (path.startsWith('/api/admin/seo')) return 'seo';
   if (path.startsWith('/api/admin/gads') || path.startsWith('/api/admin/fb')) return 'ads';
@@ -836,11 +842,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     await store.put('log', l.slice(0, 300));
   }
   const log = (type, msg) => baseLog(type, msg, 'system');
+  // Attendance events: login, check-in/out and breaks (spec §9.1). Kept in one list, 90 days.
+  const getAtt = async () => (await store.get('attendance')) || [];
+  const attLog = async (by, name, action, note) => { const l = await getAtt(); l.push({ id: uid(6), by, name, at: Date.now(), action, note: cleanText(note, 300) }); if (l.length > 1500) await store.put('attendance', l.slice(-1500)); else await store.put('attendance', l); };
   async function newSession(role, id, s, meta = {}) {
     const token = uid(24); const did = uid(5);
     const hours = Math.max(1, Number(s.security.sessionHours) || 72);
     const exp = Date.now() + hours * 3600000;
-    await store.put('session:' + token, { role, id, exp, did }, hours * 3600);
+    await store.put('session:' + token, { role, id, exp, did, ua: String(meta.ua || '').slice(0, 200), ip: String(meta.ip || '').slice(0, 60), at: Date.now() }, hours * 3600);
+    if (role === 'admin' || role === 'staff') { try { await attLog(role === 'admin' ? 'owner' : id, String(meta.name || (role === 'admin' ? 'Owner' : id)).slice(0, 60), 'login', (meta.ip ? 'IP ' + meta.ip : '') + (meta.ua ? ' · ' + meta.ua.slice(0, 80) : '')); } catch {} }
     if (role === 'user') { // remember the device so the customer can see it and sign it out
       const devs = (await getDevices(id)).slice(-19);
       devs.push({ did, token, ua: String(meta.ua || '').slice(0, 200), ip: String(meta.ip || '').slice(0, 60), at: Date.now(), exp });
@@ -1304,7 +1314,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (m.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
           const st = await second(m); if (st) return st;
           m.lastLogin = Date.now(); await store.put('team', team);
-          return ok({ token: await newSession('staff', m.id, s, meta), role: 'staff' });
+          return ok({ token: await newSession('staff', m.id, s, { ...meta, name: m.name }), role: 'staff' });
         }
         const list = await getCustomers();
         // a customer can sign in with the app details or with the line username and password from the panel
@@ -1905,6 +1915,112 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ ok: true, entry: e });
       }
       const fbId = path.match(/^\/api\/admin\/fb\/ad\/([\w-]+)$/); if (fbId && method === 'DELETE') { const f = (await store.get('fb')) || { ads: [], entries: [] }; f.ads = f.ads.filter((a) => a.id !== fbId[1]); f.entries = f.entries.filter((e) => e.adId !== fbId[1]); await store.put('fb', f); return ok({ ok: true }); }
+
+      // ---------- attendance, shifts, leave, tasks, team chat, reports (spec §9) ----------
+      const getShifts = async () => (await store.get('shifts')) || [];
+      const getLeaves = async () => (await store.get('leaves')) || [];
+      const getTasks = async () => (await store.get('tasks')) || [];
+      const attSummary = (events, since) => {
+        const per = {}; // by id
+        const add = (id, k, v) => { (per[id] ||= { logins: 0, ins: 0, outs: 0, breaksMs: 0, workedMs: 0, events: 0 })[k] += v || 1; };
+        for (const e of events) { if (since && e.at < since) continue; const p = per[e.by] ||= { logins: 0, ins: 0, outs: 0, breaksMs: 0, workedMs: 0, events: 0 }; p.events++;
+          if (e.action === 'login') p.logins++; else if (e.action === 'in') p.ins++; else if (e.action === 'out') p.outs++; }
+        // pair in→out for worked time and break time, per person, in time order
+        const by = {}; for (const e of events) { if (since && e.at < since) continue; (by[e.by] ||= []).push(e); }
+        for (const id of Object.keys(by)) { const evs = by[id].slice().sort((a, b) => a.at - b.at); let openIn = null, openBreak = null;
+          for (const e of evs) { if (e.action === 'in') openIn = e.at; else if (e.action === 'out') { if (openIn) { per[id].workedMs += e.at - openIn; openIn = null; } } else if (e.action === 'break_start') openBreak = e.at; else if (e.action === 'break_end' && openBreak) { per[id].breaksMs += e.at - openBreak; openBreak = null; } } }
+        return per;
+      };
+      const meWorks = () => (isOwner ? { id: 'owner', name: actorName.replace(' (owner)', '') || 'Owner' } : { id: member ? member.id : '', name: actorName });
+      const scopeSelf = (l) => { const me = meWorks(); return isOwner || can('attendance_all') ? l : l.filter((x) => x.by === me.id || (isOwner && x.by === 'owner') || (member && x.by === member.id) || (!isOwner && !member)); };
+      if (R('GET', '/api/admin/attendance')) {
+        const since = Date.now() - 35 * DAY; const events = (await getAtt()).filter((e) => e.at >= since);
+        const all = isOwner || can('attendance_all');
+        const mine = scopeSelf(events);
+        const sum = attSummary(events, since);
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const todaySum = attSummary(events.filter((e) => e.at >= today.getTime()));
+        return ok({ mine: mine.slice(-200).reverse(), all: all ? events.slice(-200).reverse() : null, summary: sum, today: todaySum, scopeAll: all });
+      }
+      if (R('POST', '/api/admin/attendance')) {
+        const action = ['in', 'out', 'break_start', 'break_end'].includes(body.action) ? body.action : null; if (!action) return err(400, 'Unknown action.');
+        const me = meWorks(); await attLog(me.id, me.name, action, body.note);
+        return ok({ ok: true });
+      }
+      if (R('GET', '/api/admin/shifts')) return ok((await getShifts()));
+      if (R('PUT', '/api/admin/shifts')) {
+        const l = await getShifts(); const memberId = String(body.memberId || '').slice(0, 20); if (!memberId) return err(400, 'memberId required.');
+        const idx = l.findIndex((x) => x.memberId === memberId);
+        const tz = String(body.tz || 'Europe/Paris').slice(0, 40);
+        const days = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const d = (body.days || {})[k]; if (d && d.on) days[k] = { on: true, start: Math.max(0, Math.min(1440, Number(d.start) || 540)), end: Math.max(0, Math.min(1440, Number(d.end) || 1080)) }; else days[k] = { on: false }; }
+        const rec = { memberId, memberName: String(body.memberName || memberId).slice(0, 60), tz, days, daysOff: Array.isArray(body.daysOff) ? body.daysOff.map(Number).filter((n) => n >= 0 && n <= 6) : [], updatedAt: Date.now(), by: actorName };
+        if (idx >= 0) l[idx] = rec; else l.unshift(rec);
+        await store.put('shifts', l.slice(0, 200)); await log('team', `Shift plan updated for ${rec.memberName}`);
+        return ok({ ok: true });
+      }
+      if (R('GET', '/api/admin/leaves')) {
+        const l = (await getLeaves()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.createdAt - a.createdAt);
+        const mine = isOwner || can('attendance_all');
+        const me = meWorks();
+        return ok({ list: (mine ? l : l.filter((x) => x.by === me.id)).slice(0, 200), pending: l.filter((x) => x.status === 'pending').length, mine: !mine });
+      }
+      if (R('POST', '/api/admin/leaves')) {
+        const kind = ['vacation', 'sick', 'emergency', 'other'].includes(body.kind) ? body.kind : 'vacation';
+        const from = new Date(body.from).getTime(), to = new Date(body.to || body.from).getTime();
+        if (!isFinite(from) || !isFinite(to) || to < from) return err(400, 'Invalid dates.');
+        const me = meWorks(); const reason = cleanText(body.reason, 500);
+        const l = await getLeaves(); l.unshift({ id: uid(6), by: me.id, name: me.name, kind, from, to, reason, status: 'pending', createdAt: Date.now(), decidedBy: '', decidedAt: 0 });
+        await store.put('leaves', l.slice(0, 300));
+        await notifyAdmin(s, `Leave request: ${me.name}`, `${me.name} asked for ${kind} leave from ${new Date(from).toLocaleDateString()} to ${new Date(to).toLocaleDateString()}${reason ? '\n' + reason : ''}`);
+        return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/leaves/decide')) {
+        const l = await getLeaves(); const x = l.find((y) => y.id === String(body.id || '')); if (!x) return err(404, 'Not found.');
+        if (!['approved', 'rejected'].includes(body.action)) return err(400, 'Unknown action.');
+        x.status = body.action; x.decidedBy = actorName; x.decidedAt = Date.now(); x.reason = cleanText(body.resolution, 300);
+        await store.put('leaves', l); await log('team', `Leave ${body.action}: ${x.name} (${x.kind})`);
+        return ok({ ok: true });
+      }
+      if (R('GET', '/api/admin/tasks')) {
+        const l = (await getTasks()).sort((a, b) => (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0) || b.updatedAt - a.updatedAt);
+        const me = meWorks(); const mine = me.id;
+        const visible = isOwner || can('attendance_all') ? l : l.filter((t) => t.assignee === mine);
+        return ok({ list: visible.slice(0, 300), mine: visible.filter((t) => t.assignee === mine), mineId: mine, scopeAll: isOwner || can('attendance_all') });
+      }
+      if (R('POST', '/api/admin/tasks')) {
+        if (!isOwner && !can('attendance_all')) return err(403, 'Only the owner or a manager can assign tasks.');
+        const l = await getTasks();
+        const t = { id: uid(6), name: cleanText(body.name, 160), desc: cleanText(body.desc, 1000), assignee: String(body.assignee || 'owner').slice(0, 20), assigneeName: String(body.assigneeName || body.assignee || 'Owner').slice(0, 60), start: body.start ? new Date(body.start).getTime() : Date.now(), deadline: body.deadline ? new Date(body.deadline).getTime() : null, priority: ['low', 'normal', 'high'].includes(body.priority) ? body.priority : 'normal', status: 'not_started', notes: '', createdBy: actorName, createdAt: Date.now(), updatedAt: Date.now(), doneAt: 0 };
+        if (t.name.length < 2) return err(400, 'Task name is required.');
+        l.unshift(t); await store.put('tasks', l.slice(0, 500)); await log('team', `Task assigned: "${t.name}" → ${t.assigneeName}`);
+        return ok({ ok: true, task: t });
+      }
+      const taskId = path.match(/^\/api\/admin\/tasks\/([\w-]+)$/);
+      if (taskId) {
+        const l = await getTasks(); const t = l.find((y) => y.id === taskId[1]); if (!t) return err(404, 'Not found.');
+        if (method === 'DELETE') { if (!isOwner) return err(403, 'Only the owner can delete tasks.'); await store.put('tasks', l.filter((y) => y !== t)); return ok({ ok: true }); }
+        if (method === 'PUT' || method === 'PATCH') {
+          const mine = meWorks(); const canEdit = isOwner || can('attendance_all') || t.assignee === mine.id;
+          if (!canEdit) return err(403, 'You can only update your own tasks.');
+          if (body.status && ['not_started', 'in_progress', 'completed', 'delayed', 'blocked'].includes(body.status)) { t.status = body.status; if (body.status === 'completed') t.doneAt = Date.now(); }
+          if (body.notes !== undefined) t.notes = cleanText(body.notes, 2000);
+          if (isOwner || can('attendance_all')) { if (body.name !== undefined) t.name = cleanText(body.name, 160); if (body.desc !== undefined) t.desc = cleanText(body.desc, 1000); if (body.assignee !== undefined) { t.assignee = String(body.assignee).slice(0, 20); t.assigneeName = String(body.assigneeName || body.assignee).slice(0, 60); } if (body.priority !== undefined) t.priority = String(body.priority); if (body.deadline !== undefined) t.deadline = body.deadline ? new Date(body.deadline).getTime() : null; if (body.start !== undefined) t.start = new Date(body.start).getTime(); }
+          t.updatedAt = Date.now(); await store.put('tasks', l); return ok({ ok: true, task: t });
+        }
+        return err(404, 'Not found.');
+      }
+      if (R('GET', '/api/admin/reports')) { // owner-only performance summary per member (spec §9.6)
+        const since = Date.now() - Math.max(1, Math.min(90, Number(query.days) || 30)) * DAY;
+        const events = await getAtt(), tasks = await getTasks();
+        const summary = attSummary(events, since);
+        const members = {};
+        for (const e of events) if (e.at >= since) members[e.by] = members[e.by] || { id: e.by, name: e.name };
+        for (const m of Object.values(members)) { const t = tasks.filter((x) => x.assignee === m.id); m.tasksTotal = t.length; m.completed = t.filter((x) => x.status === 'completed').length; m.delayed = t.filter((x) => x.status === 'delayed').length; m.blocked = t.filter((x) => x.status === 'blocked').length; m.adherence = m.tasksTotal ? Math.round((m.completed / m.tasksTotal) * 100) : null; m.workedMs = Math.round((summary[m.id]?.workedMs || 0)); m.breaksMs = Math.round((summary[m.id]?.breaksMs || 0)); m.logins = summary[m.id]?.logins || 0;
+          const perf = m.tasksTotal ? (m.completed * 100 - m.delayed * 15 - m.blocked * 20) / m.tasksTotal : null; m.score = perf === null ? null : Math.max(0, Math.round(perf)); }
+        return ok({ list: Object.values(members).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)), since });
+      }
+      if (R('GET', '/api/admin/teamchat')) { const l = (await store.get('teamchat')) || []; return ok(l.slice(-120)); }
+      if (R('POST', '/api/admin/teamchat')) { const text = cleanText(body.text, 1000); if (!text) return err(400, 'Write a message first.'); const me = meWorks(); const l = (await store.get('teamchat')) || []; l.push({ id: uid(6), by: me.id, name: me.name, at: Date.now(), text }); await store.put('teamchat', l.slice(-300)); return ok({ ok: true }); }
 
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
