@@ -35,6 +35,7 @@ export default {
         body.ip = request.headers.get('cf-connecting-ip') || ''; body.ua = request.headers.get('user-agent') || '';
         if (url.pathname === '/api/forgot') body.appUrl = url.origin;
       }
+      if (url.pathname === '/api/diag') { body.ip = request.headers.get('cf-connecting-ip') || ''; body.ua = request.headers.get('user-agent') || ''; }
       if (url.pathname === '/api/trial') body.ip = request.headers.get('cf-connecting-ip') || '';
       if (url.pathname === '/api/trial' && body && typeof body === 'object' && !body.appUrl) body.appUrl = url.origin;
       const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');

@@ -5,6 +5,11 @@ import { ic } from './icons.js';
 import { parseM3U, m3uAnswer } from './m3u.js';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js';
 
+// Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
+const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
+window.addEventListener('error', (e) => __diagSend({ kind: 'js-error', msg: String((e && e.message) || '').slice(0, 400), file: String((e && e.filename) || '').slice(0, 200), line: e && e.lineno }));
+window.addEventListener('unhandledrejection', (e) => __diagSend({ kind: 'js-reject', msg: String(((e && e.reason && e.reason.message) || (e && e.reason)) || '').slice(0, 400) }));
+
 // ---------------- helpers ----------------
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -163,7 +168,8 @@ async function boot() {
     state.config = await r.json();
     state.mode = 'server';
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-  } catch {
+  } catch (err) {
+    __diagSend({ kind: 'config-fail', msg: String((err && err.message) || err || '').slice(0, 300), mode: state.mode });
     state.mode = 'demo';
     state.local = createBackend({ store: localStore(), fetchFn: (u, i) => fetch(u, i), mode: 'demo' });
     state.config = await api('GET', '/api/config');
@@ -336,7 +342,7 @@ async function renderAdmin() {
   startTzClock();
   setTimeout(applyTheme);
   const b = state.config.branding;
-  if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
+  if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch (e) { __diagSend({ kind: 'admin-me-fail', msg: String(e.message || '').slice(0, 200) }); if (!state.token) return renderLogin(); $('#app').innerHTML = `<div class="block-screen"><div class="ic">📡</div><h2>Can’t reach INTPROTO-TV</h2><p class="muted" style="max-width:320px">${esc(String(e.message || 'Session expired or server unreachable.'))}</p><button class="btn primary" onclick="location.reload()">Retry</button><button class="btn ghost" onclick="localStorage.removeItem('tvp_token');location.reload()">Sign in again</button></div>`; return; } }
   const me = state.admin.me;
   if (me.mustSetup2fa) { render2faGate(); return; }
   if (me.mustSignBylaws) { renderBylawsGate(me); return; }
@@ -780,8 +786,11 @@ async function adminSecurity(s) {
 
 async function adminActivity() {
   const log = await api('GET', '/api/admin/log');
+  let diag = [];
+  if (state.admin.me.role === 'owner') { try { diag = (await api('GET', '/api/admin/diag')).list || []; } catch {} }
   const icon = { customer: '👤', renewal: '🔁', settings: '⚙️', admin: '🔐', team: '🛡', finance: '🏦', stock: '🎟', trial: '🎁', daily: '⏰' };
-  return `<div class="card">${log.length ? log.map((l) => `<div class="list-item"><span>${icon[l.type] || '•'}</span><div style="flex:1">${esc(l.msg)}${l.by ? `<div class="small muted">by ${esc(l.by)}</div>` : ''}</div><span class="small muted">${fmtDT(l.at)}</span></div>`).join('') : '<p class="muted">No activity yet.</p>'}</div>`;
+  return `${diag.length ? `<div class="card"><h3>🩺 Client diagnostics (last ${diag.length})</h3>${diag.slice(0, 20).map((d) => `<div class="list-item"><span>${d.kind === 'boot-timeout' ? '⏱' : d.kind === 'config-fail' ? '📡' : '⚠️'}</span><div style="flex:1;min-width:0"><b>${esc(d.kind)}</b> <span class="small muted">${esc(d.msg || '')}${d.file ? ' · ' + esc(d.file) + (d.line ? ':' + d.line : '') : ''}</span><div class="small muted">${esc(d.origin || '')} · ${esc(d.ua || '')} · ${fmtDT(d.at)} · IP ${esc(d.ip || '—')}</div></div></div>`).join('')}<p class="small muted" style="margin-top:8px">These are reports from devices where the app could not start. Empty = all good.</p></div>` : ''}
+    <div class="card">${log.length ? log.map((l) => `<div class="list-item"><span>${icon[l.type] || '•'}</span><div style="flex:1">${esc(l.msg)}${l.by ? `<div class="small muted">by ${esc(l.by)}</div>` : ''}</div><span class="small muted">${fmtDT(l.at)}</span></div>`).join('') : '<p class="muted">No activity yet.</p>'}</div>`;
 }
 
 function showResult(el, r) {
@@ -1077,7 +1086,14 @@ async function renderUser() {
   if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify('_stream' in u.me ? u.me._stream : u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); applySource(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); applySource(); } catch { return; }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); applySource(); }
+    catch (e) {
+      const msg = String(e.message || '');
+      if (msg.includes('terms_required')) return renderTermsScreen(); // first open: must accept the terms
+      __diagSend({ kind: 'me-fail', msg: msg.slice(0, 200) });
+      $('#app').innerHTML = `<div class="block-screen"><div class="ic">📡</div><h2>Can’t reach INTPROTO-TV</h2><p class="muted" style="max-width:320px">${esc(msg || 'Session expired or server unreachable.')}</p><button class="btn primary" onclick="location.reload()">Retry</button><button class="btn ghost" onclick="localStorage.removeItem('tvp_token');location.reload()">Sign in again</button></div>`;
+      return;
+    }
     applyBranding(u.me.branding);
     if (u.me.agreed === false) return renderTermsScreen();
   }
@@ -3394,7 +3410,12 @@ function reportPlayErr(action, e) {
 
 setTimeout(() => { // Watchdog: if the boot did not finish in 8s, show a clear message instead of an endless spinner
   if (document.querySelector('#app .boot') || document.querySelector('#app .boot .spinner')) {
+    __diagSend({ kind: 'boot-timeout', msg: 'no route() after 8s' });
     $('#app').innerHTML = `<div class="block-screen"><div class="ic">📡</div><h2>Can’t reach INTPROTO-TV right now</h2><p class="muted" style="max-width:340px">Please check your internet connection or VPN, then try again. If it keeps happening, your network may be blocking Cloudflare Workers.</p><button class="btn primary" onclick="location.reload()">Retry</button></div>`;
   }
 }, 8000);
-boot();
+boot().catch((e) => {
+  __diagSend({ kind: 'boot-throw', msg: String((e && e.message) || e || '').slice(0, 300) });
+  const el = document.getElementById('app');
+  if (el) el.innerHTML = `<div class="block-screen"><div class="ic">⚠️</div><h2>The app failed to start</h2><p class="muted" style="max-width:320px">${esc(String((e && e.message) || e || 'Unknown error').slice(0, 200))}</p><button class="btn primary" onclick="location.reload()">Retry</button></div>`;
+});

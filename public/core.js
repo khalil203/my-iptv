@@ -1253,6 +1253,22 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
         return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, username, password, pending: !lineReady, ...(lineReady && dns ? { dns, m3u: `${dns}/get.php?username=${encodeURIComponent(c.lineUsername)}&password=${encodeURIComponent(c.linePassword)}&type=m3u_plus&output=ts` } : {}) });
       }
+      if (R('POST', '/api/diag')) { // client diagnostics beacon: why the app could not start on a device
+        const ip = String(body.ip || '');
+        const k = 'diagip:' + ip; const n = Number(await store.get(k)) || 0;
+        if (n >= 20) return ok({ ok: true, ignored: true });
+        await store.put(k, n + 1, 600);
+        const l = (await store.get('diag')) || [];
+        l.unshift({ id: uid(6), at: Date.now(), ip, origin: cleanText(body.origin, 200), ua: cleanText(body.ua, 200), kind: cleanText(body.kind, 40), msg: cleanText(body.msg, 500), file: cleanText(body.file, 200), line: Number(body.line) || 0 });
+        await store.put('diag', l.slice(0, 300));
+        await log('diagnostics', `Client report (${cleanText(body.kind, 40)}): ${cleanText(body.msg, 200)}${cleanText(body.origin, 100) ? ' · ' + cleanText(body.origin, 100) : ''}`);
+        return ok({ ok: true });
+      }
+      if (R('GET', '/api/admin/diag')) { // owner-only: what devices reported
+        if (!isOwner) return err(403, 'Only the owner can see client diagnostics.');
+        const list = (await store.get('diag')) || [];
+        return ok({ list: list.slice(0, 200) });
+      }
       if (R('POST', '/api/unsub')) { // public: link from newsletter footer
         const [id, sig] = String(body.t || '').split('.');
         if (!id || !sig || sig !== (await unsubSig(s, id))) return err(400, 'Invalid link');
