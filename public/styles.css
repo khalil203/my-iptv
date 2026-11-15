@@ -805,3 +805,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .st-active { color: #3DDC97; }
 [data-theme=light] .st-active { color: #16785A; }
 [data-theme=light] .brand-name { color: #181820; }
+
+/* defensive readability for stale/out-of-sync cached shells */
+.site h1, .s-hero h1, .site h2, .s-sub { color: var(--text) !important; }
+.s-pv-now b { color: var(--text); }
