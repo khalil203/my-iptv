@@ -4,7 +4,7 @@
   /* colour */
   --primary: var(--b-primary, #FF6B42); --primary2: color-mix(in srgb, var(--primary) 70%, #230a06); --accent: var(--b-accent, #FFB03A);
   --bg: var(--brand-bg, #0B0B0F); --surface: #131318; --elevated: #1C1C24; --border: #2A2A33;
-  --text: #F0EEE8; --muted: #8B8980; --ok: #3DDC97; --warn: #FFB03A; --bad: #FF5A5A;
+  --text: #F0EEE8; --muted: #A8A69F; --ok: #3DDC97; --warn: #FFB03A; --bad: #FF5A5A;
   /* older names used across the app, mapped to the tokens above */
   --panel: var(--surface); --panel2: var(--elevated); --line: var(--border); --line2: color-mix(in srgb, var(--border) 72%, transparent);
   /* spacing: 8-point scale */
@@ -386,7 +386,7 @@ img, video, iframe, svg { max-width: 100%; }
 html { transition: background-color .4s; }
 [data-theme=light] {
   --bg: #FAF6F0; --surface: #FFFFFF; --elevated: #F1EDE3; --border: #E3DFD3;
-  --text: #181820; --muted: #6B6861; --primary: color-mix(in srgb, var(--b-primary, #FF6B42) 94%, #341207); --accent: color-mix(in srgb, var(--b-accent, #D97E00) 78%, #3B2400);
+  --text: #181820; --muted: #3E3C36; --primary: color-mix(in srgb, var(--b-primary, #FF6B42) 94%, #341207); --accent: color-mix(in srgb, var(--b-accent, #D97E00) 78%, #3B2400);
   --ok: #16785A; --warn: #B4670A; --bad: #D42F52;
   --shadow: 0 1px 2px rgba(24,24,32,.06), 0 16px 34px -18px rgba(24,24,32,.28);
   --glow: 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent), 0 14px 32px -16px color-mix(in srgb, var(--primary) 55%, transparent);
@@ -406,7 +406,7 @@ html { transition: background-color .4s; }
 [data-theme=light] .nav a.on { color: var(--text); background: linear-gradient(90deg, rgba(14,165,196,.16), transparent); }
 [data-theme=light] .mobile-nav a.on, [data-theme=light] .chips a.on { color: #fff; }
 [data-theme=light] .bnav a.on { color: var(--primary2); background: color-mix(in srgb, var(--primary) 9%, transparent); }
-[data-theme=light] .brand-name { background-image: linear-gradient(90deg, #041814 0%, #0F6E55 45%, #C99A2C 65%, #041814 100%); }
+[data-theme=light] .brand-name { background-image: linear-gradient(90deg, #181820 0%, #FF6B42 45%, #D97E00 70%, #181820 100%); }
 [data-theme=light] #toast div { background: #fff; color: #0f172a; border-color: var(--line2); box-shadow: 0 10px 30px rgba(15,23,42,.15); }
 [data-theme=light] #toast div.err { color: #b91c1c; }
 [data-theme=light] .code { background: #f1f5f9; border-color: var(--line2); color: #0f172a; }
