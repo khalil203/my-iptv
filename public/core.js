@@ -1971,18 +1971,18 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ ok: true, entry: e });
       }
       const seoId = path.match(/^\/api\/admin\/seo\/([\w-]+)$/); if (seoId && method === 'DELETE') { await store.put('seo', ((await store.get('seo')) || []).filter((e) => e.id !== seoId[1])); return ok({ ok: true }); }
-      // Google Ads: multiple accounts, per-domain campaigns (InProto-TV.com / online.info.net / .store)
-      const GAD_DOMAINS = ['InProto-TV.com', 'online.info.net', 'intproto-tv.store'];
+      // Google Ads: multiple accounts, free-text domain (no predefined choices)
+      const gadsDomains = () => [...new Set((((await store.get('gads')) || { campaigns: [] }).campaigns || []).map((c) => c.domain).filter(Boolean))];
       if (R('GET', '/api/admin/gads')) {
         const g = (await store.get('gads')) || { campaigns: [], entries: [] };
-        const withStats = g.campaigns.map((c) => { const ent = g.entries.filter((e) => e.campaignId === c.id); return { ...c, ...sumPeriod(ent), impressions: Math.round(ent.reduce((a, e) => a + (Number(e.impressions) || 0), 0)), clicks: Math.round(ent.reduce((a, e) => a + (Number(e.clicks) || 0), 0)) }; });
+        const withStats = g.campaigns.map((c) => { const ent = g.entries.filter((e) => e.campaignId === c.id); return { ...c, ...sumPeriod(ent), impressions: Math.round(ent.reduce((a, e) => a + (Number(e.impressions) || 0), 0)), clicks: Math.round(ent.reduce((a, e) => a + (Number(e.clicks) || 0), 0)), results: Math.round(ent.reduce((a, e) => a + (Number(e.results) || 0), 0)) }; });
         const all = sumPeriod(g.entries);
-        return ok({ domains: GAD_DOMAINS, campaigns: withStats, total: { ...all, spend: all.month } });
+        return ok({ domains: (await gadsDomains()), campaigns: withStats, total: { ...all, spend: all.month } });
       }
       if (R('POST', '/api/admin/gads/campaign')) {
         const g = (await store.get('gads')) || { campaigns: [], entries: [] };
         const name = cleanText(body.name, 120); if (name.length < 2) return err(400, 'Campaign name is required.');
-        const c = { id: uid(6), account: String(body.account || '').slice(0, 80), domain: GAD_DOMAINS.includes(body.domain) ? body.domain : GAD_DOMAINS[0], name, dailyBudget: Number(body.dailyBudget) || 0, currency: String(body.currency || 'USD').slice(0, 8), status: ['active', 'paused', 'ended'].includes(body.status) ? body.status : 'active', startedAt: body.startedAt ? new Date(body.startedAt).getTime() : Date.now(), createdAt: Date.now() };
+        const c = { id: uid(6), account: String(body.account || '').slice(0, 80), gmail: cleanEmail(body.gmail || ''), keyword: cleanText(body.keyword, 120), domain: String(body.domain || '').trim().slice(0, 120) || 'intproto-tv.store', name, dailyBudget: Number(body.dailyBudget) || 0, currency: String(body.currency || 'USD').slice(0, 8), status: ['active', 'paused', 'ended'].includes(body.status) ? body.status : 'active', startedAt: body.startedAt ? new Date(body.startedAt).getTime() : Date.now(), createdAt: Date.now() };
         g.campaigns.unshift(c); await store.put('gads', g);
         return ok({ ok: true, campaign: c });
       }

@@ -629,6 +629,10 @@ async function adminResellerSection(s) {
 }
 const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮' };
 const orderPrice = (s, p) => (s.orderCurrency === 'ALL' ? Number(p.price).toFixed(2) + ' €/$' : (ORDER_CUR[s.orderCurrency || 'EUR'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[s.orderCurrency || 'EUR'] ? '' : ' ' + s.orderCurrency));
+const packageOptions = (s) => [
+  ...(s.orderPackages || []).map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]),
+  ...(s.resellerPackages || []).map((p) => [p.id, `${p.name} — ${Number(p.price) || 0} ${ORDER_CUR[s.resellerCurrency || "EUR"] || ""} ${s.resellerCurrency || "EUR"}`.trim()]),
+];
 const opRow = (p = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
   <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
 function adminOrderSection(s) {
@@ -1642,7 +1646,7 @@ const actions = {
   },
   'order-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings;
-    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${s.orderPackages.map((p) => `<option value="${esc(p.id)}" ${p.id === (c.buyRequest?.pkg || c.orderSentPkg) ? 'selected' : ''}>${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select></div>
+    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${packageOptions(s).map(([id, label]) => `<option value="${esc(id)}" ${id === (c.buyRequest?.pkg || c.orderSentPkg) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
       <p class="muted small" id="op-subj"></p><iframe id="mail-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <label class="field" style="margin-top:12px"><span>Payment link for this order</span><input id="op-link" placeholder="https://… (empty = button opens your WhatsApp)" autocapitalize="none"></label>
       <div class="row"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
@@ -1662,7 +1666,7 @@ const actions = {
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
       <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr', 'ar'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
-      <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`])] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
+      <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}</div>
@@ -1746,7 +1750,7 @@ const actions = {
     const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const body = modal('✍️ Custom package email', `<form data-form="order-custom" onsubmit="return false">
       <div class="grid2">${field('Email address', 'to', '', { type: 'email', attrs: 'required autocapitalize="none"', ph: 'customer@gmail.com' })}${field('Customer name', 'name', '', { ph: 'Leave empty for "Dear Valued Customer"' })}</div>
-      <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('Package', 'pkg', p0.id, { type: 'select', options: s.orderPackages.map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]) })}</div>
+      <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']] })}${field('Package', 'pkg', p0.id, { type: 'select', options: packageOptions(s) })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">Change the details (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"', ph: String(p0.days ?? '') })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"', ph: String(p0.devices ?? '') })}${field('Top badge', 'badge', '', { ph: 'e.g. 🎁 Special offer' })}</div>
@@ -1774,7 +1778,7 @@ const actions = {
   'order-bulk': async () => {
     if (!state.admin.customers) state.admin.customers = await api('GET', '/api/admin/customers');
     const s = state.admin.settings; const n = (g) => orderTargets(g).length;
-    modal('💳 Package emails to many customers', `<label class="small muted">Package</label><select id="ob-pkg">${s.orderPackages.map((p) => `<option value="${esc(p.id)}">${esc(p.title)} — ${orderPrice(s, p)}</option>`).join('')}</select><label class="small muted" style="margin-top:10px;display:block">Payment link (optional, same for everyone)</label><input id="ob-link" placeholder="https://… empty = button opens your WhatsApp" autocapitalize="none">
+    modal('💳 Package emails to many customers', `<label class="small muted">Package</label><select id="ob-pkg">${packageOptions(s).map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('')}</select><label class="small muted" style="margin-top:10px;display:block">Payment link (optional, same for everyone)</label><input id="ob-link" placeholder="https://… empty = button opens your WhatsApp" autocapitalize="none">
       <label class="small muted" style="margin-top:10px;display:block">Send to</label><select id="ob-grp">${[['expired', 'Expired customers'], ['expiring', 'Expiring soon'], ['active', 'Active customers'], ['trial', 'Trial users'], ['notrecent', 'Everyone not emailed in the last 7 days'], ['all', 'All customers']].map(([k, l]) => `<option value="${k}">${l} (${n(k)})</option>`).join('')}</select>
       <div class="row" style="margin-top:12px"><button class="btn primary" data-act="order-go">📨 Send now</button></div>
       <p class="small muted">Sent in batches of 100. Customers with a broken email address are skipped. Your Resend plan must allow that many emails (free plan: 100/day, 3,000/month).</p><div id="ob-out"></div>`);
@@ -3002,8 +3006,9 @@ function adminStripePage(s) {
   const two = list.filter((a) => Number(a.payoutDays) === 2).length;
   return `<p class="small muted">All your Stripe accounts in one place. Track <b>status</b> (Active / Verification / Closed), the <b>payout schedule</b> and your <b>package payment links</b> in USD and EUR. Links you add here are what you can put in package emails and IBO activations — deleting a link here does not remove it from Stripe.</p>
     <div class="chips" style="margin-bottom:12px"><a class="on">${list.length} account${list.length === 1 ? '' : 's'} · ${active} active</a><a class="on">${two} with 2-day payout · ${list.length - two} with 7-day payout</a><a class="on">${links.length} link${links.length === 1 ? '' : 's'} — Normal ${byTier('Normal')} · Resellers ${byTier('Resellers')} · IBO ${byTier('IBO')}</a></div>
+    <div id="sa-all-bal" class="small muted" style="margin-bottom:10px"></div>
     <div id="sa-list">${list.map(saRow).join('')}</div>
-    <div class="row" style="margin-top:6px"><button class="btn" data-act="sa-add">＋ Add account</button><span class="spacer"></span><button class="btn primary" data-act="sa-save">💾 Save accounts</button></div>`;
+    <div class="row" style="margin-top:6px"><button class="btn" data-act="sa-add">＋ Add account</button><button class="btn" data-act="sa-balance-all">💰 All balances (total)</button><span class="spacer"></span><button class="btn primary" data-act="sa-save">💾 Save accounts</button></div>`;
 }
 Object.assign(actions, {
   'sa-add': () => $('#sa-list').insertAdjacentHTML('beforeend', saRow({ id: '', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] })),
@@ -3022,6 +3027,16 @@ Object.assign(actions, {
     el.disabled = true; const card = el.closest('.op-row'); const out = card.querySelector('.sa-bal'); out.textContent = 'Checking with Stripe…';
     try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(el.dataset.id)}/balance`); out.textContent = r.connected ? `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}` : (r.error || 'Stripe not reached'); }
     catch (e) { out.textContent = e.message; }
+    el.disabled = false;
+  },
+  'sa-balance-all': async (el) => {
+    el.disabled = true; const out = $('#sa-all-bal'); if (out) out.textContent = 'Checking with Stripe…';
+    let totUsd = 0, totEur = 0, okCount = 0, fail = 0;
+    for (const card of $('#sa-list').querySelectorAll('.op-row')) {
+      const id = card.dataset.sa; const out = card.querySelector('.sa-bal'); if (!id) continue;
+      try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(id)}/balance`); if (r.connected) { out.textContent = `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}`; if (r.currency === 'EUR') totEur += Number(r.available) || 0; else totUsd += Number(r.available) || 0; okCount++; } else { out.textContent = r.error || 'Stripe not reached'; fail++; } } catch (e) { out.textContent = e.message; fail++; }
+    }
+    if (out) out.textContent = `All accounts (${okCount} ok${fail ? `, ${fail} skipped/failed` : ''}): Available $${totUsd.toFixed(2)} · €${totEur.toFixed(2)}`;
     el.disabled = false;
   },
 });
@@ -3277,7 +3292,7 @@ async function adminMktPage() {
         <h3 style="margin-top:12px">Subject lines (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('subject' + i, st.subjects[i] || '', 'Subject ' + (i + 1))).join('')}</div>
         <div style="margin:12px 0 10px">${field('Cost per email (USD)', 'costPerEmail', m.costPerEmail, { type: 'number', attrs: 'step="0.0001" min="0"', help: '$0.0004 = $0.40 per 1,000 emails' })}</div>
         <button type="submit" class="btn primary">💾 Save marketing settings</button></form></div>
-    <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (any format)</span><textarea name="text" rows="5" required placeholder="one per line or comma separated"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>
+    <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (one per line)</span><textarea name="text" rows="5" required placeholder="one email per line"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>
       ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}">🗑</button></div>`).join('')}</div>
       <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select><textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message."></textarea><p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
   </div>`;
