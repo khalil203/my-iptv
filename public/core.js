@@ -1590,7 +1590,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const maskNum = (v) => String(v || '').replace(/\d(?=\d{2})/g, '•');
       const viewP = (c, st) => { const v = view(c, st || s); if (hidePhone) { if (v.phone) v.phone = maskNum(v.phone); if (v.whatsapp) v.whatsapp = maskNum(v.whatsapp); } return v; };
       // Mandatory two-factor for everyone (spec §2). Until it is on, only the memo and the 2FA endpoints answer.
-      if (s.security.force2fa !== false) {
+      if (s.security.force2fa === true) {
         const acct = isOwner ? await getAdmin() : member;
         const tfaOn = !!(acct && acct.totp && acct.totp.on);
         if (!tfaOn) {
@@ -1610,7 +1610,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       if (R('GET', '/api/admin/me')) {
-        const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa !== false };
+        const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa === true };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
         if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
         return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });

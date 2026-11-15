@@ -765,7 +765,7 @@ async function adminSecurity(s) {
     ${field('Current password (required)', 'currentPassword', '', { type: 'password', attrs: 'required' })}
     <button class="btn primary">Update admin login</button></form>
   <div>${twoFactorCard(me)}<form data-form="settings" class="card"><h3>Security</h3>
-    ${toggle('Require two-factor sign-in for owner & staff', 'security.force2fa', s.security.force2fa !== false, 'Every owner and staff member must turn on two-step sign-in before using the dashboard (spec §2)')}
+    ${toggle('Require two-factor sign-in for owner & staff', 'security.force2fa', s.security.force2fa === true, 'Every owner and staff member must turn on two-step sign-in before using the dashboard (spec §2)')}
     ${toggle('Require captcha on customer & trial sign-in', 'security.captcha', s.security.captcha !== false, 'A small math question blocks bots; owner and staff use two-step sign-in instead')}
     ${toggle('Email me if the IPTV server is down (daily check)', 'email.uptimeMonitor', s.email.uptimeMonitor !== false, 'The daily health check emails you when the streaming server does not answer')}
     ${toggle('Auto-clean dead duplicate accounts (same name + phone + email)', 'security.autoDupCleanup', s.security.autoDupCleanup !== false, 'Runs daily: removes expired duplicates with no sign-in or renewal in 6+ months; always keeps the newest and emails you a list')}
