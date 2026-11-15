@@ -1264,11 +1264,6 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('diagnostics', `Client report (${cleanText(body.kind, 40)}): ${cleanText(body.msg, 200)}${cleanText(body.origin, 100) ? ' · ' + cleanText(body.origin, 100) : ''}`);
         return ok({ ok: true });
       }
-      if (R('GET', '/api/admin/diag')) { // owner-only: what devices reported
-        if (!isOwner) return err(403, 'Only the owner can see client diagnostics.');
-        const list = (await store.get('diag')) || [];
-        return ok({ list: list.slice(0, 200) });
-      }
       if (R('POST', '/api/unsub')) { // public: link from newsletter footer
         const [id, sig] = String(body.t || '').split('.');
         if (!id || !sig || sig !== (await unsubSig(s, id))) return err(400, 'Invalid link');
@@ -1625,6 +1620,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
       }
 
+      if (R('GET', '/api/admin/diag')) { // owner-only: what devices reported
+        if (!isOwner) return err(403, 'Only the owner can see client diagnostics.');
+        const list = (await store.get('diag')) || [];
+        return ok({ list: list.slice(0, 200) });
+      }
       if (R('GET', '/api/admin/me')) {
         const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa === true };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
