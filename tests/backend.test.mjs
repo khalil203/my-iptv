@@ -429,3 +429,44 @@ test('renewing a customer is not blocked when the panel answers an error; the cu
   assert.equal(r.status, 200); assert.equal(r.json.panel.ok, false); assert.match(r.json.panel.error, /400/);
   assert.equal(Math.round((r.json.customer.expiresAt - c.expiresAt) / 86400000), 90); assert.ok(r.json.customer.renewPending);
 });
+
+// ---- Phase 1: roles, owner-only access and phone redaction ----
+
+test('roles: owner-only permissions cannot be granted to a team member', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const made = await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'khalil', password: 'secret12', role: 'Technical Manager', perms: ['customers_view', 'customers_phone', 'exports', 'calls', 'master_sheets'] }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  assert.ok(made.json.perms.includes('customers_view'));
+  assert.ok(made.json.perms.includes('customers_phone'));
+  for (const k of ['exports', 'calls', 'master_sheets']) assert.ok(!made.json.perms.includes(k), k + ' is owner-only and must be dropped');
+
+  const li = await x.call('POST', '/api/login', { username: 'khalil', password: 'secret12' });
+  assert.equal(li.status, 200); assert.equal(li.json.role, 'staff');
+  const me = await x.call('GET', '/api/admin/me', {}, li.json.token);
+  assert.equal(me.status, 200);
+  assert.deepEqual(me.json.ownerOnly, ['exports', 'calls', 'master_sheets']);
+  assert.ok(me.json.allRoles['Technical Manager'], 'role presets come from the server');
+  assert.ok(me.json.modules.includes('Customers'));
+  for (const k of ['exports', 'calls', 'master_sheets']) assert.ok(!me.json.perms.includes(k));
+});
+
+test('roles: a staff member cannot reach owner-only pages and the attempt is logged', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
+  const li = await x.call('POST', '/api/login', { username: 'said', password: 'secret12' });
+  assert.equal((await x.call('GET', '/api/admin/team', {}, li.json.token)).status, 403);
+  const log = await x.call('GET', '/api/admin/log', {}, tok);
+  assert.ok(log.json.some((e) => /blocked from GET \/api\/admin\/team/.test(e.msg)), 'the blocked attempt is in the activity log');
+});
+
+test('privacy: phone and WhatsApp are masked for staff without customers_phone, shown to the owner', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await addCustomer(x, tok, { phone: '212600112233', whatsapp: '212600112233' });
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
+  const li = await x.call('POST', '/api/login', { username: 'said', password: 'secret12' });
+  const staffView = (await x.call('GET', '/api/admin/customers', {}, li.json.token)).json.find((z) => z.username === 'testuser');
+  assert.match(staffView.phone, /•/); assert.ok(staffView.phone.endsWith('33'));
+  assert.ok(!/\d{4}/.test(staffView.phone.replace(/•/g, '')), 'no long digit run is left');
+  const ownerView = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((z) => z.username === 'testuser');
+  assert.equal(ownerView.phone, '212600112233');
+});

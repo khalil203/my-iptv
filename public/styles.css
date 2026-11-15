@@ -204,7 +204,8 @@ select option { background: #0d1522; }
 .perm-tags { min-height: 26px; }
 .perm-list .toggle { padding: 8px 0; }
 body.np-customers_edit [data-perm~=customers_edit], body.np-customers_delete [data-perm~=customers_delete], body.np-customers_view [data-perm~=customers_view],
-body.np-finance_edit [data-perm~=finance_edit], body.np-finance_view [data-perm~=finance_view], body.np-stock [data-perm~=stock], body.np-settings [data-perm~=settings] { display: none !important; }
+body.np-finance_edit [data-perm~=finance_edit], body.np-finance_view [data-perm~=finance_view], body.np-stock [data-perm~=stock], body.np-settings [data-perm~=settings],
+body.np-exports [data-perm~=exports], body.np-calls [data-perm~=calls], body.np-master_sheets [data-perm~=master_sheets], body.np-customers_phone [data-perm~=customers_phone] { display: none !important; }
 
 /* user app */
 .uapp { min-height: 100vh; padding-bottom: calc(80px + var(--safe-b)); }

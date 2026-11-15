@@ -150,19 +150,48 @@ const XTREAM_ACTIONS = new Set([
   'get_series_categories', 'get_series', 'get_series_info', 'get_short_epg',
 ]);
 
+// Permission registry: [key, label, module]. The module is only for grouping in the UI.
 export const PERMS = [
-  ['customers_view', 'See customers & subscriptions'],
-  ['customers_edit', 'Add, edit, renew, enable/disable customers'],
-  ['customers_delete', 'Delete customers'],
-  ['finance_view', 'See banks & balances'],
-  ['finance_edit', 'Add income, expenses, transfers'],
-  ['profits', 'See revenue & profits'],
-  ['stock', 'Credits stock (see & buy)'],
-  ['plans', 'Edit plans & prices'],
-  ['settings', 'App settings (API, branding, trial, email, user dashboard)'],
-  ['activity', 'See activity log'],
+  ['customers_view', 'See customers & subscriptions', 'Customers'],
+  ['customers_edit', 'Add, edit, renew, enable/disable customers', 'Customers'],
+  ['customers_delete', 'Delete customers', 'Customers'],
+  ['customers_phone', 'See customer phone & WhatsApp numbers', 'Customers'],
+  ['disputes', 'Disputes & escalations tracker', 'Customers'],
+  ['finance_view', 'See banks & balances', 'Finance'],
+  ['finance_edit', 'Add income, expenses, transfers', 'Finance'],
+  ['profits', 'See revenue & profits', 'Finance'],
+  ['stripe', 'Stripe accounts, payout schedules & payment links', 'Finance'],
+  ['stock', 'Credits stock (see & buy)', 'Finance'],
+  ['plans', 'Edit plans & prices', 'Finance'],
+  ['ibo', 'IBO Player panel & credits', 'Products'],
+  ['marketing', 'Email marketing, lists & campaigns', 'Marketing'],
+  ['seo', 'SEO & social media tasks', 'Marketing'],
+  ['ads', 'Google Ads & Facebook Ads dashboards', 'Marketing'],
+  ['tasks', 'Task list & weekly planning', 'Team'],
+  ['attendance', 'Own attendance, shifts & leave', 'Team'],
+  ['attendance_all', 'See the whole team attendance & reports', 'Team'],
+  ['settings', 'App settings (API, branding, trial, email, user dashboard)', 'System'],
+  ['activity', 'See activity log', 'System'],
+  // Owner-only modules: they can never be granted to a team member.
+  ['exports', 'Export or download any data (Excel, CSV, JSON)', 'System'],
+  ['calls', 'Call management & call logs', 'System'],
+  ['master_sheets', 'Master Google Sheets dashboard', 'System'],
 ];
+export const PERM_MODULES = [...new Set(PERMS.map((p) => p[2]))];
+// Nothing in here can be handed to staff, whatever the owner ticks in the UI.
+export const OWNER_ONLY = ['exports', 'calls', 'master_sheets'];
 const PERM_KEYS = PERMS.map((p) => p[0]);
+const GRANTABLE_KEYS = PERM_KEYS.filter((k) => !OWNER_ONLY.includes(k));
+const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
+
+// Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
+export const ROLE_PRESETS = {
+  'Technical Manager': ['customers_view', 'customers_edit', 'customers_phone', 'disputes', 'tasks', 'attendance', 'activity'],
+  'Sales Agent': ['customers_view', 'customers_edit', 'customers_phone', 'tasks', 'attendance'],
+  Accountant: ['finance_view', 'finance_edit', 'profits', 'stock', 'stripe', 'tasks', 'attendance'],
+  Manager: ['customers_view', 'customers_edit', 'customers_delete', 'customers_phone', 'disputes', 'finance_view', 'finance_edit', 'profits', 'stock', 'plans', 'tasks', 'attendance', 'activity'],
+  'Full access': GRANTABLE_KEYS,
+};
 function permFor(method, path, body) {
   if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
   if (path.startsWith('/api/admin/tickets') || path.startsWith('/api/admin/chat') || path.startsWith('/api/admin/receipts') || path === '/api/admin/sync') return method === 'GET' ? 'customers_view' : 'customers_edit';
@@ -1457,17 +1486,26 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const team = await getTeam();
         member = team.find((x) => x.id === ses.id);
         if (!member || member.status === 'disabled') return err(401, 'Please sign in again.');
-        perms = member.perms || [];
+        // Owner-only permissions can never take effect, even if a stale record still lists them.
+        perms = (member.perms || []).filter((p) => !isOwnerOnly(p));
         actorName = member.name || member.username;
       }
-      const can = (p) => isOwner || perms.includes(p);
+      const can = (p) => isOwner || (!isOwnerOnly(p) && perms.includes(p));
       const need = permFor(method, path, body);
-      if (need === 'owner' && !isOwner) return err(403, 'Only the owner can do this.');
-      if (need && need !== 'owner' && !can(need)) return err(403, 'You do not have permission for this.');
+      if (need === 'owner' && !isOwner) { await log('security', `${actorName} was blocked from ${method} ${path} (owner only)`); return err(403, 'Only the owner can do this.'); }
+      if (need && need !== 'owner' && !can(need)) {
+        if (!isOwner) await log('security', `${actorName} was blocked from ${method} ${path} (needs "${need}")`);
+        return err(403, 'You do not have permission for this.');
+      }
+      // Phone numbers only leave the server for callers allowed to see them (owner, or staff with customers_phone).
+      const hidePhone = !can('customers_phone');
+      const maskNum = (v) => String(v || '').replace(/\d(?=\d{2})/g, '•');
+      const viewP = (c, st) => { const v = view(c, st || s); if (hidePhone) { if (v.phone) v.phone = maskNum(v.phone); if (v.whatsapp) v.whatsapp = maskNum(v.whatsapp); } return v; };
 
       if (R('GET', '/api/admin/me')) {
-        if (isOwner) { const a = await getAdmin(); return ok({ role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, allPerms: PERMS, mode, twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ role: 'staff', name: member.name, username: member.username, isDefault: false, perms, allPerms: PERMS, mode, twoFactor: !!(member.totp && member.totp.on) });
+        const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode };
+        if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, twoFactor: !!(a.totp && a.totp.on) }); }
+        return ok({ ...meta, role: 'staff', name: member.name, username: member.username, isDefault: false, perms, twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -1576,7 +1614,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const taken = team.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getCustomers()).some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getAdmin()).username.toLowerCase() === username.toLowerCase();
         if (taken) return err(400, 'This username is already used.');
         const salt = uid(8);
-        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => PERM_KEYS.includes(p)), status: 'active', createdAt: Date.now(), lastLogin: null };
+        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', createdAt: Date.now(), lastLogin: null };
         team.push(m); await store.put('team', team);
         await log('team', `Added team member ${m.name} (${username})`);
         const { salt: _s, hash: _h, ...pub } = m; return ok(pub);
@@ -1589,7 +1627,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (method === 'PUT') {
           if (body.name !== undefined) m.name = String(body.name);
           if (body.role !== undefined) m.role = String(body.role);
-          if (Array.isArray(body.perms)) m.perms = body.perms.filter((p) => PERM_KEYS.includes(p));
+          if (Array.isArray(body.perms)) m.perms = body.perms.filter((p) => GRANTABLE_KEYS.includes(p));
           if (body.status) m.status = body.status === 'disabled' ? 'disabled' : 'active';
           if (body.password) { if (String(body.password).length < 6) return err(400, 'Password needs 6+ characters.'); m.salt = uid(8); m.hash = await hashPassword(body.password, m.salt); }
           await store.put('team', team); await log('team', `Updated team member ${m.name}`);
@@ -1625,7 +1663,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(next);
       }
 
-      if (R('GET', '/api/admin/customers')) { const bad = await getBad(); return ok((await getCustomers()).map((c) => { const v = view(c, s); const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; })); }
+      if (R('GET', '/api/admin/customers')) { const bad = await getBad(); return ok((await getCustomers()).map((c) => { const v = viewP(c, s); const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; })); }
 
       if (R('POST', '/api/admin/customers')) {
         const list = await getCustomers();
@@ -1671,7 +1709,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let mail = null;
         if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
-        return ok({ customer: view(c, s), panel, mail, duplicates: dup.map((m) => ({ username: m.c.username, name: m.c.name, why: m.why })) });
+        return ok({ customer: viewP(c, s), panel, mail, duplicates: dup.map((m) => ({ username: m.c.username, name: m.c.name, why: m.why })) });
       }
 
       const m = path.match(/^\/api\/admin\/customers\/([\w-]+)(?:\/(\w+))?$/);
@@ -1708,8 +1746,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.startAt) c.startAt = new Date(body.startAt).getTime();
           await saveCustomers(list);
           await log('customer', `Updated ${c.username}${activated ? ' · line added, trial started' : ''}`);
-          if (activated && cleanEmail(c.email)) { const m = accessEmail(s, c, c.loginPassword, c.isTrial ? 'trial' : 'sub', s.email.appUrl || body.appUrl); const r = await sendEmail(s, c.email, m.subject, m.html); await log('customer', `Login email to ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`); return ok({ ...view(c, s), activated: true, emailed: !!r.ok }); }
-          return ok(view(c, s));
+          if (activated && cleanEmail(c.email)) { const m = accessEmail(s, c, c.loginPassword, c.isTrial ? 'trial' : 'sub', s.email.appUrl || body.appUrl); const r = await sendEmail(s, c.email, m.subject, m.html); await log('customer', `Login email to ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`);           return ok({ ...viewP(c, s), activated: true, emailed: !!r.ok });
+          }
+          return ok(viewP(c, s));
         }
         if (method === 'DELETE' && !sub) {
           let panel = null;
@@ -1746,7 +1785,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await saveCustomers(list);
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${s.currency})`);
-          return ok({ customer: view(c, s), panel });
+          return ok({ customer: viewP(c, s), panel });
         }
         if (method === 'POST' && sub === 'email') {
           const to = String(body.to || c.email || '').trim();
@@ -1816,7 +1855,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           c.status = next;
           await saveCustomers(list);
           await log('customer', `${next === 'active' ? 'Enabled' : 'Disabled'} ${c.username}`);
-          return ok({ customer: view(c, s), panel });
+          return ok({ customer: viewP(c, s), panel });
         }
         return err(404, 'Not found');
       }
@@ -2091,7 +2130,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (members.length < 2) continue;
           const type = k.slice(0, k.indexOf(':')), value = k.slice(k.indexOf(':') + 1);
           out.push({ id: k, type, value: type === 'phone' ? (members.map((m) => m.whatsapp || m.phone).find((x) => String(x || '').replace(/\D/g, '').endsWith(value)) || value) : type === 'name' ? members[0].name : value,
-            members: members.map((c) => view(c, s)).sort((a, b) => (b.createdAt || b.startAt) - (a.createdAt || a.startAt)) });
+            members: members.map((c) => viewP(c, s)).sort((a, b) => (b.createdAt || b.startAt) - (a.createdAt || a.startAt)) });
         }
         out.sort((a, b) => b.members.length - a.members.length || a.type.localeCompare(b.type));
         return ok({ groups: out, attempts: ((await store.get('dupAttempts')) || []).slice(0, 200), customersInGroups: new Set(out.flatMap((g) => g.members.map((m) => m.id))).size });
@@ -2133,7 +2172,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/admin/reseller-sales')) return ok((await getSales()).filter((x) => x.type === 'reseller').sort((a, b) => b.at - a.at));
 
       if (R('GET', '/api/admin/stats')) {
-        const cs = (await getCustomers()).map((c) => view(c, s));
+        const cs = (await getCustomers()).map((c) => viewP(c, s));
         const now = new Date();
         const monthKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
         const months = [];
