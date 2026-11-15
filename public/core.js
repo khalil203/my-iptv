@@ -2245,6 +2245,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('GET', '/api/admin/settings')) {
         const maskStripe = (src) => ({ ...src, stripeAccounts: (src.stripeAccounts || []).map((a) => ({ ...a, rk: a.rk ? '••••' : '' })) });
+        const maskPanel = (src) => ({ ...src, panel: Object.fromEntries(Object.entries(src.panel || {}).map(([k, v]) => [k, { ...v, apiKey: v.apiKey ? '••••' : '', password: v.password ? '••••' : '' }])) });
         const maskKeys = (src) => ({
           ...src,
           reseller: { ...src.reseller, baseUrl: src.reseller.baseUrl ? '••••' : '', apiKey: src.reseller.apiKey ? '••••' : '', username: src.reseller.username ? '••••' : '', password: src.reseller.password ? '••••' : '', actions: Object.fromEntries(Object.entries(src.reseller.actions || {}).map(([k, v]) => [k, { ...v, url: v.url && /api_key=|\{key\}/.test(v.url) ? '••••' : '••••', headers: '••••' }])) },
@@ -2254,15 +2255,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (can('settings')) {
           const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
           if (isTm) return ok(maskStripe(s));          // Nizar & Khalil: full access
-          return ok(maskKeys(maskStripe(s)));          // Other staff with settings access: everything masked
+          return ok(maskPanel(maskKeys(maskStripe(s)))); // Other staff: everything masked (panel creds too)
         }
-        return ok(maskStripe({ ...s, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } }));
+        return ok(maskPanel(maskStripe({ ...s, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } })));
       }
       if (R('PUT', '/api/admin/settings')) {
         // Absolute sovereignty (spec §1): only Nizar (Owner) and Khalil (Technical Manager) may show, add, edit or update
         // IPTV panel keys, Resend keys, Stripe keys and other API credentials. Everyone else is locked out at the API level.
-        const API_KEY_PATHS = [['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets']];
-        const touchesKey = API_KEY_PATHS.some(([a, b]) => body?.[a] && Object.keys(body[a]).some((k) => k === b));
+        const API_KEY_PATHS = [['panel', 'dino'], ['panel', 'xtream'], ['panel', 'mega'], ['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets']];
+        const touchesKey = API_KEY_PATHS.some(([a, b]) => body?.[a] && (Array.isArray(body[a]) ? body[a].some((x) => Object.keys(x || {}).some((k) => k === b)) : Object.keys(body[a] || {}).some((k) => k === b)));
         const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
         if (touchesKey && !isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.');
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
@@ -2886,6 +2887,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           expiringSoon: cs.filter((c) => c.state === 'expiring').sort((a, b) => a.expiresAt - b.expiresAt).slice(0, 8),
           recentlyExpired: cs.filter((c) => c.state === 'expired').sort((a, b) => b.expiresAt - a.expiresAt).slice(0, 8),
         });
+      }
+
+      if (R('POST', '/api/admin/panels/test')) { // check that a Dino/Xtream/Mega panel is reachable + auth ok
+        const tm = isOwner || /technical|panel manager/i.test((member && member.role) || ''); if (!tm) return err(403, 'Only the owner and the Technical Manager can test panels.');
+        const baseUrl = String(body.baseUrl || '').trim().replace(/\/+$/, ''); const u = String(body.username || '').trim().slice(0, 80); const pw = String(body.password || '').slice(0, 200);
+        if (!/^https?:\/\//.test(baseUrl)) return err(400, 'Base URL must start with http:// or https://');
+        const type = ['dino', 'xtream', 'mega'].includes(String(body.type || '').toLowerCase()) ? String(body.type).toLowerCase() : 'xtream';
+        try {
+          const target = type === 'xtream' && u ? `${baseUrl}/player_api.php?username=${encodeURIComponent(u)}&password=${encodeURIComponent(pw)}&action=get_account_info` : baseUrl;
+          const r = await fetchFn(target);
+          const text = await r.text();
+          if (r.ok || r.status === 401 || r.status === 200) return ok({ ok: true, status: r.status, type, url: baseUrl, body: type === 'xtream' && u ? text.slice(0, 300) : text.slice(0, 120) });
+          return ok({ ok: false, status: r.status, error: `Panel answered HTTP ${r.status}` });
+        } catch (e) { return ok({ ok: false, error: e.message }); }
       }
 
       if (R('POST', '/api/admin/panel/test')) {

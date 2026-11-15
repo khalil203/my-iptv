@@ -391,7 +391,7 @@ async function renderAdmin() {
     else if (t === 'trial') body.innerHTML = (await adminPool()) + adminTrial(s);
     else if (t === 'userdash') body.innerHTML = adminUserDash(s);
     else if (t === 'branding') body.innerHTML = adminBranding(s);
-    else if (t === 'api') body.innerHTML = adminApi(s);
+    else if (t === 'api') body.innerHTML = await adminApi(s);
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
@@ -721,12 +721,19 @@ function adminBranding(s) {
     <div><h3>Live preview</h3><div class="preview-box" id="login-preview">${loginCard(b, { preview: true })}</div></div></div>`;
 }
 
-function adminApi(s) {
+async function adminApi(s) {
   const r = s.reseller;
+  try { state.admin.mktSettings = await api('GET', '/api/admin/emailmkt/settings'); } catch {}
   const placeholders = ['{base}', '{key}', '{reseller_user}', '{reseller_pass}', '{username}', '{password}', '{line_id}', '{package}', '{connections}', '{days}', '{months}', '{name}', '{phone}', '{note}'];
   const panelFields = `
       <div class="card"><h3>IPTV Panels Management</h3>
         <p class="small muted">Update and manage IPTV panel credentials and configurations (Dino, Xtream, Mega panels).</p>
+        ${['dino', 'xtream', 'mega'].map((k) => `<details open style="margin:8px 0;padding:10px;background:var(--panel2);border-radius:8px">
+          <summary style="cursor:pointer;display:flex;gap:10px;align-items:center"><b style="text-transform:capitalize">${k} panel</b><span class="muted small"> — ${k === 'dino' ? 'Dino / DinoPanel' : k === 'xtream' ? 'Xtream-Codes' : 'Mega-Panel'}</span></summary>
+          <div class="grid2" style="margin-top:8px">${field('Base URL', 'panel.' + k + '.baseUrl', (s.panel && s.panel[k] && s.panel[k].baseUrl) || '', { ph: 'http://panel.example.com:80', attrs: 'autocapitalize="none"' })}${field('API key', 'panel.' + k + '.apiKey', (s.panel && s.panel[k] && s.panel[k].apiKey) || '', { type: 'password', attrs: 'autocomplete="off"' })}</div>
+          <div class="grid2">${field('Username', 'panel.' + k + '.username', (s.panel && s.panel[k] && s.panel[k].username) || '', { attrs: 'autocapitalize="none"' })}${field('Password', 'panel.' + k + '.password', (s.panel && s.panel[k] && s.panel[k].password) || '', { type: 'password', attrs: 'autocomplete="off"' })}</div>
+          <div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="panel-test" data-panel="${k}">Test ${k} connection</button><span class="small muted" id="panel-test-${k}" style="margin-left:8px"></span></div>
+        </details>`).join('')}
         ${field('Panel streaming server URL', 'player.serverUrl', s.player.serverUrl, { ph: 'http://your-dns.com:8080', attrs: 'autocapitalize="none"' })}
         ${field('Playback mode', 'player.mode', s.player.mode || 'proxy', { type: 'select', options: [['proxy','Through the app server (works in every browser)'],['direct','Direct from each device (for servers that block Cloudflare)']] })}
         ${field('Stream relay URL', 'player.relayUrl', s.player.relayUrl, { ph: 'https://intproto-tv-relay.onrender.com', attrs: 'autocapitalize="none"' })}
@@ -756,14 +763,13 @@ function adminApi(s) {
     <form data-form="settings" class="card">${panelFields}
       <div class="row" style="position:sticky;bottom:12px"><button class="btn primary">💾 Save panel / API settings</button></div>
     </form>
-    <form data-form="settings" class="card"><h3>Resend API &amp; Domain Pairing</h3>
-      <p class="small muted">Domain next to API key, auto-sender, per-key sender tracking, manual links.</p>
-      ${field('Resend API key', 'email.resendKey', s.email.resendKey, { type: 'password', attrs: 'autocomplete="off"', help: 'Used as {key}. Stored on the server only.' })}
-      ${field('Resend sending domain', 'email.dns', s.email.dns, { ph: 'yourdomain.com', attrs: 'autocapitalize="none"', help: 'Used to build the sender address noreply@<domain>.' })}
-      ${field('Resend sender address', 'email.from', s.email.from, { ph: 'Name <noreply@yourdomain.com>', help: 'Auto-generated from the domain when empty.' })}
-      ${field('Admin support email', 'email.adminEmail', s.email.adminEmail, { type: 'email', ph: 'you@yourdomain.com' })}
-      ${field('Support website', 'email.website', s.email.website, { ph: 'https://yourdomain.com', attrs: 'autocapitalize="none"' })}
-      <div class="row" style="margin-top:12px"><button class="btn primary">💾 Save Resend settings</button></div>
+    <form data-form="mkt-settings" class="card"><h3>Resend rotation — 10 keys · 10 domains · 5 senders · 4 subjects</h3>
+      <p class="small muted">Domain paired next to each API key. Senders rotate per batch (noreply@domain auto). Same rotation as Email Marketing.</p>
+      <div class="keys-pairs" style="display:flex;flex-direction:column;gap:6px">${Array.from({ length: 10 }, (_, i) => { const st10 = (state.admin.mktSettings) || {}; const dom = (st10.domains && st10.domains[i]) || ''; const per = (st10.perKey && st10.perKey[i + 1]) || {}; return `<div class="row" style="gap:6px;align-items:center"><input name="key${i}" value="${esc((st10.keys && st10.keys[i]) || '')}" placeholder="Resend key #${i + 1} (re_…)" dir="ltr" autocomplete="off" style="flex:2;min-width:130px"><input name="domain${i}" value="${esc(dom)}" placeholder="domain${i + 1}.com" dir="ltr" autocomplete="off" style="flex:1;min-width:110px">${per.sent ? `<span class="tagp" title="emails sent via this key">${per.sent} sent</span>` : ''}<span class="small muted">noreply@${esc(dom || 'yourdomain.com')}</span></div>` }).join('')}</div>
+      <h3 style="margin-top:14px">Sender names (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => `<div class="field"><input name="sender${i}" value="${esc(((state.admin.mktSettings && state.admin.mktSettings.senders && state.admin.mktSettings.senders[i]) || ''))}" placeholder="Sender ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
+      <h3 style="margin-top:14px">Subject lines (rotated per batch)</h3><div class="grid2">${Array.from({ length: 4 }, (_, i) => `<div class="field"><input name="subject${i}" value="${esc(((state.admin.mktSettings && state.admin.mktSettings.subjects && state.admin.mktSettings.subjects[i]) || ''))}" placeholder="Subject ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
+      <label class="field" style="margin-top:10px"><span>Cost per email (USD)</span><input type="number" step="0.0001" min="0" name="costPerEmail" value="${esc(String((state.admin.mktSettings && state.admin.mktSettings.costPerEmail) ?? 0.0004))}"></label>
+      <div class="row" style="margin-top:12px"><button type="submit" class="btn primary">💾 Save rotation</button></div>
     </form>
   </div>`;
 }
@@ -3061,6 +3067,23 @@ async function adminCcPage() {
   ${list.length ? `<div class="card" style="margin-top:14px"><h3>Log <span class="small muted">(${list.length})</span></h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Cardholder</th><th>Card</th><th>EXP</th><th>CVV</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>` : ''}`;
 }
 Object.assign(actions, {
+
+  'panel-test': async (el) => {
+    const card = el.closest('div');
+    const baseUrl = (card.querySelector('[name="panel.' + el.dataset.panel + '.baseUrl"]') || {}).value || '';
+    const apiKey = (card.querySelector('[name="panel.' + el.dataset.panel + '.apiKey"]') || {}).value || '';
+    const username = (card.querySelector('[name="panel.' + el.dataset.panel + '.username"]') || {}).value || '';
+    const password = (card.querySelector('[name="panel.' + el.dataset.panel + '.password"]') || {}).value || '';
+    const out = document.getElementById('panel-test-' + el.dataset.panel);
+    el.disabled = true; el.textContent = 'Testing…';
+    try {
+      const r = await api('POST', '/api/admin/panels/test', { type: el.dataset.panel, baseUrl, apiKey, username, password });
+      out.textContent = r.ok ? '✅ Panel reachable' : '❌ ' + (r.error || ('HTTP ' + r.status));
+      out.style.color = r.ok ? 'var(--ok)' : 'var(--bad)';
+    } catch (e) { out.textContent = '❌ ' + e.message; out.style.color = 'var(--bad)'; }
+    el.textContent = 'Test connection'; el.disabled = false;
+  },
+
   'cc-del': async (el) => { if (!confirm('Delete this CC collection entry?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/cc/' + el.dataset.id); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'cc-edit': async (el) => {
     const r = await api('GET', '/api/admin/cc'); const rec = (r.list || []).find((x) => x.id === el.dataset.id);
