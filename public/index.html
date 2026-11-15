@@ -16,7 +16,7 @@
   <script>/* pick day/night before anything shows */try{var m=localStorage.getItem("tvp_theme")||"auto",hr=new Date().getHours();document.documentElement.dataset.theme=m==="auto"?(hr>=6&&hr<18?"light":"dark"):m}catch(e){}</script>
 </head>
 <body>
-  <div id="app"><div class="boot"><img src="logo.png" alt="" style="width:110px;height:110px;border-radius:50%;animation:pulse 1.6s ease-in-out infinite"></div></div>
+  <div id="app"><div class="boot" style="display:grid;place-items:center;height:100vh"><div style="width:110px;height:110px;border-radius:50%;border:6px solid var(--line2,#2A2A33);border-top-color:var(--primary,#FF6B42);animation:spin 900ms linear infinite"></div><div style="margin-top:14px;color:var(--muted,#BCBAAF);font:600 15px Inter,system-ui,sans-serif;letter-spacing:.04em">INTPROTO-TV</div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style></div>
   <div id="modal-root"></div>
   <div id="toast"></div>
   <script type="module" src="app.js"></script>
