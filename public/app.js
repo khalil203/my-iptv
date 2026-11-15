@@ -57,6 +57,14 @@ function formToObj(form) {
     parts.slice(0, -1).forEach((p) => { o = o[p] ??= {}; });
     o[parts.at(-1)] = v;
   });
+  // When a Stripe account is chosen, map it to the linked bank/ledger id so sales, renewals and new credits flow into that account.
+  if (out.stripeAccountId) {
+    const sas = (state.admin && state.admin.settings && state.admin.settings.stripeAccounts) || [];
+    const sa = sas.find((a) => a && a.id === out.stripeAccountId);
+    if (sa && sa.bankId) out.accountId = sa.bankId;
+    else if ((sas || []).length) {/* keep explicit value */} else delete out.stripeAccountId;
+    delete out.stripeAccountId;
+  }
   return out;
 }
 const pill = (st) => `<span class="pill st-${st}">${isAdminUI() ? st : t('st_' + st)}</span>`;
@@ -532,7 +540,7 @@ function customerForm(c) {
     <h3 style="margin-top:6px">Subscription</h3>
     <div class="grid2">${field('Plan', 'planId', c.planId, { type: 'select', options: planOpts })}${field('Devices (connections)', 'connections', c.connections || 1, { type: 'number', attrs: 'min="1" max="10"' })}</div>
     <div class="grid2">${field('Start date', 'startAt', isoDay(c.startAt || Date.now()), { type: 'date' })}${field('Expiry date', 'expiresAt', c.expiresAt ? isoDay(c.expiresAt) : '', { type: 'date', help: isNew ? 'Leave empty to calculate from the plan.' : '' })}</div>
-    ${isNew ? `<div class="grid2">${accountSelect(s, 'accountId', '')}${field('Amount received', 'price', s.plans[0]?.price || 0, { type: 'number', attrs: 'min="0" step="any"', help: 'In the currency of the chosen account.' })}</div>
+    ${isNew ? `<div class="grid2">${accountSelect(s, 'accountId', '')}${stripeSelect(s, 'stripeAccountId', '')}${field('Amount received', 'price', s.plans[0]?.price || 0, { type: 'number', attrs: 'min="0" step="any"', help: 'In the currency of the chosen account.' })}</div>
       ${toggle('Email the login details to the customer', 'sendEmail', !!s.email.resendKey, s.email.resendKey ? 'Sent with Resend in the language above.' : 'Set up Resend in "Trial & email" first.')}
       ${s.reseller.enabled ? toggle('Create the line on the TVplus panel now', 'createOnPanel', true, 'Uses the "create" action from API settings.') : '<p class="small muted">Reseller API is off — the line will only be saved in this app.</p>'}` : ''}
     ${field('Call notes (conclusion of call)', 'callNotes', c.callNotes || '', { type: 'textarea', rows: 2, ph: 'Summary of the last call / what was promised…' })}
@@ -550,6 +558,7 @@ function renewForm(c) {
     ${field('Plan', 'planId', p0.id || '', { type: 'select', options: [...s.plans.map((p) => [p.id, `${p.name} · ${p.days} days`]), ['custom', 'Custom number of days']], attrs: 'data-renew-plan' })}
     <div class="grid3">${field('Days to add', 'days', p0.days, { type: 'number', attrs: 'min="1"' })}${field('Credits used', 'credits', p0.credits ?? '', { type: 'number', attrs: 'min="0"' })}${field('Amount received', 'price', p0.price, { type: 'number', attrs: 'min="0" step="any"' })}</div>
     ${accountSelect(s, 'accountId', '')}
+    ${stripeSelect(s, 'stripeAccountId', '')}
     <p class="small muted" id="renew-preview"></p>
     ${s.reseller.enabled ? toggle('Also renew the line on the TVplus panel', 'syncPanel', !!c.lineId || true, 'Uses the "renew" action from API settings.') : ''}
     ${c.status === 'disabled' ? toggle('Enable this customer again', 'enable', true) : ''}
@@ -903,6 +912,11 @@ const accountSelect = (s, name, value, label = 'Paid into (bank / wallet)', opts
   type: 'select', options: [...(opts.none === false ? [] : [['', '— not recorded —']]), ...s.finance.accounts.map((a) => [a.id, `${a.name} (${a.currency})`])],
 });
 
+const stripeSelect = (s, name, value, label = 'Stripe account', opts = {}) => field(label, name, value, {
+  type: 'select', options: [...(opts.none === false ? [] : [['', '— not recorded —']]), ...((s.stripeAccounts || []).filter((a) => a.status === 'active').map((a) => [a.id, a.name || a.id]))],
+});
+
+
 // ---------------- finance ----------------
 async function adminFinance(s) {
   const f = await api('GET', '/api/admin/finance');
@@ -969,7 +983,8 @@ function txForm(type, accId) {
     <div class="grid2">${field(type === 'transfer' ? 'From' : 'Bank / wallet', 'accountId', accId || accs[0]?.id, { type: 'select', options: accs.map((a) => [a.id, `${a.name} (${a.currency})`]) })}
     ${field('Amount', 'amount', '', { type: 'number', attrs: 'step="any" min="0" required' })}</div>
     ${type === 'transfer' ? `<div class="grid2">${field('To', 'toAccountId', accs.find((a) => a.id !== (accId || accs[0]?.id))?.id, { type: 'select', options: accs.map((a) => [a.id, `${a.name} (${a.currency})`]) })}${field('Amount received', 'toAmount', '', { type: 'number', attrs: 'step="any" min="0"', help: 'Leave empty to convert with today\'s rate.' })}</div>` : ''}
-    <div class="grid2">${field('Category', 'category', cats[0], { attrs: 'list="cats"' })}<datalist id="cats">${cats.map((c) => `<option value="${c}">`).join('')}</datalist>${field('Date', 'date', isoDay(Date.now()), { type: 'date' })}</div>
+    <div class="grid2">${stripeSelect(s, 'stripeAccountId', '')}
+    ${field('Category', 'category', cats[0], { attrs: 'list="cats"' })}<datalist id="cats">${cats.map((c) => `<option value="${c}">`).join('')}</datalist>${field('Date', 'date', isoDay(Date.now()), { type: 'date' })}</div>
     ${field('Note', 'note', '')}
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Save</button></div>
   </form>`;
