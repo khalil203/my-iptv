@@ -809,3 +809,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 /* defensive readability for stale/out-of-sync cached shells */
 .site h1, .s-hero h1, .site h2, .s-sub { color: var(--text) !important; }
 .s-pv-now b { color: var(--text); }
+
+/* force-readable hero on both themes (belt & braces) */
+[data-theme=light] .site h1, [data-theme=light] .s-hero h1, .site h1 { color: #181820 !important; }
+[data-theme=dark] .site h1, [data-theme=dark] .s-hero h1, .site h1 { color: #F0EEE8 !important; }
+.s-sub { color: inherit !important; }
+.s-hero h1 span.grad { color: var(--primary) !important; -webkit-background-clip: unset !important; background-clip: unset !important; }
