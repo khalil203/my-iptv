@@ -106,7 +106,7 @@ export const DEFAULT_SETTINGS = () => ({
   orderCurrency: 'EUR',
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
-  trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false },
+  trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false, mode: 'auto', notifyAdmin: true },
   email: { lang: 'en', resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
   finance: {
     autoRates: true, ratesUpdatedAt: 0,
@@ -195,6 +195,10 @@ export const ROLE_PRESETS = {
 function permFor(method, path, body) {
   if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
   if (path.startsWith('/api/admin/tickets') || path.startsWith('/api/admin/chat') || path.startsWith('/api/admin/receipts') || path === '/api/admin/sync') return method === 'GET' ? 'customers_view' : 'customers_edit';
+  // Anyone on the team can file a problem report; only disputes-permitted staff can view and process the tracker.
+  if (path === '/api/admin/disputes' && method === 'POST') return null;
+  if (path.startsWith('/api/admin/disputes')) return 'disputes';
+  if (path.startsWith('/api/admin/trialq')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/payments') return 'finance_view';
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
@@ -1140,6 +1144,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (n >= 3) return err(429, 'trial_ip');
           await store.put(k, n + 1, 86400);
         }
+        // All-agents queue mode (spec §4): the request goes to the shared panel; an authorized agent claims and processes it.
+        if (s.trial.mode === 'agents') {
+          const tql = (await store.get('trialqueue')) || [];
+          const entry = { id: uid(6), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
+          tql.unshift(entry); await store.put('trialqueue', tql.slice(0, 300));
+          await log('trial', `Free trial request queued for ${name} <${email}> (all-agents queue)`);
+          await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for an agent to process it.\n\n${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}\n\nOpen Trial queue in the dashboard, paste the M3U link from your panel and send the trial.`);
+          return ok({ ok: true, queued: true, hours: s.trial.hours });
+        }
         const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
         let username; do { username = 't' + rnd(6, '0123456789'); } while (list.some((c) => c.username === username));
         let password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
@@ -1327,8 +1340,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         if (R('GET', '/api/me')) {
           const { lineUsername, linePassword, loginPassword, ...pub } = v;
+          const sales = (await getSales()).filter((x) => x.customerId === c.id && Number(x.amount) > 0);
+          const totalPaidUsd = Math.round(sales.reduce((a, x) => a + (Number(x.amountUsd) || 0), 0) * 100) / 100;
           return ok({
-            user: pub, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
+            user: pub, totalPaidUsd, paidCount: sales.length, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             buyRequest: c.buyRequest || null,
@@ -1578,6 +1593,93 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (from + part.length >= todo.length) { await store.put('lastsync', Date.now()); await log('customer', `Synced ${todo.length} customer(s) with the panel`); }
         return ok({ done: from + part.length >= todo.length, next: from + part.length, total: todo.length, changed, bad, error: unreachable });
       }
+      // ---------- disputes & problem reports (spec §5) ----------
+      const getDisputes = async () => (await store.get('disputes')) || [];
+      const saveDisputes = (l) => store.put('disputes', l.slice(0, 500));
+      const publicDispute = ({ att, notes, ...d }) => d;
+      const getTrialQueue = async () => (await store.get('trialqueue')) || [];
+      const saveTrialQueue = (l) => store.put('trialqueue', l.slice(0, 300));
+
+      if (R('GET', '/api/admin/disputes/att')) { const data = /^[0-9a-f]+$/.test(String(query.id || '')) ? await store.get('att:' + query.id) : null; return data ? ok({ data }) : err(404, 'This picture is no longer stored.'); }
+      if (R('GET', '/api/admin/disputes')) {
+        const all = (await getDisputes()).sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0) || b.updatedAt - a.updatedAt);
+        return ok({ list: all.map(publicDispute), open: all.filter((d) => d.status !== 'resolved').length, high: all.filter((d) => d.status !== 'resolved' && d.priority === 'high').length });
+      }
+      if (R('POST', '/api/admin/disputes')) {
+        // Any admin screen can report a problem: payment issue, service complaint, dispute, or a panel/technical bug (screenshot + priority).
+        const kind = ['payment', 'service', 'dispute', 'bug', 'other'].includes(body.kind) ? body.kind : 'other';
+        const subject = cleanText(body.subject, 160); const details = cleanText(body.details, 4000);
+        if (subject.length < 3) return err(400, 'Write a short title first.');
+        let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'The picture is too large or not an image.'); }
+        const list = await getCustomers(); const cu = body.customerId ? list.find((x) => x.id === String(body.customerId)) : null;
+        const d = { id: uid(8), kind, subject, details, priority: ['low', 'normal', 'high'].includes(body.priority) ? body.priority : 'normal', status: 'open',
+          customerId: cu ? cu.id : '', username: cu ? cu.username : '', name: cu ? cu.name : '', orderNo: cu ? (cu.orderNo || '') : '', amount: Number(body.amount) || 0,
+          att, createdBy: actorName, createdAt: Date.now(), updatedAt: Date.now(), assignedTo: String(body.assignedTo || '').slice(0, 40), notes: [], resolution: '' };
+        const all = await getDisputes(); all.unshift(d); await saveDisputes(all);
+        if (cu) { cu.statusFlag = 'dispute'; await saveCustomers(list); }
+        await log('disputes', `${d.kind === 'bug' ? 'Problem report' : 'Dispute'} opened: "${d.subject}"${cu ? ' for ' + cu.username : ''} (${d.priority})`);
+        await notifyAdmin(s, `${d.kind === 'bug' ? '🐞 Problem report' : '⚠️ Dispute'}: ${d.subject}`, `${d.details || ''}\n\nOpened by ${actorName}${cu ? `\nCustomer: ${cu.name} (${cu.username})` : ''}\nPriority: ${d.priority}`);
+        return ok({ ok: true, dispute: publicDispute(d) });
+      }
+      if (R('POST', '/api/admin/disputes/update')) {
+        const all = await getDisputes(); const d = all.find((x) => x.id === String(body.id || '')); if (!d) return err(404, 'Not found.');
+        if (body.status) { const st = ['open', 'in_progress', 'resolved'].includes(body.status) ? body.status : null; if (!st) return err(400, 'Unknown status.'); d.status = st; if (st === 'resolved') { d.resolvedAt = Date.now(); d.resolvedBy = actorName; } }
+        if (body.priority !== undefined) d.priority = ['low', 'normal', 'high'].includes(body.priority) ? body.priority : d.priority;
+        if (body.assignedTo !== undefined) d.assignedTo = String(body.assignedTo || '').slice(0, 40);
+        const note = cleanText(body.note, 1000);
+        if (note) d.notes.push({ at: Date.now(), by: actorName, text: note });
+        if (body.resolution !== undefined) d.resolution = cleanText(body.resolution, 2000);
+        d.updatedAt = Date.now(); await saveDisputes(all);
+        await log('disputes', `Dispute "${d.subject}" → ${d.status}${note ? ' · ' + note : ''}`);
+        return ok({ ok: true, dispute: publicDispute(d) });
+      }
+
+      // ---------- all-agents free trial queue (spec §4) ----------
+      const trialSend = async (entry, m3uText) => {
+        const ln = parseLineLink(String(m3uText || '').trim()); if (!ln) return { error: 'This does not look like an M3U link. Paste the full link (it contains username= and password=).' };
+        const list = await getCustomers(); const prev = findMatches(list, { email: entry.email, phone: entry.phone, whatsapp: entry.whatsapp });
+        if (prev.length) return { error: `A customer already uses this email or phone (${prev[0].c.username}). Open Customers to continue.` };
+        const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
+        let username = String(entry.username || ln.u || '').trim() || ('t' + rnd(6, '0123456789'));
+        let password = String(entry.password || ln.p || '').trim(); if (!password) password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
+        const now = Date.now(); const salt = uid(8);
+        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, lang: ['en', 'fr', 'ar'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        list.push(c); await saveCustomers(list);
+        await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
+        const dns = String(ln.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
+        const m = accessEmail(s, c, password, 'trial', body.appUrl);
+        const sent = await sendEmail(s, c.email, m.subject, m.html);
+        await log('trial', `Trial sent to ${c.username} for ${c.name} <${c.email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}`);
+        return { ok: true, username: c.username, emailSent: sent.ok, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours };
+      };
+      if (R('GET', '/api/admin/trialq')) {
+        const all = (await getTrialQueue()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.at - a.at);
+        return ok({ list: all, pending: all.filter((t) => t.status === 'pending').length });
+      }
+      if (R('POST', '/api/admin/trialq/claim')) {
+        const all = await getTrialQueue(); const t = all.find((x) => x.id === String(body.id || '')); if (!t) return err(404, 'Not found.');
+        if (t.status !== 'pending') return err(400, 'This request is already ' + t.status + '.');
+        if (t.claimedBy && !isOwner) return err(400, `Already claimed by ${t.claimedBy}.`);
+        t.claimedBy = actorName; t.claimedAt = Date.now(); await saveTrialQueue(all);
+        return ok({ ok: true, request: t });
+      }
+      if (R('POST', '/api/admin/trialq/send')) {
+        const all = await getTrialQueue(); const t = all.find((x) => x.id === String(body.id || '')); if (!t) return err(404, 'Not found.');
+        if (t.status !== 'pending') return err(400, 'This request is already ' + t.status + '.');
+        const r = await trialSend(t, body.m3u); if (r.error) return err(400, r.error);
+        t.status = 'done'; t.handledBy = actorName; t.doneAt = Date.now();
+        // link the new customer id if it can be matched (most recent created)
+        const cl = (await getCustomers()).slice().sort((a, b) => b.createdAt - a.createdAt)[0]; if (cl) t.customerId = cl.id;
+        await saveTrialQueue(all);
+        return ok({ ok: true, ...r });
+      }
+      if (R('POST', '/api/admin/trialq/reject')) {
+        const all = await getTrialQueue(); const t = all.find((x) => x.id === String(body.id || '')); if (!t) return err(404, 'Not found.');
+        t.status = 'rejected'; t.handledBy = actorName; t.doneAt = Date.now(); t.note = cleanText(body.note, 500); await saveTrialQueue(all);
+        await log('trial', `Trial request rejected for ${t.email}${t.note ? ': ' + t.note : ''}`);
+        return ok({ ok: true });
+      }
+
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
       if (R('POST', '/api/admin/chat')) {
@@ -1668,7 +1770,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(next);
       }
 
-      if (R('GET', '/api/admin/customers')) { const bad = await getBad(); return ok((await getCustomers()).map((c) => { const v = viewP(c, s); const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; })); }
+      if (R('GET', '/api/admin/customers')) {
+        const bad = await getBad(); const sales = await getSales(); const paid = {};
+        for (const sa of sales) if (Number(sa.amount) > 0) paid[sa.customerId] = (paid[sa.customerId] || 0) + (Number(sa.amountUsd) || 0);
+        return ok((await getCustomers()).map((c) => { const v = viewP(c, s); v.totalPaidUsd = Math.round((paid[c.id] || 0) * 100) / 100; const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; }));
+      }
 
       if (R('POST', '/api/admin/customers')) {
         const list = await getCustomers();
@@ -1689,6 +1795,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const c = {
           id: uid(8), name: String(body.name || username), phone: String(body.phone || ''), note: String(body.note || ''),
           email: cleanEmail(body.email) || String(body.email || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
+          telegram: String(body.telegram || ''), macAddress: String(body.macAddress || ''), deviceApp: String(body.deviceApp || ''),
+          statusFlag: ['normal', 'excellent', 'dispute'].includes(body.statusFlag) ? body.statusFlag : 'normal', callNotes: String(body.callNotes || ''),
           username, salt, passwordHash: await hashPassword(body.password, salt), loginPassword: String(body.password),
           lineUsername: body.lineSame !== false ? username : String(body.lineUsername || ''),
           linePassword: body.lineSame !== false ? String(body.password) : String(body.linePassword || ''),
@@ -1746,7 +1854,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             c.username = u;
           }
           if (body.password) { c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); c.loginPassword = String(body.password); }
-          for (const k of ['orderNo', 'country', 'address', 'server', 'panel', 'device', 'paymentMethod']) if (body[k] !== undefined) c[k] = String(body[k]);
+          for (const k of ['orderNo', 'country', 'address', 'server', 'panel', 'device', 'paymentMethod', 'telegram', 'macAddress', 'deviceApp', 'callNotes']) if (body[k] !== undefined) c[k] = String(body[k]);
+          if (body.statusFlag !== undefined && ['normal', 'excellent', 'dispute'].includes(body.statusFlag)) {
+            const was = c.statusFlag; c.statusFlag = body.statusFlag;
+            if (body.statusFlag === 'dispute' && was !== 'dispute') {
+              try {
+                const dis = await getDisputes();
+                dis.unshift({ id: uid(8), kind: 'dispute', subject: `Dispute flagged on ${c.name} (${c.username})`, details: String(body.callNotes || c.note || '').slice(0, 2000) || 'Customer was flagged as Dispute in their profile.', priority: 'high', status: 'open',
+                  customerId: c.id, username: c.username, name: c.name, orderNo: c.orderNo || '', amount: 0, att: '', createdBy: actorName, createdAt: Date.now(), updatedAt: Date.now(), assignedTo: '', notes: [], resolution: '' });
+                await saveDisputes(dis);
+                await notifyAdmin(s, `⚠️ Dispute flagged: ${c.name}`, `${c.username} was flagged as Dispute by ${actorName}. Open Disputes for details.`);
+                await log('disputes', `Dispute auto-created for ${c.username} (flagged by ${actorName})`);
+              } catch {}
+            }
+          }
           if (body.expiresAt) c.expiresAt = new Date(body.expiresAt).getTime() + DAY - 1000;
           if (body.startAt) c.startAt = new Date(body.startAt).getTime();
           await saveCustomers(list);

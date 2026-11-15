@@ -472,3 +472,57 @@ test('privacy: phone and WhatsApp are masked for staff without customers_phone, 
   const ownerView = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((z) => z.username === 'testuser');
   assert.equal(ownerView.phone, '212600112233');
 });
+
+// ---- Phase 3/4: disputes & problem reports, all-agents trial queue ----
+
+test('disputes: staff can file a problem report but cannot open the tracker; owner processes; customer dispute flag auto-creates one', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
+  const staff = (await x.call('POST', '/api/login', { username: 'said', password: 'secret12' })).json.token;
+
+  const filed = await x.call('POST', '/api/admin/disputes', { kind: 'bug', subject: 'Panel create line fails', details: 'create_line answers 512', priority: 'high' }, staff);
+  assert.equal(filed.status, 200, JSON.stringify(filed.json));
+  assert.ok(!('att' in filed.json.dispute) && !('notes' in filed.json.dispute), 'tracker internals stay internal');
+  assert.equal((await x.call('GET', '/api/admin/disputes', {}, staff)).status, 403, 'sales agent cannot open the tracker');
+  assert.equal((await x.call('POST', '/api/admin/disputes/update', { id: filed.json.dispute.id, status: 'resolved' }, staff)).status, 403);
+
+  const list = await x.call('GET', '/api/admin/disputes', {}, tok);
+  assert.equal(list.status, 200); assert.equal(list.json.open, 1); assert.equal(list.json.high, 1);
+  assert.ok(x.mails.some((m) => m.to[0] === 'owner@example.com' && /Problem report/.test(m.subject)), 'owner is notified about the problem report');
+  assert.equal((await x.call('POST', '/api/admin/disputes/update', { id: filed.json.dispute.id, status: 'resolved', resolution: 'Panel fixed on their side' }, tok)).status, 200);
+
+  const made = await addCustomer(x, tok);
+  assert.equal((await x.call('PUT', `/api/admin/customers/${made.id}`, { statusFlag: 'dispute' }, tok)).status, 200);
+  const list2 = await x.call('GET', '/api/admin/disputes', {}, tok);
+  assert.ok(list2.json.list.some((d) => d.username === 'testuser'), 'flagging a customer as Dispute opens a dispute');
+});
+
+test('all-agents trial queue: request queues, agent claims, M3U auto-extracts credentials, trial is emailed', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents' }, email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  const r = await x.call('POST', '/api/trial', { name: 'Queue Person', email: 'queue.person@example.com', phone: '+212600112233', whatsapp: '+212600112233', lang: 'en', ip: '9.9.9.9' });
+  assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.queued, true);
+
+  const q = await x.call('GET', '/api/admin/trialq', {}, tok);
+  assert.equal(q.json.pending, 1); const id = q.json.list[0].id;
+  assert.equal((await x.call('POST', '/api/admin/trialq/claim', { id }, tok)).status, 200);
+  const sent = await x.call('POST', '/api/admin/trialq/send', { id, m3u: 'http://tv.example:8080/get.php?username=LINEUSER&password=LINEPASS&type=m3u_plus' }, tok);
+  assert.equal(sent.status, 200, JSON.stringify(sent.json)); assert.equal(sent.json.username, 'LINEUSER');
+  assert.ok(x.mails.some((m) => m.to[0] === 'queue.person@example.com'), 'the trial email is sent to the requester');
+  assert.equal((await x.call('GET', '/api/admin/trialq', {}, tok)).json.pending, 0, 'queue entry is done');
+  assert.equal((await x.call('POST', '/api/login', { username: 'LINEUSER', password: 'LINEPASS' })).status, 200, 'the new trial login works');
+});
+
+test('customer totals: admin and customer payloads include total paid and lines', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { orderPackages: [{ id: 'p1x', title: '1 Month', days: 30, devices: 1, price: 10, badge: '', link: '' }] }, tok);
+  await addCustomer(x, tok); // renewals record a 0-price sale? no: price from plan p1 = 10
+  const list = await x.call('GET', '/api/admin/customers', {}, tok);
+  const c = list.json.find((z) => z.username === 'testuser');
+  assert.ok(typeof c.totalPaidUsd === 'number');
+  const u = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  const me = await x.call('GET', '/api/me', {}, u);
+  assert.equal(me.status, 200); assert.ok(typeof me.json.totalPaidUsd === 'number');
+  assert.ok(Array.isArray(me.json.user.renewals));
+});

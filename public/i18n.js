@@ -238,3 +238,9 @@ export function tErr(msg) {
   if (D.en[msg]) return t(msg);
   return map[msg] ? t(map[msg]) : msg;
 }
+Object.assign(D.en, { trialQueued: 'Your request is received ✅ An agent will process your trial and email you your login shortly.', trialQueuedSub: 'We sent a confirmation to {email}. If you do not hear from us within a few minutes, contact support.' });
+Object.assign(D.fr, { trialQueued: 'Votre demande est reçue ✅ Un agent traitera votre essai et vous enverra vos identifiants par e-mail.', trialQueuedSub: 'Nous avons envoyé une confirmation à {email}. Sans nouvelles dans quelques minutes, contactez l’assistance.' });
+Object.assign(D.ar, { trialQueued: 'تم استلام طلبك ✅ سيعالجه أحد الوكلاء ويرسل لك بيانات الدخول بالبريد الإلكتروني.', trialQueuedSub: 'أرسلنا تأكيدًا إلى {email}. إن لم تصلك رسالة خلال دقائق، تواصل مع الدعم.' });
+Object.assign(D.en, { linesN: 'Lines (devices)', totalPaid: 'Total paid' });
+Object.assign(D.fr, { linesN: 'Lignes (appareils)', totalPaid: 'Total payé' });
+Object.assign(D.ar, { linesN: 'الخطوط (الأجهزة)', totalPaid: 'إجمالي المدفوع' });

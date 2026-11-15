@@ -251,6 +251,8 @@ const ADMIN_TABS = [
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
   ['chat', '🗨', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
   ['support', '💬', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['trialq', '⚡', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
+  ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
@@ -287,7 +289,7 @@ async function renderAdmin() {
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <div class="main">
-      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
       <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </div></div>`;
@@ -310,6 +312,8 @@ async function renderAdmin() {
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
     else if (t === 'receipts') body.innerHTML = await adminReceipts();
+    else if (t === 'trialq') body.innerHTML = await adminTrialQueue();
+    else if (t === 'disputes') body.innerHTML = await adminDisputes();
     else if (t === 'chat') { body.innerHTML = await adminChat(); chatScroll(); }
     else if (t === 'templates') body.innerHTML = await adminTemplates(s);
     else if (t === 'emails') body.innerHTML = await adminEmails();
@@ -366,7 +370,7 @@ function filteredCustomers() {
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
 function custActions(c) {
-  return `${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+  return `${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<a class="btn sm" href="tel:${esc(String(c.phone).replace(/[^\d+]/g, ''))}" title="Call">📞</a>` : ''}${can('customers_phone') && c.telegram ? `<a class="btn sm" href="https://t.me/${esc(String(c.telegram).trim().replace(/^@/, ''))}" target="_blank" rel="noopener" title="Telegram">✈️</a>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
@@ -388,14 +392,14 @@ function customerListHtml() {
   if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
       <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function oldCustomerListHtml() {
   const list = filteredCustomers();
   return `<div class="tbl-wrap cust-table"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>
     <div class="cust-cards">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
@@ -419,7 +423,8 @@ function customerForm(c) {
     ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
     <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
-    <div class="grid3">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}</div>
+    <div class="grid3">${field('Telegram handle', 'telegram', c.telegram || '', { ph: '@username or id', attrs: 'autocapitalize="none"' })}${field('App / device', 'deviceApp', c.deviceApp || '', { ph: 'IBO Player, Smarters, MAC…' })}${field('MAC address', 'macAddress', c.macAddress || '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false"' })}</div>
+    <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '')}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
     <div class="grid3">${field('Address', 'address', c.address || '')}${field('Server', 'server', c.server || '', { ph: 'MEGA, DINO…' })}${field('Panel', 'panel', c.panel || '')}</div>
     <h3 style="margin-top:6px">App login details</h3>
@@ -435,6 +440,8 @@ function customerForm(c) {
     ${isNew ? `<div class="grid2">${accountSelect(s, 'accountId', '')}${field('Amount received', 'price', s.plans[0]?.price || 0, { type: 'number', attrs: 'min="0" step="any"', help: 'In the currency of the chosen account.' })}</div>
       ${toggle('Email the login details to the customer', 'sendEmail', !!s.email.resendKey, s.email.resendKey ? 'Sent with Resend in the language above.' : 'Set up Resend in "Trial & email" first.')}
       ${s.reseller.enabled ? toggle('Create the line on the TVplus panel now', 'createOnPanel', true, 'Uses the "create" action from API settings.') : '<p class="small muted">Reseller API is off — the line will only be saved in this app.</p>'}` : ''}
+    ${field('Call notes (conclusion of call)', 'callNotes', c.callNotes || '', { type: 'textarea', rows: 2, ph: 'Summary of the last call / what was promised…' })}
+    ${!isNew && c.totalPaidUsd !== undefined ? `<p class="small muted" style="margin:4px 0 0">Total paid (all time): <b>$${Number(c.totalPaidUsd || 0).toFixed(2)}</b></p>` : ''}
     ${field('Notes', 'note', c.note || '', { type: 'textarea', rows: 2 })}
     <div class="row" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">${isNew ? 'Create customer' : 'Save changes'}</button></div>
   </form>`;
@@ -891,6 +898,7 @@ function adminTrial(s) {
   const tr = s.trial, e = s.email;
   return `<form data-form="settings"><div class="grid2" style="gap:16px;align-items:start">
     <div class="card"><h3>🎁 Free trial</h3>
+      ${field('Who processes free trials?', 'trial.mode', tr.mode || 'auto', { type: 'select', options: [['auto', 'Automatic — a line is created (or taken from the pool) and the email is sent'], ['agents', 'All-agents queue — requests appear in Trial queue; any agent claims one, pastes the M3U and sends it']], help: 'The all-agents queue is for your team to handle. In queue mode nothing is auto-created.' })}
       ${toggle('Allow free trial sign-up on the login page', 'trial.enabled', tr.enabled, 'Customers enter name, email, phone and WhatsApp. One trial per email/phone.')}
       <div class="grid2" style="margin-top:10px">${field('Trial length (hours)', 'trial.hours', tr.hours, { type: 'number', attrs: 'min="1" max="168"' })}${field('Credits a trial uses', 'trial.credits', tr.credits, { type: 'number', attrs: 'min="0" step="any"' })}</div>
       <div class="grid2">${field('Trial package ID on panel', 'trial.package', tr.package, { help: 'Sent as {package} with the "trial" API action.' })}${field('Devices', 'trial.connections', tr.connections, { type: 'number', attrs: 'min="1"' })}</div>
@@ -995,7 +1003,7 @@ async function renderUserTab() {
   if (u.tab === 'account') {
     el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
         ${user.email ? `<div class="list-item" style="margin-top:12px"><span style="flex:1;min-width:0;overflow-wrap:anywhere" dir="ltr">${esc(user.email)}</span>${user.emailVerified ? `<span class="pill st-active">${t('emVerified')}</span>` : `<button class="btn sm primary" data-act="em-send">${t('emVerify')}</button>`}</div>` : ''}</div>
-      <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div><div class="list-item"><span style="flex:1">${t('devicesL')}</span><b>${user.connections}</b></div>
+      <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('linesN')}</span><b>${user.connections}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div>${(state.user.me.totalPaidUsd || 0) > 0 ? `<div class="list-item"><span style="flex:1">${t('totalPaid')}</span><b>$${Number(state.user.me.totalPaidUsd).toFixed(2)}</b></div>` : ''}
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
       ${plansCard()}
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
@@ -1873,6 +1881,7 @@ const forms = {
     try {
       const r = await api('POST', '/api/trial', body);
       const box = $('.modal-body');
+      if (r.queued) { box.innerHTML = `<p>${t('trialQueued')}</p><p class="small muted">${t('trialQueuedSub', { email: esc(o.email) })}</p><button class="btn primary block" data-act="close-modal" style="margin-top:12px">OK</button>`; return; }
       const lines = [`${t('username')}: ${r.username}`, `${t('password')}: ${r.password}`, ...(r.dns ? [`DNS: ${r.dns}`] : []), ...(r.m3u ? [`M3U: ${r.m3u}`] : [])].join('\n');
       const b0 = state.config.branding;
       box.innerHTML = `<p>${r.pending ? t('trialPending') : t('trialShown')}</p><div class="code" dir="ltr" id="trial-creds" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(lines)}</div>
@@ -2402,7 +2411,7 @@ async function pickedImage(f) {
 Object.assign(actions, {
   'att-show': async (el) => {
     el.disabled = true;
-    try { const r = await api('GET', `${el.dataset.admin ? '/api/admin' : '/api/me'}/tickets/att?id=${encodeURIComponent(el.dataset.id)}`); const img = new Image(); img.src = r.data; img.alt = ''; img.style.cssText = 'display:block;max-width:100%;border-radius:10px;margin-top:8px'; el.replaceWith(img); }
+    try { const r = await api('GET', el.dataset.src || `${el.dataset.admin ? '/api/admin' : '/api/me'}/tickets/att?id=${encodeURIComponent(el.dataset.id)}`); const img = new Image(); img.src = r.data; img.alt = ''; img.style.cssText = 'display:block;max-width:100%;border-radius:10px;margin-top:8px'; el.replaceWith(img); }
     catch (e) { el.disabled = false; toast(tErr(e.message), true); }
   },
 });
@@ -2793,6 +2802,57 @@ async function syncPanel(ids) {
   }
   return { changed, bad, total, error };
 }
+// ---------------- all-agents trial queue & disputes (spec §4, §5) ----------------
+async function adminTrialQueue() {
+  const r = await api('GET', '/api/admin/trialq'); const list = (r.list || []).slice(0, 200); state.admin.trialq = list;
+  const ui = (state.admin.tq ||= { f: 'pending' });
+  const cnt = (f) => list.filter((x) => x.status === f).length;
+  const shown = list.filter((x) => ui.f === 'all' || x.status === ui.f);
+  return `<p class="small muted">When “<b>All agents queue</b>” is on (Trial &amp; email setup), a customer who taps <b>Start free trial</b> on the website appears here instead of being auto-activated. Any team member with customer access can claim one, paste the M3U line from your panel and send the trial.</p>
+    <div class="chips">${[['pending', 'Pending'], ['done', 'Sent'], ['rejected', 'Rejected'], ['all', 'All']].map(([k, n]) => `<a class="${ui.f === k ? 'on' : ''}" data-act="tq-f" data-f="${k}">${n} · ${k === 'all' ? list.length : cnt(k)}</a>`).join('')}</div>
+    ${shown.length ? shown.map((t) => `<div class="card"><div class="row"><div class="avatar">${esc(initials(t.name))}</div><div style="flex:1;min-width:180px"><b>${esc(t.name)}</b> ${t.status === 'pending' ? (t.claimedBy ? `<span class="pill st-expiring">claimed · ${esc(t.claimedBy)}</span>` : '<span class="pill st-open">waiting</span>') : `<span class="pill st-active">${esc(t.status)}</span>`}<div class="small muted">${esc(t.email)}${t.phone ? ' · ' + esc(t.phone) : ''} · ${fmtDT(t.at)}${t.lang ? ' · ' + esc(t.lang.toUpperCase()) : ''}</div></div></div>
+      ${t.status === 'pending' ? `<form data-form="tq-send" data-id="${esc(t.id)}" style="margin-top:10px">${field('M3U line from your panel', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'required autocapitalize="none" spellcheck="false" dir="ltr"', help: 'Username, password and DNS are read from the link automatically.' })}<div class="row"><button type="button" class="btn" data-act="tq-claim" data-id="${esc(t.id)}">${t.claimedBy ? 'Re-claim' : '✋ Claim for me'}</button><button type="button" class="btn danger" data-act="tq-reject" data-id="${esc(t.id)}">Reject</button><button type="submit" class="btn primary">Send trial</button></div></form>` : `<p class="small muted" style="margin:10px 0 0">${esc(t.handledBy || '')}${t.doneAt ? ' · ' + fmtDT(t.doneAt) : ''}${t.note ? ' · ' + esc(t.note) : ''}</p>`}</div>`).join('') : `<div class="empty"><span class="ic">⚡</span>${list.length ? 'Nothing in this list.' : 'No trial requests yet. They arrive when customers tap “Start free trial” on the website.'}</div>`}`;
+}
+const DISP_KIND = { payment: ['💳', 'st-expiring'], service: ['🛠', 'st-open'], dispute: ['⚠️', 'st-expired'], bug: ['🐞', 'st-open'], other: ['❔', 'st-open'] };
+async function adminDisputes() {
+  const r = await api('GET', '/api/admin/disputes'); const list = r.list || []; state.admin.disputes = list;
+  const ui = (state.admin.disUi ||= { f: 'open' });
+  const cnt = (f) => list.filter((x) => x.status === f).length;
+  const shown = list.filter((x) => ui.f === 'all' || (ui.f === 'open' ? x.status !== 'resolved' : x.status === ui.f));
+  const attHtml = (x) => x.att ? `<button class="btn sm" data-act="att-show" data-src="/api/admin/disputes/att?id=${encodeURIComponent(x.att)}">📎 Picture</button>` : '';
+  return `<p class="small muted">Every dispute and problem report lands here, from the flagged customers, unpaid issues, service complaints and panel bugs. Anyone on the team can <b>Report a problem</b> from the top bar (🐞). Reports and disputes are emailed when they arrive.</p>
+    <div class="row" style="margin-bottom:10px"><button class="btn primary" data-act="report-problem">🐞 Report a problem</button><span class="spacer"></span><div class="chips">${[['open', 'Open · ' + list.filter((x) => x.status !== 'resolved').length], ['in_progress', 'In progress · ' + cnt('in_progress')], ['resolved', 'Resolved · ' + cnt('resolved')], ['all', 'All · ' + list.length]].map(([k, n]) => `<a class="${ui.f === k ? 'on' : ''}" data-act="dis-f" data-f="${k}">${n}</a>`).join('')}</div></div>
+    ${shown.length ? shown.map((d) => `<div class="card"><div class="row"><div class="avatar">${DISP_KIND[d.kind]?.[0] || '❔'}</div><div style="flex:1;min-width:180px"><b>${esc(d.subject)}</b> <span class="pill ${DISP_KIND[d.kind]?.[1] || 'st-open'}">${esc(d.kind)}</span>${d.priority === 'high' ? '<span class="pill st-expired" title="High priority">high</span>' : ''}${d.status === 'in_progress' ? '<span class="pill st-expiring">in progress</span>' : ''}<div class="small muted">${d.username ? esc(d.name || d.username) + ' (' + esc(d.username) + ') · ' : ''}${fmtDT(d.createdAt)} · by ${esc(d.createdBy || 'unknown')}${d.orderNo ? ' · order ' + esc(d.orderNo) : ''}</div></div>
+        ${d.status !== 'resolved' ? `<div class="row"><button class="btn sm" data-act="dis-start" data-id="${esc(d.id)}"${d.status === 'in_progress' ? ' disabled' : ''}>${d.status === 'in_progress' ? 'In progress' : '▶ In progress'}</button><button class="btn sm primary" data-act="dis-resolve" data-id="${esc(d.id)}">✓ Resolve</button></div>` : `<span class="small muted">resolved${d.resolvedBy ? ' by ' + esc(d.resolvedBy) : ''}${d.resolvedAt ? ' · ' + fmtDT(d.resolvedAt) : ''}</span>`}</div>
+      ${d.details ? `<p class="small" style="white-space:pre-wrap;margin:10px 0 6px">${esc(d.details)}</p>` : ''}
+      <div class="row">${attHtml(d)}${d.resolution ? `<span class="small muted">Resolution: ${esc(d.resolution)}</span>` : ''}${(d.notes || []).length ? `<button class="btn sm" data-act="dis-note" data-id="${esc(d.id)}">💬 Note (${d.notes.length})</button>` : `<button class="btn sm" data-act="dis-note" data-id="${esc(d.id)}">＋ Note</button>`}</div></div>`).join('') : `<div class="empty"><span class="ic">⚠️</span>${list.length ? 'Nothing in this list.' : 'No disputes or problem reports yet. 🎉'}</div>`}`;
+}
+// new dispute / report a problem (any staff can file one)
+const reportForm = (kind) => `<form data-form="report-problem" data-kind="${esc(kind || 'bug')}"><div class="grid2">${field('Kind', 'kind', kind || 'bug', { type: 'select', options: [['bug', '🐞 Panel / app bug'], ['payment', '💳 Payment issue'], ['service', '🛠 Service issue'], ['dispute', '⚠️ Customer dispute'], ['other', '❔ Other']] })}${field('Priority', 'priority', 'normal', { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div>
+  ${field('Title', 'subject', '', { attrs: 'required maxlength="160"', ph: 'Short summary' })}
+  ${field('Details', 'details', '', { type: 'textarea', rows: 4, attrs: 'maxlength="4000"', ph: 'What happened? Steps to reproduce, error codes, customer name…' })}
+  <label class="field"><span>Picture (optional)</span><input type="file" name="image" accept="image/*"></label>
+  <p class="small muted">Sends to the Owner and Technical Manager immediately.</p>
+  <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Send report</button></div></form>`;
+
+Object.assign(actions, {
+  'tq-f': async (el) => { state.admin.tq.f = el.dataset.f; $('#admin-body').innerHTML = await adminTrialQueue(); },
+  'dis-f': async (el) => { state.admin.disUi.f = el.dataset.f; $('#admin-body').innerHTML = await adminDisputes(); },
+  'tq-claim': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/trialq/claim', { id: el.dataset.id }); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { toast(tErr(e.message), true); el.disabled = false; } },
+  'tq-reject': (el) => { modal('Reject this trial request', `<form data-form="tq-reject" data-id="${esc(el.dataset.id)}">${field('Note (optional, internal)', 'note', '', { attrs: 'maxlength="500"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn danger">Reject request</button></div></form>`); },
+  'report-problem': () => { modal('🐞 Report a problem', reportForm('bug'), { wide: true }); },
+  'dis-start': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/disputes/update', { id: el.dataset.id, status: 'in_progress' }); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); el.disabled = false; } },
+  'dis-resolve': (el) => { const d = (state.admin.disputes || []).find((x) => x.id === el.dataset.id); modal('Resolve: ' + esc(d?.subject || ''), `<form data-form="dis-resolve" data-id="${esc(el.dataset.id)}">${field('Resolution', 'resolution', '', { type: 'textarea', rows: 3, attrs: 'maxlength="2000"', ph: 'What was the outcome?' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">✓ Mark resolved</button></div></form>`); },
+  'dis-note': (el) => { modal('Add a note', `<form data-form="dis-note" data-id="${esc(el.dataset.id)}">${field('Note', 'note', '', { type: 'textarea', rows: 3, attrs: 'maxlength="1000"', ph: 'Internal note — visible to the team only' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Add note</button></div></form>`); },
+});
+Object.assign(forms, {
+  async 'tq-send'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/send', { id: f.dataset.id, m3u: f.m3u.value.trim() }); closeModal(); modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 6px"><b>${esc(r.name || '')}</b> got the trial email${r.emailSent ? '' : ' (email NOT sent — check the address and Resend setup)'}.</p><p class="small muted" style="word-break:break-all">App login: <b>${esc(r.username)}</b>${r.dns ? ` · DNS: ${esc(r.dns)}` : ''}</p>${r.m3u ? `<p class="small muted" style="word-break:break-all">M3U: ${esc(r.m3u)}</p>` : ''}</div><button class="btn block" data-act="close-modal">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
+  async 'tq-reject'(f) { try { await api('POST', '/api/admin/trialq/reject', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Rejected'); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { toast(tErr(e.message), true); } },
+  async 'report-problem'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const img = await pickedImage(f).catch(() => ''); await api('POST', '/api/admin/disputes', { kind: f.kind.value, subject: f.subject.value, details: f.details.value, priority: f.priority.value, image: img }); closeModal(); toast('Sent to the owner & technical manager ✓'); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
+  async 'dis-resolve'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, status: 'resolved', resolution: f.resolution.value }); closeModal(); toast('Resolved ✓'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
+  async 'dis-note'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Note added'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
+});
+
 async function adminReceipts() {
   const list = await api('GET', '/api/admin/receipts'); state.admin.rcs = list; const ui = (state.admin.rc ||= { f: 'pending' });
   const shown = list.filter((x) => ui.f === 'all' || x.status === ui.f); const n = (f) => list.filter((x) => x.status === f).length;
