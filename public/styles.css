@@ -4,7 +4,7 @@
   /* colour */
   --primary: var(--b-primary, #FF6B42); --primary2: color-mix(in srgb, var(--primary) 70%, #230a06); --accent: var(--b-accent, #FFB03A);
   --bg: var(--brand-bg, #0B0B0F); --surface: #131318; --elevated: #1C1C24; --border: #2A2A33;
-  --text: #F0EEE8; --muted: #BCBAAF; --ok: #3DDC97; --warn: #FFB03A; --bad: #FF5A5A;
+  --text: #F0EEE8; --muted: #C9C7BD; --ok: #3DDC97; --warn: #FFB03A; --bad: #FF5A5A;
   /* older names used across the app, mapped to the tokens above */
   --panel: var(--surface); --panel2: var(--elevated); --line: var(--border); --line2: color-mix(in srgb, var(--border) 72%, transparent);
   /* spacing: 8-point scale */
@@ -96,7 +96,7 @@ select option { background: #122E25; }
 .st-active { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); } .st-active::before { animation: blink 2s infinite; }
 .st-expiring { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
 .st-expired { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
-.st-disabled { background: rgba(100,116,139,.2); color: #94a3b8; }
+.st-disabled { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
 @keyframes blink { 50% { opacity: .3; } }
 .badge-demo { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); padding: 4px 10px; border-radius: 99px; font-size: .74rem; font-weight: 700; }
 .tagp { display: inline-block; background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); padding: 2px 8px; border-radius: 99px; font-size: .72rem; font-weight: 600; margin: 2px; }
@@ -365,7 +365,7 @@ img, video, iframe, svg { max-width: 100%; }
 .vp-b { background: transparent; border: 0; color: #fff; font-size: 17px; min-width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-weight: 800; font-family: Inter, sans-serif; flex: 0 0 auto; }
 .vp-b:hover, .vp-b:focus-visible { background: rgba(255,255,255,.15); outline: none; }
 .vp-live { color: var(--bad); font-weight: 800; font-size: .8rem; margin-left: 4px; letter-spacing: .05em; }
-.vp-time { color: #e2e8f0; font-size: .8rem; margin-left: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vp-time { color: var(--text); font-size: .8rem; margin-left: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .vp input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; padding: 0; border: 0; height: 22px; cursor: pointer; box-shadow: none; }
 .vp input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: rgba(255,255,255,.3); }
 .vp input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); margin-top: -5px; box-shadow: 0 0 10px var(--primary); }
@@ -386,7 +386,7 @@ img, video, iframe, svg { max-width: 100%; }
 html { transition: background-color .4s; }
 [data-theme=light] {
   --bg: #FAF6F0; --surface: #FFFFFF; --elevated: #F1EDE3; --border: #E3DFD3;
-  --text: #181820; --muted: #2E2D28; --primary: color-mix(in srgb, var(--b-primary, #FF6B42) 94%, #341207); --accent: color-mix(in srgb, var(--b-accent, #D97E00) 78%, #3B2400);
+  --text: #181820; --muted: #262520; --primary: color-mix(in srgb, var(--b-primary, #FF6B42) 94%, #341207); --accent: color-mix(in srgb, var(--b-accent, #D97E00) 78%, #3B2400);
   --ok: #16785A; --warn: #B4670A; --bad: #D42F52;
   --shadow: 0 1px 2px rgba(24,24,32,.06), 0 16px 34px -18px rgba(24,24,32,.28);
   --glow: 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent), 0 14px 32px -16px color-mix(in srgb, var(--primary) 55%, transparent);
@@ -469,7 +469,7 @@ a { text-underline-offset: 3px; }
 input, select, textarea { background: color-mix(in srgb, var(--bg) 70%, var(--surface)); border-color: var(--border); border-radius: 12px; min-height: 44px; }
 textarea { min-height: 88px; }
 input[type=checkbox], input[type=radio], input[type=range] { min-height: 0; }
-input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--muted) 70%, transparent); }
+input::placeholder, textarea::placeholder { color: var(--muted); }
 select option { background: var(--surface); color: var(--text); }
 .field > span { font-size: .8125rem; }
 
