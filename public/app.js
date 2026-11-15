@@ -256,6 +256,7 @@ const ADMIN_TABS = [
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['stripe', '💳', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
+  ['ibo', '📺', 'IBO Player', 'ibo', 'Money', 'ibo player credits activation mac lifetime 1 year trial smart iptv'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
@@ -303,6 +304,7 @@ async function renderAdmin() {
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
     else if (t === 'stripe') body.innerHTML = adminStripePage(s);
+    else if (t === 'ibo') body.innerHTML = await adminIboPage();
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
@@ -2898,6 +2900,55 @@ Object.assign(forms, {
   async 'report-problem'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const img = await pickedImage(f).catch(() => ''); await api('POST', '/api/admin/disputes', { kind: f.kind.value, subject: f.subject.value, details: f.details.value, priority: f.priority.value, image: img }); closeModal(); toast('Sent to the owner & technical manager ✓'); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'dis-resolve'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, status: 'resolved', resolution: f.resolution.value }); closeModal(); toast('Resolved ✓'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
   async 'dis-note'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Note added'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
+});
+
+// ---------------- IBO Player panel (spec §7) ----------------
+const iboForm = (s) => `<form data-form="ibo-add" class="card"><h3>＋ Add IBO client</h3>
+  ${field('Name', 'name', '', { attrs: 'required' })}
+  ${field('Contact (Telegram, WhatsApp or email)', 'contact', '', { ph: '@id · +212… · name@email.com', attrs: 'autocomplete="off"' })}
+  <div class="grid2">${field('App / device', 'deviceApp', 'IBO Player', { type: 'select', options: ['IBO Player', 'Smart IPTV', 'Set IPTV', 'IPTV Smarters', 'Xtream IPTV', 'Other'].map((o) => [o, o]) })}${field('MAC address (MAC-based devices)', 'macAddress', '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr"' })}</div>
+  <div class="grid2">${field('DNS / portal (optional)', 'dns', state.admin.settings.player.serverUrl || '', { ph: 'http://dns:8080', attrs: 'autocapitalize="none"' })}${field('Username (optional)', 'username', '', { attrs: 'autocapitalize="none"' })}</div>
+  ${field('Password (optional)', 'password', '', { attrs: 'autocapitalize="none"' })}
+  <div class="grid2">${field('Duration', 'days', '365', { type: 'select', options: [['365', '1 year'], ['36500', 'Lifetime'], ['1', '1 day (trial)']] })}${field('Note', 'note', '', { ph: 'Order, source…' })}</div>
+  <label class="toggle" style="margin:6px 0"><input type="checkbox" name="trial" value="1"><i></i><span>Free 24h trial (no credit used)</span></label>
+  <p class="small muted">A 1-year activation uses <b>1 IBO credit</b> ($${(state.admin.iboShelf?.costUsd || 3.5).toFixed(2)}). Lifetime also uses 1 credit.</p>
+  <button type="submit" class="btn primary block">＋ Add client</button></form>`;
+async function adminIboPage() {
+  let r; try { r = await api('GET', '/api/admin/ibo'); } catch (e) { return `<div class="err-box">${esc(e.message)}</div>`; }
+  state.admin.ibo = r.list; state.admin.iboShelf = r;
+  const st = r.stats || {}; const now = Date.now();
+  const pillFor = (x) => (x.expiresAt && x.expiresAt <= now) || x.status !== 'active' ? '<span class="pill st-expired">expired</span>' : x.isTrial ? '<span class="pill st-expiring">trial</span>' : '<span class="pill st-active">active</span>';
+  const row = (x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.contact || '')}</div></td><td class="small">${esc(x.username)} / ${esc(x.password)}<div class="muted">${esc(x.dns || '')}</div></td><td class="small">${esc(x.deviceApp || '')}<div class="muted">${esc(x.macAddress || '')}</div></td><td class="small">${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${pillFor(x)}</td>
+    <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove">🗑</button></div></td></tr>`;
+  return `<div class="grid2" style="gap:16px;align-items:start">
+    <div class="card"><h3>💳 IBO credit balance</h3><div class="row" style="gap:16px;align-items:baseline"><div class="stat"><span class="dp-l">Credits</span><div class="big">${r.credits}</div></div><div class="stat"><span class="dp-l">Cost per credit</span><div class="big">$${Number(r.costUsd || 3.5).toFixed(2)}</div></div><div class="stat"><span class="dp-l">Active / trial / expired</span><div class="big">${st.active || 0} / ${st.trial || 0} / ${st.expired || 0}</div></div></div>
+      <form data-form="ibo-buy" class="row" style="margin-top:10px;gap:8px;align-items:flex-end"><div style="flex:1">${field('Credits to buy', 'credits', 10, { type: 'number', attrs: 'min="1" required' })}</div><div style="flex:1">${field('Total paid (USD)', 'price', 35, { type: 'number', attrs: 'min="0" step="any"' })}</div><button type="submit" class="btn primary">Buy</button></form>
+      <p class="small muted">1 credit = 1-year activation for 1 IBO account · $${Number(r.costUsd || 3.5).toFixed(2)} per credit.</p></div>
+    ${iboForm(state.admin.settings)}
+  </div>
+  <div class="card"><h3>📺 IBO clients <span class="small muted">(${(r.list || []).length})</span></h3>
+    ${(r.list || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Client</th><th>Login</th><th>Device / MAC</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>${(r.list || []).map(row).join('')}</tbody></table></div>` : '<div class="empty"><span class="ic">📺</span>No IBO clients yet. Add your first one on the left.</div>'}</div>`;
+}
+Object.assign(actions, {
+  'ibo-del': async (el) => { if (!confirm('Remove this IBO client?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/ibo/' + el.dataset.id); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'ibo-activate': async (el) => { el.disabled = true; try { const r = await api('POST', `/api/admin/ibo/${el.dataset.id}/activate`, {}); toast(`Activated ✓ · ${r.credits} credit${r.credits === 1 ? '' : 's'} left`); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'ibo-send': async (el) => {
+    const via = el.dataset.via; el.disabled = true;
+    try {
+      const r = await api('POST', `/api/admin/ibo/${el.dataset.id}/send`, { via });
+      if (via === 'email') { toast(r.sent ? 'Email sent ✓' : 'Email not sent — check the address and Resend setup', !r.sent); }
+      else {
+        const waDigits = String(r.wa || '').replace(/\D/g, '');
+        const waHref = via === 'whatsapp' && waDigits.length >= 8 ? `https://wa.me/${waDigits}?text=${encodeURIComponent(r.text)}` : '';
+        modal('💬 Send to the customer', `<p class="small muted">Copy the message and paste it in ${esc(via === 'telegram' ? 'Telegram' : 'WhatsApp')}:</p><textarea id="ibo-out" style="width:100%;min-height:180px;font-family:inherit" readonly>${esc(r.text)}</textarea><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="ibo-out" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 Open WhatsApp</a>` : ''}</div>`);
+      }
+      el.disabled = false;
+    } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+});
+Object.assign(forms, {
+  async 'ibo-add'(f) { const o = formToObj(f); o.trial = f.trial && f.trial.checked ? true : undefined; try { await api('POST', '/api/admin/ibo', o); toast('Added ✓'); f.reset(); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); } },
+  async 'ibo-buy'(f) { try { const o = formToObj(f); await api('POST', '/api/admin/ibo/credits', { action: 'buy', credits: o.credits, price: o.price }); toast('Credits added ✓'); f.reset(); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); } },
 });
 
 async function adminReceipts() {

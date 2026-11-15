@@ -546,3 +546,35 @@ test('stripe panel: account list is saved, rk stays secret and round-trips maske
   assert.equal(bal.json.connected, true, 'the preserved read-only key was used, not wiped by the masked save');
   assert.equal(bal.json.available, 0);
 });
+
+test('IBO panel: add client (uses a credit), lifetime, credits wallet, message build', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  // starting balance is 0 → paid add refused
+  const refused = await x.call('POST', '/api/admin/ibo', { name: 'IBO One', contact: '+212600112233', days: 365 }, tok);
+  assert.equal(refused.status, 400);
+  // buy credits
+  assert.equal((await x.call('POST', '/api/admin/ibo/credits', { action: 'buy', credits: 2, price: 7 }, tok)).status, 200);
+  // paid client uses one credit
+  const made = await x.call('POST', '/api/admin/ibo', { name: 'IBO One', contact: '+212600112233', username: 'bobuser', password: 'bobpass', days: 365, dns: 'http://dns:8080' }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  assert.equal(made.json.client.username, 'bobuser');
+  let r = await x.call('GET', '/api/admin/ibo', {}, tok);
+  assert.equal(r.json.credits, 1); assert.equal(r.json.list.length, 1);
+  // free trial costs no credit
+  const tr = await x.call('POST', '/api/admin/ibo', { name: 'Trial Bob', contact: 'trial.bob@example.com', trial: true }, tok);
+  assert.equal(tr.status, 200);
+  r = await x.call('GET', '/api/admin/ibo', {}, tok);
+  assert.equal(r.json.credits, 1, 'trial does not spend a credit');
+  assert.equal(r.json.stats.trial, 1);
+  // send via whatsapp returns a ready message with credentials
+  const id = made.json.client.id;
+  const msg = await x.call('POST', `/api/admin/ibo/${id}/send`, { via: 'whatsapp' }, tok);
+  assert.equal(msg.status, 200);
+  assert.match(msg.json.text, /bobuser/); assert.match(msg.json.text, /bobpass/); assert.match(msg.json.text, /MAC/);
+  // renew spends another credit
+  const re = await x.call('POST', `/api/admin/ibo/${id}/activate`, {}, tok);
+  assert.equal(re.status, 200); assert.equal(re.json.credits, 0);
+  // out of credits now
+  assert.equal((await x.call('POST', '/api/admin/ibo', { name: 'Nope', days: 365 }, tok)).status, 400);
+});

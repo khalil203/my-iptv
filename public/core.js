@@ -228,6 +228,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
   if (path === '/api/admin/stripe/balance') return 'finance_view';
   if (path.startsWith('/api/admin/stripe/account/')) return 'stripe';
+  if (path.startsWith('/api/admin/ibo')) return 'ibo';
   if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh' || path === '/api/admin/stripe/match') return 'finance_edit';
   if (path.startsWith('/api/admin/stock')) return 'stock';
   if (path === '/api/admin/profits') return 'profits';
@@ -1687,6 +1688,90 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         t.status = 'rejected'; t.handledBy = actorName; t.doneAt = Date.now(); t.note = cleanText(body.note, 500); await saveTrialQueue(all);
         await log('trial', `Trial request rejected for ${t.email}${t.note ? ': ' + t.note : ''}`);
         return ok({ ok: true });
+      }
+
+      // ---------- IBO Player panel (spec §7) ----------
+      const getIbo = async () => (await store.get('ibo')) || [];
+      const saveIbo = (l) => store.put('ibo', l.slice(0, 1000));
+      const iboShelf = async () => (await store.get('iboCredits')) || { credits: 0, costUsd: 3.50, purchases: [] };
+      const saveIboShelf = (x) => store.put('iboCredits', x);
+      const iboMsg = (ibo, kind) => {
+        const t = kind === 'trial' ? `${s.trial.hours || 24}-hour free trial` : kind === 'activation' ? '1-year activation' : 'renewed';
+        return [`${s.branding.appName || 'INTPROTO-TV'} · IBO Player — ${t}`,
+          `Username: ${ibo.username}`, `Password: ${ibo.password}`, ibo.dns ? `DNS: ${ibo.dns}` : '',
+          '', 'Open IBO Player → Settings (⚙️) → Playlist/Xtream Codes → add these credentials.',
+          'Using a MAC-based device (Smart TV, STB, Formuler…)? Send us your MAC address on WhatsApp or Telegram and we will activate it for you.',
+        ].filter(Boolean).join('\n');
+      };
+      if (R('GET', '/api/admin/ibo')) {
+        const all = (await getIbo()).sort((a, b) => (a.expiresAt || 0) - (b.expiresAt || 0));
+        const shelf = await iboShelf();
+        const now = Date.now();
+        return ok({ list: all, credits: shelf.credits, costUsd: shelf.costUsd,
+          stats: { total: all.length, active: all.filter((x) => !x.isTrial && (x.expiresAt || 0) > now && x.status === 'active').length, trial: all.filter((x) => x.isTrial && (x.expiresAt || 0) > now).length, expired: all.filter((x) => (x.expiresAt || 0) <= now || x.status !== 'active').length } });
+      }
+      if (R('GET', '/api/admin/ibo/credits')) { const shelf = await iboShelf(); return ok(shelf); }
+      if (R('POST', '/api/admin/ibo/credits')) {
+        const shelf = await iboShelf();
+        if (body.action === 'buy') {
+          const credits = Math.max(1, Number(body.credits) || 0); const price = Math.max(0, Number(body.price) || 0);
+          shelf.credits = (Number(shelf.credits) || 0) + credits;
+          shelf.purchases = (shelf.purchases || []).concat([{ id: uid(6), at: Date.now(), credits, priceUsd: price, by: actorName }]).slice(-50);
+          await saveIboShelf(shelf); await log('ibo', `Bought ${credits} IBO credit(s) for $${price}`);
+          return ok({ ok: true, credits: shelf.credits });
+        }
+        if (body.action === 'set') { shelf.credits = Math.max(0, Number(body.credits) || 0); await saveIboShelf(shelf); await log('ibo', `IBO credits set to ${shelf.credits}`); return ok({ ok: true, credits: shelf.credits }); }
+        if (body.action === 'cost') { shelf.costUsd = Math.max(0.1, Number(body.costUsd) || 3.5); await saveIboShelf(shelf); return ok({ ok: true, costUsd: shelf.costUsd }); }
+        return err(400, 'Unknown action.');
+      }
+      if (R('POST', '/api/admin/ibo')) {
+        const name = String(body.name || '').trim().slice(0, 80); if (!name) return err(400, 'Name is required.');
+        const days = body.lifetime ? 36500 : Math.max(1, Number(body.days) || 365);
+        const isTrial = body.trial === true || body.trial === 'true' || days <= 7;
+        const shelf = await iboShelf();
+        if (!isTrial && !body.free) { if ((Number(shelf.credits) || 0) < 1) return err(400, 'No IBO credits left — buy credits on this page first.'); shelf.credits = Number(shelf.credits) - 1; await saveIboShelf(shelf); }
+        const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
+        const x = { id: uid(8), name, contact: String(body.contact || '').slice(0, 120), deviceApp: String(body.deviceApp || 'IBO Player').slice(0, 60), macAddress: String(body.macAddress || '').slice(0, 40),
+          username: String(body.username || '').trim() || ('ibo' + rnd(5, '0123456789')), password: String(body.password || '').trim() || rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789'),
+          dns: String(body.dns || '').slice(0, 200), isTrial, creditsUsed: isTrial || body.free ? 0 : 1, status: 'active',
+          startAt: Date.now(), expiresAt: Date.now() + days * DAY, note: String(body.note || '').slice(0, 500), createdAt: Date.now() };
+        const list = await getIbo(); list.unshift(x); await saveIbo(list);
+        await log('ibo', `Added IBO ${isTrial ? 'trial' : 'client'} ${x.name} (${x.username})`);
+        return ok({ ok: true, client: x });
+      }
+      const iboId = path.match(/^\/api\/admin\/ibo\/([\w-]+)(?:\/(\w+))?$/);
+      if (iboId) {
+        const list = await getIbo(); const x = list.find((y) => y.id === iboId[1]); if (!x) return err(404, 'Not found.');
+        const sub = iboId[2] || '';
+        if (method === 'DELETE') { await saveIbo(list.filter((y) => y !== x)); await log('ibo', `Removed IBO client ${x.name}`); return ok({ ok: true }); }
+        if (method === 'PUT' && !sub) {
+          for (const k of ['name', 'contact', 'deviceApp', 'macAddress', 'username', 'password', 'dns', 'note']) if (body[k] !== undefined) x[k] = String(body[k]).slice(0, k === 'note' ? 500 : 120);
+          if (body.status !== undefined && ['active', 'disabled'].includes(body.status)) x.status = body.status;
+          if (body.days !== undefined) { const d = Math.max(1, Number(body.days) || 365); x.expiresAt = Math.max(Date.now(), x.expiresAt || 0) + d * DAY; }
+          if (body.expiresAt !== undefined) { const t = new Date(body.expiresAt).getTime(); if (!isNaN(t)) x.expiresAt = t; }
+          await saveIbo(list); await log('ibo', `Updated IBO client ${x.name}`);
+          return ok({ ok: true, client: x });
+        }
+        if (sub === 'activate' || sub === 'renew') {
+          const shelf = await iboShelf(); if ((Number(shelf.credits) || 0) < 1) return err(400, 'No IBO credits left — buy credits first.');
+          shelf.credits = Number(shelf.credits) - 1; await saveIboShelf(shelf);
+          x.creditsUsed = (Number(x.creditsUsed) || 0) + 1; x.isTrial = false; x.status = 'active';
+          x.expiresAt = Math.max(Date.now(), x.expiresAt || 0) + (sub === 'renew' && (x.expiresAt || 0) > Date.now() ? 365 * DAY : 365 * DAY);
+          await saveIbo(list); await log('ibo', `${sub === 'renew' ? 'Renewed' : 'Activated'} IBO client ${x.name} (${x.username}) — 1 credit`);
+          return ok({ ok: true, credits: shelf.credits, client: x });
+        }
+        if (sub === 'send') {
+          const via = ['email', 'whatsapp', 'telegram'].includes(body.via) ? body.via : 'whatsapp';
+          const kind = ['trial', 'activation', 'renew'].includes(body.kind) ? body.kind : (x.isTrial ? 'trial' : 'activation');
+          const text = iboMsg(x, kind);
+          if (via === 'email') {
+            if (!x.contact.includes('@')) return err(400, 'No email on this client — use WhatsApp or Telegram instead.');
+            const r = await sendEmail(s, cleanEmail(x.contact), `${s.branding.appName || 'INTPROTO-TV'} · IBO Player`, mailHtml(s, 'en', [['Username', x.username], ['Password', x.password], ['DNS', x.dns || ''], [x.isTrial ? 'Valid for' : 'Expires', x.isTrial ? '24 hours' : new Date(x.expiresAt).toLocaleDateString('en-GB')]], iboMsg(x, kind).split('\n').slice(3).join('\n'), x.name));
+            return ok({ ok: r.ok, sent: r.ok, text });
+          }
+          return ok({ ok: true, sent: false, via, text, wa: String(x.contact || '').replace(/\D/g, '') });
+        }
+        return err(404, 'Not found.');
       }
 
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
