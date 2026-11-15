@@ -767,3 +767,7 @@ svg.i { flex: none; vertical-align: -5px; }
 .chat-item { cursor: pointer; border-radius: 12px; padding-inline: 8px; } .chat-item.on { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 .chat-back { display: none; }
 @media (max-width: 760px) { .chat-wrap { grid-template-columns: 1fr; } .chat-wrap.has-open .chat-list { display: none; } .chat-wrap:not(.has-open) .chat-pane { display: none; } .chat-back { display: inline-flex; } .thread.chat { height: 56vh; } }
+
+.sa-link { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.sa-link input { flex: 1; min-width: 110px; }
+.sa-links { display: flex; flex-direction: column; gap: 4px; }

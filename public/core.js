@@ -124,6 +124,13 @@ export const DEFAULT_SETTINGS = () => ({
     ],
     stripeKey: '', stripeAccountId: 'stripe', stripeWebhookSecrets: '', // one signing secret (whsec_…) per Stripe account, one per line
   },
+  // Multi-account Stripe control panel (spec §6): status, payout schedule, package links, optional read-only key for live balances.
+  stripeAccounts: [
+    { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [] },
+    { id: 'waffim', name: 'Waffim Accounting LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
+    { id: 'avixcloud', name: 'Avixcloud LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
+    { id: 'bussalion', name: 'Bussalion LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
+  ],
   stock: { packCredits: 120, packPrice: 90, lowCreditsAlert: 20 },
   alerts: { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {} }, // customer alerts page
   mailTexts: {}, // owner's own wording for emails: { MAIL|AM|RM|OM: { en|fr|ar: { key: text } } }
@@ -203,6 +210,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/settings') {
     if (method === 'GET') return null;
     const k = Object.keys(body || {});
+    if (k.length && k.every((x) => x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts', 'waTemplates'].includes(x))) return 'plans';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
@@ -219,6 +227,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
   if (path === '/api/admin/stripe/balance') return 'finance_view';
+  if (path.startsWith('/api/admin/stripe/account/')) return 'stripe';
   if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh' || path === '/api/admin/stripe/match') return 'finance_edit';
   if (path.startsWith('/api/admin/stock')) return 'stock';
   if (path === '/api/admin/profits') return 'profits';
@@ -1743,8 +1752,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       if (R('GET', '/api/admin/settings')) {
-        if (can('settings')) return ok(s);
-        return ok({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } });
+        const maskStripe = (src) => ({ ...src, stripeAccounts: (src.stripeAccounts || []).map((a) => ({ ...a, rk: a.rk ? '••••' : '' })) });
+        if (can('settings')) return ok(maskStripe(s));
+        return ok(maskStripe({ ...s, reseller: { ...s.reseller, apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } }));
       }
       if (R('PUT', '/api/admin/settings')) {
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
@@ -1759,6 +1769,28 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           credits: p.credits === '' || p.credits == null ? Math.max(1, Math.round((Number(p.days) || 30) / 30)) : Number(p.credits),
         }));
         if (Array.isArray(body.orderPackages)) next.orderPackages = body.orderPackages.map((p) => ({ id: p.id || 'o' + uid(3), title: String(p.title || 'Package'), days: Math.max(1, Number(p.days) || 30), devices: Math.max(1, Number(p.devices) || 1), price: Number(p.price) || 0, badge: String(p.badge || ''), link: '' }));
+        if (Array.isArray(body.stripeAccounts)) { // multi-account Stripe panel (spec §6): accounts, status, payout schedule, package links
+          const oldSa = new Map((s.stripeAccounts || []).map((a) => [a.id, a]));
+          next.stripeAccounts = body.stripeAccounts.slice(0, 20).map((a) => {
+            const id = String(a.id || uid(6)).replace(/[^\w-]/g, '').slice(0, 24) || uid(6);
+            const o = oldSa.get(id) || {};
+            return {
+              id, name: String(a.name || 'Account').slice(0, 80),
+              currency: ['USD', 'EUR'].includes(String(a.currency || '').toUpperCase()) ? String(a.currency).toUpperCase() : 'USD',
+              status: ['active', 'verification', 'closed'].includes(a.status) ? a.status : 'active',
+              payoutDays: Number(a.payoutDays) === 2 ? 2 : 7,
+              note: String(a.note || '').slice(0, 200),
+              rk: a.rk === '••••' ? (o.rk || '') : String(a.rk || '').slice(0, 200),
+              links: (Array.isArray(a.links) ? a.links : []).slice(0, 50).map((l) => ({
+                id: String(l.id || uid(6)).replace(/[^\w-]/g, '').slice(0, 12) || uid(6),
+                label: String(l.label || 'Link').slice(0, 80),
+                url: String(l.url || '').slice(0, 400),
+                currency: ['USD', 'EUR'].includes(String(l.currency || '').toUpperCase()) ? String(l.currency).toUpperCase() : 'USD',
+                tier: ['Normal', 'Resellers', 'IBO'].includes(l.tier) ? l.tier : 'Normal',
+              })).filter((l) => /^https?:\/\//.test(l.url)),
+            };
+          });
+        }
         // Templates are replaced as a whole, so removing a change brings the built-in wording back.
         if (isObj(body.mailTexts)) next.mailTexts = cleanMailTexts(body.mailTexts);
         if (isObj(body.waTemplates)) { next.waTemplates = {}; for (const ty of Object.keys(WA_TPL)) for (const lg of ['en', 'fr', 'ar']) { const v = body.waTemplates?.[ty]?.[lg]; if (typeof v === 'string' && v.trim() && v !== WA_TPL[ty][lg]) (next.waTemplates[ty] ||= {})[lg] = v.slice(0, 3000); } }
@@ -2014,6 +2046,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         const totalUsd = accs.reduce((x, a) => x + a.usd, 0);
         return ok({ accounts: accs, totalUsd, totalMad: fromUsd(totalUsd, 'MAD', s.finance.rates), rates: s.finance.rates, ratesUpdatedAt: s.finance.ratesUpdatedAt, points, history, totalHistoryUsd });
+      }
+      const sab = path.match(/^\/api\/admin\/stripe\/account\/([\w-]+)\/balance$/);
+      if (sab && method === 'GET') { // live balance for one Stripe account, with its own read-only key
+        const acct = (s.stripeAccounts || []).find((a) => a.id === sab[1]); if (!acct) return err(404, 'Stripe account not found.');
+        if (!acct.rk) return ok({ connected: false, error: 'Add a read-only Stripe key for this account to see its live balance.' });
+        let d;
+        try { const r = await fetchFn('https://api.stripe.com/v1/balance', { headers: { Authorization: 'Bearer ' + acct.rk } }); d = await r.json(); if (!r.ok) return ok({ connected: true, error: d.error?.message || 'Stripe error ' + r.status }); } catch (e) { return ok({ connected: true, error: e.message }); }
+        const cur = String(acct.currency).toLowerCase();
+        const sum = (arr) => (arr || []).filter((x) => x.currency === cur).reduce((a, x) => a + x.amount, 0) / 100;
+        return ok({ connected: true, accountId: acct.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending) });
       }
       if (R('GET', '/api/admin/stripe/balance')) { // live balance from Stripe, compared with the app
         const key = s.finance.stripeKey;

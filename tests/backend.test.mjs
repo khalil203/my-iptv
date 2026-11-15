@@ -526,3 +526,23 @@ test('customer totals: admin and customer payloads include total paid and lines'
   assert.equal(me.status, 200); assert.ok(typeof me.json.totalPaidUsd === 'number');
   assert.ok(Array.isArray(me.json.user.renewals));
 });
+
+test('stripe panel: account list is saved, rk stays secret and round-trips masked; per-account balance uses its own key', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const st = await x.call('GET', '/api/admin/settings', {}, tok); // seeds the four default accounts
+  assert.deepEqual(st.json.stripeAccounts.map((a) => a.id), ['grenapp', 'waffim', 'avixcloud', 'bussalion']);
+  assert.ok(st.json.stripeAccounts.every((a) => a.rk === ''), 'no keys yet');
+
+  const made = await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: 'Mercury Day 3', rk: 'rk_live_abc', links: [{ id: 'l1', label: '1 Year', url: 'https://buy.stripe.com/abc', currency: 'USD', tier: 'Normal' }] }] }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  // saved, never leaked back
+  const st2 = await x.call('GET', '/api/admin/settings', {}, tok);
+  const grenapp = st2.json.stripeAccounts[0]; assert.equal(grenapp.rk, '••••');
+  assert.equal(grenapp.links[0].label, '1 Year'); assert.equal(grenapp.payoutDays, 2);
+  // masked rk survives a save without wiping the stored key
+  await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ ...grenapp, name: 'Grenapp Host LLC2' }] }, tok);
+  const bal = await x.call('GET', '/api/admin/stripe/account/grenapp/balance', {}, tok);
+  assert.equal(bal.status, 200);
+  assert.equal(bal.json.connected, true, 'the preserved read-only key was used, not wiped by the masked save');
+  assert.equal(bal.json.available, 0);
+});

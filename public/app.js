@@ -255,6 +255,7 @@ const ADMIN_TABS = [
   ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
+  ['stripe', '💳', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
@@ -301,6 +302,7 @@ async function renderAdmin() {
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
+    else if (t === 'stripe') body.innerHTML = adminStripePage(s);
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
@@ -2802,6 +2804,51 @@ async function syncPanel(ids) {
   }
   return { changed, bad, total, error };
 }
+// ---------------- multi-account Stripe control panel (spec §6) ----------------
+const saLinkRow = (l = {}) => `<div class="sa-link" data-link="${esc(l.id || '')}"><input data-k="label" value="${esc(l.label || '')}" placeholder="Label (e.g. 1 Year)" style="flex:1;min-width:110px"><input data-k="url" value="${esc(l.url || '')}" placeholder="https://buy.stripe.com/…" dir="ltr" style="flex:2;min-width:190px" autocomplete="off"><select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${l.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select><select data-k="tier" style="width:auto">${['Normal', 'Resellers', 'IBO'].map((t2) => `<option ${l.tier === t2 ? 'selected' : ''}>${t2}</option>`).join('')}</select><button class="btn sm danger" data-act="sa-del-link" title="Remove link">🗑</button></div>`;
+const saRow = (a) => `<div class="op-row card" data-sa="${esc(a.id || '')}" style="padding:12px;margin-bottom:12px">
+  <div class="row" style="gap:8px;flex-wrap:wrap"><input data-k="name" value="${esc(a.name || '')}" placeholder="Account name" style="flex:2;min-width:160px">
+    <select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    <select data-k="status" style="width:auto">${[['active', 'Active'], ['verification', 'Verification'], ['closed', 'Closed']].map(([k, n]) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <select data-k="payoutDays" style="width:auto">${[2, 7].map((n) => `<option value="${n}" ${Number(a.payoutDays) === n ? 'selected' : ''}>${n}-day payout</option>`).join('')}</select>
+    <button class="btn sm" data-act="sa-balance" data-id="${esc(a.id)}" title="Check the live balance (save first)">💰</button>
+    <button class="btn sm danger" data-act="sa-del" title="Remove account">🗑</button></div>
+  <input data-k="note" value="${esc(a.note || '')}" placeholder="Note (payout schedule, bank transfer, …)" style="margin-top:8px">
+  <input data-k="rk" value="${esc(a.rk || '')}" placeholder="Read-only Stripe key (rk_live_…, optional — for live balance)" dir="ltr" autocomplete="off" style="margin-top:8px">
+  <div style="margin-top:12px"><p class="small muted" style="margin:0 0 6px">Payment links — normal / resellers / IBO</p><div class="sa-links">${(a.links || []).map(saLinkRow).join('')}</div>
+    <button class="btn sm" data-act="sa-add-link">＋ Add link</button></div>
+  <div class="sa-bal small muted" style="margin-top:6px"></div></div>`;
+function adminStripePage(s) {
+  const list = s.stripeAccounts || []; const links = list.flatMap((a) => a.links || []);
+  const byTier = (t) => links.filter((l) => l.tier === t).length;
+  const active = list.filter((a) => a.status === 'active').length;
+  const two = list.filter((a) => Number(a.payoutDays) === 2).length;
+  return `<p class="small muted">All your Stripe accounts in one place. Track <b>status</b> (Active / Verification / Closed), the <b>payout schedule</b> and your <b>package payment links</b> in USD and EUR. Links you add here are what you can put in package emails and IBO activations — deleting a link here does not remove it from Stripe.</p>
+    <div class="chips" style="margin-bottom:12px"><a class="on">${list.length} account${list.length === 1 ? '' : 's'} · ${active} active</a><a class="on">${two} with 2-day payout · ${list.length - two} with 7-day payout</a><a class="on">${links.length} link${links.length === 1 ? '' : 's'} — Normal ${byTier('Normal')} · Resellers ${byTier('Resellers')} · IBO ${byTier('IBO')}</a></div>
+    <div id="sa-list">${list.map(saRow).join('')}</div>
+    <div class="row" style="margin-top:6px"><button class="btn" data-act="sa-add">＋ Add account</button><span class="spacer"></span><button class="btn primary" data-act="sa-save">💾 Save accounts</button></div>`;
+}
+Object.assign(actions, {
+  'sa-add': () => $('#sa-list').insertAdjacentHTML('beforeend', saRow({ id: '', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] })),
+  'sa-del': (el) => el.closest('.op-row').remove(),
+  'sa-add-link': (el) => el.closest('.op-row').querySelector('.sa-links').insertAdjacentHTML('beforeend', saLinkRow()),
+  'sa-del-link': (el) => el.closest('.sa-link').remove(),
+  'sa-save': async () => {
+    const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
+      const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
+      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
+        links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
+    }).filter((a) => a.name);
+    try { await api('PUT', '/api/admin/settings', { stripeAccounts }); toast('Saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); }
+  },
+  'sa-balance': async (el) => {
+    el.disabled = true; const card = el.closest('.op-row'); const out = card.querySelector('.sa-bal'); out.textContent = 'Checking with Stripe…';
+    try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(el.dataset.id)}/balance`); out.textContent = r.connected ? `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}` : (r.error || 'Stripe not reached'); }
+    catch (e) { out.textContent = e.message; }
+    el.disabled = false;
+  },
+});
+
 // ---------------- all-agents trial queue & disputes (spec §4, §5) ----------------
 async function adminTrialQueue() {
   const r = await api('GET', '/api/admin/trialq'); const list = (r.list || []).slice(0, 200); state.admin.trialq = list;
