@@ -113,9 +113,9 @@ function setSession(token, role) {
 
 function applyBranding(b) {
   const r = document.documentElement.style;
-  r.setProperty('--b-primary', b.primary || '#7C4DFF');
+  r.setProperty('--b-primary', b.primary || '#D4AF37');
   r.setProperty('--b-accent', b.accent || '#19D5B1');
-  r.setProperty('--brand-bg', b.background || '#07081A');
+  r.setProperty('--brand-bg', b.background || '#041814');
   document.title = b.appName || 'IPTV';
   applyTheme();
 }
@@ -1868,7 +1868,7 @@ const actions = {
   'tx-filter': (el) => { state.admin.txAccount = el.dataset.acc; renderAdmin(); },
   'stripe-match': async (el) => { if (!confirm('Add one adjustment so the Stripe bank in the app equals your real Stripe balance?')) return; const r = await api('POST', '/api/admin/stripe/match', { target: Number(el.dataset.target) }); toast(`Stripe synced (${r.diff > 0 ? '+' : ''}${r.diff}) ✓`); renderAdmin(); },
   'refresh-rates': async () => { await api('POST', '/api/admin/rates/refresh'); toast('Rates updated ✓'); renderAdmin(); },
-  'add-acc': () => $('#acc-rows').insertAdjacentHTML('beforeend', accRow({ name: '', currency: 'USD', opening: 0, color: '#7c5cff' })),
+  'add-acc': () => $('#acc-rows').insertAdjacentHTML('beforeend', accRow({ name: '', currency: 'USD', opening: 0, color: '#D4AF37' })),
   'del-acc': (el) => { if (confirm('Remove this bank? Its transactions stay but will not count in balances.')) el.closest('.acc-row').remove(); },
   'save-accounts': async () => {
     const accounts = [...document.querySelectorAll('#acc-rows .acc-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.acc || undefined, name: g('name'), currency: g('currency'), opening: Number(g('opening')), color: g('color') }; }).filter((a) => a.name);
