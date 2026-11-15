@@ -413,6 +413,11 @@ export function accessEmail(s, c, password, kind, appUrl) {
   const m3u = dns ? [`${dns}/get.php?${q}&type=m3u_plus&output=ts`, `${dns}/get.php?${q}&type=m3u_plus&output=m3u8`] : [];
   const date = new Date(c.expiresAt).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' });
   const trial = kind === 'trial';
+  const macNote = lang === 'ar'
+    ? 'تستعمل جهازًا بتقنية MAC Address (تلفاز ذكي، جهاز STB...)؟ أرسل عنوان MAC الخاص بك إلى الدعم عبر واتساب أو تيليجرام وسنفعل تفعيلك.'
+    : lang === 'fr'
+      ? 'Vous utilisez un appareil basé sur une adresse MAC (TV connectée, STB…) ? Envoyez votre adresse MAC au support sur WhatsApp ou Telegram et nous activerons votre compte.'
+      : 'Using a MAC-address device (Smart TV, STB, Formuler…)? Send your MAC address to support on WhatsApp or Telegram and we will activate it for you.';
   const P = '#0284c7', align = L.dir === 'rtl' ? 'right' : 'left';
   const row = (k, val, mono = true) => `<tr><td class="cred-label" width="120" style="padding:10px 0;font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e2e8f0;text-align:${align}">${k}</td><td class="cred-val" style="padding:10px 0;${mono ? "font-family:'Courier New',Courier,monospace;" : ''}font-size:15px;font-weight:700;color:${P};border-bottom:1px solid #e2e8f0;word-break:break-all;text-align:${align}" dir="ltr">${val}</td></tr>`;
   const step = (n, t) => `<tr><td width="24" style="vertical-align:top;font-weight:700;padding-bottom:10px;color:#15803d">${n}.</td><td style="padding-bottom:10px;color:#166534">${t}</td></tr>`;
@@ -431,6 +436,7 @@ ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="96" style="display:block;
 <h1 class="header-title" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${v(trial ? 'trialTitle' : 'subTitle')}</h1>
 <p style="margin:8px 0 0;font-size:14px;color:#64748b">${v(trial ? 'trialSub' : 'subSub')}</p></td></tr>
 <tr><td class="mobile-pad" style="padding:32px 40px 16px;text-align:${align}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${v('dear', { name: c.name })}</p><p style="margin:0;font-size:15px;line-height:1.65">${v(trial ? 'trialIntro' : 'subIntro')}</p></td></tr>
+<tr><td class="mobile-pad" style="padding:4px 40px 20px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#eff6ff;border-${align}:4px solid #3b82f6;border-radius:6px"><tr><td style="padding:12px 16px;font-size:13px;color:#1e40af;line-height:1.5;text-align:${align}">📺 ${e(macNote)}</td></tr></table></td></tr>
 <tr><td class="mobile-pad" style="padding:10px 40px 20px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#fef3c7;border-${align}:4px solid #f59e0b;border-radius:6px"><tr><td style="padding:12px 16px;font-size:14px;color:#b45309;line-height:1.5;text-align:${align}">${trial ? v('trialNote', { hours: s.trial.hours }) : v('subNote', { date })}</td></tr></table></td></tr>
 <tr><td class="mobile-pad" style="padding:0 40px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
 <tr><td style="padding:20px 24px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;text-align:${align}"><h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a">${L.details}</h2><p style="margin:6px 0 0;font-size:13px;color:#475569;line-height:1.5">${L.detailsIntro}</p></td></tr>
