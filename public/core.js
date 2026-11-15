@@ -55,6 +55,8 @@ export const DEFAULT_SETTINGS = () => ({
     supportLabel: 'Contact support',
     supportUrl: '',
     whatsapp: '', // WhatsApp number with country code, digits only (shows the green WhatsApp button)
+    telegram: '', // private support Telegram handle, without @ (support and payment links go here in a private chat)
+    telegramChannel: '', // public Telegram channel used only for marketing, promos and announcements (no payments)
     footerText: '',
   },
   userDashboard: {
@@ -92,16 +94,14 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'r50', name: 'VIP', credits: 50, price: 999.99 },
   ],
   resellerCurrency: 'EUR',
-  // Package order emails (each one has its own Stripe payment link)
+  // Storefront packages (spec §3): IBO Player activations + multi-device yearly plans.
   orderPackages: [
-    { id: 'o1m', title: '1 Month', days: 30, devices: 1, price: 29.99, badge: '', link: '' },
-    { id: 'o3m', title: '3 Months', days: 90, devices: 1, price: 49.99, badge: '', link: '' },
-    { id: 'o6m', title: '6 Months', days: 180, devices: 1, price: 59.99, badge: '', link: '' },
-    { id: 'o1y', title: '1 Year', days: 365, devices: 1, price: 69.99, badge: '', link: '' },
-    { id: 'o2y', title: '2 Years', days: 730, devices: 1, price: 99.99, badge: '⭐ Best Value • 2-Year Plan', link: '' },
-    { id: 'o1y2d', title: '2 Devices · 1 Year', days: 365, devices: 2, price: 109.99, badge: 'Multi-Device Plan • 2 Connections', link: '' },
-    { id: 'o1y3d', title: '3 Devices · 1 Year', days: 365, devices: 3, price: 129.99, badge: 'Family Plan • 3 Connections', link: '' },
-    { id: 'o1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 139.99, badge: '🔥 Ultimate Plan • 4 Connections', link: '' },
+    { id: 'ibo1y', title: 'IBO Player · 1 Year', days: 365, devices: 1, price: 5.99, badge: '', link: '' },
+    { id: 'ibolife', title: 'IBO Player · Lifetime', days: 36500, devices: 1, price: 11.98, badge: '⭐ Lifetime activation', link: '' },
+    { id: 'o1y1d', title: '1 Device · 1 Year', days: 365, devices: 1, price: 5.99, badge: '', link: '' },
+    { id: 'o1y2d', title: '2 Devices · 1 Year', days: 365, devices: 2, price: 11.98, badge: '⭐ Best Value', link: '' },
+    { id: 'o1y3d', title: '3 Devices · 1 Year', days: 365, devices: 3, price: 17.97, badge: '', link: '' },
+    { id: 'o1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 23.96, badge: '', link: '' },
   ],
   orderCurrency: 'EUR',
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
@@ -636,6 +636,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     // Design system v2: move the previous default colours (cyan) to the new palette; colours the owner chose are kept.
     const oldLook = [['#12bfd8', '#7cf0ff'], ['#7c5cff', '#22d3ee'], ['#8065ff', '#19d5b1']].some(([p, a]) => String(s.branding.primary).toLowerCase() === p && String(s.branding.accent).toLowerCase() === a);
     if (oldLook) s.branding = { ...s.branding, primary: '#7C4DFF', accent: '#19D5B1', background: '#07081A' };
+    // Storefront pricing v2 (spec §3): swap the old default package list once, but only if the owner never changed it.
+    if (!s.pricingV2) {
+      if ((s.orderPackages || []).map((p) => p.id).join(',') === 'o1m,o3m,o6m,o1y,o2y,o1y2d,o1y3d,o1y4d') s.orderPackages = DEFAULT_SETTINGS().orderPackages;
+      s.pricingV2 = true; await store.put('settings', s);
+    }
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
     applyMailTexts(s.mailTexts); setMailLang(s.email.lang);
     sCache = s; sAt = Date.now();

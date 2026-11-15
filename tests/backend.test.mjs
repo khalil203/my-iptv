@@ -103,6 +103,7 @@ test('password reset by email: link works once, old sessions end, unknown accoun
 
 test('Stripe webhook: only signed, paid events activate; never twice; records are kept', async () => {
   const x = setup(); const tok = await adminToken(x); const secret = 'whsec_test_123';
+  await x.call('PUT', '/api/admin/settings', { orderPackages: [{ id: 'o3m', title: '3 Months', days: 90, devices: 1, price: 49.99, badge: '', link: '' }] }, tok);
   const cust = await addCustomer(x, tok);
   const before = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.username === 'testuser').expiresAt;
   const event = (id, obj) => JSON.stringify({ id, type: 'checkout.session.completed', data: { object: { id: 'cs_' + id, payment_status: 'paid', amount_total: 4999, currency: 'eur', client_reference_id: cust.id, customer_details: { email: 'test.person@example.com' }, metadata: { package: 'o3m' }, ...obj } } });
@@ -374,6 +375,7 @@ test('panel sync through the line: end date and devices follow the panel, missin
 });
 test('payment receipts: upload, owner approves, subscription extends, customer is told; a rejected one changes nothing', async () => {
   const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { orderPackages: [{ id: 'o3m', title: '3 Months', days: 90, devices: 1, price: 49.99, badge: '', link: '' }, { id: 'o1m', title: '1 Month', days: 30, devices: 1, price: 29.99, badge: '', link: '' }] }, tok);
   await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
   const cust = await addCustomer(x, tok); await addCustomer(x, tok, { username: 'other1', email: 'other@example.com', name: 'Other' });
   const u = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token; const ub = (await x.call('POST', '/api/login', { username: 'other1', password: 'secret12' })).json.token;

@@ -608,6 +608,7 @@ function adminBranding(s) {
     ${field('Title', 'branding.loginTitle', b.loginTitle)}${field('Subtitle', 'branding.loginSubtitle', b.loginSubtitle, { type: 'textarea', rows: 2 })}
     ${field('Background image URL', 'branding.loginBgUrl', b.loginBgUrl, { ph: 'https://…/background.jpg' })}
     ${field('WhatsApp number', 'branding.whatsapp', b.whatsapp, { type: 'tel', ph: '66812345678', help: 'With country code, no + or spaces (Thailand 66…, Morocco 212…). Shows a green WhatsApp button on the login page and in every customer account.' })}
+    <div class="grid2">${field('Telegram support handle', 'branding.telegram', b.telegram, { ph: 'yourid', help: 'Private support chat, without @. Payment and renewal links are sent here privately, never on the website.' })}${field('Telegram marketing channel', 'branding.telegramChannel', b.telegramChannel, { ph: 'yourchannel', help: 'Public channel for promos and announcements only — no payments here.' })}</div>
     <div class="grid2">${field('Support button text', 'branding.supportLabel', b.supportLabel)}${field('Support link', 'branding.supportUrl', b.supportUrl, { ph: 'https://line.me/ti/p/~yourid' })}</div>
     ${field('Footer text', 'branding.footerText', b.footerText, { ph: '© 2026 Your company' })}
     <button class="btn primary">Save branding</button></form>
