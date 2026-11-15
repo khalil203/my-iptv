@@ -762,14 +762,14 @@ test('aliases and payroll details: stored on the member, shown to the owner only
   assert.equal(m.alias, 'Mark'); assert.equal(m.bank, 'CIH'); assert.equal(m.bankDetails, 'MA64-0000-1111-2222');
 });
 
-test('CC collection: owner-only tracker with status and processor metadata', async () => {
+test('CC collection: owner-only tracker with the 8-field form and card status counters', async () => {
   const x = setup(); const tok = await adminToken(x);
   assert.equal((await x.call('GET', '/api/admin/cc', {}, tok)).status, 200);
-  const made = await x.call('POST', '/api/admin/cc', { customerName: 'Kast Client A', country: 'MA', processor: 'Kast', status: 'live', amount: 78035.48, currency: 'USD', contact: '+212600112233', notes: 'card****4521' }, tok);
+  const made = await x.call('POST', '/api/admin/cc', { fullName: 'Kast Client A', email: 'a@example.com', phone: '+212600112233', address: 'Casablanca', cardNumber: '4111111111111111', exp: '1227', cvv: '123', status: 'live' }, tok);
   assert.equal(made.status, 200, JSON.stringify(made.json));
-  await x.call('POST', '/api/admin/cc', { customerName: 'Trade OKX B', country: 'ES', processor: 'Trade OKX', status: 'declined', amount: 1200, currency: 'EUR' }, tok);
+  await x.call('POST', '/api/admin/cc', { fullName: 'Trade OKX B', email: 'b@example.com', phone: '+34600000000', address: 'Madrid', cardNumber: '5555555555554444', exp: '0128', cvv: '456', status: 'declined' }, tok);
   const r = await x.call('GET', '/api/admin/cc', {}, tok);
-  assert.equal(r.json.liveCount, 1); assert.equal(r.json.declinedCount, 1); assert.equal(r.json.totalLive, 78035.48);
+  assert.equal(r.json.liveCount, 1); assert.equal(r.json.declinedCount, 1); assert.equal(r.json.deadCount, 0);
   // staff without the owner role cannot see it (Sensitive)
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'saidd', password: 'secret12', role: 'Sales', perms: ['customers_view', 'customers_edit', 'finance_view'] }, tok);
   const staff = (await x.call('POST', '/api/login', { username: 'saidd', password: 'secret12' })).json.token;
