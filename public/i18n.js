@@ -244,3 +244,6 @@ Object.assign(D.ar, { trialQueued: 'تم استلام طلبك ✅ سيعالج�
 Object.assign(D.en, { linesN: 'Lines (devices)', totalPaid: 'Total paid' });
 Object.assign(D.fr, { linesN: 'Lignes (appareils)', totalPaid: 'Total payé' });
 Object.assign(D.ar, { linesN: 'الخطوط (الأجهزة)', totalPaid: 'إجمالي المدفوع' });
+Object.assign(D.en, { captcha_bad: 'Wrong answer to the check question. Try again.', captchaQ: 'What is {q}?' });
+Object.assign(D.fr, { captcha_bad: 'Mauvaise réponse à la question. Réessayez.', captchaQ: 'Que vaut {q} ?' });
+Object.assign(D.ar, { captcha_bad: 'إجابة خاطئة للسؤال. حاول مرة أخرى.', captchaQ: 'ما هو {q}؟' });

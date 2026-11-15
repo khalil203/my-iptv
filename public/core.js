@@ -152,6 +152,23 @@ const fill = (tpl, vars, encode) => String(tpl || '').replace(/\{(\w+)\}/g, (_, 
 });
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 
+// Math captcha for customer/reseller sign-in (spec §2) — no external keys needed.
+async function captchaChallenge(s) {
+  const a = 1 + Math.floor(Math.random() * 8), b = 2 + Math.floor(Math.random() * 8);
+  const id = `${a}.${b}.${Date.now() + 300000}`;
+  const sig = (await hmac(s.security.proxySecret, 'cap:' + id)).slice(0, 24);
+  return { id: `${id}.${sig}`, q: `${a} + ${b} = ?` };
+}
+async function captchaVerify(s, body) {
+  if (s.security.captcha === false) return true;
+  const m = String(body.captchaId || '').match(/^(\d+)\.(\d+)\.(\d+)\.([a-f0-9]+)$/);
+  if (!m) return false;
+  const [, a, b, exp, sig] = m;
+  if (Number(exp) < Date.now()) return false;
+  if ((await hmac(s.security.proxySecret, `cap:${a}.${b}.${exp}`)).slice(0, 24) !== sig) return false;
+  return Number(body.captchaAnswer) === Number(a) + Number(b);
+}
+
 const XTREAM_ACTIONS = new Set([
   'get_live_categories', 'get_live_streams', 'get_vod_categories', 'get_vod_streams', 'get_vod_info',
   'get_series_categories', 'get_series', 'get_series_info', 'get_short_epg',
@@ -172,6 +189,7 @@ export const PERMS = [
   ['plans', 'Edit plans & prices', 'Finance'],
   ['ibo', 'IBO Player panel & credits', 'Products'],
   ['marketing', 'Email marketing, lists & campaigns', 'Marketing'],
+  ['templates_edit', 'Create & edit email/WhatsApp templates (Marketing)', 'Marketing'],
   ['seo', 'SEO & social media tasks', 'Marketing'],
   ['ads', 'Google Ads & Facebook Ads dashboards', 'Marketing'],
   ['tasks', 'Task list & weekly planning', 'Team'],
@@ -193,7 +211,7 @@ const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
 
 // Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
 export const ROLE_PRESETS = {
-  'Technical Manager': ['customers_view', 'customers_edit', 'customers_phone', 'disputes', 'tasks', 'attendance', 'activity'],
+  'Technical Manager': ['customers_view', 'customers_edit', 'customers_phone', 'disputes', 'tasks', 'attendance', 'activity', 'ibo', 'marketing', 'templates_edit'],
   'Sales Agent': ['customers_view', 'customers_edit', 'customers_phone', 'tasks', 'attendance'],
   Accountant: ['finance_view', 'finance_edit', 'profits', 'stock', 'stripe', 'tasks', 'attendance'],
   Manager: ['customers_view', 'customers_edit', 'customers_delete', 'customers_phone', 'disputes', 'finance_view', 'finance_edit', 'profits', 'stock', 'plans', 'tasks', 'attendance', 'activity'],
@@ -235,6 +253,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/tasks')) return 'tasks';
   if (path.startsWith('/api/admin/reports')) return 'attendance_all';
   if (path.startsWith('/api/admin/teamchat')) return null;
+  if (path.startsWith('/api/admin/cc')) return 'owner';
   if (path.startsWith('/api/admin/emailmkt')) return 'marketing';
   if (path.startsWith('/api/admin/seo')) return 'seo';
   if (path.startsWith('/api/admin/gads') || path.startsWith('/api/admin/fb')) return 'ads';
@@ -245,7 +264,8 @@ function permFor(method, path, body) {
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
   if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/email/recent') return 'customers_view';
-  if (path.startsWith('/api/admin/templates') || path.startsWith('/api/admin/trialpool')) return 'settings';
+  if (path.startsWith('/api/admin/trialpool')) return 'settings';
+  if (path.startsWith('/api/admin/templates')) return method === 'GET' ? null : 'templates_edit'; // everyone views & inputs, only TM/owner/full-access edits (spec §1)
   return 'owner';
 }
 
@@ -762,7 +782,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Who can get a renewal email right now
   function renewalTargets(list, onlyRecentDays) {
     const now = Date.now();
-    return list.filter((c) => cleanEmail(c.email) && !c.emailBad && !c.unsub && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
+    return list.filter((c) => (cleanEmail(c.email) || cleanEmail(c.email2)) && !c.emailBad && !c.unsub && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
   }
   async function sentToday() { const k = 'renewsent:' + new Date().toISOString().slice(0, 10); return { k, n: (await store.get(k)) || 0 }; }
   function loginMail(s, c, password, kind) {
@@ -814,6 +834,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   function contactKeys(c) {
     const k = [];
     if (normEmail(c.email)) k.push(['email', normEmail(c.email)]);
+    if (normEmail(c.email2)) k.push(['email', normEmail(c.email2)]);
     for (const ph of new Set([normPhone(c.phone), normPhone(c.whatsapp)])) if (ph) k.push(['phone', ph]);
     if (c.lineUsername && c.lineUsername !== c.username) k.push(['line', String(c.lineUsername).toLowerCase()]);
     const nm = normName(c.name); if (nm.length >= 6) k.push(['name', nm]);
@@ -945,6 +966,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return ch;
   }
   // A short plain email to the owner about something a customer did. Never blocks the customer's action.
+  async function notifyTM(s, subject, text) { // Technical Manager copy of escalation emails (spec §1) — they get it alongside the owner
+    try { const app = s.branding.appName || 'IPTV'; const url = String(s.email.appUrl || '').replace(/\/+$/, ''); const team = await getTeam();
+      const tms = team.filter((m) => m.status !== 'disabled' && /technical|panel manager/i.test(m.role || '') && cleanEmail(m.notifyEmail));
+      for (const m of tms) await sendEmail(s, m.notifyEmail, `[${app}] ${subject}`, `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#121726"><h3 style="margin:0 0 12px">${escHtml(subject)}</h3><p style="white-space:pre-line;line-height:1.5">${escHtml(text)}</p>${url ? `<p><a href="${escHtml(url)}">Open the dashboard</a></p>` : ''}</div>`);
+    } catch {}
+  }
   async function notifyAdmin(s, subject, text) {
     const to = cleanEmail(s.email.adminEmail); if (!to || !s.email.resendKey) return;
     const k = 'adminmail:' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0; if (n >= 40) return; await store.put(k, n + 1, 2 * 86400);
@@ -1146,7 +1173,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/config')) {
         await getAdmin();
         const cur = s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
-        return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail),
+        return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail), captcha: s.security.captcha === false ? null : await captchaChallenge(s),
           packages: (s.orderPackages || []).filter((p) => p.title && Number(p.price) > 0).map((p) => ({ title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur })) });
       }
       if (R('POST', '/api/trial')) {
@@ -1160,6 +1187,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!/^\+\d{8,15}$/.test(phone) || (whatsapp && !/^\+?\d{8,15}$/.test(whatsapp))) return err(400, 'trial_phone');
         { const typo = emailTypo(email); if (typo) return { status: 400, json: { error: 'trial_typo', suggest: typo } }; if (await emailProblem(email)) return err(400, 'trial_bademail'); }
         const list = await getCustomers();
+        if (!(await captchaVerify(s, body))) return err(400, 'captcha_bad'); // customers & resellers sign in with a captcha (spec §2)
         const digits = (x) => String(x || '').replace(/\D/g, '').slice(-9);
         const prev = findMatches(list, { email, phone, whatsapp });
         if (prev.length) {
@@ -1322,6 +1350,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           m.lastLogin = Date.now(); await store.put('team', team);
           return ok({ token: await newSession('staff', m.id, s, { ...meta, name: m.name }), role: 'staff' });
         }
+        if (!(await captchaVerify(s, body))) return err(400, 'captcha_bad'); // customers & resellers sign in with a captcha (spec §2)
         const list = await getCustomers();
         // a customer can sign in with the app details or with the line username and password from the panel
         let c = null;
@@ -1537,6 +1566,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!member || member.status === 'disabled') return err(401, 'Please sign in again.');
         // Owner-only permissions can never take effect, even if a stale record still lists them.
         perms = (member.perms || []).filter((p) => !isOwnerOnly(p));
+        // A trainee is limited to view, attendance and tasks for their first 14 days (spec §3)
+        if (member.traineeUntil && member.traineeUntil > Date.now()) perms = perms.filter((p) => ['customers_view', 'attendance', 'tasks'].includes(p));
         actorName = member.name || member.username;
       }
       const can = (p) => isOwner || (!isOwnerOnly(p) && perms.includes(p));
@@ -1550,11 +1581,21 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const hidePhone = !can('customers_phone');
       const maskNum = (v) => String(v || '').replace(/\d(?=\d{2})/g, '•');
       const viewP = (c, st) => { const v = view(c, st || s); if (hidePhone) { if (v.phone) v.phone = maskNum(v.phone); if (v.whatsapp) v.whatsapp = maskNum(v.whatsapp); } return v; };
+      // Mandatory two-factor for everyone (spec §2). Until it is on, only the memo and the 2FA endpoints answer.
+      if (s.security.force2fa !== false) {
+        const acct = isOwner ? await getAdmin() : member;
+        const tfaOn = !!(acct && acct.totp && acct.totp.on);
+        if (!tfaOn) {
+          const allow = path === '/api/admin/me' || path.startsWith('/api/admin/2fa');
+          if (!allow) return err(403, '2fa_setup_required');
+        }
+      }
 
       if (R('GET', '/api/admin/me')) {
-        const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode };
-        if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ ...meta, role: 'staff', name: member.name, username: member.username, isDefault: false, perms, twoFactor: !!(member.totp && member.totp.on) });
+        const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa !== false };
+        const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
+        if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
+        return ok({ ...meta, role: 'staff', name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms, mustSetup2fa: must2fa(member), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -1648,6 +1689,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (cu) { cu.statusFlag = 'dispute'; await saveCustomers(list); }
         await log('disputes', `${d.kind === 'bug' ? 'Problem report' : 'Dispute'} opened: "${d.subject}"${cu ? ' for ' + cu.username : ''} (${d.priority})`);
         await notifyAdmin(s, `${d.kind === 'bug' ? '🐞 Problem report' : '⚠️ Dispute'}: ${d.subject}`, `${d.details || ''}\n\nOpened by ${actorName}${cu ? `\nCustomer: ${cu.name} (${cu.username})` : ''}\nPriority: ${d.priority}`);
+        await notifyTM(s, `${d.kind === 'bug' ? '🐞 Problem report' : '⚠️ Dispute'}: ${d.subject}`, `${d.details || ''}\n\nOpened by ${actorName}${cu ? `\nCustomer: ${cu.name} (${cu.username})` : ''}\nPriority: ${d.priority}`);
         return ok({ ok: true, dispute: publicDispute(d) });
       }
       if (R('POST', '/api/admin/disputes/update')) {
@@ -1938,6 +1980,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return per;
       };
       const meWorks = () => (isOwner ? { id: 'owner', name: actorName.replace(' (owner)', '') || 'Owner' } : { id: member ? member.id : '', name: actorName });
+      const aliasName = (member && member.alias) ? member.alias : (member ? (member.name || member.username) : 'Owner'); // western alias shown to customers; logs keep the real name
       const scopeSelf = (l) => { const me = meWorks(); return isOwner || can('attendance_all') ? l : l.filter((x) => x.by === me.id || (isOwner && x.by === 'owner') || (member && x.by === member.id) || (!isOwner && !member)); };
       if (R('GET', '/api/admin/attendance')) {
         const since = Date.now() - 35 * DAY; const events = (await getAtt()).filter((e) => e.at >= since);
@@ -2028,12 +2071,32 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/admin/teamchat')) { const l = (await store.get('teamchat')) || []; return ok(l.slice(-120)); }
       if (R('POST', '/api/admin/teamchat')) { const text = cleanText(body.text, 1000); if (!text) return err(400, 'Write a message first.'); const me = meWorks(); const l = (await store.get('teamchat')) || []; l.push({ id: uid(6), by: me.id, name: me.name, at: Date.now(), text }); await store.put('teamchat', l.slice(-300)); return ok({ ok: true }); }
 
+      // ---------- CC Collection (spec §5): full metadata + card status, owner-only ----------
+      const getCc = async () => (await store.get('ccnotes')) || [];
+      const saveCc = (l) => store.put('ccnotes', l.slice(0, 1000));
+      if (R('GET', '/api/admin/cc')) {
+        const list = (await getCc()).sort((a, b) => b.at - a.at);
+        const sum = (st) => list.filter((x) => x.status === st).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+        return ok({ list, totalLive: Math.round(sum('live') * 100) / 100, totalDeclined: Math.round(sum('declined') * 100) / 100, liveCount: list.filter((x) => x.status === 'live').length, declinedCount: list.filter((x) => x.status === 'declined').length });
+      }
+      if (R('POST', '/api/admin/cc')) {
+        const status = ['live', 'declined', 'refunded'].includes(body.status) ? body.status : 'live';
+        const rec = { id: uid(8), at: Date.now(), by: actorName, customerName: cleanText(body.customerName, 80), customerId: String(body.customerId || '').slice(0, 20), country: cleanText(body.country, 60), contact: cleanText(body.contact, 120), processor: ['Kast', 'Trade OKX', 'Epay', 'Exchanger', 'Other'].includes(body.processor) ? body.processor : 'Other', status, amount: Math.abs(Number(body.amount) || 0), currency: ['USD', 'EUR', 'MAD', 'USDT', 'THB'].includes(String(body.currency || '').toUpperCase()) ? String(body.currency).toUpperCase() : 'USD', notes: cleanText(body.notes, 500) };
+        if (!rec.customerName) return err(400, 'Customer name is required.');
+        const list = await getCc(); list.unshift(rec); await saveCc(list);
+        await log('finance', `CC Collection: ${rec.customerName} · ${rec.status} · ${rec.amount} ${rec.currency} · ${rec.processor}`);
+        return ok({ ok: true, record: rec });
+      }
+      const ccId = path.match(/^\/api\/admin\/cc\/([\w-]+)$/);
+      if (ccId && method === 'DELETE') { const list = (await getCc()).filter((x) => x.id !== ccId[1]); await saveCc(list); await log('finance', 'CC Collection entry removed'); return ok({ ok: true }); }
+      if (ccId && method === 'PUT') { const list = await getCc(); const rec = list.find((x) => x.id === ccId[1]); if (!rec) return err(404, 'Not found.'); if (body.status && ['live', 'declined', 'refunded'].includes(body.status)) rec.status = body.status; if (body.notes !== undefined) rec.notes = cleanText(body.notes, 500); if (body.amount !== undefined) rec.amount = Math.abs(Number(body.amount) || 0); rec.at = Date.now(); await saveCc(list); return ok({ ok: true, record: rec }); }
+
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
       if (R('POST', '/api/admin/chat')) {
         const cu = (await getCustomers()).find((x) => x.id === body.id); if (!cu) return err(404, 'Customer not found.');
         const text = cleanText(body.text, 1000); if (!text) return err(400, 'Write a message first.');
-        const { ch } = await chatAdd(cu, 's', actorName.replace(' (owner)', ''), text);
+        const { ch } = await chatAdd(cu, 's', aliasName, text);
         return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages });
       }
       if (R('GET', '/api/admin/tickets')) return ok((await getTickets()).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || b.updatedAt - a.updatedAt));
@@ -2043,7 +2106,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!tk) return err(404, 'Ticket not found.');
         const text = cleanText(body.text, 2000);
         let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'The picture is too large or not an image.'); }
-        if (text || att) { tk.messages.push({ from: 'staff', by: actorName.replace(' (owner)', ''), at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'answered'; }
+        if (text || att) { tk.messages.push({ from: 'staff', by: aliasName, at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'answered'; }
         if (['open', 'answered', 'closed'].includes(body.status)) tk.status = body.status;
         if (['low', 'normal', 'high'].includes(body.priority)) tk.priority = body.priority;
         tk.updatedAt = Date.now(); await saveTickets(all);
@@ -2069,7 +2132,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const taken = team.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getCustomers()).some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getAdmin()).username.toLowerCase() === username.toLowerCase();
         if (taken) return err(400, 'This username is already used.');
         const salt = uid(8);
-        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', createdAt: Date.now(), lastLogin: null };
+        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', alias: String(body.alias || '').slice(0, 40), bank: ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '', bankDetails: String(body.bankDetails || '').slice(0, 120), notifyEmail: String(body.notifyEmail || '').slice(0, 120), traineeUntil: body.trainee ? Date.now() + 14 * DAY : (Number(body.traineeUntil) || 0), createdAt: Date.now(), lastLogin: null };
         team.push(m); await store.put('team', team);
         await log('team', `Added team member ${m.name} (${username})`);
         const { salt: _s, hash: _h, ...pub } = m; return ok(pub);
@@ -2080,12 +2143,19 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!m) return err(404, 'Not found');
         if (method === 'DELETE') { await store.put('team', team.filter((x) => x !== m)); await log('team', `Removed team member ${m.name}`); return ok({ ok: true }); }
         if (method === 'PUT') {
-          if (body.name !== undefined) m.name = String(body.name);
-          if (body.role !== undefined) m.role = String(body.role);
+          if (body.name !== undefined) m.name = String(body.name).slice(0, 80);
+          if (body.role !== undefined) m.role = String(body.role).slice(0, 60);
+          if (body.alias !== undefined) m.alias = String(body.alias).slice(0, 40);
+          if (body.bank !== undefined) m.bank = ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '';
+          if (body.bankDetails !== undefined) m.bankDetails = String(body.bankDetails).slice(0, 120);
+          if (body.notifyEmail !== undefined) m.notifyEmail = cleanEmail(body.notifyEmail) || String(body.notifyEmail || '').trim().toLowerCase().slice(0, 120);
+          if (body.promote) m.traineeUntil = 0;
+          else if (body.traineeUntil !== undefined) m.traineeUntil = Number(body.traineeUntil) || 0;
+          if (body.trainee) m.traineeUntil = Date.now() + 14 * DAY;
           if (Array.isArray(body.perms)) m.perms = body.perms.filter((p) => GRANTABLE_KEYS.includes(p));
           if (body.status) m.status = body.status === 'disabled' ? 'disabled' : 'active';
           if (body.password) { if (String(body.password).length < 6) return err(400, 'Password needs 6+ characters.'); m.salt = uid(8); m.hash = await hashPassword(body.password, m.salt); }
-          await store.put('team', team); await log('team', `Updated team member ${m.name}`);
+          await store.put('team', team); await log('team', `Updated team member ${m.name}${body.promote ? ' · promoted to active' : ''}`);
           const { salt, hash, ...pub } = m; return ok(pub);
         }
       }
@@ -2165,7 +2235,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const salt = uid(8);
         const c = {
           id: uid(8), name: String(body.name || username), phone: String(body.phone || ''), note: String(body.note || ''),
-          email: cleanEmail(body.email) || String(body.email || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
+          email: cleanEmail(body.email) || String(body.email || '').trim().toLowerCase(), email2: cleanEmail(body.email2) || String(body.email2 || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
           telegram: String(body.telegram || ''), macAddress: String(body.macAddress || ''), deviceApp: String(body.deviceApp || ''),
           statusFlag: ['normal', 'excellent', 'dispute'].includes(body.statusFlag) ? body.statusFlag : 'normal', callNotes: String(body.callNotes || ''),
           username, salt, passwordHash: await hashPassword(body.password, salt), loginPassword: String(body.password),
@@ -2204,9 +2274,21 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const sub = m[2];
 
         if (method === 'PUT' && !sub) {
-          if (body.email && cleanEmail(body.email) !== cleanEmail(c.email) && !body.emailAnyway) { const prob = await emailProblem(body.email); if (prob) return err(400, prob); }
+          // 24-hour auto-reset contact checkboxes (spec §4): checking marks "contacted" today; stale marks auto-expire in the UI
+          if (body.contact && typeof body.contact === 'object') {
+            const ct = { ...(c.contact || {}) };
+            for (const k of ['email', 'whatsapp', 'telegram']) {
+              if (k in body.contact) { const v = body.contact[k]; ct[k] = v === 'toggle' ? (ct[k] ? 0 : Date.now()) : v ? Date.now() : 0; }
+            }
+            c.contact = ct; await saveCustomers(list);
+            await log('customer', `Contact check: ${['email', 'whatsapp', 'telegram'].filter((k) => ct[k]).join(', ') || 'none'} marked for ${c.username}`);
+            return ok({ ok: true, contact: ct });
+          }
+          if (body.email && cleanEmail(body.email) !== cleanEmail(c.email) && !body.emailAnyway) { const prob = await emailProblem(cleanEmail(body.email)); if (prob) return err(400, prob); }
+          if (body.email2 !== undefined && (String(body.email2 || '') !== '' && cleanEmail(body.email2) !== cleanEmail(c.email2 || ''))) { const prob = await emailProblem(cleanEmail(body.email2)); if (prob) return err(400, 'Secondary email: ' + prob); }
           for (const k of ['name', 'phone', 'note', 'lineUsername', 'linePassword', 'lineId', 'planId', 'email', 'whatsapp', 'lang']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.email !== undefined) c.email = cleanEmail(body.email) || String(body.email).trim();
+          if (body.email2 !== undefined) c.email2 = cleanEmail(body.email2) || String(body.email2 || '').trim().toLowerCase();
           const lineWas = c.lineUsername + '\n' + c.linePassword;
           let activated = false;
           if (body.m3u) {
@@ -2235,6 +2317,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
                   customerId: c.id, username: c.username, name: c.name, orderNo: c.orderNo || '', amount: 0, att: '', createdBy: actorName, createdAt: Date.now(), updatedAt: Date.now(), assignedTo: '', notes: [], resolution: '' });
                 await saveDisputes(dis);
                 await notifyAdmin(s, `⚠️ Dispute flagged: ${c.name}`, `${c.username} was flagged as Dispute by ${actorName}. Open Disputes for details.`);
+                await notifyTM(s, `⚠️ Dispute flagged: ${c.name}`, `${c.username} was flagged as Dispute by ${actorName}. Open Disputes for details.`);
                 await log('disputes', `Dispute auto-created for ${c.username} (flagged by ${actorName})`);
               } catch {}
             }
@@ -2654,7 +2737,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const left = body.all ? 100 : Math.max(0, (Number(s.renewalOffer.dailyLimit) || 90) - t.n);
         if (!left) return ok({ sent: 0, limitReached: true, waiting: renewalTargets(list).length });
         const batch = renewalTargets(list, body.onlyRecentDays).sort((a, b) => b.expiresAt - a.expiresAt).slice(0, Math.min(body.all ? 100 : 50, left));
-        const r = await sendBatch(s, batch.map((c) => ({ to: c.email, ...renewalEmail(s, c, body.appUrl) })));
+        const r = await sendBatch(s, batch.map((c) => ({ to: cleanEmail(c.email) || cleanEmail(c.email2), ...renewalEmail(s, c, body.appUrl) })));
         if (!r.ok) return err(502, r.error);
         const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; });
         await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400);
@@ -2792,6 +2875,18 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Daily job (Cloudflare cron): low credit alerts to admin + expiry reminders to customers.
   async function daily() {
     try { const s0 = await getSettings(); if (s0.email.resendKey) await syncBounces(s0); } catch {}
+    try { // uptime monitor (spec §2/§4): daily probe of the streaming server; email the owner if it is down
+      const sU = await getSettings();
+      if (sU.player.serverUrl && sU.email.resendKey && sU.email.adminEmail && sU.email.uptimeMonitor !== false) {
+        let ok = false, why = '';
+        try { const r = await fetchFn(String(sU.player.serverUrl).replace(/\/+$/, '') + '/player_api.php', { headers: { 'User-Agent': sU.player.userAgent || 'IPTVSmartersPro' } }); ok = r.status < 500; why = 'HTTP ' + r.status; } catch (e) { why = e.message; }
+        const last = await store.get('uptime'); const now = Date.now();
+        if (!ok && now - (last?.at || 0) > 6 * 3600000) {
+          await sendEmail(sU, sU.email.adminEmail, `🚨 ${sU.branding.appName || 'INTPROTO-TV'}: the IPTV server is not reachable`, mailHtml(sU, 'en', [['Server', sU.player.serverUrl], ['Answer', why], ['Checked at', new Date(now).toLocaleString('en-GB')]], 'The streaming server did not answer the daily health check. Customers may not be able to watch or renew lines through the panel API. Check the server, DNS and panel status with your provider.', 'Admin'));
+          await store.put('uptime', { at: now, ok: false });
+        } else if (ok && last) await store.del('uptime');
+      }
+    } catch {}
     try { const s1 = await getSettings(); if (s1.player.serverUrl) { const l = await getCustomers(); const part = l.filter((c) => !c.pendingLine && c.status !== 'disabled').sort((a, b) => ((a.panel && a.panel.at) || 0) - ((b.panel && b.panel.at) || 0)).slice(0, 20); let ch = 0; for (const c of part) { try { if (await syncLine(s1, c)) ch++; } catch {} } if (part.length) await saveCustomers(l); } } catch {}
     const s = await refreshRates(await getSettings(), false);
     const out = { reminders: 0, alert: false };
@@ -2810,11 +2905,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const list = await getCustomers(); let changed = false;
       const days = Number(s.email.reminderDays) || 3;
       for (const c of list) {
+        const to = cleanEmail(c.email) || cleanEmail(c.email2); // primary address, falling back to the secondary one
         const left = Math.ceil((c.expiresAt - Date.now()) / DAYMS);
-        if (c.email && !c.isTrial && c.status !== 'disabled' && left > 0 && left <= days && c.remindedFor !== c.expiresAt) {
+        if (to && !c.isTrial && c.status !== 'disabled' && left > 0 && left <= days && c.remindedFor !== c.expiresAt) {
           const lang = ml(c);
           const date = new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium' });
-          const r = await sendEmail(s, c.email, mt(lang, 'expirySubject', { days: left }), mailHtml(s, lang, [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), date]], mt(lang, 'expiryBody', { date }), c.name));
+          const r = await sendEmail(s, to, mt(lang, 'expirySubject', { days: left }), mailHtml(s, lang, [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), date]], mt(lang, 'expiryBody', { date }), c.name));
           if (r.ok) { c.remindedFor = c.expiresAt; changed = true; out.reminders++; }
         }
       }
@@ -2825,7 +2921,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const left = Math.max(0, (Number(s.renewalOffer.dailyLimit) || 90) - t.n);
       const batch = renewalTargets(list, Number(s.renewalOffer.autoDays) || 3).slice(0, Math.min(50, left));
       if (batch.length) {
-        const r = await sendBatch(s, batch.map((c) => ({ to: c.email, ...renewalEmail(s, c, s.email.appUrl) })));
+        const r = await sendBatch(s, batch.map((c) => ({ to: cleanEmail(c.email) || cleanEmail(c.email2), ...renewalEmail(s, c, s.email.appUrl) })));
         if (r.ok) { const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; }); await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400); out.reminders += batch.length; }
       }
     }

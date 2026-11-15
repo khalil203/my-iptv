@@ -10,11 +10,11 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtDate = (x) => (x ? new Date(x).toLocaleDateString(isAdminUI() ? undefined : locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtDT = (x) => (x ? new Date(x).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
-const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-const mad = (n) => `${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} MAD`;
-const num = (n, cur) => `${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${cur || ''}`;
+const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const mad = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
+const num = (n, cur) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur || ''}`;
 const isoDay = (t) => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-const money = (n) => `${Number(n || 0).toLocaleString()} ${state.config?.currency || ''}`;
+const money = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${state.config?.currency || ''}`;
 const initials = (n) => String(n || '?').trim().split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
 const b64 = (s) => { try { return decodeURIComponent(escape(atob(s))); } catch { return s || ''; } };
 
@@ -114,6 +114,7 @@ function applyBranding(b) {
   document.title = b.appName || 'IPTV';
   applyTheme();
 }
+const DAYMS = 86400000;
 
 // ---------------- day / night theme ----------------
 // Auto (default): day theme 06:00–18:00 in the device's own time zone, night theme otherwise.
@@ -202,6 +203,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       <form ${preview ? '' : 'data-form="login"'}>
         ${field(t('username'), 'username', '', { attrs: 'autocomplete="username" autocapitalize="none" required' })}
         <label class="field"><span>${t('password')}</span><div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" data-act="pw-eye">👁</button></div></label>
+        ${!preview && state.config?.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : ''}
         <button class="btn primary block" ${preview ? 'type="button"' : ''}>${t('signIn')}</button>
       </form>
       ${preview ? '' : `<div class="login-foot" style="margin-top:10px"><a href="#" data-act="forgot">${t('forgot')}</a></div>`}
@@ -224,6 +226,7 @@ function trialForm() {
     ${phoneField(t('phone'), 'phone')}
     ${toggle(t('sameWhatsapp'), 'same', true)}
     <div id="wa-field" style="display:none">${phoneField(t('whatsapp'), 'whatsapp', false)}</div>
+    ${state.config?.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : ''}
     <div id="trial-err"></div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">🎁 ${t('getTrial')}</button></div>
   </form>`;
@@ -255,6 +258,7 @@ const ADMIN_TABS = [
   ['attendance', '🕒', 'Attendance & shifts', 'attendance', 'Team', 'attendance check in out breaks night shift timezone leave days off reports weekly performance clock'],
   ['teamchat', '💬', 'Team chat', null, 'Team', 'team chat internal handover announcements staff channel'],
   ['trialq', '⚡', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
+  ['cc', '💳', 'CC Collection', 'owner', 'Money', 'cc collection card kast trade okx epay exchangers live declined owner'],
   ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
@@ -274,6 +278,7 @@ const ADMIN_TABS = [
   ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name whatsapp number theme'],
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
   ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
+  ['holidays', '🗓', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
   ['team', '🛡', 'Team & access', 'owner', 'System', 'staff permissions roles'],
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
   ['activity', '🧾', 'Activity', 'activity', 'System', 'log audit history'],
@@ -281,6 +286,14 @@ const ADMIN_TABS = [
 const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
 
+async function render2faGate() {
+  setWaFab(null);
+  const me = state.admin.me;
+  $('#app').innerHTML = `<div class="block-screen"><div class="ic">🔐</div><h2>Two-factor sign-in required</h2>
+    <p class="muted" style="max-width:440px;margin:6px 0 18px">The dashboard is only available once two-factor sign-in is on for <b>${esc(me?.username || '')}</b>. It protects customer lines, payments and settings (spec §2).</p>
+    <button class="btn primary" data-act="tfa-setup">🔐 Turn on two-step sign-in</button>
+    <p class="small muted" style="margin-top:14px">You will type a setup key into your authenticator app, then enter the 6-digit code it shows.</p></div>`;
+}
 async function renderAdmin() {
   setWaFab(null);
   startTzClock();
@@ -288,7 +301,8 @@ async function renderAdmin() {
   const b = state.config.branding;
   if (!state.admin.me) { try { state.admin.me = await api('GET', '/api/admin/me'); } catch { return; } }
   const me = state.admin.me;
-  const tabs = ADMIN_TABS.filter((x) => can(x[3]) && READY_TABS(x[0]));
+  if (me.mustSetup2fa) { render2faGate(); return; }
+  const tabs = ADMIN_TABS.filter((x) => (x[0] === 'holidays' ? (me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || '')) : can(x[3])) && READY_TABS(x[0]));
   if (!tabs.some((x) => x[0] === state.admin.tab)) state.admin.tab = tabs[0][0];
   const t = state.admin.tab;
   const title = ADMIN_TABS.find((x) => x[0] === t)?.[2] || '';
@@ -306,6 +320,15 @@ async function renderAdmin() {
   try {
     const s = await api('GET', '/api/admin/settings');
     state.admin.settings = s;
+    if (s.security && s.security.discordUrl) { // Discord team voice channel (spec §2)
+      const tb = $('.topbar');
+      if (tb && !tb.querySelector('[data-act="discord-vc"] a')) {
+        const a = document.createElement('span');
+        a.setAttribute('data-act', 'discord-vc');
+        a.innerHTML = `<a class="btn sm" href="${esc(s.security.discordUrl)}" target="_blank" rel="noopener" title="Team voice channel on Discord">🎧 Discord</a>`;
+        tb.insertBefore(a, tb.querySelector('[data-act="theme"]'));
+      }
+    }
     const body = $('#admin-body');
     if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
@@ -319,6 +342,7 @@ async function renderAdmin() {
     else if (t === 'seo') body.innerHTML = await adminSeoPage();
     else if (t === 'gads') body.innerHTML = await adminGadsPage();
     else if (t === 'fb') body.innerHTML = await adminFbPage();
+    else if (t === 'cc') body.innerHTML = await adminCcPage();
     else if (t === 'ibo') body.innerHTML = await adminIboPage();
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
@@ -336,6 +360,7 @@ async function renderAdmin() {
     else if (t === 'chat') { body.innerHTML = await adminChat(); chatScroll(); }
     else if (t === 'templates') body.innerHTML = await adminTemplates(s);
     else if (t === 'emails') body.innerHTML = await adminEmails();
+    else if (t === 'holidays') body.innerHTML = adminHolidays();
     else if (t === 'data') body.innerHTML = await adminData(s);
     else if (t === 'activity') body.innerHTML = await adminActivity();
     else if (t === 'team') body.innerHTML = await adminTeam();
@@ -385,11 +410,19 @@ function filteredCustomers() {
   const qq = q.trim().toLowerCase();
   return state.admin.customers
     .filter((c) => filter === 'all' || c.state === filter || (filter === 'trial' && c.isTrial) || (filter === 'request' && c.buyRequest && !c.buyRequest.answeredAt))
-    .filter((c) => !qq || [c.name, c.username, c.phone, c.lineUsername, c.note, c.email, c.whatsapp, c.orderNo, c.country].some((x) => String(x || '').toLowerCase().includes(qq)))
+    .filter((c) => !qq || [c.name, c.username, c.phone, c.lineUsername, c.note, c.email, c.email2, c.whatsapp, c.telegram, c.macAddress, c.orderNo, c.country].some((x) => String(x || '').toLowerCase().includes(qq)))
     .sort((a, b) => a.expiresAt - b.expiresAt);
 }
+// 24-hour auto-reset contact checkboxes (spec §4): a mark expires 24h after it was made, for the daily follow-up routine.
+const contactedRecently = (ts) => ts && Date.now() - ts < 24 * 3600000;
+const contactChecks = (c) => {
+  if (!can('customers_edit')) return '';
+  const ct = c.contact || {};
+  const box = (k, icn, tip) => `<button class="btn sm ${contactedRecently(ct[k]) ? 'primary' : ''}" data-act="contact-toggle" data-id="${c.id}" data-k="${k}" title="${tip}${contactedRecently(ct[k]) ? ' · marked ' + fmtDT(ct[k]) + ' — resets automatically after 24h' : ''}" aria-pressed="${contactedRecently(ct[k]) ? 'true' : 'false'}">${icn}${contactedRecently(ct[k]) ? '✓' : ''}</button>`;
+  return `<span class="row" style="gap:4px;flex-wrap:nowrap" title="Contacted today?">${box('email', '📧', 'Emailed')}${box('whatsapp', '💬', 'WhatsApp sent')}${box('telegram', '✈️', 'Telegram sent')}</span>`;
+};
 function custActions(c) {
-  return `${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<a class="btn sm" href="tel:${esc(String(c.phone).replace(/[^\d+]/g, ''))}" title="Call">📞</a>` : ''}${can('customers_phone') && c.telegram ? `<a class="btn sm" href="https://t.me/${esc(String(c.telegram).trim().replace(/^@/, ''))}" target="_blank" rel="noopener" title="Telegram">✈️</a>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+  return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<a class="btn sm" href="tel:${esc(String(c.phone).replace(/[^\d+]/g, ''))}" title="Call">📞</a>` : ''}${can('customers_phone') && c.telegram ? `<a class="btn sm" href="https://t.me/${esc(String(c.telegram).trim().replace(/^@/, ''))}" target="_blank" rel="noopener" title="Telegram">✈️</a>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
@@ -441,6 +474,7 @@ function customerForm(c) {
     ${c.pendingLine ? `<div class="notice warning">⏳ This trial is waiting for a line. Paste the M3U link from your panel below and save: the trial starts and the login email is sent.</div>` : ''}
     ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
+    <div class="grid2">${field('Secondary email', 'email2', c.email2 || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'Backup/reminder address' })}</div>
     <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
     <div class="grid3">${field('Telegram handle', 'telegram', c.telegram || '', { ph: '@username or id', attrs: 'autocapitalize="none"' })}${field('App / device', 'deviceApp', c.deviceApp || '', { ph: 'IBO Player, Smarters, MAC…' })}${field('MAC address', 'macAddress', c.macAddress || '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false"' })}</div>
     <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: [['ar', 'العربية'], ['fr', 'Français'], ['en', 'English']] })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
@@ -687,7 +721,11 @@ async function adminSecurity(s) {
     ${field('New password (leave empty to keep)', 'newPassword', '', { type: 'password' })}
     ${field('Current password (required)', 'currentPassword', '', { type: 'password', attrs: 'required' })}
     <button class="btn primary">Update admin login</button></form>
-  <div>${twoFactorCard(me)}<form data-form="settings" class="card"><h3>Sessions</h3>
+  <div>${twoFactorCard(me)}<form data-form="settings" class="card"><h3>Security</h3>
+    ${toggle('Require two-factor sign-in for owner & staff', 'security.force2fa', s.security.force2fa !== false, 'Every owner and staff member must turn on two-step sign-in before using the dashboard (spec §2)')}
+    ${toggle('Require captcha on customer & trial sign-in', 'security.captcha', s.security.captcha !== false, 'A small math question blocks bots; owner and staff use two-step sign-in instead')}
+    ${toggle('Email me if the IPTV server is down (daily check)', 'email.uptimeMonitor', s.email.uptimeMonitor !== false, 'The daily health check emails you when the streaming server does not answer')}
+    ${field('Discord voice channel link', 'security.discordUrl', s.security.discordUrl || '', { ph: 'https://discord.com/channels/…', attrs: 'autocapitalize="none"', help: 'One-tap team coordination in the dashboard header — for shift handovers and urgent discussions' })}
     ${field('Keep users signed in for (hours)', 'security.sessionHours', s.security.sessionHours, { type: 'number', attrs: 'min="1" max="2160"' })}
     <button class="btn primary">Save</button></form>
   <div class="card"><h3>Backup</h3><p class="small muted">Download all settings and customers, or restore from a backup file.</p>
@@ -738,8 +776,11 @@ async function adminTeam() {
   ${team.length ? `<div class="team-grid">${team.map((m) => `<div class="tm ${m.status === 'disabled' ? 'off' : ''}">
     <div class="row"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1;min-width:0"><b>${esc(m.name)}</b><div class="small muted">${esc(m.role || 'Staff')} · @${esc(m.username)}</div></div>${pill(m.status === 'disabled' ? 'disabled' : 'active')}</div>
     <div class="perm-tags">${(m.perms || []).map((p) => `<span class="tagp">${esc((all.find((x) => x[0] === p) || [p, p])[1])}</span>`).join('') || '<span class="small muted">No permissions</span>'}</div>
+    ${m.alias ? `<div class="small muted">✍️ Alias for customers: <b>${esc(m.alias)}</b></div>` : ''}
+    ${m.bank && m.bankDetails ? `<div class="small muted">💳 ${esc(m.bank)} · <code>•••• ${esc(String(m.bankDetails).slice(-4))}</code></div>` : ''}
+    ${m.traineeUntil && m.traineeUntil > Date.now() ? `<div class="notice warning" style="margin:6px 0">⏳ Unpaid trainee · ${Math.ceil((m.traineeUntil - Date.now()) / 86400000)} day(s) left · view/tasks/attendance only</div>` : ''}
     <div class="small muted">Last sign-in: ${m.lastLogin ? fmtDT(m.lastLogin) : 'never'}</div>
-    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="edit-member" data-id="${m.id}">Edit</button><button class="btn sm" data-act="toggle-member" data-id="${m.id}">${m.status === 'disabled' ? 'Enable' : 'Disable'}</button><button class="btn sm danger" data-act="del-member" data-id="${m.id}">🗑</button></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="edit-member" data-id="${m.id}">Edit</button>${m.traineeUntil && m.traineeUntil > Date.now() ? `<button class="btn sm primary" data-act="promote-member" data-id="${m.id}">🎓 Promote</button>` : ''}<button class="btn sm" data-act="toggle-member" data-id="${m.id}">${m.status === 'disabled' ? 'Enable' : 'Disable'}</button><button class="btn sm danger" data-act="del-member" data-id="${m.id}">🗑</button></div>
   </div>`).join('')}</div>` : `<div class="empty card"><span class="ic">🛡</span>No team members yet.</div>`}`;
 }
 function memberForm(m) {
@@ -756,6 +797,10 @@ function memberForm(m) {
   return `<form data-form="member" data-id="${m.id || ''}">
     <div class="grid2">${field('Name', 'name', m.name || '', { attrs: 'required' })}${field('Function', 'role', m.role || '', { ph: 'e.g. Technical Manager' })}</div>
     <div class="grid2">${field('Username', 'username', m.username || '', { attrs: (isNew ? 'required minlength="3"' : 'disabled') + ' autocapitalize="none"' })}${field(isNew ? 'Password' : 'New password (optional)', 'password', '', { type: 'password', attrs: isNew ? 'required minlength="6"' : '' })}</div>
+    <div class="grid2">${field('Western alias (shown to customers)', 'alias', m.alias || '', { ph: 'e.g. Mark, Simon, Jasmin' })}${field('Payroll bank', 'bank', m.bank || '', { type: 'select', options: [['', '—'], ['CIH', 'CIH (MAD)'], ['IBAN', 'European IBAN'], ['US', 'US bank'], ['other', 'Other']] })}</div>
+    ${field('Payroll account / IBAN', 'bankDetails', m.bankDetails || '', { attrs: 'autocapitalize="none"', ph: 'e.g. MA64 3508 0000 0001 2345 6789 01' })}
+    ${field('Escalation email (Technical Manager)', 'notifyEmail', m.notifyEmail || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'Escalation copies go here — usually Khalil’s email' })}
+    ${isNew ? toggle('Start as an unpaid 14-day trainee', 'trainee', true, 'Restricted to Customers (view), Attendance and Tasks until you promote them') : (m.traineeUntil && m.traineeUntil > Date.now() ? `<p class="notice warning" style="margin:6px 0">⏳ Trainee · ${Math.ceil((m.traineeUntil - Date.now()) / 86400000)} day(s) left · restricted access</p>` : '')}
     <h3>Role preset</h3>
     <div class="chips">${Object.keys(roles).map((k) => `<a data-act="preset" data-p="${esc(k)}">${esc(k)}</a>`).join('')}</div>
     <h3>Access</h3>
@@ -1713,6 +1758,7 @@ const actions = {
   },
   'close-modal': () => closeModal(),
   'new-member': () => modal('Add team member', memberForm(null), { wide: true }),
+  'promote-member': async (el) => { try { await api('PUT', '/api/admin/team/' + el.dataset.id, { promote: true }); toast('Promoted to active ✓'); $('#admin-body').innerHTML = await adminTeam(); } catch (e) { toast(e.message, true); } },
   'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
   'toggle-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); await api('PUT', '/api/admin/team/' + m.id, { status: m.status === 'disabled' ? 'active' : 'disabled' }); toast('Updated ✓'); renderAdmin(); },
   'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast('Removed'); renderAdmin(); },
@@ -1766,6 +1812,11 @@ const actions = {
     const rnd = (n, chars) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => chars[x % chars.length]).join('');
     f.username.value = 'u' + rnd(6, '0123456789');
     f.password.value = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
+  },
+  'contact-toggle': async (el) => {
+    el.disabled = true;
+    try { await api('PUT', '/api/admin/customers/' + el.dataset.id, { contact: { [el.dataset.k]: 'toggle' } }); state.admin.customers = await api('GET', '/api/admin/customers'); $('#cust-list').innerHTML = customerListHtml(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
   },
   renew: async (el) => {
     if (!state.admin.customers.length || !state.admin.customers.find((x) => x.id === el.dataset.id)) state.admin.customers = await api('GET', '/api/admin/customers');
@@ -2597,26 +2648,27 @@ async function adminTemplates() {
   const edits = (d.custom[ui.g] || {})[ui.lang] || {};
   const changedCount = (g) => g === 'WA' ? Object.values(d.wa).reduce((n, x) => n + Object.keys(x).length, 0) : g === 'OWN' ? d.waCustom.length : Object.values(d.custom[g] || {}).reduce((n, x) => n + Object.keys(x).length, 0);
   const grp = TPL_GROUPS.find((x) => x[0] === ui.g);
+  const canEdit = can("templates_edit");
   const q = ui.q.trim().toLowerCase();
   let body;
   if (own) {
     body = `<p class="small muted">Your own WhatsApp messages. They appear in the message list when you tap 💬 on a customer. You can use: {name} {fullname} {app} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {appUrl}</p>
-      ${d.waCustom.map((x, i) => `<div class="tpl-f"><div class="row"><input style="flex:1" value="${esc(x.name)}" data-own="${i}" data-k="name" placeholder="Name of this message" maxlength="40"><button type="button" class="btn sm danger" data-act="tp-own-del" data-i="${i}">Delete</button></div><textarea rows="5" data-own="${i}" data-k="text" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}" placeholder="Message in ${LANG3.find((l) => l[0] === ui.lang)[1]}">${esc(x.text[ui.lang] || '')}</textarea></div>`).join('') || '<p class="muted small">No messages of your own yet.</p>'}
-      <button type="button" class="btn" data-act="tp-own-add">＋ Add a message</button>`;
+      ${d.waCustom.map((x, i) => `<div class="tpl-f"><div class="row"><input style="flex:1" value="${esc(x.name)}" data-own="${i}" data-k="name" placeholder="Name of this message" maxlength="40"><button type="button" class="btn sm danger" data-act="tp-own-del" data-perm="templates_edit" data-i="${i}">Delete</button></div><textarea rows="5" data-own="${i}" data-k="text" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}" placeholder="Message in ${LANG3.find((l) => l[0] === ui.lang)[1]}">${esc(x.text[ui.lang] || '')}</textarea></div>`).join('') || '<p class="muted small">No messages of your own yet.</p>'}
+      <button type="button" class="btn" data-act="tp-own-add" data-perm="templates_edit">＋ Add a message</button>`;
   } else if (wa) {
     body = `<p class="small muted">The ready-made WhatsApp messages. You can use: {name} {fullname} {app} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {appUrl}</p>
-      ${Object.keys(d.waDefaults).map((ty) => { const cur = (d.wa[ty] || {})[ui.lang]; return `<div class="tpl-f"><label><b>${WA_NAMES[ty] || nice(ty)}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label><textarea rows="9" data-wa="${ty}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || d.waDefaults[ty][ui.lang] || '')}</textarea>${cur ? `<button type="button" class="btn sm" data-act="tp-wa-reset" data-ty="${ty}">Back to the original</button>` : ''}</div>`; }).join('')}`;
+      ${Object.keys(d.waDefaults).map((ty) => { const cur = (d.wa[ty] || {})[ui.lang]; return `<div class="tpl-f"><label><b>${WA_NAMES[ty] || nice(ty)}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label><textarea rows="9" data-wa="${ty}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || d.waDefaults[ty][ui.lang] || '')}</textarea>${cur ? `<button type="button" class="btn sm" data-act="tp-wa-reset" data-perm="templates_edit" data-ty="${ty}">Back to the original</button>` : ''}</div>`; }).join('')}`;
   } else {
     const keys = Object.keys(d.defaults[ui.g][ui.lang]).filter((k) => k !== 'dir').filter((k) => (!ui.only || edits[k]) && (!q || (k + ' ' + (edits[k] || d.defaults[ui.g][ui.lang][k])).toLowerCase().includes(q)));
     body = `<p class="small muted">${grp[3]} You can use: <span dir="ltr">${grp[4]}</span>. Simple formatting like &lt;b&gt;bold&lt;/b&gt; works.</p>
       <div class="row" style="margin-bottom:10px"><input style="flex:1;min-width:160px" type="search" placeholder="🔎 Find a text…" value="${esc(ui.q)}" data-input="tp-search"><label class="toggle" style="margin:0"><input type="checkbox" data-act="tp-only" ${ui.only ? 'checked' : ''}><i></i><span>Only changed</span></label></div>
       ${keys.map((k) => { const def = d.defaults[ui.g][ui.lang][k]; const cur = edits[k]; const long = (cur || def).length > 70;
-        return `<div class="tpl-f"><label><b>${esc(nice(k))}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label>${long ? `<textarea rows="${Math.min(8, Math.ceil((cur || def).length / 60) + 1)}" data-tk="${k}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || def)}</textarea>` : `<input data-tk="${k}" value="${esc(cur || def)}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">`}${cur ? `<button type="button" class="btn sm" data-act="tp-reset" data-k="${k}">Back to the original</button>` : ''}</div>`; }).join('') || '<p class="muted small">Nothing matches.</p>'}`;
+        return `<div class="tpl-f"><label><b>${esc(nice(k))}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label>${long ? `<textarea rows="${Math.min(8, Math.ceil((cur || def).length / 60) + 1)}" data-tk="${k}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || def)}</textarea>` : `<input data-tk="${k}" value="${esc(cur || def)}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">`}${cur ? `<button type="button" class="btn sm" data-act="tp-reset" data-perm="templates_edit" data-k="${k}">Back to the original</button>` : ''}</div>`; }).join('') || '<p class="muted small">Nothing matches.</p>'}`;
   }
   return `<div class="chips">${TPL_GROUPS.map(([g, , n]) => `<a class="${ui.g === g ? 'on' : ''}" data-act="tp-g" data-g="${g}">${n}${changedCount(g) ? ' · ' + changedCount(g) : ''}</a>`).join('')}<a class="${wa ? 'on' : ''}" data-act="tp-g" data-g="WA">💬 WhatsApp messages${changedCount('WA') ? ' · ' + changedCount('WA') : ''}</a><a class="${own ? 'on' : ''}" data-act="tp-g" data-g="OWN">✍️ My own WhatsApp messages · ${d.waCustom.length}</a></div>
-    <div class="card"><div class="row" style="margin-bottom:10px"><div class="seg">${LANG3.map(([k, n]) => `<button type="button" class="${ui.lang === k ? 'on' : ''}" data-act="tp-lang" data-lang="${k}">${n}</button>`).join('')}</div><span class="spacer"></span>${grp ? `<button type="button" class="btn" data-act="tp-preview">👁 Preview email</button>` : ''}<button type="button" class="btn primary" data-act="tp-save">Save</button></div>
-      <div id="tpl-fields">${body}</div>
-      <div class="row" style="margin-top:14px;justify-content:space-between"><div class="row"><button type="button" class="btn sm" data-act="tp-export" data-perm="exports">⬇ Export all templates</button><button type="button" class="btn sm" data-act="tp-import">⬆ Import</button></div><button type="button" class="btn primary" data-act="tp-save">Save</button></div></div>`;
+    <div class="card"><div class="row" style="margin-bottom:10px"><div class="seg">${LANG3.map(([k, n]) => `<button type="button" class="${ui.lang === k ? 'on' : ''}" data-act="tp-lang" data-lang="${k}">${n}</button>`).join('')}</div><span class="spacer"></span>${grp ? `<button type="button" class="btn" data-act="tp-preview">👁 Preview email</button>` : ''}<button type="button" class="btn primary" data-act="tp-save" data-perm="templates_edit">Save</button></div>
+      <fieldset id="tpl-fields" ${canEdit ? "" : "disabled"} style="border:none;margin:0;padding:0">${body}</fieldset>
+      <div class="row" style="margin-top:14px;justify-content:space-between"><div class="row"><button type="button" class="btn sm" data-act="tp-export" data-perm="exports">⬇ Export all templates</button><button type="button" class="btn sm" data-act="tp-import" data-perm="templates_edit">⬆ Import</button></div><button type="button" class="btn primary" data-act="tp-save" data-perm="templates_edit">Save</button></div></div>`;
 }
 // Reads what is typed on the page into the working copy, so switching language or group loses nothing.
 function tpCollect() {
@@ -2866,6 +2918,22 @@ Object.assign(actions, {
   },
 });
 
+// ---------------- CC Collection — owner only (spec §5) ----------------
+async function adminCcPage() {
+  const r = await api('GET', '/api/admin/cc'); const list = r.list || [];
+  const rows = list.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.customerName)}</b><div class="small muted">${esc(x.country || '')}${x.contact ? ' · ' + esc(x.contact) : ''}${x.customerId ? ' · #' + esc(x.customerId) : ''}</div></td><td class="small">${esc(x.processor)}</td><td><span class="pill ${x.status === 'live' ? 'st-active' : x.status === 'refunded' ? 'st-expiring' : 'st-expired'}">${esc(x.status)}</span></td><td class="small" dir="ltr">${Number(x.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${esc(x.currency)}</td><td class="small">${esc(x.notes || '')}</td><td><button class="btn sm danger" data-act="cc-del" data-id="${esc(x.id)}">🗑</button></td></tr>`).join('');
+  return `<p class="small muted">Owner-only. Every CC collection with full metadata and card status (Live / Declined / Refunded), logged with who entered it and when. Kast, Trade OKX, Epay, exchangers — whatever the processor is.</p>
+  <div class="chips" style="margin-bottom:14px"><a class="on">${r.liveCount} live · $${Number(r.totalLive).toFixed(2)}</a><a class="on">${r.declinedCount} declined · $${Number(r.totalDeclined).toFixed(2)}</a></div>
+  <form data-form="cc-add" class="card"><h3>＋ Log a collection</h3><div class="grid2">${field('Customer name', 'customerName', '', { attrs: 'required maxlength="80"' })}${field('Customer ID (optional)', 'customerId', '', { attrs: 'autocapitalize="none"' })}</div><div class="grid3">${field('Country', 'country', '', { ph: 'MA, ES, US…' })}${field('Contact', 'contact', '', { ph: 'phone / WhatsApp / email' })}${field('Processor', 'processor', 'Kast', { type: 'select', options: ['Kast', 'Trade OKX', 'Epay', 'Exchanger', 'Other'].map((o) => [o, o]) })}</div><div class="grid3">${field('Card status', 'status', 'live', { type: 'select', options: [['live', 'Live'], ['declined', 'Declined'], ['refunded', 'Refunded']] })}${field('Amount', 'amount', '', { type: 'number', attrs: 'min="0" step="0.01" required' })}${field('Currency', 'currency', 'USD', { type: 'select', options: [['USD', 'USD'], ['EUR', 'EUR'], ['MAD', 'MAD'], ['USDT', 'USDT'], ['THB', 'THB']] })}</div>${field('Notes', 'notes', '', { type: 'textarea', rows: 2, ph: 'Reference, card last digits, exchanger name…' })}<button type="submit" class="btn primary">Save entry</button></form>
+  ${list.length ? `<div class="card" style="margin-top:14px"><h3>Log <span class="small muted">(${list.length})</span></h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Customer</th><th>Processor</th><th>Status</th><th>Amount</th><th>Notes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>` : ''}`;
+}
+Object.assign(actions, {
+  'cc-del': async (el) => { if (!confirm('Delete this CC collection entry?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/cc/' + el.dataset.id); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+});
+Object.assign(forms, {
+  async 'cc-add'(f) { try { await api('POST', '/api/admin/cc', formToObj(f)); toast('Saved ✓'); f.reset(); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); } },
+});
+
 // ---------------- all-agents trial queue & disputes (spec §4, §5) ----------------
 async function adminTrialQueue() {
   const r = await api('GET', '/api/admin/trialq'); const list = (r.list || []).slice(0, 200); state.admin.trialq = list;
@@ -2998,6 +3066,51 @@ Object.assign(forms, {
   async 'teamchat-send'(f) { const t = f.text.value.trim(); if (!t) return; try { await api('POST', '/api/admin/teamchat', { text: t }); f.text.value = ''; $('#tc-thread').innerHTML = (await api('GET', '/api/admin/teamchat')).map((m) => `<div class="msg ${m.name === state.admin.me?.name ? 'mine' : ''}"><b class="small">${esc(m.name)}</b><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${fmtDT(m.at)}</div></div>`).join(''); const th = $('#tc-thread'); th.scrollTop = th.scrollHeight; } catch (e) { toast(e.message, true); } },
 });
 document.addEventListener('change', (e) => { const t = e.target; if (t.dataset?.task && ['not_started', 'in_progress', 'completed', 'delayed', 'blocked'].includes(t.value)) { t.disabled = true; api('PUT', '/api/admin/tasks/' + t.dataset.task, { status: t.value }).then(() => { }).catch((err) => toast(err.message, true)).finally(() => { t.disabled = false; }); } });
+
+// ---------------- Holidays & campaign planning: Owner and Technical Manager only (spec §2) ----------------
+const easterSunday = (y) => { // Anonymous Gregorian algorithm
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), month = Math.floor((h + l - 7 * m + 114) / 31) - 1, day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(y, month, day);
+};
+function holidaysList() {
+  const now = new Date(); const y0 = now.getFullYear(); const out = []; const add = (d, name, region, tip) => out.push({ at: d.getTime(), name, region, tip });
+  const nth = (y, mo, wd, n) => { const d = new Date(y, mo, 1); d.setDate(1 + ((wd - d.getDay() + 7) % 7) + (n - 1) * 7); return d; };
+  const last = (y, mo, wd) => { const d = new Date(y, mo + 1, 0); d.setDate(d.getDate() - ((d.getDay() - wd + 7) % 7)); return d; };
+  for (const y of [y0, y0 + 1]) {
+    add(new Date(y, 0, 1), "New Year's Day", 'Intl', 'Big renew promos — "new year, new setup".');
+    add(nth(y, 0, 1, 3), 'Martin Luther King Jr. Day', 'US', 'US soft launch weekend, Reddit/Quora SEO push.');
+    add(nth(y, 1, 0, 2), 'Super Bowl (US)', 'US', 'Huge streaming peak — check line capacity, prime promos for multi-device.');
+    add(new Date(y, 1, 14), 'Valentine’s Day', 'US / EU', 'Couple packages (2 devices).');
+    add(new Date(y, 2, 17), 'St. Patrick’s Day', 'US / IE / UK', 'Small promo — renewals.');
+    add(easterSunday(y), 'Easter Sunday', 'US / EU', 'Family plans (3–4 devices).');
+    add(new Date(y, 4, 1), 'Labour Day', 'EU', 'Europe promo weekend.');
+    add(last(y, 4, 1), 'Memorial Day', 'US', 'US holiday — Stripe payouts may be delayed.');
+    add(new Date(y, 5, 1), 'Labour Day (VE/FR)', 'EU', 'May 1 — Europe capacity planning.');
+    add(new Date(y, 6, 4), 'Independence Day', 'US', 'US Stripe payouts 1–2 days late; renew promos.');
+    add(new Date(y, 6, 14), 'Bastille Day', 'FR', 'Fr-speaking EU promos.');
+    add(nth(y, 8, 1, 1), 'Labor Day', 'US', 'US holiday — Stripe payouts may be delayed.');
+    add(new Date(y, 9, 3), 'German Unity Day', 'DE', 'Germany-focused promos.');
+    add(new Date(y, 9, 12), 'Spanish National Day', 'ES', 'Spain promos.');
+    add(new Date(y, 9, 31), 'Halloween', 'US', 'Themed creative for Facebook ads.');
+    add(nth(y, 10, 4, 4), 'Thanksgiving', 'US', 'Big US weekend — pre-load credits, Stripe payouts may be delayed; Black Friday next day.');
+    add(new Date(nth(y, 10, 4, 4).getTime() + DAYMS), 'Black Friday', 'US / Intl', 'Peak sales day — caps on tickets: send trials in batches.');
+    add(new Date(y, 11, 24), "Christmas Eve", 'EU', 'Gift cards go fast — resellers restock.');
+    add(new Date(y, 11, 25), 'Christmas', 'US / EU', 'Stripe payouts delayed; minimal staffing — use the all-agents trial queue.');
+    add(new Date(y, 11, 26), 'Boxing Day / St. Stephen’s', 'EU / UK', 'EU post-Christmas promos.');
+    add(new Date(y, 11, 31), "New Year's Eve", 'Intl', 'Countdown promos, last renewal push of the year.');
+    // approximate moveable feasts — verify locally each year
+    add(new Date(y, 2, 19), 'Ramadan begins (approx.)', 'Intl', 'Night-owl viewing peaks — push night-shift coverage.');
+    add(new Date(y, 4, 27), 'Eid al-Fitr (approx.)', 'Intl', 'Multi-device gift promos.');
+    add(new Date(y, 6, 7), 'Eid al-Adha (approx.)', 'Intl', 'Family device plans.');
+  }
+  return out.filter((x) => x.at >= now.getTime() - 2 * DAYMS).sort((a, b) => a.at - b.at).slice(0, 40);
+}
+function adminHolidays() {
+  const list = holidaysList();
+  const regionTone = { US: 'st-open', 'US / EU': 'st-active', EU: 'st-expiring', Intl: 'st-renewed' };
+  return `<p class="small muted">For <b>Nizar</b> and <b>Khalil</b> only. Use these dates to plan marketing campaigns and to expect Stripe/bank payout delays (US federal holidays delay ACH/payout by 1–2 days). Moveable feasts (Ramadan, Eid) are approximate — double-check each year.</p>
+  <div class="card"><h3>🗓 Upcoming holidays &amp; campaign windows</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Region</th><th>Planning note</th></tr></thead><tbody>${list.map((h) => `<tr><td class="small">${fmtDate(h.at)}</td><td class="small">${new Date(h.at).toLocaleDateString(undefined, { weekday: 'short' })}</td><td><b>${esc(h.name)}</b>${h.at < Date.now() + 30 * DAYMS ? ' <span class="pill st-active">soon</span>' : ''}</td><td><span class="tagp">${esc(h.region)}</span></td><td class="small">${esc(h.tip)}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
 
 // ---------------- Marketing dashboards (spec §8) ----------------
 async function adminMktPage() {
