@@ -2090,7 +2090,9 @@ const forms = {
   async login(f) {
     const btn = f.querySelector('button.primary'); btn.disabled = true;
     try {
-      const r = await api('POST', '/api/login', { username: f.username.value, password: f.password.value });
+      const body = { username: f.username.value, password: f.password.value };
+      if (f.captchaAnswer && f.captchaAnswer.value) { body.captchaAnswer = f.captchaAnswer.value; body.captchaId = f.captchaId ? f.captchaId.value : ''; }
+      const r = await api('POST', '/api/login', body);
       localStorage.setItem('tvp_known', '1'); setSession(r.token, r.role); route();
     } catch (e) {
       if (e.data?.need2fa) { btn.disabled = false; state.pendingLogin = { username: f.username.value, password: f.password.value }; const b = modal('🔐 ' + t('code2faTitle'), `<p class="muted" style="margin-top:0">${t('code2faText')}</p><form data-form="login-code">${field(t('code2fa'), 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" dir="ltr"' })}<div id="code-err"></div><button class="btn primary block">${t('verify')}</button></form>`); b.querySelector('input').focus(); return; }
