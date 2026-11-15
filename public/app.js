@@ -3018,7 +3018,11 @@ const saRow = (a) => `<div class="op-row card" data-sa="${esc(a.id || '')}" styl
     <button class="btn sm" data-act="sa-balance" data-id="${esc(a.id)}" title="Check the live balance (save first)">💰</button>
     <button class="btn sm danger" data-act="sa-del" title="Remove account">🗑</button></div>
   <input data-k="note" value="${esc(a.note || '')}" placeholder="Note (payout schedule, bank transfer, …)" style="margin-top:8px">
-  <input data-k="rk" value="${esc(a.rk || '')}" placeholder="Read-only Stripe key (rk_live_…, optional — for live balance)" dir="ltr" autocomplete="off" style="margin-top:8px">
+  <div class="grid2" style="margin-top:8px">
+    <label class="field" style="margin:0"><span class="small">Stored balance (enter e.g. 28.82 or use 💰 to refresh)</span><input data-k="balance" type="number" step="any" value="${a.balance == null ? '' : String(a.balance)}" placeholder="e.g. 28.82" dir="ltr" min="0"></label>
+    <label class="field" style="margin:0"><span class="small">As of (auto)</span><input data-k="balanceAt" type="number" value="${esc(String(a.balanceAt || ''))}" placeholder="Unix ms" dir="ltr" style="display:none"></label>
+  </div>
+  <div class="sa-bal small muted" style="margin-top:6px"></div>
   <div style="margin-top:12px"><p class="small muted" style="margin:0 0 6px">Payment links — normal / resellers / IBO</p><div class="sa-links">${(a.links || []).map(saLinkRow).join('')}</div>
     <button class="btn sm" data-act="sa-add-link">＋ Add link</button></div>
   <div class="sa-bal small muted" style="margin-top:6px"></div></div>`;
@@ -3041,7 +3045,10 @@ Object.assign(actions, {
   'sa-save': async () => {
     const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
       const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
+      const bTxt = g('balance').trim();
       return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
+        balance: bTxt === '' ? null : Number(bTxt),
+        balanceAt: bTxt === '' ? 0 : Date.now(),
         links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
     }).filter((a) => a.name);
     try { await api('PUT', '/api/admin/settings', { stripeAccounts }); toast('Saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); }
@@ -3053,13 +3060,15 @@ Object.assign(actions, {
     el.disabled = false;
   },
   'sa-balance-all': async (el) => {
-    el.disabled = true; const out = $('#sa-all-bal'); if (out) out.textContent = 'Checking with Stripe…';
+    el.disabled = true; const out = $('#sa-all-bal'); if (out) out.textContent = 'Checking…';
     let totUsd = 0, totEur = 0, okCount = 0, fail = 0;
     for (const card of $('#sa-list').querySelectorAll('.op-row')) {
       const id = card.dataset.sa; const out = card.querySelector('.sa-bal'); if (!id) continue;
+      const bTxt = (card.querySelector('[data-k="balance"]') || {}).value || '';
+      if (bTxt.trim() !== '') { const n = Number(bTxt) || 0; const cur = (card.querySelector('[data-k="currency"]') || {}).value || 'USD'; if (cur === 'EUR') totEur += n; else totUsd += n; okCount++; out.textContent = `Stored: Available ${n} ${cur}`; continue; }
       try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(id)}/balance`); if (r.connected) { out.textContent = `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}`; if (r.currency === 'EUR') totEur += Number(r.available) || 0; else totUsd += Number(r.available) || 0; okCount++; } else { out.textContent = r.error || 'Stripe not reached'; fail++; } } catch (e) { out.textContent = e.message; fail++; }
     }
-    if (out) out.textContent = `All accounts (${okCount} ok${fail ? `, ${fail} skipped/failed` : ''}): Available $${totUsd.toFixed(2)} · €${totEur.toFixed(2)}`;
+    if (out) out.textContent = `All accounts (${okCount} ok${fail ? `, ${fail} skipped/failed` : ''}): Available ${totUsd.toFixed(2)} · €${totEur.toFixed(2)}`;
     el.disabled = false;
   },
 });

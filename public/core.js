@@ -2289,6 +2289,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               status: ['active', 'verification', 'closed'].includes(a.status) ? a.status : 'active',
               payoutDays: Number(a.payoutDays) === 2 ? 2 : 7,
               bankId: String(a.bankId || o.bankId || '').slice(0, 24),
+              balance: (a.balance === '' || a.balance == null) ? (o.balance ?? null) : Number(a.balance) || 0,
+              balanceAt: (a.balanceAt === '') ? (o.balanceAt ?? 0) : (Number(a.balanceAt) || 0),
               note: String(a.note || '').slice(0, 200),
               rk: a.rk === '••••' ? (o.rk || '') : String(a.rk || '').slice(0, 200),
               links: (Array.isArray(a.links) ? a.links : []).slice(0, 50).map((l) => ({
