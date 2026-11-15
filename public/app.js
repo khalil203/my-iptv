@@ -720,39 +720,49 @@ function adminBranding(s) {
 function adminApi(s) {
   const r = s.reseller;
   const placeholders = ['{base}', '{key}', '{reseller_user}', '{reseller_pass}', '{username}', '{password}', '{line_id}', '{package}', '{connections}', '{days}', '{months}', '{name}', '{phone}', '{note}'];
-  return `<form data-form="settings">
-  <div class="card"><h3>1 · Streaming server (customers watch from here)</h3>
-    <p class="small muted">The Xtream-style DNS/URL from TVplus, the same one you'd type into IPTV Smarters.</p>
-    ${field('Server URL', 'player.serverUrl', s.player.serverUrl, { ph: 'http://your-dns.com:8080', attrs: 'autocapitalize="none"' })}
-    ${field('Playback mode', 'player.mode', s.player.mode || 'proxy', { type: 'select', options: [['proxy', 'Through the app server (works in every browser)'], ['direct', 'Direct from each device (for servers that block Cloudflare)']], help: 'Direct: the Android / Android TV app connects to your IPTV server itself and plays with its built-in player. Windows/Mac apps also connect directly; iPhone, iPad and browsers play through the Stream relay below.' })}
-    ${field('Stream relay URL (iPhone, iPad & browsers)', 'player.relayUrl', s.player.relayUrl, { ph: 'https://intproto-tv-relay.onrender.com', attrs: 'autocapitalize="none"', help: 'Used in Direct mode for devices without our app. Deploy it free on Render (see README). Empty = those devices are asked to install the app.' })}
-    ${toggle('Play through the built-in secure proxy (recommended)', 'player.useProxy', s.player.useProxy, 'Fixes "http" streams on iPhone/HTTPS and hides the server from customers. Note: Cloudflare only connects to ports 80, 8080, 8880, 2052, 2082, 2086, 2095 (http) or 443, 8443, 2053, 2083, 2087, 2096 (https).')}
-    ${field('Player identity (User-Agent)', 'player.userAgent', s.player.userAgent, { help: 'Some IPTV servers only accept known players. Default: IPTVSmartersPro.' })}
-    <div class="grid3" style="margin-top:12px">${field('Test line username', 'tu', '', { attrs: 'data-skip id="test-u" autocapitalize="none"' })}${field('Test line password', 'tp', '', { attrs: 'data-skip id="test-p" autocapitalize="none"' })}<div class="field"><span>&nbsp;</span><button type="button" class="btn" data-act="test-player">Test server</button></div></div>
-    <div id="test-player-out"></div>
-  </div>
-  <div class="card"><h3>2 · TVplus reseller API (create / renew lines)</h3>
-    ${toggle('Enable reseller API', 'reseller.enabled', r.enabled)}
-    ${toggle('Auto-sync enable/disable with the panel', 'reseller.autoSync', r.autoSync)}
-    <div class="grid2" style="margin-top:12px">${field('API base URL', 'reseller.baseUrl', r.baseUrl, { ph: 'https://panel.tvpluspanel.com', attrs: 'autocapitalize="none"', help: 'Used as {base}' })}${field('API key / token', 'reseller.apiKey', r.apiKey, { type: 'password', attrs: 'autocomplete="off"', help: 'Used as {key}. Stored on the server only.' })}</div>
-    <div class="grid2">${field('Reseller username', 'reseller.username', r.username, { attrs: 'autocapitalize="none"', help: '{reseller_user}' })}${field('Reseller password', 'reseller.password', r.password, { type: 'password', help: '{reseller_pass}' })}</div>
-    <div class="grid3">${field('New line username in response', 'reseller.usernamePath', r.usernamePath, { ph: 'e.g. username or data.username', help: 'If TVplus creates the username, the app uses it.' })}${field('New line password in response', 'reseller.passwordPath', r.passwordPath, { ph: 'e.g. password' })}${field('DNS in response (optional)', 'reseller.dnsPath', r.dnsPath, { ph: 'e.g. dns or data.url' })}</div>
-    <div class="grid2">${field('Where is the new line ID in the response?', 'reseller.idPath', r.idPath, { help: 'e.g. <code>id</code> or <code>data.id</code>' })}${field('Where are credits in the response?', 'reseller.creditsPath', r.creditsPath, { help: 'e.g. <code>credits</code> or <code>data.credits</code>' })}</div>
-    <h3 style="margin-top:8px">API actions</h3>
-    <p class="small muted">Copy each call from the TVplus API docs. These placeholders are filled in automatically:</p>
-    <div class="tags">${placeholders.map((p) => `<code>${p}</code>`).join('')}</div>
-    ${Object.entries(r.actions).map(([k, a]) => `<div class="action-row"><h4>${k}</h4><div>
-      <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><select name="reseller.actions.${k}.method" style="width:96px">${['GET', 'POST', 'PUT', 'DELETE'].map((m) => `<option ${a.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select><input name="reseller.actions.${k}.url" value="${esc(a.url)}" placeholder="{base}/api/…" autocapitalize="none"></div>
-      <details style="margin-top:6px"><summary class="small muted" style="cursor:pointer">Body & headers</summary>
-      <div style="margin-top:8px">${field('Body (for POST — JSON or form text)', `reseller.actions.${k}.body`, a.body, { type: 'textarea', rows: 3, ph: '{"username":"{username}","password":"{password}","package":"{package}"}' })}${field('Headers (one per line)', `reseller.actions.${k}.headers`, a.headers, { type: 'textarea', rows: 2, ph: 'Authorization: Bearer {key}' })}</div></details>
-    </div></div>`).join('')}
-    <div class="row" style="margin-top:14px"><button type="button" class="btn" data-act="test-reseller">Test API (get credits)</button></div>
-    <div id="test-reseller-out"></div>
-  </div>
-  <div class="row" style="position:sticky;bottom:12px"><button class="btn primary">💾 Save API settings</button></div>
-  </form>`;
+  const panelFields = `
+      <div class="card"><h3>IPTV Panels Management</h3>
+        <p class="small muted">Update and manage IPTV panel credentials and configurations (Dino, Xtream, Mega panels).</p>
+        ${field('Panel streaming server URL', 'player.serverUrl', s.player.serverUrl, { ph: 'http://your-dns.com:8080', attrs: 'autocapitalize="none"' })}
+        ${field('Playback mode', 'player.mode', s.player.mode || 'proxy', { type: 'select', options: [['proxy','Through the app server (works in every browser)'],['direct','Direct from each device (for servers that block Cloudflare)']] })}
+        ${field('Stream relay URL', 'player.relayUrl', s.player.relayUrl, { ph: 'https://intproto-tv-relay.onrender.com', attrs: 'autocapitalize="none"' })}
+        ${toggle('Play through the built-in secure proxy (recommended)', 'player.useProxy', s.player.useProxy, 'Fixes "http" streams on iPhone/HTTPS and hides the server from customers. Note: Cloudflare only connects to ports 80, 8080, 8880, 2052, 2082, 2086, 2095 (http) or 443, 8443, 2053, 2083, 2087, 2096 (https).')}
+        ${field('Player identity (User-Agent)', 'player.userAgent', s.player.userAgent, { help: 'Some IPTV servers only accept known players. Default: IPTVSmartersPro.' })}
+        <div class="grid3" style="margin-top:12px">${field('Test line username', 'tu', '', { attrs: 'data-skip id="test-u" autocapitalize="none"' })}${field('Test line password', 'tp', '', { attrs: 'data-skip id="test-p" autocapitalize="none"' })}<div class="field"><span>&nbsp;</span><button type="button" class="btn" data-act="test-player">Test server</button></div></div>
+        <div id="test-player-out"></div>
+        <h3 style="margin-top:8px">TVplus reseller API (create / renew lines)</h3>
+        ${toggle('Enable reseller API', 'reseller.enabled', r.enabled)}
+        ${toggle('Auto-sync enable/disable with the panel', 'reseller.autoSync', r.autoSync)}
+        <div class="grid2" style="margin-top:12px">${field('API base URL', 'reseller.baseUrl', r.baseUrl, { ph: 'https://panel.tvpluspanel.com', attrs: 'autocapitalize="none"', help: 'Used as {base}' })}${field('API key / token', 'reseller.apiKey', r.apiKey, { type: 'password', attrs: 'autocomplete="off"', help: 'Used as {key}. Stored on the server only.' })}</div>
+        <div class="grid2">${field('Reseller username', 'reseller.username', r.username, { attrs: 'autocapitalize="none"', help: '{reseller_user}' })}${field('Reseller password', 'reseller.password', r.password, { type: 'password', help: '{reseller_pass}' })}</div>
+        <div class="grid3">${field('New line username in response', 'reseller.usernamePath', r.usernamePath, { ph: 'e.g. username or data.username', help: 'If TVplus creates the username, the app uses it.' })}${field('New line password in response', 'reseller.passwordPath', r.passwordPath, { ph: 'e.g. password' })}${field('DNS in response (optional)', 'reseller.dnsPath', r.dnsPath, { ph: 'e.g. dns or data.url' })}</div>
+        <div class="grid2">${field('Where is the new line ID in the response?', 'reseller.idPath', r.idPath, { help: 'e.g. <code>id</code> or <code>data.id</code>' })}${field('Where are credits in the response?', 'reseller.creditsPath', r.creditsPath, { help: 'e.g. <code>credits</code> or <code>data.credits</code>' })}</div>
+        <h3 style="margin-top:8px">API actions</h3>
+        <p class="small muted">Copy each call from the TVplus API docs. These placeholders are filled in automatically:</p>
+        <div class="tags">${placeholders.map((p) => `<code>${p}</code>`).join('')}</div>
+        ${Object.entries(r.actions).map(([k, a]) => `<div class="action-row"><h4>${k}</h4><div>
+          <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><select name="reseller.actions.${k}.method" style="width:96px">${['GET', 'POST', 'PUT', 'DELETE'].map((m) => `<option ${a.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select><input name="reseller.actions.${k}.url" value="${esc(a.url)}" placeholder="{base}/api/…" autocapitalize="none"></div>
+          <details style="margin-top:6px"><summary class="small muted" style="cursor:pointer">Body & headers</summary>
+          <div style="margin-top:8px">${field('Body (for POST — JSON or form text)', `reseller.actions.${k}.body`, a.body, { type: 'textarea', rows: 3, ph: '{"username":"{username}","password":"{password}","package":"{package}"}' })}${field('Headers (one per line)', `reseller.actions.${k}.headers`, a.headers, { type: 'textarea', rows: 2, ph: 'Authorization: Bearer {key}' })}</div></details>
+        </div></div>`).join('')}
+        <div class="row" style="margin-top:14px"><button type="button" class="btn" data-act="test-reseller">Test API (get credits)</button></div>
+        <div id="test-reseller-out"></div>
+      </div>`;
+  return `<div class="grid2" style="gap:16px;align-items:start">
+    <form data-form="settings" class="card">${panelFields}
+      <div class="row" style="position:sticky;bottom:12px"><button class="btn primary">💾 Save panel / API settings</button></div>
+    </form>
+    <form data-form="settings" class="card"><h3>Resend API &amp; Domain Pairing</h3>
+      <p class="small muted">Domain next to API key, auto-sender, per-key sender tracking, manual links.</p>
+      ${field('Resend API key', 'email.resendKey', s.email.resendKey, { type: 'password', attrs: 'autocomplete="off"', help: 'Used as {key}. Stored on the server only.' })}
+      ${field('Resend sending domain', 'email.dns', s.email.dns, { ph: 'yourdomain.com', attrs: 'autocapitalize="none"', help: 'Used to build the sender address noreply@<domain>.' })}
+      ${field('Resend sender address', 'email.from', s.email.from, { ph: 'Name <noreply@yourdomain.com>', help: 'Auto-generated from the domain when empty.' })}
+      ${field('Admin support email', 'email.adminEmail', s.email.adminEmail, { type: 'email', ph: 'you@yourdomain.com' })}
+      ${field('Support website', 'email.website', s.email.website, { ph: 'https://yourdomain.com', attrs: 'autocapitalize="none"' })}
+      <div class="row" style="margin-top:12px"><button class="btn primary">💾 Save Resend settings</button></div>
+    </form>
+  </div>`;
 }
-
 async function adminSecurity(s) {
   const me = state.admin.me;
   if (me.role !== 'owner') return `<form data-form="staff-password" class="card" style="max-width:520px"><h3>My login</h3><p class="muted small">Signed in as <b>${esc(me.username)}</b>. Permissions: ${me.perms.map((p) => `<span class="tagp">${esc((me.allPerms.find((x) => x[0] === p) || [p, p])[1])}</span>`).join(' ') || 'none'}</p>
