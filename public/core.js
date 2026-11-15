@@ -1956,7 +1956,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       const seoId = path.match(/^\/api\/admin\/seo\/([\w-]+)$/); if (seoId && method === 'DELETE') { await store.put('seo', ((await store.get('seo')) || []).filter((e) => e.id !== seoId[1])); return ok({ ok: true }); }
       // Google Ads: multiple accounts, per-domain campaigns (InProto-TV.com / online.info.net / .store)
-      const GAD_DOMAINS = ['InProto-TV.com', 'online.info.net', 'intproto-iptv.store'];
+      const GAD_DOMAINS = ['InProto-TV.com', 'online.info.net', 'intproto-tv.store'];
       if (R('GET', '/api/admin/gads')) {
         const g = (await store.get('gads')) || { campaigns: [], entries: [] };
         const withStats = g.campaigns.map((c) => { const ent = g.entries.filter((e) => e.campaignId === c.id); return { ...c, ...sumPeriod(ent), impressions: Math.round(ent.reduce((a, e) => a + (Number(e.impressions) || 0), 0)), clicks: Math.round(ent.reduce((a, e) => a + (Number(e.clicks) || 0), 0)) }; });

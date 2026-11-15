@@ -631,7 +631,7 @@ test('seo/gads/fb trackers: logs entries and rolls up daily spend', async () => 
   const post = await x.call('POST', '/api/admin/seo', { platform: 'Reddit', title: 'Posted about INTPROTO on r/IPTV', result: '12 upvotes' }, tok);
   assert.equal(post.status, 200);
   assert.equal((await x.call('GET', '/api/admin/seo', {}, tok)).json.today, 1);
-  const camp = await x.call('POST', '/api/admin/gads/campaign', { account: 'Grenapp Ads', domain: 'intproto-iptv.store', name: 'Search NL', dailyBudget: 10 }, tok);
+  const camp = await x.call('POST', '/api/admin/gads/campaign', { account: 'Grenapp Ads', domain: 'intproto-tv.store', name: 'Search NL', dailyBudget: 10 }, tok);
   assert.equal(camp.status, 200); const cid = camp.json.campaign.id;
   assert.equal((await x.call('POST', '/api/admin/gads/entry', { campaignId: cid, spend: 15.5, clicks: 9, impressions: 300, results: 2 }, tok)).status, 200);
   const g = await x.call('GET', '/api/admin/gads', {}, tok);

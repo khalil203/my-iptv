@@ -1,4 +1,4 @@
-# Upgrade plan — intproto-iptv.store ecosystem
+# Upgrade plan — intproto-tv.store ecosystem
 
 Source: owner specification (Team/RBAC, storefront, pricing, CRM, disputes, Stripe,
 IBO Player, marketing/ads, attendance). This file tracks the phased delivery.
