@@ -3398,7 +3398,16 @@ Object.assign(actions, {
   'fb-entry': (el) => { modal('＋ Log performance', `<form data-form="fb-entry" data-id="${esc(el.dataset.id)}"><div class="grid2">${field('Spend (USD)', 'spend', '', { type: 'number', attrs: 'min="0" step="0.01" required' })}${field('Results', 'results', '', { type: 'number', attrs: 'min="0"' })}</div>${field('Reach', 'reach', '', { type: 'number', attrs: 'min="0"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Log</button></div></form>`); },
 });
 Object.assign(forms, {
-  async 'mkt-settings'(f) { const keys = Array.from({ length: 10 }, (_, i) => f['key' + i].value.trim()); const domains = Array.from({ length: 10 }, (_, i) => { const v = (f['domain' + i].value || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v : ''; }); const senders = Array.from({ length: 5 }, (_, i) => f['sender' + i].value.trim()); const subjects = Array.from({ length: 5 }, (_, i) => f['subject' + i].value.trim()); await api('PUT', '/api/admin/emailmkt/settings', { keys, domains, senders, subjects, costPerEmail: Number(f.costPerEmail.value) || 0.0004 }); toast('Saved ✓'); renderAdmin(); },
+  async 'mkt-settings'(f) {
+    const val = (n) => ((f.elements[n] && 'value' in f.elements[n]) ? f.elements[n].value : '').trim();
+    const keys = Array.from({ length: 10 }, (_, i) => val('key' + i));
+    const domains = Array.from({ length: 10 }, (_, i) => { const v = val('domain' + i).toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v : ''; });
+    const senders = Array.from({ length: 5 }, (_, i) => val('sender' + i));
+    const subjects = []; for (let i = 0; i < 10; i++) { if (f.elements['subject' + i]) subjects.push(val('subject' + i)); }
+    const costEl = f.elements['costPerEmail'];
+    await api('PUT', '/api/admin/emailmkt/settings', { keys, domains, senders, subjects, costPerEmail: Number((costEl && costEl.value) || 0.0004) || 0.0004 });
+    toast('Saved ✓'); renderAdmin();
+  },
   async 'mkt-list'(f) { const o = formToObj(f); try { const r = await api('POST', '/api/admin/emailmkt/list', { name: o.name, text: o.text }); toast(`List saved: ${r.count} emails (${r.removed} removed as bounced) ✓`); f.reset(); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); } },
   async 'seo-add'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/seo', o); toast('Logged ✓'); f.reset(); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); } },
   async 'gads-campaign'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/gads/campaign', o); toast('Campaign added ✓'); f.reset(); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
