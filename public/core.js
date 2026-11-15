@@ -1972,7 +1972,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       const seoId = path.match(/^\/api\/admin\/seo\/([\w-]+)$/); if (seoId && method === 'DELETE') { await store.put('seo', ((await store.get('seo')) || []).filter((e) => e.id !== seoId[1])); return ok({ ok: true }); }
       // Google Ads: multiple accounts, free-text domain (no predefined choices)
-      const gadsDomains = () => [...new Set((((await store.get('gads')) || { campaigns: [] }).campaigns || []).map((c) => c.domain).filter(Boolean))];
+      const gadsDomains = async () => [...new Set((((await store.get('gads')) || { campaigns: [] }).campaigns || []).map((c) => c.domain).filter(Boolean))];
       if (R('GET', '/api/admin/gads')) {
         const g = (await store.get('gads')) || { campaigns: [], entries: [] };
         const withStats = g.campaigns.map((c) => { const ent = g.entries.filter((e) => e.campaignId === c.id); return { ...c, ...sumPeriod(ent), impressions: Math.round(ent.reduce((a, e) => a + (Number(e.impressions) || 0), 0)), clicks: Math.round(ent.reduce((a, e) => a + (Number(e.clicks) || 0), 0)), results: Math.round(ent.reduce((a, e) => a + (Number(e.results) || 0), 0)) }; });
