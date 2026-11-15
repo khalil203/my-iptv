@@ -3022,7 +3022,6 @@ const saRow = (a) => `<div class="op-row card" data-sa="${esc(a.id || '')}" styl
     <label class="field" style="margin:0"><span class="small">Stored balance (enter e.g. 28.82 or use 💰 to refresh)</span><input data-k="balance" type="number" step="any" value="${a.balance == null ? '' : String(a.balance)}" placeholder="e.g. 28.82" dir="ltr" min="0"></label>
     <label class="field" style="margin:0"><span class="small">As of (auto)</span><input data-k="balanceAt" type="number" value="${esc(String(a.balanceAt || ''))}" placeholder="Unix ms" dir="ltr" style="display:none"></label>
   </div>
-  <div class="sa-bal small muted" style="margin-top:6px"></div>
   <div style="margin-top:12px"><p class="small muted" style="margin:0 0 6px">Payment links — normal / resellers / IBO</p><div class="sa-links">${(a.links || []).map(saLinkRow).join('')}</div>
     <button class="btn sm" data-act="sa-add-link">＋ Add link</button></div>
   <div class="sa-bal small muted" style="margin-top:6px"></div></div>`;
@@ -3055,9 +3054,29 @@ Object.assign(actions, {
   },
   'sa-balance': async (el) => {
     el.disabled = true; const card = el.closest('.op-row'); const out = card.querySelector('.sa-bal'); out.textContent = 'Checking with Stripe…';
-    try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(el.dataset.id)}/balance`); out.textContent = r.connected ? `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}` : (r.error || 'Stripe not reached'); }
-    catch (e) { out.textContent = e.message; }
+    try {
+      const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(el.dataset.id)}/balance`);
+      out.textContent = r.connected ? `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}` : (r.error || 'Stripe not reached');
+      if (r.connected) {
+        card.querySelector('[data-k="balance"]').value = String(r.available);
+        card.querySelector('[data-k="balanceAt"]').value = String(Date.now());
+        await persistStripeAccountsFromTable();
+        toast('Balance saved ✓');
+      }
+    } catch (e) { out.textContent = e.message; }
     el.disabled = false;
+  },
+  async function persistStripeAccountsFromTable(silent) {
+    const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
+      const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
+      const bTxt = g('balance').trim();
+      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
+        balance: bTxt === '' ? null : Number(bTxt),
+        balanceAt: bTxt === '' ? 0 : (Number(g('balanceAt')) || Date.now()),
+        links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
+    }).filter((a) => a.name);
+    if (!stripeAccounts.length) return;
+    try { await api('PUT', '/api/admin/settings', { stripeAccounts }); if (!silent) toast('Saved ✓'); } catch (e) { toast(e.message, true); }
   },
   'sa-balance-all': async (el) => {
     el.disabled = true; const out = $('#sa-all-bal'); if (out) out.textContent = 'Checking…';
@@ -3066,8 +3085,9 @@ Object.assign(actions, {
       const id = card.dataset.sa; const out = card.querySelector('.sa-bal'); if (!id) continue;
       const bTxt = (card.querySelector('[data-k="balance"]') || {}).value || '';
       if (bTxt.trim() !== '') { const n = Number(bTxt) || 0; const cur = (card.querySelector('[data-k="currency"]') || {}).value || 'USD'; if (cur === 'EUR') totEur += n; else totUsd += n; okCount++; out.textContent = `Stored: Available ${n} ${cur}`; continue; }
-      try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(id)}/balance`); if (r.connected) { out.textContent = `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}`; if (r.currency === 'EUR') totEur += Number(r.available) || 0; else totUsd += Number(r.available) || 0; okCount++; } else { out.textContent = r.error || 'Stripe not reached'; fail++; } } catch (e) { out.textContent = e.message; fail++; }
+      try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(id)}/balance`); if (r.connected) { out.textContent = `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}`; if (r.currency === 'EUR') totEur += Number(r.available) || 0; else totUsd += Number(r.available) || 0; okCount++; card.querySelector('[data-k="balance"]').value = String(r.available); card.querySelector('[data-k="balanceAt"]').value = String(Date.now()); } else { out.textContent = r.error || 'Stripe not reached'; fail++; } } catch (e) { out.textContent = e.message; fail++; }
     }
+    await persistStripeAccountsFromTable(true);
     if (out) out.textContent = `All accounts (${okCount} ok${fail ? `, ${fail} skipped/failed` : ''}): Available ${totUsd.toFixed(2)} · €${totEur.toFixed(2)}`;
     el.disabled = false;
   },
