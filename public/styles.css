@@ -411,7 +411,7 @@ html { transition: background-color .4s; }
 [data-theme=light] .err-box { color: #b91c1c; background: #fef2f2; }
 [data-theme=light] .btn { background: #fff; border-color: rgba(15,23,42,.14); color: var(--text); }
 [data-theme=light] .btn:hover { background: #f8fafc; }
-[data-theme=light] .btn.primary { color: #fff; background: linear-gradient(135deg, var(--primary), var(--primary2)); }
+[data-theme=light] .btn.primary { color: #1A0805; background: linear-gradient(135deg, var(--primary), var(--primary2)); }
 [data-theme=light] .btn.danger { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
 [data-theme=light] .btn.ghost { background: transparent; }
 [data-theme=light] .st-active { color: #15803d; background: #dcfce7; } [data-theme=light] .st-expiring { color: #b45309; background: #fef3c7; }
@@ -525,7 +525,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 /* Day theme adjustments */
-[data-theme=light] .btn.primary, [data-theme=light] .mobile-nav a.on, [data-theme=light] .chips a.on { color: #fff; }
+[data-theme=light] .btn.primary, [data-theme=light] .mobile-nav a.on, [data-theme=light] .chips a.on, [data-theme=light] .s-pv-tabs span.on, [data-theme=light] .s-steps li::before, [data-theme=light] .cw-play, [data-theme=light] .s-plan .s-badge, [data-theme=light] .seg button.on { color: #1A0805; }
 [data-theme=light] .nav a.on, [data-theme=light] .bnav a.on { color: var(--primary); }
 [data-theme=light] .sub-card { background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 16%, #fff), #fff 70%); color: var(--text); }
 [data-theme=light] .modal-bg { background: rgba(18,23,38,.45); }
