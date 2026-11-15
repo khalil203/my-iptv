@@ -581,7 +581,7 @@ test('IBO panel: add client (uses a credit), lifetime, credits wallet, message b
 
 test('marketing: keys stay masked, lists drop bounced emails, campaign sends with rotating keys and records spend', async () => {
   const x = setup(); const tok = await adminToken(x);
-  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'INTPROTO-TV <hello@example.com>', adminEmail: 'owner@example.com' } }, tok);
   // no Resend marketing keys yet → cannot send
   assert.equal((await x.call('GET', '/api/admin/emailmkt', {}, tok)).json.keysSet, 0);
   // save masked keys (round-trip) then add two more
@@ -589,7 +589,7 @@ test('marketing: keys stay masked, lists drop bounced emails, campaign sends wit
   const st = await x.call('GET', '/api/admin/emailmkt/settings', {}, tok);
   assert.equal(st.json.keys[0], '••••'); assert.equal(st.json.keys[1], '••••'); assert.equal(st.json.senders[0], 'INTPROTO-TV');
   // upload a list with a bounced address removed
-  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'INTPROTO-TV <hello@example.com>', adminEmail: 'owner@example.com' } }, tok);
   const up = await x.call('POST', '/api/admin/emailmkt/list', { name: 'Prospects', text: 'a@example.com\nb@example.com\na@example.com' }, tok);
   assert.equal(up.status, 200); assert.equal(up.json.count, 2);
   const sent = await x.call('POST', '/api/admin/emailmkt/send', { listId: up.json.id }, tok);
