@@ -150,7 +150,8 @@ select option { background: #0d1522; }
   .mobile-nav { display: flex; overflow-x: auto; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); scrollbar-width: none; position: sticky; top: 63px; z-index: 4; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px); }
   .mobile-nav a { flex: 0 0 auto; padding: 7px 12px; border-radius: 99px; background: var(--panel); color: var(--muted); font-weight: 600; font-size: .84rem; text-decoration: none; cursor: pointer; border: 1px solid var(--line2); }
   .mobile-nav a.on { background: var(--primary); color: #fff; border-color: transparent; box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 50%, transparent); }
-  .content { padding: 14px; } .topbar { padding: 12px 14px; }
+  .content { padding: 14px; } .topbar { padding: 12px 14px; flex-wrap: wrap; row-gap: 8px; }
+  .topbar h2 { flex: 1 1 auto; }
 }
 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat { position: relative; overflow: hidden; background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.015)); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; transition: transform .25s var(--ease), box-shadow .25s; animation: fadeUp .5s var(--ease) both; }
