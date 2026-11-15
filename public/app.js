@@ -1135,7 +1135,7 @@ async function renderUserTab() {
     const renew = b.supportUrl ? `<a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${t('renewNow')}</a>` : t('contactRenew');
     const trialLeft = user.isTrial && user.state !== 'expired';
     pullNativePos();
-    el.innerHTML = `<div class="welcome"><h2>${t('hello', { name: esc(user.name.split(' ')[0]) })}</h2><p class="muted">${t('overview')}</p></div>
+    el.innerHTML = `<div class="cinema">${state.user.me.branding.logoUrl ? `<img class="cinema-logo" src="${esc(state.user.me.branding.logoUrl)}" alt="">` : `<div class="cinema-mark">${esc((state.user.me.branding.appName || 'INTPROTO-TV').slice(0, 2).toUpperCase())}</div>`}<div class="cinema-text"><span class="cinema-eyebrow">${t('overview')}</span><h2 class="cinema-title">${esc(state.user.me.branding.appName || 'INTPROTO-TV')}</h2><p class="cinema-h">${t('hello', { name: esc(user.name.split(' ')[0]) })}</p></div><div class="cinema-watermark">$${esc((state.user.me.branding.appName || 'INTPROTO').slice(0, 4))}</div></div>
       ${d.maintenance ? `<div class="notice warning">🛠 ${esc(d.maintenanceMessage)}</div>` : ''}
       ${d.announcement ? `<div class="notice ${esc(d.announcementType)}">📣 ${esc(d.announcement)}</div>` : ''}
       ${trialLeft ? `<div class="notice info">🎁 ${t('trialEnds', { n: user.hoursLeft })} ${renew}</div>` : ''}
