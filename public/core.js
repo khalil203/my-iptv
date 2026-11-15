@@ -1891,11 +1891,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       // ---------- Email marketing dashboard (spec §8.1) ----------
-      const getMkt = async () => (await store.get('mkt')) || { keys: Array(10).fill(''), senders: ['', '', '', '', ''], subjects: ['', '', '', '', ''], costPerEmail: 0.0004, stats: {}, totalSent: 0, totalSpendUsd: 0, lastSendAt: 0 };
+      const getMkt = async () => (await store.get('mkt')) || { keys: Array(10).fill(''), domains: Array(10).fill(''), senders: ['', '', '', '', ''], subjects: ['', '', '', '', ''], costPerEmail: 0.0004, stats: {}, perKey: {}, perDomain: {}, totalSent: 0, totalSpendUsd: 0, lastSendAt: 0 };
       const saveMkt = (m) => store.put('mkt', m);
       const getMktLists = async () => (await store.get('mktlists')) || [];
       const getMktList = async (id) => { if (!/^[\w-]{1,20}$/.test(String(id))) return null; return store.get('mktlist:' + id); };
-      const mktStats = (m) => { const cut = Date.now() - 30 * DAY; const rows = Object.entries(m.stats || {}).filter(([d]) => new Date(d).getTime() >= cut); const day = Object.entries(m.stats || {}).find(([d]) => d === new Date().toISOString().slice(0, 10))?.[1] || { sent: 0 }; return { last30: rows.reduce((a, [, v]) => a + (Number(v.sent) || 0), 0), today: Number(day.sent) || 0, byDay: Object.fromEntries(rows.slice(-14)), totalSent: Number(m.totalSent) || 0, totalSpendUsd: Math.round((Number(m.totalSpendUsd) || 0) * 100) / 100 } };
+      const mktStats = (m) => { const cut = Date.now() - 30 * DAY; const rows = Object.entries(m.stats || {}).filter(([d]) => new Date(d).getTime() >= cut); const day = Object.entries(m.stats || {}).find(([d]) => d === new Date().toISOString().slice(0, 10))?.[1] || { sent: 0 }; return { last30: rows.reduce((a, [, v]) => a + (Number(v.sent) || 0), 0), today: Number(day.sent) || 0, byDay: Object.fromEntries(rows.slice(-14)), totalSent: Number(m.totalSent) || 0, totalSpendUsd: Math.round((Number(m.totalSpendUsd) || 0) * 100) / 100, perKey: m.perKey || {}, perDomain: m.perDomain || {} } };
       if (R('GET', '/api/admin/emailmkt')) {
         const m = await getMkt(); const lists = (await getMktLists()).map(({ id, name, count, createdAt, by }) => ({ id, name, count, createdAt, by }));
         return ok({ keysSet: (m.keys || []).filter(Boolean).length, senders: (m.senders || []).filter(Boolean).length, subjects: (m.subjects || []).filter(Boolean).length, costPerEmail: Number(m.costPerEmail) || 0.0004, lists, ...mktStats(m) });
@@ -1904,6 +1904,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('PUT', '/api/admin/emailmkt/settings')) {
         const m = await getMkt();
         if (Array.isArray(body.keys)) m.keys = body.keys.slice(0, 10).map((k, i) => String(k || '').startsWith('••••') ? m.keys[i] || '' : String(k || ''));
+        if (Array.isArray(body.domains)) m.domains = body.domains.slice(0, 10).map((d) => { const v = String(d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v.slice(0, 100) : ''; });
         if (Array.isArray(body.senders)) m.senders = body.senders.slice(0, 5).map((x) => cleanText(x, 80));
         if (Array.isArray(body.subjects)) m.subjects = body.subjects.slice(0, 5).map((x) => cleanText(x, 150));
         if (body.costPerEmail !== undefined) m.costPerEmail = Math.max(0, Number(body.costPerEmail) || 0.0004);
@@ -1934,21 +1935,24 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const doc = await getMktList(listRef.id); if (!doc) return err(404, 'List not found.');
         const bad = await getBad(); const recipients = (doc.emails || []).filter((e) => !bad[e]);
         if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
-        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim());
+        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const domains = (m.domains || []).map((d) => String(d || '').trim().toLowerCase());
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
         const html = String(body.html || '').slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
         for (let i = 0; i < recipients.length; i += 100) { // Resend batch API, 100 at a time
           const bi = Math.floor(i / 100); const batch = recipients.slice(i, i + 100);
-          const key = keys[bi % keys.length];
-          const from = `${senders.length ? senders[bi % senders.length] : app} <${fromAddr}>`;
+          const keyIndex = bi % keys.length;
+          const key = keys[keyIndex];
+          const dom = domains[keyIndex] || (String(s.branding.supportUrl || '') ? '' : '');
+          const from = `${senders.length ? senders[bi % senders.length] : app} <noreply@${dom || 'intproto-tv.store'}>`;
           const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
           try {
             const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(batch.map((to) => ({ from, to: [to], subject, html }))) });
-            if (r.ok) { sentCount += batch.length; spent += batch.length * perEmail; m.stats[day] = { sent: (Number(m.stats?.[day]?.sent) || 0) + batch.length }; }
+            if (r.ok) { sentCount += batch.length; spent += batch.length * perEmail; m.stats[day] = { sent: (Number(m.stats?.[day]?.sent) || 0) + batch.length }; m.perKey = m.perKey || {}; m.perKey[keyIndex + 1] = { sent: (Number(m.perKey?.[keyIndex + 1]?.sent) || 0) + batch.length, spend: Math.round(((Number(m.perKey?.[keyIndex + 1]?.spend) || 0) + batch.length * perEmail) * 100) / 100 }; }
             else { const d = await r.json().catch(() => ({})); await log('marketing', `Marketing batch ${bi + 1} failed: ${d.message || 'Resend error ' + r.status}`); }
           } catch (e) { await log('marketing', `Marketing batch ${bi + 1} failed: ${e.message}`); }
         }
+        if (m.perKey) { const perKey = Object.entries(m.perKey).filter(([, v]) => v.sent).map(([k, v]) => `#${k}: ${v.sent} sent`).join(', '); await log('marketing', `Per-key sends: ${perKey}`); }
         m.totalSent = (Number(m.totalSent) || 0) + sentCount; m.totalSpendUsd = Math.round(((Number(m.totalSpendUsd) || 0) + spent) * 100) / 100; m.lastSendAt = Date.now();
         await saveMkt(m); await log('marketing', `Marketing campaign: ${sentCount}/${recipients.length} sent to "${listRef.name}" (keys rotating, ${senders.length || 1} sender name(s), ${subjects.length || 1} subject line(s))`);
         return ok({ ok: true, sent: sentCount, removed: (doc.emails || []).length - recipients.length, spendUsd: Math.round(spent * 100) / 100 });
