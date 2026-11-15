@@ -46,9 +46,9 @@ export const DEFAULT_SETTINGS = () => ({
     appName: 'INTPROTO-TV',
     tagline: 'Live TV · Movies · Series',
     logoUrl: 'logo.png',
-    primary: '#D4AF37',
+    primary: '#FF6B42',
     accent: '#19D5B1',
-    background: '#041814',
+    background: '#0B0B0F',
     loginTitle: 'Welcome back',
     loginSubtitle: 'Sign in with the login details you received.',
     loginBgUrl: '',
@@ -685,7 +685,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (s.branding.appName === 'My IPTV' && !s.branding.logoUrl) s.branding = { ...s.branding, ...DEFAULT_SETTINGS().branding, supportUrl: s.branding.supportUrl, supportLabel: s.branding.supportLabel, footerText: s.branding.footerText };
     // Design system v2: move the previous default colours (cyan) to the new palette; colours the owner chose are kept.
     const oldLook = [['#12bfd8', '#7cf0ff'], ['#7c5cff', '#22d3ee'], ['#8065ff', '#19d5b1']].some(([p, a]) => String(s.branding.primary).toLowerCase() === p && String(s.branding.accent).toLowerCase() === a);
-    if (oldLook) s.branding = { ...s.branding, primary: '#D4AF37', accent: '#19D5B1', background: '#07081A' };
+    if (oldLook) s.branding = { ...s.branding, primary: '#FF6B42', accent: '#19D5B1', background: '#07081A' };
     // Storefront pricing v2 (spec §3): swap the old default package list once, but only if the owner never changed it.
     if (!s.pricingV2) {
       if ((s.orderPackages || []).map((p) => p.id).join(',') === 'o1m,o3m,o6m,o1y,o2y,o1y2d,o1y3d,o1y4d') s.orderPackages = DEFAULT_SETTINGS().orderPackages;

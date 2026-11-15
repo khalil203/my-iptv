@@ -1,18 +1,18 @@
 /* INTPROTO-TV — Premium Futuristic Dark design system (tokens first, then components) */
 :root {
-  /* ---- Design tokens (INTPROTO-TV — Emerald & Champagne Gold) ---- */
+  /* ---- Design tokens (INTPROTO-TV — Void Ember) ---- */
   /* colour */
-  --primary: var(--b-primary, #D4AF37); --primary2: color-mix(in srgb, var(--primary) 70%, #2A1F0A); --accent: var(--b-accent, #7FE3C9);
-  --bg: var(--brand-bg, #041814); --surface: #0A2720; --elevated: #12382E; --border: #1D4A3D;
-  --text: #F5F1E4; --muted: #9FB6A9; --ok: #19D5B1; --warn: #FFBF69; --bad: #FF5574;
+  --primary: var(--b-primary, #FF6B42); --primary2: color-mix(in srgb, var(--primary) 70%, #230a06); --accent: var(--b-accent, #FFB03A);
+  --bg: var(--brand-bg, #0B0B0F); --surface: #131318; --elevated: #1C1C24; --border: #2A2A33;
+  --text: #F0EEE8; --muted: #8B8980; --ok: #3DDC97; --warn: #FFB03A; --bad: #FF5A5A;
   /* older names used across the app, mapped to the tokens above */
   --panel: var(--surface); --panel2: var(--elevated); --line: var(--border); --line2: color-mix(in srgb, var(--border) 72%, transparent);
   /* spacing: 8-point scale */
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 64px;
   /* shape, depth, motion */
   --r: 16px; --r-sm: 10px; --r-lg: 20px; --tap: 44px; --safe-b: env(safe-area-inset-bottom, 0px);
-  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -18px rgba(0,0,0,.7);
-  --glow: 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent), 0 20px 44px -18px color-mix(in srgb, var(--primary) 70%, transparent);
+  --shadow: 0 1px 2px rgba(0,0,0,.45), 0 14px 36px -18px rgba(0,0,0,.85);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 18px 46px -18px color-mix(in srgb, var(--primary) 70%, transparent);
   --ease: cubic-bezier(.2,.8,.2,1);
   font-family: Inter, "Noto Sans Thai", Cairo, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-variant-numeric: tabular-nums;
@@ -89,7 +89,7 @@ select option { background: #122E25; }
 @media (max-width: 640px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
-.card { background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)); border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border)); border-radius: var(--r); padding: 18px; margin-bottom: 16px; background: linear-gradient(165deg, rgba(255,255,255,.05), rgba(255,255,255,.015)); transition: box-shadow .3s, border-color .3s; }
+.card { background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)); border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border)); border-radius: var(--r); padding: 18px; margin-bottom: 16px; background: linear-gradient(165deg, rgba(255,107,66,.055), rgba(19,19,24,.25)); transition: box-shadow .3s, border-color .3s; }
 .card:hover { box-shadow: var(--glow); }
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 99px; font-size: .74rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; }
 .pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -150,7 +150,7 @@ select option { background: #122E25; }
   .tb-logo { display: block; } .chip-user { display: none; }
   .mobile-nav { display: flex; overflow-x: auto; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); scrollbar-width: none; position: sticky; top: 63px; z-index: 4; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px); }
   .mobile-nav a { flex: 0 0 auto; padding: 7px 12px; border-radius: 99px; background: var(--panel); color: var(--muted); font-weight: 600; font-size: .84rem; text-decoration: none; cursor: pointer; border: 1px solid var(--line2); }
-  .mobile-nav a.on { background: var(--primary); color: #1d1404; border-color: transparent; box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 50%, transparent); }
+  .mobile-nav a.on { background: var(--primary); color: #120404; border-color: transparent; box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 50%, transparent); }
   .content { padding: 14px; } .topbar { padding: 12px 14px; flex-wrap: wrap; row-gap: 8px; }
   .topbar h2 { flex: 1 1 auto; }
 }
@@ -196,7 +196,7 @@ select option { background: #122E25; }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px; scrollbar-width: none; }
 .chips a { flex: 0 0 auto; padding: 7px 13px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line2); cursor: pointer; font-size: .84rem; font-weight: 600; color: var(--muted); text-decoration: none; transition: .2s; text-transform: capitalize; }
 .chips a:hover { color: var(--text); border-color: var(--line); }
-.chips a.on { background: var(--primary); color: #1d1404; border-color: transparent; box-shadow: 0 0 16px color-mix(in srgb, var(--primary) 50%, transparent); }
+.chips a.on { background: var(--primary); color: #120404; border-color: transparent; box-shadow: 0 0 16px color-mix(in srgb, var(--primary) 50%, transparent); }
 
 /* team */
 .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
@@ -385,11 +385,11 @@ img, video, iframe, svg { max-width: 100%; }
 /* ================= DAY THEME (light) ================= */
 html { transition: background-color .4s; }
 [data-theme=light] {
-  --bg: #F8F6EF; --surface: #FFFFFF; --elevated: #ECE9DD; --border: #D8D4C6;
-  --text: #0F2A22; --muted: #55685D; --primary: color-mix(in srgb, var(--b-primary, #C99A2C) 92%, #2A1F0A); --accent: color-mix(in srgb, var(--b-accent, #0F6E55) 80%, #0A2A20);
-  --ok: #0E8F76; --warn: #B4670A; --bad: #D42F52;
-  --shadow: 0 1px 2px rgba(15,42,34,.06), 0 16px 34px -18px rgba(15,42,34,.28);
-  --glow: 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent), 0 14px 32px -16px color-mix(in srgb, var(--primary) 50%, transparent);
+  --bg: #FAF6F0; --surface: #FFFFFF; --elevated: #F1EDE3; --border: #E3DFD3;
+  --text: #181820; --muted: #6B6861; --primary: color-mix(in srgb, var(--b-primary, #FF6B42) 94%, #341207); --accent: color-mix(in srgb, var(--b-accent, #D97E00) 78%, #3B2400);
+  --ok: #16785A; --warn: #B4670A; --bad: #D42F52;
+  --shadow: 0 1px 2px rgba(24,24,32,.06), 0 16px 34px -18px rgba(24,24,32,.28);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent), 0 14px 32px -16px color-mix(in srgb, var(--primary) 55%, transparent);
   color-scheme: light;
 }
 [data-theme=dark] { color-scheme: dark; }
@@ -793,3 +793,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .cinema-h { color: var(--muted); margin: 0; font-size: .95rem; font-weight: 600; }
 .cinema-watermark { position: absolute; right: 14px; bottom: -28px; font-size: clamp(4rem, 14vw, 7rem); font-weight: 900; color: transparent; -webkit-text-stroke: 1px color-mix(in srgb, var(--primary) 22%, transparent); letter-spacing: -.02em; line-height: 1; pointer-events: none; user-select: none; }
 @media (max-width: 560px) { .cinema { flex-direction: column; text-align: center; padding: 16px; } .cinema-logo, .cinema-mark { width: 72px; height: 72px; } .cinema-watermark { display: none; } }
+
+/* ===== Void Ember — brand gradients & wires ===== */
+.brand-name { background: linear-gradient(95deg, #fff 0%, #FFB03A 35%, #FF6B42 60%, #fff 100%); background-size: 260% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 5.5s linear infinite; font-weight: 900; letter-spacing: .04em; }
+[data-theme=light] .brand-name { background-image: linear-gradient(95deg, #181820 0%, #FF6B42 45%, #D97E00 70%, #181820 100%); }
+.btn.primary { color: #120404; background: linear-gradient(135deg, #FFB03A 0%, #FF6B42 60%, #FF3D2E 100%); box-shadow: 0 14px 40px -12px color-mix(in srgb, #FF6B42 70%, transparent), inset 0 1px 0 rgba(255,255,255,.35); }
+.btn.primary:hover { background: linear-gradient(135deg, #FFC35C 0%, #FF6B42 55%, #FF3D2E 100%); }
+.hero-logo i { background: conic-gradient(from 0deg, var(--accent), transparent 30%, var(--primary), transparent 70%, var(--accent)); }
+.hero-logo::after { background: radial-gradient(circle, color-mix(in srgb, var(--primary) 55%, transparent), transparent 70%); }
+.cinema { background: radial-gradient(120vmax 60vmax at 10% -10%, color-mix(in srgb, var(--primary) 32%, transparent), transparent 60%), linear-gradient(135deg, #1E1210 0%, #0B0B0F 55%, #24110E 100%); }
+.cinema-mark { background: linear-gradient(135deg, #FFB03A, #FF6B42 45%, #7A1F0A); color: #1A0805; }
+.cinema-watermark { -webkit-text-stroke: 1px color-mix(in srgb, var(--primary) 28%, transparent); }
+.st-active { color: #3DDC97; }
+[data-theme=light] .st-active { color: #16785A; }
+[data-theme=light] .brand-name { background-image: linear-gradient(95deg, #181820 0%, #FF6B42 45%, #D97E00 70%, #181820 100%); }
