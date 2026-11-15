@@ -578,3 +578,45 @@ test('IBO panel: add client (uses a credit), lifetime, credits wallet, message b
   // out of credits now
   assert.equal((await x.call('POST', '/api/admin/ibo', { name: 'Nope', days: 365 }, tok)).status, 400);
 });
+
+test('marketing: keys stay masked, lists drop bounced emails, campaign sends with rotating keys and records spend', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  // no Resend marketing keys yet → cannot send
+  assert.equal((await x.call('GET', '/api/admin/emailmkt', {}, tok)).json.keysSet, 0);
+  // save masked keys (round-trip) then add two more
+  await x.call('PUT', '/api/admin/emailmkt/settings', { keys: ['re_one', 're_two'], senders: ['INTPROTO-TV', 'IPTV Team'], subjects: ['Offer', 'Sale'] }, tok);
+  const st = await x.call('GET', '/api/admin/emailmkt/settings', {}, tok);
+  assert.equal(st.json.keys[0], '••••'); assert.equal(st.json.keys[1], '••••'); assert.equal(st.json.senders[0], 'INTPROTO-TV');
+  // upload a list with a bounced address removed
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  const up = await x.call('POST', '/api/admin/emailmkt/list', { name: 'Prospects', text: 'a@example.com\nb@example.com\na@example.com' }, tok);
+  assert.equal(up.status, 200); assert.equal(up.json.count, 2);
+  const sent = await x.call('POST', '/api/admin/emailmkt/send', { listId: up.json.id }, tok);
+  assert.equal(sent.status, 200, JSON.stringify(sent.json)); assert.equal(sent.json.sent, 2);
+  const batch = x.mails[x.mails.length - 1];
+  assert.ok(Array.isArray(batch), 'the batch endpoint was used'); assert.equal(batch.length, 2);
+  assert.match(batch[0].from, /^INTPROTO-TV </); assert.equal(batch[0].from.includes('no-reply@'), false, 'sender name is configured, not noreply');
+  const overview = await x.call('GET', '/api/admin/emailmkt', {}, tok);
+  assert.equal(overview.json.totalSent, 2); assert.ok(overview.json.totalSpendUsd >= 0);
+  // marketing permission: staff without it are refused
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'saidm', password: 'secret12', role: 'Sales', perms: ['customers_view'] }, tok);
+  const staff = (await x.call('POST', '/api/login', { username: 'saidm', password: 'secret12' })).json.token;
+  assert.equal((await x.call('GET', '/api/admin/emailmkt', {}, staff)).status, 403);
+});
+
+test('seo/gads/fb trackers: logs entries and rolls up daily spend', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const post = await x.call('POST', '/api/admin/seo', { platform: 'Reddit', title: 'Posted about INTPROTO on r/IPTV', result: '12 upvotes' }, tok);
+  assert.equal(post.status, 200);
+  assert.equal((await x.call('GET', '/api/admin/seo', {}, tok)).json.today, 1);
+  const camp = await x.call('POST', '/api/admin/gads/campaign', { account: 'Grenapp Ads', domain: 'intproto-iptv.store', name: 'Search NL', dailyBudget: 10 }, tok);
+  assert.equal(camp.status, 200); const cid = camp.json.campaign.id;
+  assert.equal((await x.call('POST', '/api/admin/gads/entry', { campaignId: cid, spend: 15.5, clicks: 9, impressions: 300, results: 2 }, tok)).status, 200);
+  const g = await x.call('GET', '/api/admin/gads', {}, tok);
+  assert.equal(g.json.campaigns[0].today, 15.5); assert.equal(g.json.total.month, 15.5);
+  const ad = await x.call('POST', '/api/admin/fb/ad', { account: 'act_123', phone: '+212600112233', description: 'INTPROTO TV — new channels' }, tok);
+  assert.equal(ad.status, 200, JSON.stringify(ad.json));
+  const f = await x.call('GET', '/api/admin/fb', {}, tok);
+  assert.equal(f.json.ads.length, 1); assert.equal(f.json.total.month, 0);
+});

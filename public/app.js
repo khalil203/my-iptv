@@ -257,6 +257,10 @@ const ADMIN_TABS = [
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['stripe', '💳', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
   ['ibo', '📺', 'IBO Player', 'ibo', 'Money', 'ibo player credits activation mac lifetime 1 year trial smart iptv'],
+  ['mkt', '📧', 'Email marketing', 'marketing', 'Marketing', 'resend keys rotation bounce lists campaign send marketing newsletter'],
+  ['seo', '🧵', 'SEO & social', 'seo', 'Marketing', 'reddit quora facebook posts agents results seo social'],
+  ['gads', '🎯', 'Google Ads', 'ads', 'Marketing', 'google ads campaigns budget spend domain'],
+  ['fb', '👍', 'Facebook Ads', 'ads', 'Marketing', 'facebook ads creatives description performance photo history'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
@@ -304,6 +308,10 @@ async function renderAdmin() {
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
     else if (t === 'stripe') body.innerHTML = adminStripePage(s);
+    else if (t === 'mkt') body.innerHTML = await adminMktPage();
+    else if (t === 'seo') body.innerHTML = await adminSeoPage();
+    else if (t === 'gads') body.innerHTML = await adminGadsPage();
+    else if (t === 'fb') body.innerHTML = await adminFbPage();
     else if (t === 'ibo') body.innerHTML = await adminIboPage();
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
@@ -2900,6 +2908,77 @@ Object.assign(forms, {
   async 'report-problem'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const img = await pickedImage(f).catch(() => ''); await api('POST', '/api/admin/disputes', { kind: f.kind.value, subject: f.subject.value, details: f.details.value, priority: f.priority.value, image: img }); closeModal(); toast('Sent to the owner & technical manager ✓'); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'dis-resolve'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, status: 'resolved', resolution: f.resolution.value }); closeModal(); toast('Resolved ✓'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
   async 'dis-note'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Note added'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },
+});
+
+// ---------------- Marketing dashboards (spec §8) ----------------
+async function adminMktPage() {
+  const m = await api('GET', '/api/admin/emailmkt'); const st = await api('GET', '/api/admin/emailmkt/settings');
+  state.admin.mkt = m; state.admin.mktSettings = st;
+  const lists = m.lists || [];
+  const input = (k, val, ph) => `<input data-k="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}" dir="ltr" autocomplete="off">`;
+  return `<p class="small muted">Marketing email lists are isolated from customer emails. Keys, sender names and subjects rotate batch by batch. Bounced/dead addresses are removed at upload and excluded at send. No email is ever sent from a noreply@ address.</p>
+  <div class="chips" style="margin-bottom:12px"><a class="on">${m.keysSet}/10 Resend keys set</a><a class="on">${m.senders}/5 sender names</a><a class="on">${m.subjects}/5 subject lines</a><a class="on">Today: ${m.today} sent</a><a class="on">30 days: ${m.last30} sent</a><a class="on">Total spend: $${Number(m.totalSpendUsd || 0).toFixed(2)}</a></div>
+  <div class="grid2" style="gap:16px;align-items:start">
+    <div class="card"><h3>🔑 Resend keys &amp; rotation</h3><p class="small muted" style="margin-top:0">Up to 10 keys, rotated automatically; the active one is masked. A key is used only if filled.</p>
+      <form data-form="mkt-settings">
+        <div class="grid2">${Array.from({ length: 10 }, (_, i) => input('key' + i, st.keys[i] || '', 'Resend key #' + (i + 1) + ' (re_…)')).join('')}</div>
+        <h3 style="margin-top:12px">Sender names (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('sender' + i, st.senders[i] || '', 'Sender ' + (i + 1) + ' e.g. INTPROTO-TV')).join('')}</div>
+        <h3 style="margin-top:12px">Subject lines (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('subject' + i, st.subjects[i] || '', 'Subject ' + (i + 1))).join('')}</div>
+        <div style="margin:12px 0 10px">${field('Cost per email (USD)', 'costPerEmail', m.costPerEmail, { type: 'number', attrs: 'step="0.0001" min="0"', help: '$0.0004 = $0.40 per 1,000 emails' })}</div>
+        <button type="submit" class="btn primary">💾 Save marketing settings</button></form></div>
+    <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (any format)</span><textarea name="text" rows="5" required placeholder="one per line or comma separated"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>
+      ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}">🗑</button></div>`).join('')}</div>
+      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select><textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message."></textarea><p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
+  </div>`;
+}
+async function adminSeoPage() {
+  const r = await api('GET', '/api/admin/seo');
+  const rows = r.list.map((e) => `<tr><td class="small">${fmtDT(e.at)}</td><td><span class="tagp">${esc(e.platform)}</span></td><td>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</td><td class="small">${esc(e.result || '')}</td><td class="small">${esc(e.agent)}</td><td><button class="btn sm danger" data-act="seo-del" data-id="${esc(e.id)}">🗑</button></td></tr>`).join('');
+  return `<p class="small muted">Team tasks for SEO and promo posts on Reddit, Quora and Facebook — one log, daily / weekly / monthly counts, per-agent results.</p>
+    <div class="chips" style="margin-bottom:12px"><a class="on">Today: ${r.today}</a><a class="on">Last 7 days: ${r.weekCount}</a><a class="on">Last 30 days: ${r.monthCount}</a>${Object.entries(r.byAgent || {}).map(([a, n]) => `<a class="on">${esc(a)}: ${n}</a>`).join('')}</div>
+    <div class="grid2" style="gap:16px;align-items:start"><form data-form="seo-add" class="card"><h3>＋ Log a post</h3>${field('Platform', 'platform', 'Reddit', { type: 'select', options: [['Reddit', 'Reddit'], ['Quora', 'Quora'], ['Facebook', 'Facebook']] })}${field('Title / what you did', 'title', '', { attrs: 'required maxlength="200"' })}${field('Link (optional)', 'url', '', { attrs: 'autocapitalize="none"' })}${field('Result (optional)', 'result', '', { ph: 'views, upvotes, signups…' })}<button type="submit" class="btn primary">Log it</button></form>
+    <div class="card"><h3>Recent posts</h3>${r.list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Platform</th><th>Post</th><th>Result</th><th>Agent</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted small">Nothing logged yet.</p>'}</div></div>`;
+}
+async function adminGadsPage() {
+  const r = await api('GET', '/api/admin/gads'); const t = r.total || {};
+  const rows = (r.campaigns || []).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small muted">${esc(c.account || '—')} · ${esc(c.domain)} · ${esc(c.status)}</div></td><td class="small">${c.dailyBudget} ${esc(c.currency)}/day<div class="muted">${c.impressions|0} impr · ${c.clicks|0} clk</div></td><td class="small">Today $${Number(c.today||0).toFixed(2)}<div class="muted">7d $${Number(c.week||0).toFixed(2)} · 30d $${Number(c.month||0).toFixed(2)}</div></td><td><button class="btn sm" data-act="gads-entry" data-id="${esc(c.id)}">＋ Spend</button><button class="btn sm danger" data-act="gads-del" data-id="${esc(c.id)}">🗑</button></td></tr>`).join('');
+  return `<p class="small muted">Google Ads campaigns across <b>InProto-TV.com</b>, <b>online.info.net</b> and <b>intproto-iptv.store</b> — multiple accounts, per-campaign daily budget and spend per day / week / month.</p>
+    <div class="chips" style="margin-bottom:12px"><a class="on">Today $${Number(t.today||0).toFixed(2)}</a><a class="on">Last 7 days $${Number(t.week||0).toFixed(2)}</a><a class="on">Last 30 days $${Number(t.month||0).toFixed(2)}</a></div>
+    <div class="grid2" style="gap:16px;align-items:start"><form data-form="gads-campaign" class="card"><h3>＋ New campaign</h3>${field('Google Ads account', 'account', '', { ph: 'e.g. Grenapp Ads' })}${field('Domain', 'domain', 'intproto-iptv.store', { type: 'select', options: r.domains.map((d) => [d, d]) })}${field('Campaign name', 'name', '', { attrs: 'required maxlength="120"' })}<div class="grid2">${field('Daily budget', 'dailyBudget', 10, { type: 'number', attrs: 'min="0" step="any"' })}${field('Currency', 'currency', 'USD', { type: 'select', options: [['USD', 'USD'], ['EUR', 'EUR']] })}</div><button type="submit" class="btn primary">Add campaign</button></form>
+    <div class="card"><h3>Campaigns (${(r.campaigns || []).length})</h3>${(r.campaigns || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Campaign</th><th>Budget</th><th>Spend</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted small">No campaigns yet.</p>'}</div></div>`;
+}
+async function adminFbPage() {
+  const r = await api('GET', '/api/admin/fb'); const t = r.total || {};
+  const cards = (r.ads || []).map((a) => `<div class="card"><div class="row">${a.image ? `<button class="btn" style="flex:0 0 auto" data-act="att-show" data-src="/api/admin/fb/att?id=${encodeURIComponent(a.image)}">🖼 Photo</button>` : ''}<div style="flex:1;min-width:180px"><p style="margin:0;white-space:pre-wrap">${esc(a.description)}</p><p class="small muted">${esc(a.account || '—')} · ${esc(a.phone || '')}</p></div></div><p class="small" style="margin:8px 0 4px">Today $${Number(a.today||0).toFixed(2)} · 7d $${Number(a.week||0).toFixed(2)} · 30d $${Number(a.month||0).toFixed(2)} · ${a.results||0} results</p><div class="row"><button class="btn sm" data-act="fb-entry" data-id="${esc(a.id)}">＋ Log performance</button><button class="btn sm danger" data-act="fb-del" data-id="${esc(a.id)}">🗑</button></div></div>`).join('');
+  return `<p class="small muted">Facebook Ads for photo posts — keep the creative description, the phone number and the ad account used for each campaign, and log performance per creative. Everything is kept in the creative history log.</p>
+    <div class="chips" style="margin-bottom:12px"><a class="on">${(r.ads || []).length} creatives</a><a class="on">Today $${Number(t.today||0).toFixed(2)}</a><a class="on">Last 7 days $${Number(t.week||0).toFixed(2)}</a><a class="on">Last 30 days $${Number(t.month||0).toFixed(2)}</a></div>
+    <div class="grid2" style="gap:16px;align-items:start"><form data-form="fb-ad" class="card"><h3>＋ New creative</h3>${field('Facebook Ad account', 'account', '', { ph: 'act_…' })}${field('Phone used', 'phone', '', { type: 'tel', ph: '+212…' })}${field('Description', 'description', '', { type: 'textarea', rows: 4, attrs: 'required maxlength="500"', ph: 'Post text / creative description' })}<label class="field"><span>Photo</span><input type="file" name="image" accept="image/*"></label><button type="submit" class="btn primary">Add creative</button></form>
+    <div>${cards || '<div class="empty card"><span class="ic">👍</span>No creatives yet.</div>'}</div></div>`;
+}
+Object.assign(actions, {
+  'mkt-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/emailmkt/list/' + el.dataset.id); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'mkt-send': async (el) => {
+    const sel = $('#mkt-list'); const listId = sel?.value; if (!listId) return toast('Upload a list first.', true);
+    const l = (state.admin.mkt.lists || []).find((x) => x.id === listId); const html = ($('#mkt-html') || {}).value || '';
+    const cost = ((l?.count || 0) * Number(state.admin.mkt.costPerEmail || 0)).toFixed(2);
+    if (!confirm(`Send to ${l?.count || 0} recipients?\nEstimated cost: $${cost}`)) return;
+    el.disabled = true; toast('Sending…');
+    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'seo-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/seo/' + el.dataset.id); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'gads-del': async (el) => { if (!confirm('Delete this campaign and its stats?')) return; try { await api('DELETE', '/api/admin/gads/campaign/' + el.dataset.id); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
+  'gads-entry': (el) => { modal('＋ Log spend', `<form data-form="gads-entry" data-id="${esc(el.dataset.id)}"><div class="grid2">${field('Spend (USD)', 'spend', '', { type: 'number', attrs: 'min="0" step="0.01" required' })}${field('Results (signups…)', 'results', '', { type: 'number', attrs: 'min="0"' })}</div><div class="grid2">${field('Impressions', 'impressions', '', { type: 'number', attrs: 'min="0"' })}${field('Clicks', 'clicks', '', { type: 'number', attrs: 'min="0"' })}</div><div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Log</button></div></form>`); },
+  'fb-del': async (el) => { if (!confirm('Delete this creative and its stats?')) return; try { await api('DELETE', '/api/admin/fb/ad/' + el.dataset.id); $('#admin-body').innerHTML = await adminFbPage(); } catch (e) { toast(e.message, true); } },
+  'fb-entry': (el) => { modal('＋ Log performance', `<form data-form="fb-entry" data-id="${esc(el.dataset.id)}"><div class="grid2">${field('Spend (USD)', 'spend', '', { type: 'number', attrs: 'min="0" step="0.01" required' })}${field('Results', 'results', '', { type: 'number', attrs: 'min="0"' })}</div>${field('Reach', 'reach', '', { type: 'number', attrs: 'min="0"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Log</button></div></form>`); },
+});
+Object.assign(forms, {
+  async 'mkt-settings'(f) { const k = Array.from({ length: 10 }, (_, i) => f['key' + i].value.trim()); const senders = Array.from({ length: 5 }, (_, i) => f['sender' + i].value.trim()); const subjects = Array.from({ length: 5 }, (_, i) => f['subject' + i].value.trim()); await api('PUT', '/api/admin/emailmkt/settings', { keys: k, senders, subjects, costPerEmail: Number(f.costPerEmail.value) || 0.0004 }); toast('Saved ✓'); renderAdmin(); },
+  async 'mkt-list'(f) { const o = formToObj(f); try { const r = await api('POST', '/api/admin/emailmkt/list', { name: o.name, text: o.text }); toast(`List saved: ${r.count} emails (${r.removed} removed as bounced) ✓`); f.reset(); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); } },
+  async 'seo-add'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/seo', o); toast('Logged ✓'); f.reset(); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); } },
+  async 'gads-campaign'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/gads/campaign', o); toast('Campaign added ✓'); f.reset(); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
+  async 'gads-entry'(f) { try { await api('POST', '/api/admin/gads/entry', { campaignId: f.dataset.id, spend: f.spend.value, impressions: f.impressions.value, clicks: f.clicks.value, results: f.results.value }); closeModal(); toast('Logged ✓'); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
+  async 'fb-ad'(f) { const o = formToObj(f); o.image = await pickedImage(f).catch(() => ''); try { await api('POST', '/api/admin/fb/ad', o); toast('Creative added ✓'); f.reset(); $('#admin-body').innerHTML = await adminFbPage(); } catch (e) { toast(e.message, true); } },
+  async 'fb-entry'(f) { try { await api('POST', '/api/admin/fb/entry', { adId: f.dataset.id, spend: f.spend.value, results: f.results.value, reach: f.reach.value }); closeModal(); toast('Logged ✓'); $('#admin-body').innerHTML = await adminFbPage(); } catch (e) { toast(e.message, true); } },
 });
 
 // ---------------- IBO Player panel (spec §7) ----------------

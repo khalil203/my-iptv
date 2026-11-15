@@ -229,6 +229,9 @@ function permFor(method, path, body) {
   if (path === '/api/admin/stripe/balance') return 'finance_view';
   if (path.startsWith('/api/admin/stripe/account/')) return 'stripe';
   if (path.startsWith('/api/admin/ibo')) return 'ibo';
+  if (path.startsWith('/api/admin/emailmkt')) return 'marketing';
+  if (path.startsWith('/api/admin/seo')) return 'seo';
+  if (path.startsWith('/api/admin/gads') || path.startsWith('/api/admin/fb')) return 'ads';
   if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh' || path === '/api/admin/stripe/match') return 'finance_edit';
   if (path.startsWith('/api/admin/stock')) return 'stock';
   if (path === '/api/admin/profits') return 'profits';
@@ -1773,6 +1776,135 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         return err(404, 'Not found.');
       }
+
+      // ---------- Email marketing dashboard (spec §8.1) ----------
+      const getMkt = async () => (await store.get('mkt')) || { keys: Array(10).fill(''), senders: ['', '', '', '', ''], subjects: ['', '', '', '', ''], costPerEmail: 0.0004, stats: {}, totalSent: 0, totalSpendUsd: 0, lastSendAt: 0 };
+      const saveMkt = (m) => store.put('mkt', m);
+      const getMktLists = async () => (await store.get('mktlists')) || [];
+      const getMktList = async (id) => { if (!/^[\w-]{1,20}$/.test(String(id))) return null; return store.get('mktlist:' + id); };
+      const mktStats = (m) => { const cut = Date.now() - 30 * DAY; const rows = Object.entries(m.stats || {}).filter(([d]) => new Date(d).getTime() >= cut); const day = Object.entries(m.stats || {}).find(([d]) => d === new Date().toISOString().slice(0, 10))?.[1] || { sent: 0 }; return { last30: rows.reduce((a, [, v]) => a + (Number(v.sent) || 0), 0), today: Number(day.sent) || 0, byDay: Object.fromEntries(rows.slice(-14)), totalSent: Number(m.totalSent) || 0, totalSpendUsd: Math.round((Number(m.totalSpendUsd) || 0) * 100) / 100 } };
+      if (R('GET', '/api/admin/emailmkt')) {
+        const m = await getMkt(); const lists = (await getMktLists()).map(({ id, name, count, createdAt, by }) => ({ id, name, count, createdAt, by }));
+        return ok({ keysSet: (m.keys || []).filter(Boolean).length, senders: (m.senders || []).filter(Boolean).length, subjects: (m.subjects || []).filter(Boolean).length, costPerEmail: Number(m.costPerEmail) || 0.0004, lists, ...mktStats(m) });
+      }
+      if (R('GET', '/api/admin/emailmkt/settings')) { const m = await getMkt(); return ok({ keys: (m.keys || []).map((k) => (k ? '••••' : '')), senders: m.senders || [], subjects: m.subjects || [], costPerEmail: m.costPerEmail, ...mktStats(m) }); }
+      if (R('PUT', '/api/admin/emailmkt/settings')) {
+        const m = await getMkt();
+        if (Array.isArray(body.keys)) m.keys = body.keys.slice(0, 10).map((k, i) => String(k || '').startsWith('••••') ? m.keys[i] || '' : String(k || ''));
+        if (Array.isArray(body.senders)) m.senders = body.senders.slice(0, 5).map((x) => cleanText(x, 80));
+        if (Array.isArray(body.subjects)) m.subjects = body.subjects.slice(0, 5).map((x) => cleanText(x, 150));
+        if (body.costPerEmail !== undefined) m.costPerEmail = Math.max(0, Number(body.costPerEmail) || 0.0004);
+        await saveMkt(m); await log('marketing', 'Marketing settings updated');
+        return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/emailmkt/list')) {
+        const name = cleanText(body.name, 80); if (name.length < 2) return err(400, 'List name is required.');
+        const emails = String(body.text || '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || [];
+        const clean = [...new Set(emails.map((e) => e.toLowerCase()))];
+        if (!clean.length) return err(400, 'No email addresses found in the text.');
+        const bad = await getBad(); const kept = clean.filter((e) => !bad[e]); const removed = clean.length - kept.length;
+        const id = uid(8); await store.put('mktlist:' + id, { id, name, emails: kept, createdAt: Date.now(), by: actorName }, 400 * 86400);
+        const lists = await getMktLists(); lists.unshift({ id, name, count: kept.length, createdAt: Date.now(), by: actorName }); await store.put('mktlists', lists.slice(0, 100));
+        await log('marketing', `Marketing list "${name}": ${kept.length} emails (${removed} removed as bounced/dead)`);
+        return ok({ ok: true, id, count: kept.length, removed });
+      }
+      const mktId = path.match(/^\/api\/admin\/emailmkt\/list\/([\w-]+)(?:\/(\w+))?$/);
+      if (mktId) {
+        if (method === 'DELETE') { await store.del('mktlist:' + mktId[1]); const lists = (await getMktLists()).filter((l) => l.id !== mktId[1]); await store.put('mktlists', lists); return ok({ ok: true }); }
+        return err(404, 'Not found.');
+      }
+      if (R('POST', '/api/admin/emailmkt/send')) {
+        const m = await getMkt();
+        const keys = (m.keys || []).filter(Boolean);
+        if (!keys.length) return err(400, 'Add at least one Resend API key first.');
+        const lists = await getMktLists(); const listRef = lists.find((l) => l.id === String(body.listId || '')); if (!listRef) return err(404, 'List not found.');
+        const doc = await getMktList(listRef.id); if (!doc) return err(404, 'List not found.');
+        const bad = await getBad(); const recipients = (doc.emails || []).filter((e) => !bad[e]);
+        if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
+        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim());
+        const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'contact@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
+        const html = String(body.html || '').slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
+        const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
+        for (let i = 0; i < recipients.length; i += 100) { // Resend batch API, 100 at a time
+          const bi = Math.floor(i / 100); const batch = recipients.slice(i, i + 100);
+          const key = keys[bi % keys.length];
+          const from = `${senders.length ? senders[bi % senders.length] : app} <${fromAddr}>`;
+          const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
+          try {
+            const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(batch.map((to) => ({ from, to: [to], subject, html }))) });
+            if (r.ok) { sentCount += batch.length; spent += batch.length * perEmail; m.stats[day] = { sent: (Number(m.stats?.[day]?.sent) || 0) + batch.length }; }
+            else { const d = await r.json().catch(() => ({})); await log('marketing', `Marketing batch ${bi + 1} failed: ${d.message || 'Resend error ' + r.status}`); }
+          } catch (e) { await log('marketing', `Marketing batch ${bi + 1} failed: ${e.message}`); }
+        }
+        m.totalSent = (Number(m.totalSent) || 0) + sentCount; m.totalSpendUsd = Math.round(((Number(m.totalSpendUsd) || 0) + spent) * 100) / 100; m.lastSendAt = Date.now();
+        await saveMkt(m); await log('marketing', `Marketing campaign: ${sentCount}/${recipients.length} sent to "${listRef.name}" (keys rotating, ${senders.length || 1} sender name(s), ${subjects.length || 1} subject line(s))`);
+        return ok({ ok: true, sent: sentCount, removed: (doc.emails || []).length - recipients.length, spendUsd: Math.round(spent * 100) / 100 });
+      }
+
+      // ---------- SEO & social, Google Ads, Facebook Ads dashboards (spec §8.2–§8.4) ----------
+      const sumPeriod = (entries) => { const now = Date.now(); const day0 = new Date(); day0.setHours(0, 0, 0, 0); const week0 = day0.getTime() - 6 * DAY; const month0 = day0.getTime() - 29 * DAY; const sum = (from) => entries.filter((e) => e.at >= from).reduce((a, e) => a + (Number(e.spend) || 0), 0); const cnt = (from) => entries.filter((e) => e.at >= from).length; return { today: sum(day0.getTime()), week: sum(week0), month: sum(month0), todayCount: cnt(day0.getTime()), weekCount: cnt(week0), monthCount: cnt(month0) } };
+      // SEO & social posts log
+      if (R('GET', '/api/admin/seo')) {
+        const list = (await store.get('seo')) || [];
+        const byAgent = {}; for (const e of list) byAgent[e.agent || '—'] = (byAgent[e.agent || '—'] || 0) + 1;
+        const month0 = Date.now() - 29 * DAY;
+        return ok({ list: list.slice(0, 300), byAgent, monthCount: list.filter((e) => e.at >= month0).length, today: list.filter((e) => new Date(e.at).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)).length, weekCount: list.filter((e) => e.at >= Date.now() - 6 * DAY).length });
+      }
+      if (R('POST', '/api/admin/seo')) {
+        const platform = ['Reddit', 'Quora', 'Facebook'].includes(body.platform) ? body.platform : 'Reddit';
+        const e = { id: uid(6), at: Date.now(), platform, title: cleanText(body.title, 200), url: cleanText(body.url, 400), agent: String(actorName).slice(0, 60), result: cleanText(body.result, 300) };
+        if (e.title.length < 2) return err(400, 'Write a short title first.');
+        const list = (await store.get('seo')) || []; list.unshift(e); await store.put('seo', list.slice(0, 1000));
+        return ok({ ok: true, entry: e });
+      }
+      const seoId = path.match(/^\/api\/admin\/seo\/([\w-]+)$/); if (seoId && method === 'DELETE') { await store.put('seo', ((await store.get('seo')) || []).filter((e) => e.id !== seoId[1])); return ok({ ok: true }); }
+      // Google Ads: multiple accounts, per-domain campaigns (InProto-TV.com / online.info.net / .store)
+      const GAD_DOMAINS = ['InProto-TV.com', 'online.info.net', 'intproto-iptv.store'];
+      if (R('GET', '/api/admin/gads')) {
+        const g = (await store.get('gads')) || { campaigns: [], entries: [] };
+        const withStats = g.campaigns.map((c) => { const ent = g.entries.filter((e) => e.campaignId === c.id); return { ...c, ...sumPeriod(ent), impressions: Math.round(ent.reduce((a, e) => a + (Number(e.impressions) || 0), 0)), clicks: Math.round(ent.reduce((a, e) => a + (Number(e.clicks) || 0), 0)) }; });
+        const all = sumPeriod(g.entries);
+        return ok({ domains: GAD_DOMAINS, campaigns: withStats, total: { ...all, spend: all.month } });
+      }
+      if (R('POST', '/api/admin/gads/campaign')) {
+        const g = (await store.get('gads')) || { campaigns: [], entries: [] };
+        const name = cleanText(body.name, 120); if (name.length < 2) return err(400, 'Campaign name is required.');
+        const c = { id: uid(6), account: String(body.account || '').slice(0, 80), domain: GAD_DOMAINS.includes(body.domain) ? body.domain : GAD_DOMAINS[0], name, dailyBudget: Number(body.dailyBudget) || 0, currency: String(body.currency || 'USD').slice(0, 8), status: ['active', 'paused', 'ended'].includes(body.status) ? body.status : 'active', startedAt: body.startedAt ? new Date(body.startedAt).getTime() : Date.now(), createdAt: Date.now() };
+        g.campaigns.unshift(c); await store.put('gads', g);
+        return ok({ ok: true, campaign: c });
+      }
+      if (R('POST', '/api/admin/gads/entry')) {
+        const g = (await store.get('gads')) || { campaigns: [], entries: [] };
+        const c = g.campaigns.find((x) => x.id === String(body.campaignId || '')); if (!c) return err(404, 'Campaign not found.');
+        const e = { id: uid(6), at: body.at ? new Date(body.at).getTime() : Date.now(), campaignId: c.id, spend: Math.max(0, Number(body.spend) || 0), impressions: Number(body.impressions) || 0, clicks: Number(body.clicks) || 0, results: Number(body.results) || 0 };
+        g.entries.unshift(e); await store.put('gads', g);
+        return ok({ ok: true, entry: e });
+      }
+      const gadsId = path.match(/^\/api\/admin\/gads\/campaign\/([\w-]+)$/); if (gadsId && method === 'DELETE') { const g = (await store.get('gads')) || { campaigns: [], entries: [] }; g.campaigns = g.campaigns.filter((c) => c.id !== gadsId[1]); g.entries = g.entries.filter((e) => e.campaignId !== gadsId[1]); await store.put('gads', g); return ok({ ok: true }); }
+      // Facebook Ads: creative history with photo + description + phone + ad account
+      if (R('GET', '/api/admin/fb/att')) { const data = /^[0-9a-f]+$/.test(String(query.id || '')) ? await store.get('att:' + query.id) : null; return data ? ok({ data }) : err(404, 'This picture is no longer stored.'); }
+      if (R('GET', '/api/admin/fb')) {
+        const f = (await store.get('fb')) || { ads: [], entries: [] };
+        const ads = f.ads.map((a) => { const ent = f.entries.filter((e) => e.adId === a.id); return { ...a, ...sumPeriod(ent), spend: ent.reduce((x, e) => x + (Number(e.spend) || 0), 0), results: ent.reduce((x, e) => x + (Number(e.results) || 0), 0) }; });
+        const all = sumPeriod(f.entries);
+        return ok({ ads, total: { ...all, spend: all.month } });
+      }
+      if (R('POST', '/api/admin/fb/ad')) {
+        const f = (await store.get('fb')) || { ads: [], entries: [] };
+        const description = cleanText(body.description, 500); if (description.length < 2) return err(400, 'Write a creative description first.');
+        let image = ''; try { image = await saveAttachment(body.image); } catch { return err(400, 'The picture is too large or not an image.'); }
+        const a = { id: uid(6), account: String(body.account || '').slice(0, 80), phone: String(body.phone || '').replace(/[^\d+]/g, '').slice(0, 20), description, image, status: ['active', 'paused', 'archived'].includes(body.status) ? body.status : 'active', createdAt: Date.now() };
+        f.ads.unshift(a); await store.put('fb', f);
+        return ok({ ok: true, ad: a });
+      }
+      if (R('POST', '/api/admin/fb/entry')) {
+        const f = (await store.get('fb')) || { ads: [], entries: [] };
+        const a = f.ads.find((x) => x.id === String(body.adId || '')); if (!a) return err(404, 'Creative not found.');
+        const e = { id: uid(6), at: body.at ? new Date(body.at).getTime() : Date.now(), adId: a.id, spend: Math.max(0, Number(body.spend) || 0), results: Number(body.results) || 0, reach: Number(body.reach) || 0 };
+        f.entries.unshift(e); await store.put('fb', f);
+        return ok({ ok: true, entry: e });
+      }
+      const fbId = path.match(/^\/api\/admin\/fb\/ad\/([\w-]+)$/); if (fbId && method === 'DELETE') { const f = (await store.get('fb')) || { ads: [], entries: [] }; f.ads = f.ads.filter((a) => a.id !== fbId[1]); f.entries = f.entries.filter((e) => e.adId !== fbId[1]); await store.put('fb', f); return ok({ ok: true }); }
 
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
