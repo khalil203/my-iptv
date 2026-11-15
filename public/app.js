@@ -2066,6 +2066,7 @@ const forms = {
     const phone = fullPhone(f, 'phone'); const wa2 = o.same ? phone : fullPhone(f, 'whatsapp');
     if (!phone || (!o.same && !wa2)) { $('#trial-err').innerHTML = `<div class="err-box">${t('trial_phone')}</div>`; return; }
     const body = { name: o.name, email: o.email, phone, whatsapp: wa2, lang: getLang(), appUrl: location.origin + location.pathname.replace(/index\.html$/, '') };
+    if (f.captchaAnswer && f.captchaAnswer.value) { body.captchaAnswer = f.captchaAnswer.value; body.captchaId = f.captchaId ? f.captchaId.value : ''; }
     const btn = f.querySelector('button.primary'); btn.disabled = true;
     try {
       const r = await api('POST', '/api/trial', body);
