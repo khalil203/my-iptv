@@ -3046,7 +3046,7 @@ async function adminCcPage() {
   const r = await api('GET', '/api/admin/cc'); const list = r.list || [];
   const last4 = (n) => { const s = String(n || ''); return s.length >= 4 ? '•••• ' + s.slice(-4) : '••••'; };
   const exp = (e) => { const s = String(e || '').replace(/\D/g, ''); if (s.length >= 4) return s.slice(0, 2) + '/' + s.slice(-2); return s; };
-  const rows = list.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.fullName)}</b><div class="small muted">${esc(x.email || '')}${x.phone ? ' · ' + esc(x.phone) : ''}${x.address ? ' · ' + esc(x.address) : ''}</div></td><td class="small">${last4(x.cardNumber)}</td><td class="small">${esc(exp(x.exp))}</td><td class="small">•••</td><td><span class="pill ${x.status === 'live' ? 'st-active' : 'st-expired'}">${esc((x.status || 'dead').toUpperCase())}</span></td><td><button class="btn sm danger" data-act="cc-del" data-id="${esc(x.id)}">🗑</button></td></tr>`).join('');
+  const rows = list.map((x) => { const id = esc(x.id); return `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.fullName)}</b><div class="small muted">${esc(x.email || '')}${x.phone ? ' · ' + esc(x.phone) : ''}${x.address ? ' · ' + esc(x.address) : ''}</div></td><td class="small">${last4(x.cardNumber)}</td><td class="small">${esc(exp(x.exp))}</td><td class="small">•••</td><td><span class="pill ${x.status === 'live' ? 'st-active' : 'st-expired'}">${esc((x.status || 'dead').toUpperCase())}</span></td><td><button class="btn sm" data-act="cc-edit" data-id="${id}">✏️</button> <button class="btn sm danger" data-act="cc-del" data-id="${id}">🗑</button></td></tr>` }).join('');
   return `<p class="small muted">Owner-only. Every CC collection with full card details and card status.</p>
   <div class="chips" style="margin-bottom:14px"><a class="on">Live ${r.liveCount || 0}</a><a class="on">Declined ${r.declinedCount || 0}</a><a class="on">Dead ${r.deadCount || 0}</a></div>
   <form data-form="cc-add" class="card"><h3>＋ Log a collection</h3>
@@ -3061,9 +3061,29 @@ async function adminCcPage() {
 }
 Object.assign(actions, {
   'cc-del': async (el) => { if (!confirm('Delete this CC collection entry?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/cc/' + el.dataset.id); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'cc-edit': async (el) => {
+    const r = await api('GET', '/api/admin/cc'); const rec = (r.list || []).find((x) => x.id === el.dataset.id);
+    if (!rec) return toast('Record not found', true);
+    const m = modal('✏️ Edit CC entry — Owner only', `<form data-form="cc-edit" data-id="${esc(rec.id)}" class="grid2">
+      <div class="grid2 full">${field('Full Name', 'fullName', rec.fullName || '', { attrs: 'required maxlength="80"' })}</div>
+      <div>${field('Email', 'email', rec.email || '', { type: 'email' })}</div>
+      <div>${field('Phone Number', 'phone', rec.phone || '', { type: 'tel' })}</div>
+      <div class="grid2 full">${field('Address', 'address', rec.address || '', { attrs: 'maxlength="300"' })}</div>
+      <div class="grid2 full">${field('Card Number (16 Digits)', 'cardNumber', rec.cardNumber || '', { inputmode: 'numeric', attrs: 'required maxlength="19" placeholder="0000000000000000"' })}</div>
+      <div>${field('Expiration Date (MM/YY)', 'exp', (rec.exp ? rec.exp.slice(0,2)+'/'+rec.exp.slice(2) : ''), { attrs: 'required maxlength="5" placeholder="MM/YY" inputmode="numeric"' })}</div>
+      <div>${field('CVV', 'cvv', rec.cvv || '', { type: 'password', attrs: 'required maxlength="4" inputmode="numeric"' })}</div>
+      <div class="grid2 full">${field('Card Status', 'status', rec.status || 'live', { type: 'select', options: [['live','Live'],['declined','Declined'],['dead','Dead']] })}</div>
+      <div class="row full" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">💾 Save changes</button></div>
+    </form>`);
+  },
 });
 Object.assign(forms, {
   async 'cc-add'(f) { try { await api('POST', '/api/admin/cc', formToObj(f)); toast('Saved ✓'); f.reset(); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); } },
+  async 'cc-edit'(f) {
+    const id = f.dataset.id;
+    const body = { fullName: f.fullName.value.trim(), email: f.email.value.trim(), phone: f.phone.value.trim(), address: f.address.value.trim(), cardNumber: f.cardNumber.value.replace(/\D/g, '').slice(0, 16), exp: f.exp.value.replace(/[^0-9]/g, '').slice(0, 6), cvv: f.cvv.value.replace(/\D/g, '').slice(0, 4), status: ['live', 'declined', 'dead'].includes(f.status.value) ? f.status.value : 'live' };
+    try { await api('PUT', '/api/admin/cc/' + id, body); closeModal(); toast('CC entry updated ✓'); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); }
+  },
 });
 
 // ---------------- all-agents trial queue & disputes (spec §4, §5) ----------------

