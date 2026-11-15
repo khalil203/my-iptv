@@ -39,9 +39,7 @@ h2 { font-size: 1.35rem; } h3 { font-size: 1.02rem; }
 @keyframes pop { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* brand */
-.brand-name { font-family: inherit; font-weight: 900; letter-spacing: .04em; text-transform: uppercase;
-  background: linear-gradient(90deg, #fff 0%, var(--accent) 40%, var(--primary) 60%, #fff 100%); background-size: 250% 100%;
-  -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 6s linear infinite; }
+.brand-name { font-family: inherit; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--text); }
 @keyframes sheen { to { background-position: -250% 0; } }
 .brand-name.xl { font-size: 1.7rem; display: block; margin-top: 14px; }
 .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
@@ -789,14 +787,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .cinema-mark { font-weight: 900; font-size: 30px; color: #1d1404; background: linear-gradient(135deg, #F1D88B, #D4AF37 45%, #8A6A1F); letter-spacing: .02em; }
 .cinema-text { position: relative; min-width: 0; }
 .cinema-eyebrow { display: block; color: var(--accent); font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .16em; }
-.cinema-title { margin: 1px 0 1px; font-size: clamp(1.5rem, 4vw, 2rem); font-weight: 900; letter-spacing: -.01em; background: linear-gradient(90deg, #fff 0%, var(--primary) 45%, var(--accent) 80%, #fff 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 7s linear infinite; }
+.cinema-title { margin: 1px 0 1px; font-size: clamp(1.5rem, 4vw, 2rem); font-weight: 900; letter-spacing: -.01em; color: var(--text); }
 .cinema-h { color: var(--muted); margin: 0; font-size: .95rem; font-weight: 600; }
-.cinema-watermark { position: absolute; right: 14px; bottom: -28px; font-size: clamp(4rem, 14vw, 7rem); font-weight: 900; color: transparent; -webkit-text-stroke: 1px color-mix(in srgb, var(--primary) 22%, transparent); letter-spacing: -.02em; line-height: 1; pointer-events: none; user-select: none; }
+.cinema-watermark { position: absolute; right: 14px; bottom: -28px; font-size: clamp(4rem, 14vw, 7rem); font-weight: 900; color: color-mix(in srgb, var(--text) 8%, transparent); letter-spacing: -.02em; line-height: 1; pointer-events: none; user-select: none; }
 @media (max-width: 560px) { .cinema { flex-direction: column; text-align: center; padding: 16px; } .cinema-logo, .cinema-mark { width: 72px; height: 72px; } .cinema-watermark { display: none; } }
 
 /* ===== Void Ember — brand gradients & wires ===== */
-.brand-name { background: linear-gradient(95deg, #fff 0%, #FFB03A 35%, #FF6B42 60%, #fff 100%); background-size: 260% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 5.5s linear infinite; font-weight: 900; letter-spacing: .04em; }
-[data-theme=light] .brand-name { background-image: linear-gradient(95deg, #181820 0%, #FF6B42 45%, #D97E00 70%, #181820 100%); }
+.brand-name { color: var(--text); }
+[data-theme=light] .brand-name { color: #181820; }
 .btn.primary { color: #120404; background: linear-gradient(135deg, #FFB03A 0%, #FF6B42 60%, #FF3D2E 100%); box-shadow: 0 14px 40px -12px color-mix(in srgb, #FF6B42 70%, transparent), inset 0 1px 0 rgba(255,255,255,.35); }
 .btn.primary:hover { background: linear-gradient(135deg, #FFC35C 0%, #FF6B42 55%, #FF3D2E 100%); }
 .hero-logo i { background: conic-gradient(from 0deg, var(--accent), transparent 30%, var(--primary), transparent 70%, var(--accent)); }
@@ -806,4 +804,4 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .cinema-watermark { -webkit-text-stroke: 1px color-mix(in srgb, var(--primary) 28%, transparent); }
 .st-active { color: #3DDC97; }
 [data-theme=light] .st-active { color: #16785A; }
-[data-theme=light] .brand-name { background-image: linear-gradient(95deg, #181820 0%, #FF6B42 45%, #D97E00 70%, #181820 100%); }
+[data-theme=light] .brand-name { color: #181820; }
