@@ -752,15 +752,32 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     }
     return sale;
   }
+  function transPair(s) {
+    const ks = (s.email.transKeys || []).filter((k) => String(k || '').trim());
+    const ds = (s.email.transDomains || []);
+    const n = ks.length;
+    if (!n) return { key: s.email.resendKey || '', domain: s.email.dns || (String(s.email.website || '').replace(/^https?:\/\//, '').split('/')[0] || ''), fromName: String(s.branding.appName || 'INTPROTO-TV') };
+    const i = Math.floor(Math.random() * n);
+    return { key: ks[i], domain: ds[i] || s.email.dns || (String(s.email.website || '').replace(/^https?:\/\//, '').split('/')[0] || ''), fromName: (s.email.transSenders || [])[i] || String(s.branding.appName || 'INTPROTO-TV') };
+  }
+  function transFrom(s, p) {
+    const fromName = p.fromName || 'INTPROTO-TV';
+    const domain = p.domain || 'intproto-tv.store';
+    return `${fromName} <noreply@${domain}>`;
+  }
   async function sendEmail(s, to, subject, html) {
     const e = s.email;
     to = cleanEmail(to);
     if (!to) return { ok: false, error: 'This is not a valid email address.' };
-    if (!e.resendKey || !e.from || !to) return { ok: false, skipped: true, error: 'Email is not set up (Resend key / sender missing).' };
+    const pair = transPair(s);
+    if (!pair.key) return { ok: false, skipped: true, error: 'Email is not set up (Resend key / sender missing).' };
+    // (pair.key replaces resendKey below)
+    const auth = pair.key;
+    const fromHeader = transFrom(s, pair);
     const paused = (await getBad())[to];
     if (paused) return { ok: false, bounced: true, error: `Not sent: ${to} ${paused.why} before. Correct the address, or allow it again in Trial & email → Bounced addresses.` };
     try {
-      const res = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: e.from, to: [to], subject, html }) });
+      const res = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: fromHeader, to: [to], subject, html }) });
       const data = await res.json().catch(() => ({}));
       return res.ok ? { ok: true, id: data.id } : { ok: false, error: data.message || 'Resend error ' + res.status };
     } catch (err) { return { ok: false, error: err.message }; }
@@ -769,13 +786,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Send many emails in one request (Resend batch API, up to 100)
   async function sendBatch(s, msgs) {
     const e = s.email;
-    if (!e.resendKey || !e.from) return { ok: false, error: 'Email is not set up (Resend key / sender missing).' };
+    const pair = transPair(s);
+    const auth = pair.key;
+    const fromHeader = transFrom(s, pair);
+    if (!auth) return { ok: false, error: 'Email is not set up (Resend key / sender missing).' };
     if (!msgs.length) return { ok: true, sent: 0 };
     try {
       const bad = await getBad();
       msgs = msgs.map((m) => ({ ...m, to: cleanEmail(m.to) })).filter((m) => m.to && !bad[m.to]);
       if (!msgs.length) return { ok: true, sent: 0 };
-      const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + e.resendKey, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: e.from, to: [m.to], subject: m.subject, html: m.html }))) });
+      const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: fromHeader, to: [m.to], subject: m.subject, html: m.html }))) });
       const d = await r.json().catch(() => ({}));
       return r.ok ? { ok: true, sent: msgs.length } : { ok: false, error: d.message || 'Resend error ' + r.status };
     } catch (err) { return { ok: false, error: err.message }; }
@@ -2249,7 +2269,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const maskKeys = (src) => ({
           ...src,
           reseller: { ...src.reseller, baseUrl: src.reseller.baseUrl ? '••••' : '', apiKey: src.reseller.apiKey ? '••••' : '', username: src.reseller.username ? '••••' : '', password: src.reseller.password ? '••••' : '', actions: Object.fromEntries(Object.entries(src.reseller.actions || {}).map(([k, v]) => [k, { ...v, url: v.url && /api_key=|\{key\}/.test(v.url) ? '••••' : '••••', headers: '••••' }])) },
-          email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '' },
+          email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '', transKeys: (src.email.transKeys || []).map((k) => (k ? '••••' : '')), transSenders: src.email.transSenders || [], transSubjects: src.email.transSubjects || [] },
           finance: { ...src.finance, stripeKey: src.finance.stripeKey ? '••••' : '', stripeWebhookSecrets: src.finance.stripeWebhookSecrets ? '••••' : '' },
         });
         if (can('settings')) {

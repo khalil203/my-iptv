@@ -772,12 +772,12 @@ async function adminApi(s) {
     <form data-form="settings" class="card">${panelFields}
       <div class="row" style="position:sticky;bottom:12px"><button class="btn primary">💾 Save panel / API settings</button></div>
     </form>
-    <form data-form="mkt-settings" class="card"><h3>Resend rotation — 10 keys · 10 domains · 5 senders · 4 subjects</h3>
-      <p class="small muted">Domain paired next to each API key. Senders rotate per batch (noreply@domain auto). Same rotation as Email Marketing.</p>
-      <div class="keys-pairs" style="display:flex;flex-direction:column;gap:6px">${Array.from({ length: 10 }, (_, i) => { const st10 = (state.admin.mktSettings) || {}; const dom = (st10.domains && st10.domains[i]) || ''; const per = (st10.perKey && st10.perKey[i + 1]) || {}; return `<div class="row" style="gap:6px;align-items:center"><input name="key${i}" value="${esc((st10.keys && st10.keys[i]) || '')}" placeholder="Resend key #${i + 1} (re_…)" dir="ltr" autocomplete="off" style="flex:2;min-width:130px"><input name="domain${i}" value="${esc(dom)}" placeholder="domain${i + 1}.com" dir="ltr" autocomplete="off" style="flex:1;min-width:110px">${per.sent ? `<span class="tagp" title="emails sent via this key">${per.sent} sent</span>` : ''}<span class="small muted">noreply@${esc(dom || 'yourdomain.com')}</span></div>` }).join('')}</div>
-      <h3 style="margin-top:14px">Sender names (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => `<div class="field"><input name="sender${i}" value="${esc(((state.admin.mktSettings && state.admin.mktSettings.senders && state.admin.mktSettings.senders[i]) || ''))}" placeholder="Sender ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
-      <h3 style="margin-top:14px">Subject lines (rotated per batch)</h3><div class="grid2">${Array.from({ length: 4 }, (_, i) => `<div class="field"><input name="subject${i}" value="${esc(((state.admin.mktSettings && state.admin.mktSettings.subjects && state.admin.mktSettings.subjects[i]) || ''))}" placeholder="Subject ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
-      <label class="field" style="margin-top:10px"><span>Cost per email (USD)</span><input type="number" step="0.0001" min="0" name="costPerEmail" value="${esc(String((state.admin.mktSettings && state.admin.mktSettings.costPerEmail) ?? 0.0004))}"></label>
+    <form data-form="trans-settings" class="card"><h3>Resend rotation — API &amp; Settings (separate from Marketing)</h3>
+      <p class="small muted">Independent 10×10 rotation for transactional email (login, renewal, tickets, sales …). Rotation applies across these keys/domains on every send.</p>
+      <div class="keys-pairs" style="display:flex;flex-direction:column;gap:6px">${Array.from({ length: 10 }, (_, i) => { const ks = (s.email.transKeys || []); const ds = (s.email.transDomains || []); const dom = ds[i] || ''; return `<div class="row" style="gap:6px;align-items:center"><input name="transKey${i}" value="${esc(ks[i] || '')}" placeholder="Resend key #${i + 1} (re_…)" dir="ltr" autocomplete="off" style="flex:2;min-width:130px"><input name="transDomain${i}" value="${esc(dom)}" placeholder="domain${i + 1}.com" dir="ltr" autocomplete="off" style="flex:1;min-width:110px"><span class="small muted">noreply@${esc(dom || 'yourdomain.com')}</span></div>` }).join('')}</div>
+      <h3 style="margin-top:14px">Sender names (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => `<div class="field"><input name="transSender${i}" value="${esc(((s.email.transSenders || [])[i] || ''))}" placeholder="Sender ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
+      <h3 style="margin-top:14px">Subject lines</h3><div class="grid2">${Array.from({ length: 4 }, (_, i) => `<div class="field"><input name="transSubject${i}" value="${esc(((s.email.transSubjects || [])[i] || ''))}" placeholder="Subject ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
+      <label class="field" style="margin-top:10px"><span>Cost per email (USD)</span><input type="number" step="0.0001" min="0" name="transCost" value="${esc(String(s.email.transCostPerEmail ?? 0.0004))}"></label>
       <div class="row" style="margin-top:12px"><button type="submit" class="btn primary">💾 Save rotation</button></div>
     </form>
   </div>`;
@@ -3358,7 +3358,7 @@ async function adminMktPage() {
   <div class="grid2" style="gap:16px;align-items:start">
     <div class="card"><h3>🔑 Resend keys &amp; rotation</h3><p class="small muted" style="margin-top:0">Up to 10 keys, rotated automatically; the active one is masked. A key is used only if filled.</p>
       <form data-form="mkt-settings">
-        <div class="keys-pairs" style="display:flex;flex-direction:column;gap:8px">${Array.from({ length: 10 }, (_, i) => { const dom = (st.domains && st.domains[i]) || ''; const per = (st.perKey && st.perKey[i + 1]) || {}; return `<div class="row" style="gap:6px;align-items:center"><input name="key${i}" value="${esc(st.keys[i] || '')}" placeholder="Resend key #${i + 1} (re_…)" dir="ltr" autocomplete="off" style="flex:2;min-width:140px"><input name="domain${i}" value="${esc(dom)}" placeholder="domain${i + 1}.com" dir="ltr" autocomplete="off" style="flex:1;min-width:120px">${per.sent ? `<span class="tagp" title="emails sent via this key">${per.sent} sent</span>` : ''}<span class="small muted" id="snd${i}" style="min-width:160px">noreply@${esc(dom || 'yourdomain.com')}</span></div>` }).join('')}</div>
+        <div class="keys-pairs" style="display:flex;flex-direction:column;gap:8px">${Array.from({ length: 10 }, (_, i) => { const dom = (st.domains && st.domains[i]) || ''; const per = (st.perKey && st.perKey[i + 1]) || {}; return `<div class="row" style="gap:6px;align-items:center"><input name="transKey${i}" value="${esc(st.keys[i] || '')}" placeholder="Resend key #${i + 1} (re_…)" dir="ltr" autocomplete="off" style="flex:2;min-width:140px"><input name="transDomain${i}" value="${esc(dom)}" placeholder="domain${i + 1}.com" dir="ltr" autocomplete="off" style="flex:1;min-width:120px">${per.sent ? `<span class="tagp" title="emails sent via this key">${per.sent} sent</span>` : ''}<span class="small muted" id="snd${i}" style="min-width:160px">noreply@${esc(dom || 'yourdomain.com')}</span></div>` }).join('')}</div>
         <h3 style="margin-top:12px">Sender names</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('sender' + i, st.senders[i] || '', 'Sender ' + (i + 1) + ' e.g. INTPROTO-TV')).join('')}</div>
         <h3 style="margin-top:12px">Subject lines (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('subject' + i, st.subjects[i] || '', 'Subject ' + (i + 1))).join('')}</div>
         <div style="margin:12px 0 10px">${field('Cost per email (USD)', 'costPerEmail', m.costPerEmail, { type: 'number', attrs: 'step="0.0001" min="0"', help: '$0.0004 = $0.40 per 1,000 emails' })}</div>
@@ -3409,7 +3409,19 @@ Object.assign(actions, {
   'fb-entry': (el) => { modal('＋ Log performance', `<form data-form="fb-entry" data-id="${esc(el.dataset.id)}"><div class="grid2">${field('Spend (USD)', 'spend', '', { type: 'number', attrs: 'min="0" step="0.01" required' })}${field('Results', 'results', '', { type: 'number', attrs: 'min="0"' })}</div>${field('Reach', 'reach', '', { type: 'number', attrs: 'min="0"' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Log</button></div></form>`); },
 });
 Object.assign(forms, {
-  async 'mkt-settings'(f) {
+
+  async 'trans-settings'(f) {
+    const el = (n) => f.elements[n];
+    const val = (n) => ((el(n) && 'value' in el(n)) ? el(n).value : '').trim();
+    const keys = Array.from({ length: 10 }, (_, i) => val('transKey' + i));
+    const domains = Array.from({ length: 10 }, (_, i) => { const v = val('transDomain' + i).toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v : ''; });
+    const senders = Array.from({ length: 5 }, (_, i) => val('transSender' + i));
+    const subjects = []; for (let i = 0; i < 10; i++) { if (el('transSubject' + i)) subjects.push(val('transSubject' + i)); }
+    const cost = Number(val('transCost') || '0.0004') || 0.0004;
+    await api('PUT', '/api/admin/settings', { email: { transKeys: keys, transDomains: domains, transSenders: senders, transSubjects: subjects, transCostPerEmail: cost } });
+    toast('Saved ✓'); renderAdmin();
+  },
+    async 'mkt-settings'(f) {
     const val = (n) => ((f.elements[n] && 'value' in f.elements[n]) ? f.elements[n].value : '').trim();
     const keys = Array.from({ length: 10 }, (_, i) => val('key' + i));
     const domains = Array.from({ length: 10 }, (_, i) => { const v = val('domain' + i).toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v : ''; });
