@@ -10,7 +10,7 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 ## B. UI/UX improvements (recent commits)
 - UltraIO dark-neon theme tokens (--primary #A855F7, --accent #D946EF, --bg #07080E) + Inter; day/night boot preset; light theme contrast pass on bnav/topbar.
 - Customer sidebar + mobile nav: Home + Account only (Live/Movies/Series reachable via Home tiles & search).
-- “My playlists” card now carries connection details: Username / Password / DNS / M3U (+ copy). Standalone duplicate card removed.
+- “My Details” card now carries connection details: Username / Password / DNS / M3U (+ copy). Standalone duplicate card removed.
 - Splash/manifest `theme_color`/`background_color` now `#07080E` (was old #07081A).
 - Arabic removed from everything customer-facing (site, login, trial form, account language switcher); admin kept en/fr/ar intentionally.
 - Boot screen: logo + spinner, centered, responsive (min() with dvh).
@@ -25,7 +25,7 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 | 5 | Trial requests lost Telegram handle | parse/normalize (`@t.me/` strip), persist on queue entry + auto-created customer, return to agents for dispatch | COMPLETED + test asserts value |
 | 6 | Agents queue had no WhatsApp/Telegram dispatch | queue card shows Telegram; `tq-send` returns phone/whatsapp/telegram; modal offers Copy / WhatsApp / Telegram buttons | COMPLETED (not live-verified end-to-end with real creds) |
 | 7 | SW served stale shell on refresh after deploy | network-first + cached fallback | COMPLETED |
-| 8 | Trial Telegram not stored; service-details missing | parsed/stored/returned; card added then moved into My playlists; copy button | COMPLETED |
+| 8 | Trial Telegram not stored; service-details missing | parsed/stored/returned; card added then moved into My Details; copy button | COMPLETED |
 | 9 | `/freetrial` & `/resellers` intermittently slow first hit | environment network flakiness, not a code defect; retries pass | NOT A BUG |
 | 10 | Arabic options on customer side | dictionaries/pickers removed | COMPLETED + live-verified |
 
@@ -50,8 +50,8 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 - Config: `wrangler.toml` routes to zone `intproto-tv.store`; KV namespace `DB`; secrets in Workers.
 
 ## H. Final status
-- COMPLETED & VERIFIED: Arabic removal (customer), sidebar cleanup, My-playlists connection details, /freetrial route + form (incl. Telegram), /resellers landing + sign-in flow, trial-queue Telegram storage + dispatch UI, SW network-first, playlist http-fetch fallback via /proxy, manifest color sync, 43/43 tests, deploy green.
-- IMPLEMENTED, NOT FULLY VERIFIED: service-details in My playlists (needs a live customer session), agents dispatch modal (needs a real queue entry).
+- COMPLETED & VERIFIED: Arabic removal (customer), sidebar cleanup, My Details connection details, /freetrial route + form (incl. Telegram), /resellers landing + sign-in flow, trial-queue Telegram storage + dispatch UI, SW network-first, playlist http-fetch fallback via /proxy, manifest color sync, 43/43 tests, deploy green.
+- IMPLEMENTED, NOT FULLY VERIFIED: service-details in My Details (needs a live customer session), agents dispatch modal (needs a real queue entry).
 - PARTIALLY COMPLETED (by design): MASTER redesign directive — audit done; redesign executed only where risk is low and value is direct (sidebar, playlist details, Arabic, boot/splash colors, routing). Full re-skin of every screen not done this session.
 - BLOCKED / NOT STARTED: Reseller panel with IBO Player/TVPlus credentials, credit balance and purchase history (no reseller data model exists: customer has no isReseller/credit/panel fields — needs Nizar’s product decision + schema change); off-site backup (needs R2); Kast/Trade OKX/Epay integration; SOP scoring UI; AI chat archive.
 

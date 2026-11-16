@@ -89,7 +89,7 @@ Object.assign(D.fr, {
 // ---- dashboard home, own playlists, requests ----
 Object.assign(D.en, {
   overview: 'Here is your account overview.', activePlan: 'Active plan', expiresOn: 'Expires on', connectedDev: 'Connected devices', quick: 'Quick actions', managePlan: 'Manage plan', contactSup: 'Contact support',
-  srcT: 'My playlists', srcText: 'Add your own IPTV provider with Xtream Codes or an M3U playlist. The details are saved on this device only.', srcMain: '{app} subscription', srcActive: 'In use', srcUse: 'Use', srcRemove: 'Remove',
+  srcT: 'My Details', srcText: 'Add your own IPTV provider with Xtream Codes or an M3U playlist. The details are saved on this device only.', srcMain: '{app} subscription', srcActive: 'In use', srcUse: 'Use', srcRemove: 'Remove',
   srcName: 'Name', srcServer: 'Server address', srcUrl: 'Playlist address', srcFile: 'Or choose a playlist file', srcCheckAdd: 'Check and add', srcTesting: 'Checking…', srcSaved: 'Added: {n}', srcChannels: '{n} items',
   srcBadUrl: 'Enter an address that starts with http:// or https://', srcBadLogin: 'The provider refused this username or password.', srcExpired: 'This account is not active at the provider.', srcUnreachable: 'The provider could not be reached. Check the address and try again.', srcEmpty: 'No channels were found in this playlist.',
   srcNeedApp: 'This playlist cannot be opened in the browser. Use the Android, TV or desktop app.', srcNow: 'Now watching: {name}', srcBack: 'Back to {app}', srcOnlyYours: 'Only add providers you have the right to use.',
@@ -97,7 +97,7 @@ Object.assign(D.en, {
 });
 Object.assign(D.fr, {
   overview: 'Voici l’aperçu de votre compte.', activePlan: 'Offre active', expiresOn: 'Expire le', connectedDev: 'Appareils connectés', quick: 'Actions rapides', managePlan: 'Gérer l’offre', contactSup: 'Contacter l’assistance',
-  srcT: 'Mes playlists', srcText: 'Ajoutez votre propre fournisseur IPTV avec Xtream Codes ou une playlist M3U. Les informations restent sur cet appareil.', srcMain: 'Abonnement {app}', srcActive: 'Utilisée', srcUse: 'Utiliser', srcRemove: 'Supprimer',
+  srcT: 'Mes détails', srcText: 'Ajoutez votre propre fournisseur IPTV avec Xtream Codes ou une playlist M3U. Les informations restent sur cet appareil.', srcMain: 'Abonnement {app}', srcActive: 'Utilisée', srcUse: 'Utiliser', srcRemove: 'Supprimer',
   srcName: 'Nom', srcServer: 'Adresse du serveur', srcUrl: 'Adresse de la playlist', srcFile: 'Ou choisissez un fichier playlist', srcCheckAdd: 'Vérifier et ajouter', srcTesting: 'Vérification…', srcSaved: 'Ajoutée : {n}', srcChannels: '{n} éléments',
   srcBadUrl: 'Saisissez une adresse commençant par http:// ou https://', srcBadLogin: 'Le fournisseur a refusé ce nom d’utilisateur ou ce mot de passe.', srcExpired: 'Ce compte n’est pas actif chez le fournisseur.', srcUnreachable: 'Fournisseur injoignable. Vérifiez l’adresse et réessayez.', srcEmpty: 'Aucune chaîne trouvée dans cette playlist.',
   srcNeedApp: 'Cette playlist ne peut pas s’ouvrir dans le navigateur. Utilisez l’application Android, TV ou ordinateur.', srcNow: 'En cours : {name}', srcBack: 'Revenir à {app}', srcOnlyYours: 'N’ajoutez que des fournisseurs que vous avez le droit d’utiliser.',
@@ -189,14 +189,14 @@ Object.assign(D.en, { telegramId: 'Telegram ID (optional)', optional: 'Optional 
 Object.assign(D.fr, { telegramId: 'Identifiant Telegram (facultatif)', optional: 'Facultatif — pour vous joindre sur Telegram si besoin.', resellerPanel: 'Espace revendeur', resellerIntro: 'Achetez des crédits en gros, activez des comptes IBO Player et TVPlus et retrouvez tous vos achats au même endroit. Connectez-vous avec le compte que nous avons créé pour vous.', resellerSignIn: 'Se connecter à mon espace revendeur', resellerProgram: 'Pas encore revendeur ? Contactez-nous pour ouvrir un compte revendeur.', serviceDetails: 'Informations du service', creditBalance: 'Solde de crédits', purchaseHistory: 'Historique des achats', noPurchases: 'Aucun achat pour le moment.', copyDetails: '📋 Copier', yourLogin: 'Vos identifiants', m3uOne: 'Lien M3U', backHome: "Retour à l'accueil" });
 
 // How-to activation guide (customer account)
-Object.assign(D.en, { userGuide: 'How to activate (IBO Player)', gStep1: 'Install IBO Player (or IBO Player Pro / IPTV Smarters) from the app store on your Smart TV, Android TV or phone.', gStep2: 'Open the app and note your Device ID (MAC address) and Device Key, then enter them on the activation page (or send them to support) to activate the app.', gStep3: 'In My Playlists above, copy Username, Password and DNS — in the app choose Add Xtream Playlist and paste them, or paste the M3U link directly as the playlist URL.', gStep4: 'Reload / Restart the app — your channels, movies and series load automatically.' });
-Object.assign(D.fr, { userGuide: 'Comment activer (IBO Player)', gStep1: 'Installez IBO Player (ou IBO Player Pro / IPTV Smarters) depuis le store de votre TV, Android TV ou téléphone.', gStep2: 'Ouvrez l’application et notez Device ID (adresse MAC) et Device Key, puis entrez-les sur la page d’activation (ou envoyez-les au support) pour activer l’app.', gStep3: 'Dans « Mes playlists » ci-dessus, copiez Username, Password et DNS — dans l’app, choisissez Add Xtream Playlist et collez-les, ou collez le lien M3U comme URL de playlist.', gStep4: 'Rechargez ou redémarrez l’app — vos chaînes, films et séries se chargent automatiquement.' });
+Object.assign(D.en, { userGuide: 'How to activate (IBO Player)', gStep1: 'Install IBO Player (or IBO Player Pro / IPTV Smarters) from the app store on your Smart TV, Android TV or phone.', gStep2: 'Open the app and note your Device ID (MAC address) and Device Key, then enter them on the activation page (or send them to support) to activate the app.', gStep3: 'In My Details above, copy Username, Password and DNS — in the app choose Add Xtream Playlist and paste them, or paste the M3U link directly as the playlist URL.', gStep4: 'Reload / Restart the app — your channels, movies and series load automatically.' });
+Object.assign(D.fr, { userGuide: 'Comment activer (IBO Player)', gStep1: 'Installez IBO Player (ou IBO Player Pro / IPTV Smarters) depuis le store de votre TV, Android TV ou téléphone.', gStep2: 'Ouvrez l’application et notez Device ID (adresse MAC) et Device Key, puis entrez-les sur la page d’activation (ou envoyez-les au support) pour activer l’app.', gStep3: 'Dans « Mes détails » ci-dessus, copiez Username, Password et DNS — dans l’app, choisissez Add Xtream Playlist et collez-les, ou collez le lien M3U comme URL de playlist.', gStep4: 'Rechargez ou redémarrez l’app — vos chaînes, films et séries se chargent automatiquement.' });
 
 // See-all-plans CTA
 Object.assign(D.en, { seePlans: 'See all plans →' });
 Object.assign(D.fr, { seePlans: 'Voir tous les forfaits →' });
 
-// My Playlists: setup instructions + all-inclusive packages + Telegram trial
+// My Details: setup instructions + all-inclusive packages + Telegram trial
 Object.assign(D.en, {
   credOwnM3u: 'You are using your own M3U playlist. Copy the M3U link below.',
   copyAll: '📋 Copy all details',

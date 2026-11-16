@@ -544,6 +544,13 @@ test('all-agents trial queue: request queues, agent claims, M3U auto-extracts cr
   assert.equal((await x.call('POST', '/api/login', { username: 'LINEUSER', password: 'LINEPASS' })).status, 200, 'the new trial login works');
 });
 
+test('all-agents trial queue: dedicated dispatch entry takes free-trial credentials and dispatches', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents' }, email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  const d = await x.call('POST', '/api/admin/trialq/direct', { email: 'direct.person@example.com', username: 'DIRECTUSER', password: 'DIRECTPASS', dns: 'http://tv.example:8080', ibo: 'MAC: AA:BB:CC:DD:EE:FF 🎮 device key: XYZ' }, tok);
+  assert.equal(d.status, 200, JSON.stringify(d.json)); assert.equal(d.json.username, 'DIRECTUSER'); assert.equal(d.json.ibo, true);
+});
+
 test('customer totals: admin and customer payloads include total paid and lines', async () => {
   const x = setup(); const tok = await adminToken(x);
   await x.call('PUT', '/api/admin/settings', { orderPackages: [{ id: 'p1x', title: '1 Month', days: 30, devices: 1, price: 10, badge: '', link: '' }] }, tok);

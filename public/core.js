@@ -1967,6 +1967,30 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('trial', `Trial sent to ${c.username} for ${c.name} <${c.email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}${tgSent ? ' · Telegram sent' : ''}`);
         return { ok: true, username: c.username, emailSent: sent.ok, telegramSent: tgSent, telegramLinked: !!tgChat, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours, phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: c.telegram || '' };
       };
+      if (R('POST', '/api/admin/trialq/direct')) { // dedicated staff entry: dispatch free-trial credentials straight to a customer
+        const body2 = body || {};
+        const custId = String(body2.customerId || '');
+        const list = await getCustomers();
+        const c = custId ? list.find((x) => x.id === custId) || null : null;
+        const entry = {
+          email: String(c?.email || body2.email || '').trim(),
+          phone: String(c?.phone || body2.phone || ''),
+          whatsapp: String(c?.whatsapp || body2.whatsapp || ''),
+          telegram: String(c?.telegram || body2.telegram || ''),
+          name: String(c?.name || body2.name || ''),
+          lang: ['en', 'fr'].includes(String(body2.lang || (c ? c.lang : '') || '')) ? String(body2.lang || c.lang) : 'en',
+          username: String(body2.username || (c ? c.username : '') || ''),
+          password: String(body2.password || (c ? c.loginPassword || c.password || '' : '') || ''),
+        };
+        const dns = String(body2.dns || (c ? String(c.dns || '') : '') || '').replace(/\/+$/, '');
+        const m3u = String(body2.m3u || '').trim() || (entry.username && entry.password ? `${dns}/get.php?username=${encodeURIComponent(entry.username)}&password=${encodeURIComponent(entry.password)}&type=m3u_plus&output=ts` : '');
+        const r = await trialSend(entry, m3u);
+        if (r.error) return err(400, r.error);
+        const iboText = String(body2.ibo || '');
+        if (iboText) { try { await tgSend(s, s.telegram && s.telegram.adminChat, `🎮 IBO Player activation — ${entry.name || entry.username}\n${iboText}`); } catch {} }
+        await log('trial', `Dedicated free-trial dispatch via ${entry.email || entry.username}: email ${r.emailSent ? 'sent' : 'skipped'} · telegram ${r.telegramSent ? 'sent' : 'skipped'}`);
+        return ok({ ok: true, ...r, ibo: !!iboText });
+      }
       if (R('GET', '/api/admin/trialq')) {
         const all = (await getTrialQueue()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.at - a.at);
         return ok({ list: all, pending: all.filter((t) => t.status === 'pending').length });
