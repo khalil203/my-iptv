@@ -47,6 +47,10 @@ export default {
     if (url.pathname === '/img') return image(request, url);
     // Short links for TVs (type in the "Downloader" app): /tv or /apk → Android app
     if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
+    // Public landing pages served by the single-page app (clean URLs, no .html)
+    if (url.pathname === '/freetrial' || url.pathname === '/resellers') {
+      return env.ASSETS.fetch(new Request(url.origin + '/index.html', { method: 'GET', headers: request.headers }));
+    }
 
     return env.ASSETS.fetch(request);
   },

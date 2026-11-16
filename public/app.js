@@ -193,6 +193,9 @@ function route() {
   if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
+  const path = location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/freetrial') return renderFreeTrial();
+  if (path === '/resellers') return renderResellers();
   if (!state.token) return wantsSite() ? renderSite() : renderLogin();
   if (isAdminUI()) return renderAdmin();
   return renderUser();
@@ -240,6 +243,7 @@ function trialForm() {
     ${field(t('fullName'), 'name', '', { attrs: 'required autocomplete="name"' })}
     ${field(t('email'), 'email', '', { type: 'email', attrs: 'required autocomplete="email" autocapitalize="none" dir="ltr"' })}
     ${phoneField(t('phone'), 'phone')}
+    ${field(t('telegramId'), 'telegram', '', { ph: '@username', attrs: 'autocapitalize="none" autocomplete="off"', help: t('optional') })}
     ${toggle(t('sameWhatsapp'), 'same', true)}
     <div id="wa-field" style="display:none">${phoneField(t('whatsapp'), 'whatsapp', false)}</div>
     ${state.config?.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : ''}
@@ -247,6 +251,77 @@ function trialForm() {
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">🎁 ${t('getTrial')}</button></div>
   </form>`;
 }
+function renderFreeTrial() {
+  const b = state.config.branding || {}, tr = state.config.trial || {};
+  const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
+  const cap = state.config.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : '';
+  const form = tr.enabled === false
+    ? `<div class="notice warning">${esc(t('trial_off'))}</div>`
+    : `<form data-form="trial" id="ft-form">
+        ${field(t('fullName'), 'name', '', { attrs: 'required autocomplete="name"' })}
+        ${field(t('email'), 'email', '', { type: 'email', attrs: 'required autocomplete="email" autocapitalize="none" dir="ltr"' })}
+        ${phoneField(t('phone'), 'phone')}
+        ${field(t('telegramId'), 'telegram', '', { ph: '@username', attrs: 'autocapitalize="none" autocomplete="off"', help: t('optional') })}
+        ${toggle(t('sameWhatsapp'), 'same', true)}
+        <div id="wa-field" style="display:none">${phoneField(t('whatsapp'), 'whatsapp', false)}</div>
+        ${cap}
+        <div id="trial-err"></div>
+        <button class="btn primary block" style="margin-top:10px">🎁 ${esc(t('getTrial'))}</button>
+      </form>`;
+  $('#app').innerHTML = `<div class="site"><main class="s-doc" style="max-width:560px;margin:0 auto">
+    <a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>
+    <h1>🎁 ${esc(t('trialTitle', { hours: tr.hours }))}</h1>
+    <p class="s-sub">${esc(t('trialIntro'))}</p>
+    <div id="ft-card" class="card" style="padding:18px">${form}</div>
+    <div class="s-cta" style="margin-top:14px;justify-content:flex-start">
+      ${wa ? `<a class="btn wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 ${esc(t('whatsapp'))}</a>` : ''}
+      ${tg ? `<a class="btn" href="https://t.me/${esc(tg)}" target="_blank" rel="noopener">✈️ Telegram</a>` : ''}
+      <a class="btn" href="/" data-act="site-page" data-page="home">${esc(t('backHome'))}</a>
+    </div>
+  </main></div>`;
+  window.scrollTo(0, 0);
+}
+
+function renderResellers() {
+  const b = state.config.branding || {};
+  const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
+  $('#app').innerHTML = `<div class="site"><main class="s-doc" style="max-width:720px;margin:0 auto">
+    <a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>
+    <h1>🤝 ${esc(t('resellerPanel'))}</h1>
+    <p class="s-sub">${esc(t('resellerIntro'))}</p>
+    <div id="rs-body"></div>
+    <div class="card" style="margin-top:16px"><p class="small muted" style="margin:0">${esc(t('resellerProgram'))}</p>
+      <div class="s-cta" style="margin-top:10px;justify-content:flex-start">
+        ${wa ? `<a class="btn wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 ${esc(t('whatsapp'))}</a>` : ''}
+        ${tg ? `<a class="btn" href="https://t.me/${esc(tg)}" target="_blank" rel="noopener">✈️ Telegram</a>` : ''}
+        ${b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a>` : ''}
+      </div></div>
+  </main></div>`;
+  if (state.token && state.role === 'user') loadResellerPanel();
+  else if (state.token) $('#rs-body').innerHTML = `<div class="card" style="padding:18px"><p style="margin-top:0">${esc(t('resellerIntro'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a></div>`;
+  else $('#rs-body').innerHTML = `<div class="card" style="padding:18px"><p style="margin-top:0">${esc(t('resellerSignIn'))}</p><button class="btn primary block" data-act="site-login">${esc(t('signIn'))}</button></div>`;
+  window.scrollTo(0, 0);
+}
+
+async function loadResellerPanel() {
+  const el = $('#rs-body'); if (!el) return;
+  el.innerHTML = `<div class="card" style="padding:18px"><p class="muted small" style="margin:0">${t('loadingDots')}</p></div>`;
+  try {
+    const me = await api('GET', '/api/me');
+    const u = me.user || {};
+    const hist = (u.renewals || []).slice().reverse();
+    const credit = Number(u.credit || u.creditBalance || 0);
+    const rows = hist.length
+      ? hist.map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : (Number(r.days) || 0) + 'd'}</span></div>`).join('')
+      : `<p class="muted small">${esc(t('noPurchases'))}</p>`;
+    el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:48px;height:48px;font-size:18px">${esc(initials(u.name || ''))}</div><div><h2 style="margin:0">${esc(u.name || '')}</h2><div class="muted">${esc(u.username || '')}</div></div><span class="spacer"></span>${pill(u.state || 'active')}</div></div>
+      <div class="card"><h3>${esc(t('creditBalance'))}</h3><div class="list-item"><span style="flex:1">${esc(t('creditBalance'))}</span><b>${credit ? esc(credit) : '—'}</b></div>${(Number(me.totalPaidUsd) || 0) > 0 ? `<div class="list-item"><span style="flex:1">${esc(t('totalPaid'))}</span><b>$${Number(me.totalPaidUsd).toFixed(2)}</b></div>` : ''}</div>
+      <div class="card"><h3>${esc(t('purchaseHistory'))}</h3>${rows}</div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="notice warning">${esc(e.message || 'Could not load your account.')}</div><button class="btn primary" data-act="site-login" style="margin-top:10px">${esc(t('signIn'))}</button>`;
+  }
+}
+
 function renderSetup() {
   const b = state.config.branding;
   $('#app').innerHTML = `<div class="login-wrap"><div class="login-card">${brandHtml(b)}
@@ -1192,10 +1267,19 @@ async function renderUserTab() {
     return;
   }
   if (u.tab === 'account') {
+    const sm = state.user.me.stream;
+    const m3uUrl = sm && sm.dns && sm.u ? (sm.dns + '/get.php?username=' + encodeURIComponent(sm.u) + '&password=' + encodeURIComponent(sm.p || '') + '&type=m3u_plus&output=ts') : '';
+    const sd = sm ? `<div class="card" id="acc-service"><h3>${t('serviceDetails')}</h3>
+        <div class="list-item"><span style="flex:1">${t('username')}</span><b dir="ltr" style="word-break:break-all">${esc(sm.u || '—')}</b></div>
+        <div class="list-item"><span style="flex:1">${t('password')}</span><b dir="ltr" style="word-break:break-all">${esc(sm.p || '—')}</b></div>
+        ${sm.dns ? `<div class="list-item"><span style="flex:1">DNS</span><b dir="ltr" style="word-break:break-all">${esc(sm.dns)}</b></div>` : ''}
+        ${m3uUrl ? `<div class="list-item"><span style="flex:1">${t('m3uOne')}</span><b dir="ltr" style="word-break:break-all;font-size:11px">${esc(m3uUrl)}</b></div><button class="btn block" data-act="copy-el" data-el="acc-m3u" style="margin-top:8px">${t('copyDetails')}</button><div id="acc-m3u" style="display:none">${esc(m3uUrl)}</div>` : ''}
+        <p class="small muted" style="margin-top:8px">IBO Player / TVPlus: enter the DNS and your username/password in the app, then pick your device bundle (1–4 devices).</p></div>` : '';
     el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
         ${user.email ? `<div class="list-item" style="margin-top:12px"><span style="flex:1;min-width:0;overflow-wrap:anywhere" dir="ltr">${esc(user.email)}</span>${user.emailVerified ? `<span class="pill st-active">${t('emVerified')}</span>` : `<button class="btn sm primary" data-act="em-send">${t('emVerify')}</button>`}</div>` : ''}</div>
       <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('linesN')}</span><b>${user.connections}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div>${(state.user.me.totalPaidUsd || 0) > 0 ? `<div class="list-item"><span style="flex:1">${t('totalPaid')}</span><b>$${Number(state.user.me.totalPaidUsd).toFixed(2)}</b></div>` : ''}
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
+      ${sd}
       ${plansCard()}
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-tickets"><div class="row"><h3 style="margin:0;flex:1">${t('supportT')}</h3><button class="btn sm primary" data-act="ticket-new">＋ ${t('newTicket')}</button></div><p class="muted small">${t('loadingDots')}</p></div>
@@ -2080,19 +2164,19 @@ const forms = {
     const o = formToObj(f);
     const phone = fullPhone(f, 'phone'); const wa2 = o.same ? phone : fullPhone(f, 'whatsapp');
     if (!phone || (!o.same && !wa2)) { $('#trial-err').innerHTML = `<div class="err-box">${t('trial_phone')}</div>`; return; }
-    const body = { name: o.name, email: o.email, phone, whatsapp: wa2, lang: getLang(), appUrl: location.origin + location.pathname.replace(/index\.html$/, '') };
+    const body = { name: o.name, email: o.email, phone, whatsapp: wa2, telegram: String(o.telegram || '').trim(), lang: getLang(), appUrl: location.origin + location.pathname.replace(/index\.html$/, '') };
     if (f.captchaAnswer && f.captchaAnswer.value) { body.captchaAnswer = f.captchaAnswer.value; body.captchaId = f.captchaId ? f.captchaId.value : ''; }
     const btn = f.querySelector('button.primary'); btn.disabled = true;
     try {
       const r = await api('POST', '/api/trial', body);
-      const box = $('.modal-body');
-      if (r.queued) { box.innerHTML = `<p>${t('trialQueued')}</p><p class="small muted">${t('trialQueuedSub', { email: esc(o.email) })}</p><button class="btn primary block" data-act="close-modal" style="margin-top:12px">OK</button>`; return; }
+      const box = $('.modal-body') || $('#ft-card'); const onPage = !$('.modal-body'); const closeBtn = onPage ? '' : `<button class="btn primary block" data-act="close-modal" style="margin-top:12px">OK</button>`;
+      if (r.queued) { box.innerHTML = `<div class="notice success"><p style="margin:0 0 6px">${t('trialQueued')}</p><p class="small muted" style="margin:0">${t('trialQueuedSub', { email: esc(o.email) })}</p></div>${closeBtn}`; return; }
       const lines = [`${t('username')}: ${r.username}`, `${t('password')}: ${r.password}`, ...(r.dns ? [`DNS: ${r.dns}`] : []), ...(r.m3u ? [`M3U: ${r.m3u}`] : [])].join('\n');
       const b0 = state.config.branding;
       box.innerHTML = `<p>${r.pending ? t('trialPending') : t('trialShown')}</p><div class="code" dir="ltr" id="trial-creds" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(lines)}</div>
         <div class="row" style="margin-top:10px"><button type="button" class="btn" data-act="copy-el" data-el="trial-creds" style="flex:1">📋 ${t('copy')}</button>${waNum(b0) ? `<a class="btn wa-btn" style="flex:1" href="${esc(waUrl(b0, t('waMsg', { app: b0.appName, u: r.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>
         ${r.emailed ? `<p class="small muted">${t('trialSent', { email: esc(o.email) })}</p>` : ''}
-        <button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>`;
+        <button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>${closeBtn}`;
     } catch (e) { $('#trial-err').innerHTML = e.data?.suggest ? `<div class="err-box">${t('trial_typo', { s: esc(e.data.suggest) })} <button type="button" class="btn sm" data-act="trial-fix" data-email="${esc(e.data.suggest)}">${t('useIt')}</button></div>` : `<div class="err-box">${esc(t(e.message))}</div>`; btn.disabled = false; }
   },
   async tx(f) {
@@ -3183,7 +3267,7 @@ async function adminTrialQueue() {
   const shown = list.filter((x) => ui.f === 'all' || x.status === ui.f);
   return `<p class="small muted">When “<b>All agents queue</b>” is on (Trial &amp; email setup), a customer who taps <b>Start free trial</b> on the website appears here instead of being auto-activated. Any team member with customer access can claim one, paste the M3U line from your panel and send the trial.</p>
     <div class="chips">${[['pending', 'Pending'], ['done', 'Sent'], ['rejected', 'Rejected'], ['all', 'All']].map(([k, n]) => `<a class="${ui.f === k ? 'on' : ''}" data-act="tq-f" data-f="${k}">${n} · ${k === 'all' ? list.length : cnt(k)}</a>`).join('')}</div>
-    ${shown.length ? shown.map((t) => `<div class="card"><div class="row"><div class="avatar">${esc(initials(t.name))}</div><div style="flex:1;min-width:180px"><b>${esc(t.name)}</b> ${t.status === 'pending' ? (t.claimedBy ? `<span class="pill st-expiring">claimed · ${esc(t.claimedBy)}</span>` : '<span class="pill st-open">waiting</span>') : `<span class="pill st-active">${esc(t.status)}</span>`}<div class="small muted">${esc(t.email)}${t.phone ? ' · ' + esc(t.phone) : ''} · ${fmtDT(t.at)}${t.lang ? ' · ' + esc(t.lang.toUpperCase()) : ''}</div></div></div>
+    ${shown.length ? shown.map((t) => `<div class="card"><div class="row"><div class="avatar">${esc(initials(t.name))}</div><div style="flex:1;min-width:180px"><b>${esc(t.name)}</b> ${t.status === 'pending' ? (t.claimedBy ? `<span class="pill st-expiring">claimed · ${esc(t.claimedBy)}</span>` : '<span class="pill st-open">waiting</span>') : `<span class="pill st-active">${esc(t.status)}</span>`}<div class="small muted">${esc(t.email)}${t.phone ? ' · ' + esc(t.phone) : ''}${t.telegram ? ' · ✈️ @' + esc(String(t.telegram).replace(/^@/, '')) : ''} · ${fmtDT(t.at)}${t.lang ? ' · ' + esc(t.lang.toUpperCase()) : ''}</div></div></div>
       ${t.status === 'pending' ? `<form data-form="tq-send" data-id="${esc(t.id)}" style="margin-top:10px">${field('M3U line from your panel', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'required autocapitalize="none" spellcheck="false" dir="ltr"', help: 'Username, password and DNS are read from the link automatically.' })}<div class="row"><button type="button" class="btn" data-act="tq-claim" data-id="${esc(t.id)}">${t.claimedBy ? 'Re-claim' : '✋ Claim for me'}</button><button type="button" class="btn danger" data-act="tq-reject" data-id="${esc(t.id)}">Reject</button><button type="submit" class="btn primary">Send trial</button></div></form>` : `<p class="small muted" style="margin:10px 0 0">${esc(t.handledBy || '')}${t.doneAt ? ' · ' + fmtDT(t.doneAt) : ''}${t.note ? ' · ' + esc(t.note) : ''}</p>`}</div>`).join('') : `<div class="empty"><span class="ic">⚡</span>${list.length ? 'Nothing in this list.' : 'No trial requests yet. They arrive when customers tap “Start free trial” on the website.'}</div>`}`;
 }
 const DISP_KIND = { payment: ['💳', 'st-expiring'], service: ['🛠', 'st-open'], dispute: ['⚠️', 'st-expired'], bug: ['🐞', 'st-open'], other: ['❔', 'st-open'] };
@@ -3219,7 +3303,7 @@ Object.assign(actions, {
   'dis-note': (el) => { modal('Add a note', `<form data-form="dis-note" data-id="${esc(el.dataset.id)}">${field('Note', 'note', '', { type: 'textarea', rows: 3, attrs: 'maxlength="1000"', ph: 'Internal note — visible to the team only' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Add note</button></div></form>`); },
 });
 Object.assign(forms, {
-  async 'tq-send'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/send', { id: f.dataset.id, m3u: f.m3u.value.trim() }); closeModal(); modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 6px"><b>${esc(r.name || '')}</b> got the trial email${r.emailSent ? '' : ' (email NOT sent — check the address and Resend setup)'}.</p><p class="small muted" style="word-break:break-all">App login: <b>${esc(r.username)}</b>${r.dns ? ` · DNS: ${esc(r.dns)}` : ''}</p>${r.m3u ? `<p class="small muted" style="word-break:break-all">M3U: ${esc(r.m3u)}</p>` : ''}</div><button class="btn block" data-act="close-modal">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
+  async 'tq-send'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/send', { id: f.dataset.id, m3u: f.m3u.value.trim() }); closeModal(); const msg = `Your free trial is ready 🎉\n\n👤 Username: ${r.username}\n🔑 Password: ${r.password}${r.dns ? '\n🌐 DNS: ' + r.dns : ''}${r.m3u ? '\n📋 M3U: ' + r.m3u : ''}`; const waDigits = String(r.whatsapp || r.phone || '').replace(/\D/g, ''); const tgUser = String(r.telegram || '').replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, ''); const waHref = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}` : ''; const tgHref = tgUser ? `https://t.me/${tgUser}` : ''; modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 6px"><b>${esc(r.name || '')}</b> got the trial${r.emailSent ? ' email' : ' (email NOT sent — check the address and Resend setup)'}.</p><p class="small muted" style="word-break:break-all">App login: <b>${esc(r.username)}</b>${r.dns ? ` · DNS: ${esc(r.dns)}` : ''}</p>${r.m3u ? `<p class="small muted" style="word-break:break-all">M3U: ${esc(r.m3u)}</p>` : ''}</div><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="tq-creds" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 WhatsApp</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No WhatsApp number on this request">💬 WhatsApp</span>`}${tgHref ? `<a class="btn" style="flex:1" target="_blank" rel="noopener" href="${esc(tgHref)}">✈️ Telegram</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No Telegram ID on this request">✈️ Telegram</span>`}</div><div id="tq-creds" style="display:none">${esc(msg)}</div><button class="btn block" data-act="close-modal" style="margin-top:10px">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'tq-reject'(f) { try { await api('POST', '/api/admin/trialq/reject', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Rejected'); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { toast(tErr(e.message), true); } },
   async 'report-problem'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const img = await pickedImage(f).catch(() => ''); await api('POST', '/api/admin/disputes', { kind: f.kind.value, subject: f.subject.value, details: f.details.value, priority: f.priority.value, image: img }); closeModal(); toast('Sent to the owner & technical manager ✓'); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'dis-resolve'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, status: 'resolved', resolution: f.resolution.value }); closeModal(); toast('Resolved ✓'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },

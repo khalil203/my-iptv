@@ -1207,6 +1207,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const email = String(body.email || '').trim().toLowerCase().slice(0, 120);
         const phone = String(body.phone || '').replace(/[^\d+]/g, '').slice(0, 20);
         const whatsapp = String(body.whatsapp || phone).replace(/[^\d+]/g, '').slice(0, 20);
+        const telegram = String(body.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '').replace(/\?.*$/, '').slice(0, 40);
         if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err(400, 'trial_invalid');
         if (!/^\+\d{8,15}$/.test(phone) || (whatsapp && !/^\+?\d{8,15}$/.test(whatsapp))) return err(400, 'trial_phone');
         { const typo = emailTypo(email); if (typo) return { status: 400, json: { error: 'trial_typo', suggest: typo } }; if (await emailProblem(email)) return err(400, 'trial_bademail'); }
@@ -1228,10 +1229,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         // All-agents queue mode (spec §4): the request goes to the shared panel; an authorized agent claims and processes it.
         if (s.trial.mode === 'agents') {
           const tql = (await store.get('trialqueue')) || [];
-          const entry = { id: uid(6), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
+          const entry = { id: uid(6), name, email, phone, whatsapp, telegram, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
           tql.unshift(entry); await store.put('trialqueue', tql.slice(0, 300));
           await log('trial', `Free trial request queued for ${name} <${email}> (all-agents queue)`);
-          await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for an agent to process it.\n\n${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}\n\nOpen Trial queue in the dashboard, paste the M3U link from your panel and send the trial.`);
+          await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for an agent to process it.\n\n${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\n\nOpen Trial queue in the dashboard, paste the M3U link from your panel and send the trial.`);
           return ok({ ok: true, queued: true, hours: s.trial.hours });
         }
         const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
@@ -1240,7 +1241,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const salt = uid(8);
         const now = Date.now();
         let lineReady = false; let panelError = '';
-        const c = { loginPassword: password, id: uid(8), name, email, phone, whatsapp, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        const c = { loginPassword: password, id: uid(8), name, email, phone, whatsapp, telegram, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         if (s.reseller.enabled) {
           const panel = await panelCall(s, 'trial', { username, password, line_id: '', package: s.trial.package, connections: c.connections, days: 1, months: 1, hours: s.trial.hours, name, phone, note: 'trial' });
           if (!panel.ok && !panel.skipped) { panelError = panel.error || 'unknown error'; await log('trial', `Trial for ${email}: the panel refused (${panelError}). Using a ready line or the waiting list instead.`); }
@@ -1267,7 +1268,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let sent = { ok: false };
         if (lineReady) { const m = accessEmail(s, c, password, 'trial', body.appUrl); sent = await sendEmail(s, email, m.subject, m.html); }
         await log('trial', `Free trial ${username} for ${name} <${email}>${lineReady ? (sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')) : ' · WAITING for a line'}`);
-        const who = `${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}\nApp login: ${username}`;
+        const who = `${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\nApp login: ${username}`;
         if (!lineReady) await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for a line.\n\n${who}\n\n${panelError ? 'The panel API answered: ' + panelError + '\n\n' : ''}Open Customers → Alerts → “Waiting for a line”, tap Edit, paste the M3U link from your panel and save. The customer then gets the login email automatically.`);
         else if (s.trial.notifyAdmin !== false) await notifyAdmin(s, `New free trial: ${name}`, `A free trial was created.\n\n${who}`);
         const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
@@ -1789,14 +1790,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let username = String(entry.username || ln.u || '').trim() || ('t' + rnd(6, '0123456789'));
         let password = String(entry.password || ln.p || '').trim(); if (!password) password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const now = Date.now(); const salt = uid(8);
-        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, lang: ['en', 'fr', 'ar'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, telegram: entry.telegram || '', lang: ['en', 'fr', 'ar'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
         const dns = String(ln.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
         const m = accessEmail(s, c, password, 'trial', body.appUrl);
         const sent = await sendEmail(s, c.email, m.subject, m.html);
         await log('trial', `Trial sent to ${c.username} for ${c.name} <${c.email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}`);
-        return { ok: true, username: c.username, emailSent: sent.ok, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours };
+        return { ok: true, username: c.username, emailSent: sent.ok, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours, phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: c.telegram || '' };
       };
       if (R('GET', '/api/admin/trialq')) {
         const all = (await getTrialQueue()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.at - a.at);
