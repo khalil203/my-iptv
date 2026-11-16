@@ -2579,6 +2579,10 @@ async function fetchText(url) {
   if (bridge()) return bridgeFetch(url, ua);
   if (url.startsWith('https:') || location.protocol === 'http:') { try { const r = await fetch(url); if (r.ok) return await r.text(); } catch {} }
   const base = state.user.me?._stream;
+  // The Worker itself proxies http IPTV panels server-side (the browser can't: mixed content / no CORS).
+  if (base?.proxyToken) {
+    try { const r = await fetch(`/proxy?u=${encodeURIComponent(url)}&t=${encodeURIComponent(base.proxyToken)}`); if (r && r.ok) return r.text(); } catch {}
+  }
   if (base?.relay) { const r = await fetch(`${base.relay}/x?u=${encodeURIComponent(url)}&t=${encodeURIComponent(base.proxyToken)}`).catch(() => null); if (r && r.ok) return r.text(); if (r) throw new Error(t('srcUnreachable')); }
   throw new Error(t('srcNeedApp'));
 }
