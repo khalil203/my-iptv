@@ -521,14 +521,17 @@ test('disputes: staff can file a problem report but cannot open the tracker; own
 test('all-agents trial queue: request queues, agent claims, M3U auto-extracts credentials, trial is emailed', async () => {
   const x = setup(); const tok = await adminToken(x);
   await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents' }, email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);
-  const r = await x.call('POST', '/api/trial', { name: 'Queue Person', email: 'queue.person@example.com', phone: '+212600112233', whatsapp: '+212600112233', lang: 'en', ip: '9.9.9.9' });
+  const r = await x.call('POST', '/api/trial', { name: 'Queue Person', email: 'queue.person@example.com', phone: '+212600112233', whatsapp: '+212600112233', telegram: '@QueuePerson', lang: 'en', ip: '9.9.9.9' });
   assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.queued, true);
 
   const q = await x.call('GET', '/api/admin/trialq', {}, tok);
   assert.equal(q.json.pending, 1); const id = q.json.list[0].id;
+  assert.equal(q.json.list[0].telegram, 'QueuePerson', 'telegram id is stored without the @ prefix');
   assert.equal((await x.call('POST', '/api/admin/trialq/claim', { id }, tok)).status, 200);
   const sent = await x.call('POST', '/api/admin/trialq/send', { id, m3u: 'http://tv.example:8080/get.php?username=LINEUSER&password=LINEPASS&type=m3u_plus' }, tok);
   assert.equal(sent.status, 200, JSON.stringify(sent.json)); assert.equal(sent.json.username, 'LINEUSER');
+  assert.equal(sent.json.telegram, 'QueuePerson', 'dispatch links get the telegram id back');
+  assert.equal(sent.json.whatsapp, '+212600112233', 'dispatch links get the whatsapp number back');
   assert.ok(x.mails.some((m) => m.to[0] === 'queue.person@example.com'), 'the trial email is sent to the requester');
   assert.equal((await x.call('GET', '/api/admin/trialq', {}, tok)).json.pending, 0, 'queue entry is done');
   assert.equal((await x.call('POST', '/api/login', { username: 'LINEUSER', password: 'LINEPASS' })).status, 200, 'the new trial login works');

@@ -194,8 +194,13 @@ function route() {
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
   const path = location.pathname.replace(/\/+$/, '') || '/';
-  if (path === '/freetrial') return renderFreeTrial();
-  if (path === '/resellers') return renderResellers();
+  // Public landing pages live on clean URLs; keep them out of the way of the
+  // sign-in flow and of signed-in users (otherwise route() would redraw them forever).
+  if (!state.showLogin) {
+    if (!state.token && path === '/freetrial') return renderFreeTrial();
+    if (!state.token && path === '/resellers') return renderResellers();
+    if (state.token && path === '/resellers' && !isAdminUI()) return renderResellers();
+  }
   if (!state.token) return wantsSite() ? renderSite() : renderLogin();
   if (isAdminUI()) return renderAdmin();
   return renderUser();
