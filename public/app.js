@@ -2928,6 +2928,18 @@ async function adminPool() {
     <form data-form="pool-add">${field('M3U links, one per line', 'add', '', { type: 'textarea', rows: 4, ph: 'http://your-dns.com:8080/get.php?username=AAA&password=BBB&type=m3u_plus\nhttp://your-dns.com:8080/get.php?username=CCC&password=DDD&type=m3u_plus', attrs: 'required spellcheck="false" autocapitalize="none" dir="ltr"' })}<div class="row"><button class="btn primary">Add lines</button>${d.lines.length ? `<button type="button" class="btn" data-act="pool-export" data-perm="exports">⬇ Export list</button><button type="button" class="btn danger" data-act="pool-clear">Remove all</button>` : ''}</div></form>
     ${d.lines.length ? `<div style="margin-top:12px">${d.lines.slice(0, 30).map((x) => `<div class="list-item"><div style="flex:1;min-width:0" dir="ltr"><b>${esc(x.u)}</b><div class="small muted">${esc(x.dns)}</div></div><button class="btn sm" data-act="pool-del" data-u="${esc(x.u)}">Remove</button></div>`).join('')}${d.lines.length > 30 ? `<p class="small muted">…and ${d.lines.length - 30} more.</p>` : ''}</div>` : ''}</div>`;
 }
+async function persistStripeAccountsFromTable(silent) {
+    const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
+      const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
+      const bTxt = g('balance').trim();
+      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
+        balance: bTxt === '' ? null : Number(bTxt),
+        balanceAt: bTxt === '' ? 0 : (Number(g('balanceAt')) || Date.now()),
+        links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
+    }).filter((a) => a.name);
+    if (!stripeAccounts.length) return;
+    try { await api('PUT', '/api/admin/settings', { stripeAccounts }); if (!silent) toast('Saved ✓'); } catch (e) { toast(e.message, true); }
+}
 Object.assign(actions, {
   'copy-el': async (el) => { const txt = document.getElementById(el.dataset.el)?.textContent || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
   'pool-del': async (el) => { await api('POST', '/api/admin/trialpool/remove', { u: el.dataset.u }); renderAdmin(); },
@@ -3066,18 +3078,6 @@ Object.assign(actions, {
       }
     } catch (e) { out.textContent = e.message; }
     el.disabled = false;
-  },
-  async function persistStripeAccountsFromTable(silent) {
-    const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
-      const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
-      const bTxt = g('balance').trim();
-      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
-        balance: bTxt === '' ? null : Number(bTxt),
-        balanceAt: bTxt === '' ? 0 : (Number(g('balanceAt')) || Date.now()),
-        links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
-    }).filter((a) => a.name);
-    if (!stripeAccounts.length) return;
-    try { await api('PUT', '/api/admin/settings', { stripeAccounts }); if (!silent) toast('Saved ✓'); } catch (e) { toast(e.message, true); }
   },
   'sa-balance-all': async (el) => {
     el.disabled = true; const out = $('#sa-all-bal'); if (out) out.textContent = 'Checking…';
