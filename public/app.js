@@ -2225,6 +2225,30 @@ const actions = {
     const csv = rows.map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     download('subscriptions.csv', '﻿' + csv, 'text/csv');
   },
+  'reseller-add': async (el) => {
+    const pick = $('#rsl-pick');
+    const id = pick && pick.value;
+    if (!id) { toast('Pick a customer first to add them as a reseller', true); return; }
+    try { const r = await api('POST', '/api/admin/reseller/toggle', { id }); toast(r.isReseller ? `Reseller flagged · ${r.rslId}` : 'Reseller flag removed ✓'); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
+  'reseller-toggle': async (el) => {
+    try { const r = await api('POST', '/api/admin/reseller/toggle', { id: el.dataset.id }); toast(r.isReseller ? `Reseller flagged · ${r.rslId}` : 'Reseller flag removed ✓'); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
+  'sheets-save': async (el) => {
+    const url = String(($('#sheets-url') || {}).value || '').trim();
+    const token = String(($('#sheets-token') || {}).value || '').trim();
+    if (!/^https?:\/\//.test(url)) { toast('Paste your Google Sheets webhook URL first', true); return; }
+    await saveSettings({ sheets: { url, token, enabled: true } });
+    renderAdmin();
+  },
+  'sheets-sync': async (el) => {
+    const url = String(($('#sheets-url') || {}).value || '').trim();
+    const r = await api('POST', '/api/admin/reseller/sync', url ? { url } : {});
+    toast('Reseller Google Sheets sync: ' + (r.sent ?? 0) + ' rows ✓');
+    renderAdmin();
+  },
   'sell-rp': () => modal('🤝 Sell a reseller package', resellerSaleForm(state.admin.settings)),
   'add-rp': () => $('#rps').insertAdjacentHTML('beforeend', `<div class="rp-row" data-rp=""><input data-k="name" placeholder="Name"><input data-k="credits" type="number" value="10"><input data-k="price" type="number" step="any" value="0"><button class="btn sm danger" data-act="del-rp">✕</button></div>`),
   'del-rp': (el) => el.closest('.rp-row').remove(),
