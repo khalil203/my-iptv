@@ -1019,3 +1019,10 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 
 /* logo text: never behind a background */
 .brand-name, .brand-name.xl, [data-theme=light] .brand-name, [data-theme=dark] .brand-name { background: none !important; -webkit-text-fill-color: currentColor !important; }
+
+/* horizontal bar charts (gads/resellers) */
+.hbars2 { display: flex; flex-direction: column; gap: 10px; }
+.hbars2 > div { display: flex; align-items: center; gap: 10px; }
+.hbars2 > div > span:first-child { min-width: 52px; font-weight: 800; font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hbar2 { flex: 1; height: 14px; border-radius: 99px; background: var(--elevated); overflow: hidden; border: 1px solid var(--line2); }
+.hbar2 i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary), var(--accent)); box-shadow: 0 0 18px color-mix(in srgb, var(--primary) 55%, transparent); }
