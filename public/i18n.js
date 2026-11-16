@@ -191,3 +191,7 @@ Object.assign(D.fr, { telegramId: 'Identifiant Telegram (facultatif)', optional:
 // How-to activation guide (customer account)
 Object.assign(D.en, { userGuide: 'How to activate (IBO Player)', gStep1: 'Install IBO Player (or IBO Player Pro / IPTV Smarters) from the app store on your Smart TV, Android TV or phone.', gStep2: 'Open the app and note your Device ID (MAC address) and Device Key, then enter them on the activation page (or send them to support) to activate the app.', gStep3: 'In My Playlists above, copy Username, Password and DNS — in the app choose Add Xtream Playlist and paste them, or paste the M3U link directly as the playlist URL.', gStep4: 'Reload / Restart the app — your channels, movies and series load automatically.' });
 Object.assign(D.fr, { userGuide: 'Comment activer (IBO Player)', gStep1: 'Installez IBO Player (ou IBO Player Pro / IPTV Smarters) depuis le store de votre TV, Android TV ou téléphone.', gStep2: 'Ouvrez l’application et notez Device ID (adresse MAC) et Device Key, puis entrez-les sur la page d’activation (ou envoyez-les au support) pour activer l’app.', gStep3: 'Dans « Mes playlists » ci-dessus, copiez Username, Password et DNS — dans l’app, choisissez Add Xtream Playlist et collez-les, ou collez le lien M3U comme URL de playlist.', gStep4: 'Rechargez ou redémarrez l’app — vos chaînes, films et séries se chargent automatiquement.' });
+
+// See-all-plans CTA
+Object.assign(D.en, { seePlans: 'See all plans →' });
+Object.assign(D.fr, { seePlans: 'Voir tous les forfaits →' });

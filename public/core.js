@@ -1461,7 +1461,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (R('POST', '/api/me/agree')) { c.agreedAt = Date.now(); await saveCustomers(list); await log('customer', `${c.username} accepted the terms of service`); return ok({ ok: true, agreed: true }); }
 
         if (R('POST', '/api/me/order')) { // customer asks to buy a package: the admin is told and sends a payment link
-          const pk = (s.orderPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
+          const pk = (s.orderPackages || []).find((p) => p.id === body.pkg) || (s.resellerPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
           const k = 'buyreq:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
           if (n >= 5) return err(429, 'Too many requests today. Please contact us on WhatsApp.');
           await store.put(k, n + 1, 2 * 86400);
@@ -1478,6 +1478,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
+            resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, credits: p.credits || 0, cur: s.resellerCurrency || 'EUR' })),
             buyRequest: c.buyRequest || null,
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {

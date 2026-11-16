@@ -1065,3 +1065,6 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 .sa-link-url { font-size:.8rem; opacity:.9; }
 .sa-link { align-items: center; }
 .sa-bank { max-width: 200px; }
+
+/* order-card section headings */
+.op-sec { margin: 16px 0 8px; font-size: .82rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 800; border-bottom: 1px solid var(--line2); padding-bottom: 6px; }

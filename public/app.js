@@ -1,9 +1,9 @@
-import { createBackend } from './core.js?v=61';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=61';
-import { siteHtml } from './site.js?v=61';
-import { ic } from './icons.js?v=61';
-import { parseM3U, m3uAnswer } from './m3u.js?v=61';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=61';
+import { createBackend } from './core.js?v=62';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=62';
+import { siteHtml } from './site.js?v=62';
+import { ic } from './icons.js?v=62';
+import { parseM3U, m3uAnswer } from './m3u.js?v=62';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=62';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -282,6 +282,7 @@ function renderFreeTrial() {
       ${wa ? `<a class="btn wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 ${esc(t('whatsapp'))}</a>` : ''}
       ${tg ? `<a class="btn" href="https://t.me/${esc(tg)}" target="_blank" rel="noopener">✈️ Telegram</a>` : ''}
       <a class="btn" href="/" data-act="site-page" data-page="home">${esc(t('backHome'))}</a>
+      <a class="btn primary" href="/#pricing">${esc(t('seePlans'))}</a>
     </div>
   </main></div>`;
   window.scrollTo(0, 0);
@@ -1507,11 +1508,23 @@ function setWaFab(b, text) {
   el.href = url;
 }
 function orderCard() {
-  const me = state.user.me; const op = me.orderPackages || []; if (!op.length) return '';
+  const me = state.user.me; const op = me.orderPackages || [];
+  const rp = me.resellerPackages || [];
+  if (!op.length && !rp.length) return '';
   const u = me.user.username; const app = me.branding.appName;
-  return `<div class="card"><h3>💎 ${t('buyTitle')}</h3><div class="plans-grid">${op.map((p) => { const pr = priceTxt(p.price, p.cur); const wa = waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u })); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div><div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
+  const isIbo = (p) => /^ibo/i.test(p.id || '');
+  const std = op.filter((p) => !isIbo(p));
+  const ibo = op.filter((p) => isIbo(p));
+  const waLink = (p, pr) => waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u }));
+  const card = (p) => { const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${p.credits} credit${p.credits === 1 ? '' : 's'}</div>` : ''}<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
     ${me.buyRequest?.pkg === p.id && !me.buyRequest.answeredAt ? `<div class="small pos" style="margin-top:8px">✓ ${t('requested')}</div>` : `<button class="btn sm primary block" style="margin-top:8px" data-act="buy-request" data-pkg="${esc(p.id)}">🛒 ${t('requestBuy')}</button>`}
-    ${wa ? `<a class="btn sm wa-btn block" style="margin-top:6px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`; }).join('')}</div><p class="small muted" style="margin:10px 0 0">${t('buyHow')}</p><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
+    ${wa ? `<a class="btn sm wa-btn block" style="margin-top:6px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`; };
+  const section = (title, list) => list.length ? `<h3 class="op-sec">${esc(title)}</h3><div class="plans-grid">${list.map(card).join('')}</div>` : '';
+  return `<div class="card"><h3>💎 ${t('buyTitle')}</h3>
+    ${section('📡 Subscription packages', std)}
+    ${section('📺 IBO Player · activation only', ibo)}
+    ${section('🤝 Reseller credits', rp)}
+    <p class="small muted" style="margin:10px 0 0">${t('buyHow')}</p><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
   if (state.user.me.orderPackages?.length) return `<div id="acc-plans">${orderCard()}</div>`;
