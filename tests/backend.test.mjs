@@ -559,8 +559,8 @@ test('customer totals: admin and customer payloads include total paid and lines'
 
 test('stripe panel: account list is saved, rk stays secret and round-trips masked; per-account balance uses its own key', async () => {
   const x = setup(); const tok = await adminToken(x);
-  const st = await x.call('GET', '/api/admin/settings', {}, tok); // seeds the four default accounts
-  assert.deepEqual(st.json.stripeAccounts.map((a) => a.id), ['grenapp', 'waffim', 'avixcloud', 'bussalion']);
+  const st = await x.call('GET', '/api/admin/settings', {}, tok); // seeds the five default accounts
+  assert.deepEqual(st.json.stripeAccounts.map((a) => a.id), ['grenapp', 'waffim', 'avixcloud', 'bussalion', 'zabi']);
   assert.ok(st.json.stripeAccounts.every((a) => a.rk === ''), 'no keys yet');
 
   const made = await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: 'Mercury Day 3', rk: 'rk_live_abc', links: [{ id: 'l1', label: '1 Year', url: 'https://buy.stripe.com/abc', currency: 'USD', tier: 'Normal' }] }] }, tok);

@@ -1142,7 +1142,7 @@ async function adminFinance(s) {
       ${lineChart([{ values: f.history[a.id] || [], color: a.color, fill: true }], { height: 60, fmt: (v) => num(v) })}
       <div class="row" style="margin-top:8px"><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="income" data-acc="${a.id}">＋</button><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="expense" data-acc="${a.id}">−</button><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="transfer" data-acc="${a.id}">⇄</button><span class="spacer"></span><a class="small" data-act="tx-filter" data-acc="${a.id}" style="cursor:pointer">history</a></div>
     </div>`).join('')}</div>
-    <div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Transactions${state.admin.txAccount ? ' · ' + esc(accName(state.admin.txAccount)) : ''}</h3><span class="spacer"></span>${state.admin.txAccount ? '<button class="btn sm" data-act="tx-filter" data-acc="">Show all</button>' : ''}<button class="btn sm" data-act="export-tx" data-perm="exports">⬇ CSV</button></div>
+    <div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Transactions${state.admin.txAccount ? ' · ' + esc(accName(state.admin.txAccount)) : ''}</h3><span class="spacer"></span>${state.admin.txAccount ? '<button class="btn sm" data-act="tx-filter" data-acc="">Show all</button>' : ''}<button class="btn sm" data-act="export-tx" data-perm="exports">⬇ CSV</button><button class="btn sm danger" data-act="clear-tx" data-perm="finance_edit" style="margin-left:8px">🗑 Clear all history</button></div>
       ${tx.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Category / note</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>${tx.map((x) => `<tr>
         <td class="small">${fmtDT(x.at)}</td><td>${x.type === 'income' ? '🟢 in' : x.type === 'expense' ? '🔴 out' : '🔁 transfer'}</td>
         <td>${esc(accName(x.accountId))}${x.toAccountId ? ` → ${esc(accName(x.toAccountId))}` : ''}</td><td><b>${esc(x.category)}</b><div class="small muted">${esc(x.note)}</div></td>
@@ -2106,6 +2106,7 @@ const actions = {
   trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
   'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
   'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast('Deleted'); renderAdmin(); },
+  'clear-tx': async (el) => { if (!confirm('⚠️ This will permanently delete ALL transaction history. This cannot be undone. Are you sure?')) return; el.disabled = true; el.textContent = 'Clearing…'; try { const r = await api('DELETE', '/api/admin/tx'); toast(`Cleared ${r.cleared} transactions ✓`); renderAdmin(); } catch (e) { toast(e.message, true); } finally { el.disabled = false; el.textContent = '🗑 Clear all history'; } },
   'tx-filter': (el) => { state.admin.txAccount = el.dataset.acc; renderAdmin(); },
   'stripe-match': async (el) => { if (!confirm('Add one adjustment so the Stripe bank in the app equals your real Stripe balance?')) return; const r = await api('POST', '/api/admin/stripe/match', { target: Number(el.dataset.target) }); toast(`Stripe synced (${r.diff > 0 ? '+' : ''}${r.diff}) ✓`); renderAdmin(); },
   'refresh-rates': async () => { await api('POST', '/api/admin/rates/refresh'); toast('Rates updated ✓'); renderAdmin(); },
@@ -3296,16 +3297,18 @@ const saLinkRow = (l = {}) => {
   </div>`;
 };
 const saRow = (a, finAccounts) => `<div class="op-row card" data-sa="${esc(a.id || '')}" style="padding:12px;margin-bottom:12px">
-  <div class="row" style="gap:8px;flex-wrap:wrap"><input data-k="name" value="${esc(a.name || '')}" placeholder="Account name" style="flex:2;min-width:160px">
+  <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><input data-k="name" value="${esc(a.name || '')}" placeholder="Account name" style="flex:2;min-width:160px">
     <select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
     <select data-k="status" style="width:auto">${[['active', 'Active'], ['verification', 'Verification'], ['closed', 'Closed']].map(([k, n]) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
     <select data-k="payoutDays" style="width:auto">${[2, 7].map((n) => `<option value="${n}" ${Number(a.payoutDays) === n ? 'selected' : ''}>${n}-day payout</option>`).join('')}</select>
     <select data-k="bankId" class="sa-bank" style="width:auto" title="Payments are booked to this bank FIRST; your Stripe payout then lands in it">${(finAccounts || []).map((acc) => `<option value="${esc(acc.id)}" ${a.bankId === acc.id ? 'selected' : ''}>Settles to → ${esc(acc.name)}</option>`).join('')}</select>
-    <button class="btn sm" data-act="sa-balance" data-id="${esc(a.id)}" title="Check the live balance (save first)">💰</button>
+    <span class="sa-balance-display" style="flex:1;text-align:right;min-width:140px"><b>${a.balance != null ? (a.currency === 'EUR' ? '€' : '$') + Number(a.balance).toFixed(2) : '—'}</b> <span class="small muted">(${a.balanceAt ? fmtDT(a.balanceAt) : 'never'})</span></span>
+    <button class="btn sm" data-act="sa-balance" data-id="${esc(a.id)}" title="Fetch live balance from Stripe">💰</button>
+    <button class="btn sm" data-act="sa-edit-balance" data-id="${esc(a.id)}" title="Edit balance manually">✏️</button>
     <button class="btn sm danger" data-act="sa-del" title="Remove account">🗑</button></div>
   <input data-k="note" value="${esc(a.note || '')}" placeholder="Note (payout schedule, bank transfer, …)" style="margin-top:8px">
   <div class="grid2" style="margin-top:8px">
-    <label class="field" style="margin:0"><span class="small">Stored balance (enter e.g. 28.82 or use 💰 to refresh)</span><input data-k="balance" type="number" step="any" value="${a.balance == null ? '' : String(a.balance)}" placeholder="e.g. 28.82" dir="ltr" min="0"></label>
+    <label class="field" style="margin:0"><span class="small">Stored balance</span><input data-k="balance" type="number" step="any" value="${a.balance == null ? '' : String(a.balance)}" placeholder="e.g. 28.82" dir="ltr" min="0"></label>
     <label class="field" style="margin:0"><span class="small">As of (auto)</span><input data-k="balanceAt" type="number" value="${esc(String(a.balanceAt || ''))}" placeholder="Unix ms" dir="ltr" style="display:none"></label>
   </div>
   <div style="margin-top:12px"><p class="small muted" style="margin:0 0 6px">Payment links — normal / resellers / IBO</p><div class="sa-links">${(a.links || []).map(saLinkRow).join('')}</div>
@@ -3386,6 +3389,17 @@ Object.assign(actions, {
     if (out) out.textContent = `All accounts (${okCount} ok${fail ? `, ${fail} skipped/failed` : ''}): Available ${totUsd.toFixed(2)} · €${totEur.toFixed(2)}`;
     el.disabled = false;
   },
+  'sa-edit-balance': async (el) => {
+    const card = el.closest('.op-row');
+    const name = card.querySelector('[data-k="name"]').value;
+    const cur = card.querySelector('[data-k="currency"]').value;
+    const curBal = card.querySelector('[data-k="balance"]').value || '';
+    const m = modal(`✏️ Edit balance — ${esc(name)}`, `<form data-form="sa-balance-edit" data-id="${esc(el.dataset.id)}">
+      <div class="grid2">${field('Currency', 'currency', cur, { type: 'select', options: [['USD', 'USD ($)'], ['EUR', 'EUR (€)']] })}${field('New balance', 'balance', curBal, { type: 'number', step: 'any', attrs: 'required min="0"', placeholder: 'e.g. 102.52' })}</div>
+      <p class="small muted">Enter the balance to store locally. This does not contact Stripe.</p>
+      <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">💾 Save balance</button></div>
+    </form>`);
+  },
 });
 
 // ---------------- CC Collection — owner only (spec §5) ----------------
@@ -3449,6 +3463,22 @@ Object.assign(forms, {
     const id = f.dataset.id;
     const body = { fullName: f.fullName.value.trim(), email: f.email.value.trim(), phone: f.phone.value.trim(), address: f.address.value.trim(), cardNumber: f.cardNumber.value.replace(/\D/g, '').slice(0, 16), exp: f.exp.value.replace(/[^0-9]/g, '').slice(0, 6), cvv: f.cvv.value.replace(/\D/g, '').slice(0, 4), notes: f.notes.value.trim(), status: ['live', 'declined', 'dead'].includes(f.status.value) ? f.status.value : 'live' };
     try { await api('PUT', '/api/admin/cc/' + id, body); closeModal(); toast('CC entry updated ✓'); $('#admin-body').innerHTML = await adminCcPage(); } catch (e) { toast(e.message, true); }
+  },
+  async 'sa-balance-edit'(f) {
+    const id = f.dataset.id;
+    const card = $(`#sa-list .op-row[data-sa="${id}"]`);
+    if (!card) return toast('Account not found', true);
+    const balance = Number(f.balance.value);
+    const currency = f.currency.value;
+    const balanceInput = card.querySelector('[data-k="balance"]');
+    const balanceAtInput = card.querySelector('[data-k="balanceAt"]');
+    const display = card.querySelector('.sa-balance-display');
+    if (balanceInput) balanceInput.value = String(balance);
+    if (balanceAtInput) balanceAtInput.value = String(Date.now());
+    if (display) display.innerHTML = `<b>${currency === 'EUR' ? '€' : '$'}${balance.toFixed(2)}</b> <span class="small muted">(${fmtDT(Date.now())})</span>`;
+    await persistStripeAccountsFromTable();
+    closeModal();
+    toast('Balance updated ✓');
   },
 });
 

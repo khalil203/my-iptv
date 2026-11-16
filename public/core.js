@@ -136,10 +136,11 @@ export const DEFAULT_SETTINGS = () => ({
   },
   // Multi-account Stripe control panel (spec §6): status, payout schedule, package links, optional read-only key for live balances.
     stripeAccounts: [
-      { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [], bankId: 'mercury' },
-    { id: 'waffim', name: 'Waffim Accounting LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
-    { id: 'avixcloud', name: 'Avixcloud LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
-    { id: 'bussalion', name: 'Bussalion LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] },
+      { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [], bankId: 'mercury', balance: 102.52, balanceAt: Date.now() },
+    { id: 'waffim', name: 'Wafinaccounting LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
+    { id: 'avixcloud', name: 'Avixcloud LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
+    { id: 'bussalion', name: 'Bussalion LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
+    { id: 'zabi', name: 'Zabi', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
   ],
   stock: { packCredits: 120, packPrice: 90, lowCreditsAlert: 20 },
   alerts: { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {} }, // customer alerts page
@@ -2877,6 +2878,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (t.stockId) { const st = await getStock(); await store.put('stock', st.filter((x) => x.id !== t.stockId)); }
         await log('finance', `Deleted transaction ${t.type} ${t.amount}`);
         return ok({ ok: true });
+      }
+      if (R('DELETE', '/api/admin/tx')) {
+        const tx = await getTx();
+        const count = tx.length;
+        await store.put('tx', []);
+        await log('finance', `Cleared all ${count} transactions`);
+        return ok({ ok: true, cleared: count });
       }
       // ----- stock / credits -----
       if (R('GET', '/api/admin/stock')) {
