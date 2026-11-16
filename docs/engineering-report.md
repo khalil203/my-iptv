@@ -67,3 +67,9 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 - Final 8 packages applied: 1M 30d/1cr/PkgID1 €29.99 · 3M 90d/3cr/ID2 €49.99 · 6M 180d/6cr/ID3 €59.99 · 1Y 365d/12cr/ID1 €69.99 · 2Y 730d/24cr/ID4 €99.99 · 2D-1Y 365d/24cr/2dev/ID3 €109.99 · 3D-1Y 365d/36cr/3dev/ID4 €129.99 · 4D-1Y 365d/48cr/4dev/ID4 €139.99. EUR is the canonical price; USD mirrors the same numbers (user decision); orderCurrency setting unchanged.
 - One-time auto-migration (pricingV3, runs in getSettings on deploy): rewrites plans + purchase-page packages, preserves IBO packages, preserves any hand-made custom packages/plans, and preserves per-package Stripe routing by matching days×devices (o1y1d→s1y=grenapp, o1y2d→s1y2d=waffim, o1y3d→s1y3d=grenapp verified in a simulated production KV).
 - Migration logged in activity log; admins can still edit everything in Plans & prices afterwards.
+
+## Addendum — Arabic removed everywhere (commit d8ebbaa / SW v55)
+- UI: login, account, trial form, admin panel (bylaws modal now English/French only, customer language selector, WhatsApp language pickers, email language options incl. "Arabic for everyone", newsletter (split/all), order preview, templates LANG3, unsubscribe page), download page (APK page language list).
+- Backend mail/WA template dictionaries (MAIL, AM/activation, RM/renewal, OM/order, NL/newsletter, WhatsApp templates, 2FA/password/reset/payment): all Arabic content deleted with the objects closed correctly. Language whitelists are now en/fr only; existing 'ar' customer records fall back to English.
+- Android offline page: French/English only. Two Arabic strings remain deliberately: the ADULT content-filter regex and the panel error-detection regex (safety filters, not user-facing text).
+- Tests: 44/44 pass (templates preview test updated to en/fr).
