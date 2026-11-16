@@ -290,6 +290,7 @@ function renderFreeTrial() {
 function renderResellers() {
   const b = state.config.branding || {};
   const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
+  setWaFab(b, t('waMsg', { app: b.appName || 'INTPROTO-TV', u: '' }));
   $('#app').innerHTML = `<div class="site"><main class="s-doc" style="max-width:720px;margin:0 auto">
     <a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>
     <h1>🤝 ${esc(t('resellerPanel'))}</h1>
@@ -1182,8 +1183,8 @@ function toggleFav(item) {
 }
 
 async function renderTermsScreen() {
-  setWaFab(null);
-  const me = state.user.me;
+  const me = state.user.me; const wb = (me && me.branding) || state.config.branding;
+  if (wb) setWaFab(wb, t('waMsg', { app: wb.appName, u: me?.user?.username || '' }));
   const b = (me && me.branding) || state.config.branding;
   const closeLink = `<div class="login-foot"><a data-act="logout">${t('logout')}</a></div>`;
   const termsHtml = `<style>.terms-doc{max-height:340px;overflow:auto;padding:12px 4px;text-align:start;font-size:13px;line-height:1.55;color:var(--text)}</style>
@@ -2349,7 +2350,7 @@ const isStandalone = () => { try { return matchMedia('(display-mode: standalone)
 // Visitors see the website. The installed apps, and devices that have signed in before, open the sign-in screen directly.
 const wantsSite = () => !bridge() && (state.forceSite || (!state.showLogin && !isStandalone() && !localStorage.getItem('tvp_known')));
 function renderSite() {
-  setWaFab(null);
+  const b = state.config.branding; setWaFab(b, t('waMsg', { app: b.appName, u: '' }));
   $('#app').innerHTML = siteHtml({ config: state.config, lang: getLang(), langs: LANGS, page: state.sitePage || 'home' });
 }
 
