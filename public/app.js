@@ -256,13 +256,26 @@ function trialForm() {
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">🎁 ${t('getTrial')}</button></div>
   </form>`;
 }
+function publicPkgCard(p, kind, b) {
+  const title = p.title || p.name || 'Package';
+  const pr = priceTxt(p.price, p.cur);
+  const meta = kind === 'reseller' ? t('pkgCreditsN', { n: p.credits }) : [p.days ? t('daysN', { n: p.days }) : '', p.devices ? t('devices', { n: p.devices }) : ''].filter(Boolean).join(' · ');
+  const wa = waUrl(b, `${b.appName || 'INTPROTO-TV'}: ${title} (${pr})`);
+  return `<div class="plan-c trial-pkg">${p.badge ? `<div class="small" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${meta ? `<div class="small muted">${meta}</div>` : ''}${wa ? `<a class="btn sm wa-btn block" style="margin-top:8px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${esc(t('pkgOrderWa'))}</a>` : ''}</div>`;
+}
 function renderFreeTrial() {
   const b = state.config.branding || {}, tr = state.config.trial || {};
   const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
+  const tgInfo = state.config.telegram;
+  const op = state.config.orderPackages || [], rp = state.config.resellerPackages || [];
+  const std = op.filter((p) => p.kind !== 'ibo' && p.kind !== 'reseller'), ibo = op.filter((p) => p.kind === 'ibo');
+  const pkgSec = (title, list, kind) => list.length ? `<h3 class="op-sec">${title}</h3><div class="plans-grid trial-pkgs">${list.map((p) => publicPkgCard(p, kind, b)).join('')}</div>` : '';
+  const tgHint = tgInfo?.link ? `<div class="notice info small" style="margin:0 0 12px">✈️ ${t('trialTgHint', { bot: esc('@' + (tgInfo.bot || 'bot')) })} <a href="${esc(tgInfo.link)}" target="_blank" rel="noopener">${t('trialTgButton')}</a></div>` : '';
   const cap = state.config.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : '';
   const form = tr.enabled === false
     ? `<div class="notice warning">${esc(t('trial_off'))}</div>`
     : `<form data-form="trial" id="ft-form">
+        ${tgHint}
         ${field(t('fullName'), 'name', '', { attrs: 'required autocomplete="name"' })}
         ${field(t('email'), 'email', '', { type: 'email', attrs: 'required autocomplete="email" autocapitalize="none" dir="ltr"' })}
         ${phoneField(t('phone'), 'phone')}
@@ -278,13 +291,16 @@ function renderFreeTrial() {
     <h1>🎁 ${esc(t('trialTitle', { hours: tr.hours }))}</h1>
     <p class="s-sub">${esc(t('trialIntro'))}</p>
     <div id="ft-card" class="card" style="padding:18px">${form}</div>
+    ${(std.length || ibo.length || rp.length) ? `<section style="margin-top:22px"><h2 style="margin:0 0 4px">💎 ${esc(t('pkgAllTitle'))}</h2><p class="muted small" style="margin:0 0 12px">${esc(t('pkgAllText'))}</p>${pkgSec(t('pkgSubs'), std, 'subscription')}${pkgSec(t('pkgIbo'), ibo, 'ibo')}${pkgSec(t('pkgReseller'), rp, 'reseller')}</section>` : ''}
     <div class="s-cta" style="margin-top:14px;justify-content:flex-start">
       ${wa ? `<a class="btn wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 ${esc(t('whatsapp'))}</a>` : ''}
       ${tg ? `<a class="btn" href="https://t.me/${esc(tg)}" target="_blank" rel="noopener">✈️ Telegram</a>` : ''}
+      ${tgInfo?.link ? `<a class="btn" href="${esc(tgInfo.link)}" target="_blank" rel="noopener">✈️ ${esc('@' + (tgInfo.bot || 'bot'))}</a>` : ''}
       <a class="btn" href="/" data-act="site-page" data-page="home">${esc(t('backHome'))}</a>
       <a class="btn primary" href="/#pricing">${esc(t('seePlans'))}</a>
     </div>
   </main></div>`;
+  setWaFab(b, t('waMsg', { app: b.appName || 'INTPROTO-TV', u: '' }));
   window.scrollTo(0, 0);
 }
 
@@ -1227,7 +1243,8 @@ async function adminStock(s) {
 
 // ---------------- trial & email ----------------
 function adminTrial(s) {
-  const tr = s.trial, e = s.email;
+  const tr = s.trial, e = s.email, tg = s.telegram || {};
+  const tgLink = tg.botUsername ? 'https://t.me/' + tg.botUsername : '';
   return `<form data-form="settings"><div class="grid2" style="gap:16px;align-items:start">
     <div class="card"><h3>🎁 Free trial</h3>
       ${field('Who processes free trials?', 'trial.mode', tr.mode || 'auto', { type: 'select', options: [['auto', 'Automatic — a line is created (or taken from the pool) and the email is sent'], ['agents', 'All-agents queue — requests appear in Trial queue; any agent claims one, pastes the M3U and sends it']], help: 'The all-agents queue is for your team to handle. In queue mode nothing is auto-created.' })}
@@ -1249,6 +1266,16 @@ function adminTrial(s) {
       ${field('Days before expiry', 'email.reminderDays', e.reminderDays, { type: 'number', attrs: 'min="1" max="30"' })}
       <div class="row"><input id="test-to" placeholder="send test to…" value="${esc(e.adminEmail)}" data-skip style="flex:1"><button type="button" class="btn" data-act="test-email">Send test</button></div><div id="test-email-out"></div>
     </div></div>
+    <div class="card"><h3>✈️ Telegram (free-trial delivery)</h3>
+      <p class="small muted" style="margin-top:0">Customers open your bot and press Start once; their Telegram is linked to their email/phone. Trials are then sent to them automatically, and every request is copied to your admin chat.</p>
+      <div class="grid2">${field('Bot token', 'telegram.botToken', tg.botToken, { type: 'password', attrs: 'autocomplete="off"', ph: '123456789:AA…', help: 'From @BotFather → /newbot or /token. Stored on the server and masked after saving.' })}${field('Admin chat ID', 'telegram.adminChat', tg.adminChat, { attrs: 'autocapitalize="none"', ph: '123456789', help: 'Send /start to the bot, then open your admin Telegram copy or use the bot to find your chat ID.' })}</div>
+      ${field('Webhook secret (automatic)', 'telegram.webhookSecret', tg.webhookSecret, { type: 'password', attrs: 'autocomplete="off"', help: 'Generated automatically and registered with Telegram by “Connect”. Leave as is.' })}
+      ${toggle('Send trial logins automatically on Telegram', 'telegram.autoTrial', tg.autoTrial !== false, 'When the customer has linked their Telegram, the login is sent there as soon as it is created.')}
+      ${toggle('Notify the admin chat', 'telegram.notifyAdmin', tg.notifyAdmin !== false, 'Copies every trial request and the customer login to your admin chat.')}
+      <div class="row" style="margin-top:10px"><button type="button" class="btn primary" data-act="tg-connect">🔗 Connect &amp; set webhook</button><button type="button" class="btn" data-act="tg-test">Send test</button></div>
+      <div id="tg-out" class="small muted" style="margin-top:8px"></div>
+      ${tgLink ? `<p class="small" style="margin:10px 0 0">Customer link: <a href="${esc(tgLink)}" target="_blank" rel="noopener">${esc(tgLink)}</a>${tg.enabled ? ' · connected' : ' · not connected'}</p>` : ''}
+    </div>
     <div class="card"><h3>🔁 Renewal offer (email to expired customers)</h3>
       <p class="small muted" style="margin-top:0">Uses your renewal template. Sent in the customer's language (Arabic, French, English).</p>
       <div class="grid2">${field('Offer title', 'renewalOffer.title', s.renewalOffer.title)}${field('Price shown', 'renewalOffer.price', s.renewalOffer.price, { ph: '$109.99' })}</div>
@@ -1312,8 +1339,7 @@ async function renderUser() {
   setChatFab(u.me.chatUnread || 0);
   if (state.justPaid) { const how = state.justPaid; state.justPaid = null; setTimeout(() => modal(how === 'done' ? '✅ ' + t('paidTitle') : '💳 ' + t('paidBackTitle'), `<p>${how === 'done' ? t('paidText') : t('paidBackText')}</p><div class="row"><button class="btn primary" data-act="close-modal" style="flex:1">OK</button><button class="btn" data-act="rc-new" style="flex:1">🧾 ${t('rcBtn')}</button></div>`), 400); }
   const tabs = [['home', ic('home'), t('home')], ['account', ic('user'), t('account')]];
-  const canWatchTab = (u.tab === 'live' || u.tab === 'movies' || u.tab === 'series') && d[u.tab];
-  if (u.tab !== 'home' && u.tab !== 'account' && !canWatchTab) u.tab = 'home';
+  if (u.tab !== 'home' && u.tab !== 'account') u.tab = 'home';
   $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
     <div class="ubody" id="ubody"></div>
     <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}<div class="bnav-tail"><button class="bnav-sup" data-act="goto-acc" data-to="acc-plans"><span class="ic">${ic('card')}</span>${t('managePlan')}</button><button class="bnav-sup" data-act="ticket-new"><span class="ic">${ic('chat')}</span>${t('contactSup')}</button></div></nav></div>`;
@@ -1335,8 +1361,6 @@ async function renderUserTab() {
   const u = state.user; const el = $('#ubody');
   const { user, dashboard: d, branding: b } = u.me;
   if (u.tab === 'home') {
-    if (!u.prefetched && !blockedScreen()) { u.prefetched = true; setTimeout(() => { const d = u.me.dashboard; [d.live && 'get_live_categories', d.movies && 'get_vod_categories', d.series && 'get_series_categories'].filter(Boolean).forEach((a) => xt(a).then((cats) => { const first = cats?.[0]?.category_id; if (first && a === 'get_live_categories') xt('get_live_streams', { category_id: first }).catch(() => {}); }).catch(() => {})); loadHls().catch(() => {}); }, 800); }
-    const favs = d.favorites ? getFavs() : [];
     const renew = b.supportUrl ? `<a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${t('renewNow')}</a>` : t('contactRenew');
     const trialLeft = user.isTrial && user.state !== 'expired';
     pullNativePos();
@@ -1353,12 +1377,9 @@ async function renderUserTab() {
         <div class="dash-mini" data-act="goto-acc" data-to="acc-devices" tabindex="0"><span class="chip-ic ok">${ic('devices')}</span><div><span class="dp-l">${t('connectedDev')}</span><b id="dash-dev">– / ${esc(user.connections)}</b></div></div>
         <div class="dash-mini" data-act="goto-acc" data-to="acc-tickets" tabindex="0"><span class="chip-ic">${ic('chat')}</span><div><span class="dp-l">${t('supportT')}</span><b id="dash-tk">–</b></div></div>
       </div>
-      <div class="tiles big">${d.live ? `<div class="tile t-live" data-act="utab" data-tab="live" tabindex="0">${ic('tv', 34)}<b>${t('liveTv')}</b></div>` : ''}${d.movies ? `<div class="tile t-movies" data-act="utab" data-tab="movies" tabindex="0">${ic('film', 34)}<b>${t('movies')}</b></div>` : ''}${d.series ? `<div class="tile t-series" data-act="utab" data-tab="series" tabindex="0">${ic('series', 34)}<b>${t('series')}</b></div>` : ''}</div>
       <h3>${t('quick')}</h3>
       <div class="quick"><a data-act="utab" data-tab="account" tabindex="0">${ic('card')}<span>${t('managePlan')}</span></a><a data-act="goto-acc" data-to="acc-devices" tabindex="0">${ic('devices')}<span>${t('devicesT')}</span></a><a data-act="ticket-new" tabindex="0">${ic('chat')}<span>${t('contactSup')}</span></a>${d.ownPlaylists !== false ? `<a data-act="goto-acc" data-to="acc-sources" tabindex="0">${ic('list')}<span>${t('srcT')}</span></a>` : ''}</div>
-      ${user.isTrial || user.state !== 'active' ? plansCard() : ''}
-      ${libraryHtml()}
-      ${favs.length ? `<h3>${t('favorites')}</h3>${itemsGrid(favs)}` : ''}`;
+      ${user.isTrial || user.state !== 'active' ? plansCard() : ''}`;
     loadDashCounts();
     return;
   }
@@ -1513,11 +1534,11 @@ function orderCard() {
   const rp = me.resellerPackages || [];
   if (!op.length && !rp.length) return '';
   const u = me.user.username; const app = me.branding.appName;
-  const isIbo = (p) => /^ibo/i.test(p.id || '');
+  const isIbo = (p) => p.kind === 'ibo' || /^ibo/i.test(p.id || '');
   const std = op.filter((p) => !isIbo(p));
   const ibo = op.filter((p) => isIbo(p));
-  const waLink = (p, pr) => waUrl(me.branding, t('waBuy', { app, pkg: p.title, price: pr, u }));
-  const card = (p) => { const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(p.title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${p.credits} credit${p.credits === 1 ? '' : 's'}</div>` : ''}<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>
+  const waLink = (p, pr) => waUrl(me.branding, t('waBuy', { app, pkg: p.title || p.name, price: pr, u }));
+  const card = (p) => { const title = p.title || p.name || 'Package'; const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${p.credits} credit${p.credits === 1 ? '' : 's'}</div>` : ''}${p.days ? `<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>` : ''}
     ${me.buyRequest?.pkg === p.id && !me.buyRequest.answeredAt ? `<div class="small pos" style="margin-top:8px">✓ ${t('requested')}</div>` : `<button class="btn sm primary block" style="margin-top:8px" data-act="buy-request" data-pkg="${esc(p.id)}">🛒 ${t('requestBuy')}</button>`}
     ${wa ? `<a class="btn sm wa-btn block" style="margin-top:6px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`; };
   const section = (title, list) => list.length ? `<h3 class="op-sec">${esc(title)}</h3><div class="plans-grid">${list.map(card).join('')}</div>` : '';
@@ -1528,7 +1549,7 @@ function orderCard() {
     <p class="small muted" style="margin:10px 0 0">${t('buyHow')}</p><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
-  if (state.user.me.orderPackages?.length) return `<div id="acc-plans">${orderCard()}</div>`;
+  if (state.user.me.orderPackages?.length || state.user.me.resellerPackages?.length) return `<div id="acc-plans">${orderCard()}</div>`;
   const me = state.user.me; if (!me.plans?.length) return '';
   const sup = me.branding.supportUrl;
   return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
@@ -2110,6 +2131,25 @@ const actions = {
     const r = await api('POST', '/api/admin/email/test', { to: $('#test-to').value }).catch((e) => ({ ok: false, error: e.message }));
     out.innerHTML = `<div class="notice ${r.ok ? 'success' : 'danger'}" style="margin-top:10px">${r.ok ? '✅ Test email sent' : '❌ ' + esc(r.error || 'Failed')}</div>`;
   },
+  'tg-connect': async (el) => {
+    const out = $('#tg-out'); if (!out) return; out.innerHTML = '<div class="spinner"></div>';
+    const btn = el; btn.disabled = true;
+    try {
+      await saveSettings(formToObj($('form[data-form=settings]')), true);
+      const r = await api('POST', '/api/admin/telegram/setup', { url: location.origin }).catch((e) => ({ ok: false, error: e.message }));
+      out.innerHTML = r.ok ? `<div class="notice success">✅ Connected${r.botUsername ? ' as @' + esc(r.botUsername) : ''}${r.webhook ? ' · webhook set' : ''}</div>` : `<div class="notice danger">❌ ${esc(r.error || 'Connection failed')}</div>`;
+      if (r.ok) setTimeout(renderAdmin, 900);
+    } finally { btn.disabled = false; }
+  },
+  'tg-test': async (el) => {
+    const out = $('#tg-out'); if (!out) return; out.innerHTML = '<div class="spinner"></div>';
+    const btn = el; btn.disabled = true;
+    try {
+      await saveSettings(formToObj($('form[data-form=settings]')), true);
+      const r = await api('POST', '/api/admin/telegram/test', {}).catch((e) => ({ ok: false, error: e.message }));
+      out.innerHTML = r.ok ? '<div class="notice success">✅ Test message sent to the admin chat</div>' : `<div class="notice danger">❌ ${esc(r.error || 'Failed')}</div>`;
+    } finally { btn.disabled = false; }
+  },
   'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
   logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); document.body.className = ''; await refreshConfig(); route(); },
@@ -2217,7 +2257,7 @@ const actions = {
   backup: async () => { const d = await api('GET', '/api/admin/backup'); download(`iptv-backup-${isoDay(Date.now())}.json`, JSON.stringify(d, null, 2), 'application/json'); },
   'reset-demo': () => { if (!confirm('Erase all demo data?')) return; Object.keys(localStorage).filter((k) => k.startsWith('tvp_')).forEach((k) => localStorage.removeItem(k)); location.reload(); },
   // user
-  utab: (el) => { state.user.tab = el.dataset.tab; state.user.q = ''; state.user.limit = 120; window.scrollTo(0, 0); renderUser(); },
+  utab: (el) => { state.user.tab = el.dataset.tab === 'account' ? 'account' : 'home'; state.user.q = ''; state.user.limit = 120; window.scrollTo(0, 0); renderUser(); },
   ucat: (el) => { state.user.cat[state.user.tab] = el.dataset.cat; state.user.limit = 120; renderUserTab(); },
   more: () => { state.user.limit += 120; renderUserTab(); },
   'open-item': (el, e) => { if (e.target.closest('.fav')) return; openItem(JSON.parse(el.dataset.item)); },
@@ -2270,10 +2310,12 @@ const forms = {
     try {
       const r = await api('POST', '/api/trial', body);
       const box = $('.modal-body') || $('#ft-card'); const onPage = !$('.modal-body'); const closeBtn = onPage ? '' : `<button class="btn primary block" data-act="close-modal" style="margin-top:12px">OK</button>`;
-      if (r.queued) { box.innerHTML = `<div class="notice success"><p style="margin:0 0 6px">${t('trialQueued')}</p><p class="small muted" style="margin:0">${t('trialQueuedSub', { email: esc(o.email) })}</p></div>${closeBtn}`; return; }
-      const lines = [`${t('username')}: ${r.username}`, `${t('password')}: ${r.password}`, ...(r.dns ? [`DNS: ${r.dns}`] : []), ...(r.m3u ? [`M3U: ${r.m3u}`] : [])].join('\n');
+      if (r.queued) { const tgq = r.telegram || state.config.telegram; const tgStart = r.telegram?.start || tgq?.link; box.innerHTML = `<div class="notice success"><p style="margin:0 0 6px">${t('trialQueued')}</p><p class="small muted" style="margin:0">${t('trialQueuedSub', { email: esc(o.email) })}</p></div>${tgStart ? `<p class="small muted" style="margin-top:10px">${t('trialTgNotLinked')} <a href="${esc(tgStart)}" target="_blank" rel="noopener">${t('trialTgOpen')}</a></p>` : ''}${closeBtn}`; return; }
+      const lines = [`Username: ${r.username}`, `Password: ${r.password}`, `DNS: ${r.dns || '—'}`, `M3U: ${r.m3u || '—'}`].join('\n');
       const b0 = state.config.branding;
-      box.innerHTML = `<p>${r.pending ? t('trialPending') : t('trialShown')}</p><div class="code" dir="ltr" id="trial-creds" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(lines)}</div>
+      const tg = r.telegram || {};
+      const tgLine = r.pending ? '' : tg.sent ? `<p class="small pos" style="margin:8px 0 0">${t('trialTgSent')}</p>` : tg.link ? `<p class="small muted" style="margin:8px 0 0">${t('trialTgNotLinked')} <a href="${esc(tg.link)}" target="_blank" rel="noopener">${t('trialTgOpen')}</a></p>` : '';
+      box.innerHTML = `<p>${r.pending ? t('trialPending') : t('trialShown')}</p><div class="code" dir="ltr" id="trial-creds" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(lines)}</div>${tgLine}
         <div class="row" style="margin-top:10px"><button type="button" class="btn" data-act="copy-el" data-el="trial-creds" style="flex:1">📋 ${t('copy')}</button>${waNum(b0) ? `<a class="btn wa-btn" style="flex:1" href="${esc(waUrl(b0, t('waMsg', { app: b0.appName, u: r.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>
         ${r.emailed ? `<p class="small muted">${t('trialSent', { email: esc(o.email) })}</p>` : ''}
         <button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>${closeBtn}`;
@@ -2468,18 +2510,6 @@ function savePos(kind, id, pos, dur) {
   const l = getHist(); const h = l.find((x) => x.kind === kind && String(x.id) === String(id)); if (!h) return;
   h.pos = Math.floor(pos); h.dur = Math.floor(dur); h.at = Date.now(); putHist(l);
 }
-function libraryHtml() {
-  if (blockedScreen()) return '';
-  const l = getHist();
-  const cont = l.filter((x) => x.kind !== 'live' && x.pos > 30 && x.dur && x.pos < x.dur * 0.95).slice(0, 8);
-  const recent = l.filter((x) => x.kind === 'live').slice(0, 12);
-  if (!cont.length && !recent.length) return '';
-  const row = (x) => `<div class="cw" data-act="open-item" data-item="${esc(JSON.stringify({ kind: x.kind, id: x.id, name: x.name, icon: x.icon, ext: x.ext }))}" tabindex="0"><div class="cw-play">▶</div><div style="flex:1;min-width:0"><b>${esc(x.name)}</b><div class="prog" style="margin-top:8px"><i style="width:${Math.round((x.pos / x.dur) * 100)}%;animation:none"></i></div><div class="small muted" dir="ltr">${fmtT(x.pos)} / ${fmtT(x.dur)}</div></div></div>`;
-  return `${cont.length ? `<h3>${t('continueW')}</h3><div class="cw-list">${cont.map(row).join('')}</div>` : ''}
-    ${recent.length ? `<h3>${t('recentCh')}</h3>${itemsGrid(recent.map((x) => ({ kind: 'live', id: x.id, name: x.name, icon: x.icon })))}` : ''}
-    <p style="margin:-4px 0 16px"><a href="#" class="small muted" data-act="hist-clear">${t('clearHist')}</a></p>`;
-}
-
 // ---------------- parental PIN (kept on this device only) ----------------
 const pinKey = () => 'tvp_pin_' + (state.user.me?.user?.username || '');
 const getPin = () => localStorage.getItem(pinKey()) || '';
@@ -2709,17 +2739,31 @@ function sourcesCard() {
   const list = getSources(); const act = activeSrc(); const app = me.branding.appName;
   const row = (id, name, tag, canDel) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(name)}</b>${tag ? ` <span class="tagp">${tag}</span>` : ''}</div>${act === id ? `<span class="pill st-active">${t('srcActive')}</span>` : `<button class="btn sm" data-act="src-use" data-id="${esc(id)}">${t('srcUse')}</button>`}${canDel ? `<button class="btn sm ghost" data-act="src-del" data-id="${esc(id)}" aria-label="${t('srcRemove')}">✕</button>` : ''}</div>`;
   const st = me.stream;
-  const m3uUrl = st && st.dns && st.u ? (st.dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts') : '';
-  const svcRow = (label, value, key) => `<div class="svc-row"><span class="svc-l">${esc(label)}</span><b class="svc-v" dir="ltr">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="svc-${key}" aria-label="Copy ${esc(label)}" title="Copy">⧉</button><div id="svc-${key}" style="display:none">${esc(value)}</div></div>`;
-  const svc = st ? `<div class="svc-box">
-      ${svcRow(t('username'), st.u || '—', 'u')}
-      ${svcRow(t('password'), st.p || '—', 'p')}
-      ${st.dns ? svcRow('DNS', st.dns, 'dns') : ''}
-      ${m3uUrl ? svcRow('M3U', m3uUrl, 'm3u') : ''}
-      <p class="small muted" style="margin:10px 2px 0">IBO Player / TVPlus: enter the DNS and your username/password in the app, then pick your device bundle (1–4 devices).</p></div>` : '';
+  const src = list.find((x) => x.id === act);
+  const m3uOnly = src?.type === 'm3u';
+  const dns = m3uOnly ? '' : String(st?.dns || st?.server || '').replace(/\/+$/, '');
+  const u = m3uOnly ? '—' : (st?.u || '—');
+  const p = m3uOnly ? '—' : (st?.p || '—');
+  const m3uUrl = m3uOnly ? (src.url || '—') : (dns && st?.u && st?.p ? dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts' : '—');
+  const credLine = (label, value, key) => `<li><span class="cred-k">${label}</span><b class="cred-v" id="cred-${key}" dir="ltr">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="cred-${key}" aria-label="Copy ${label}" title="Copy">⧉</button></li>`;
+  const allCreds = `Username: ${u}\nPassword: ${p}\nDNS: ${dns || '—'}\nM3U: ${m3uUrl}`;
+  const svc = st ? `<div class="svc-box creds">
+      ${m3uOnly ? `<p class="small muted" style="margin:0 0 4px">${t('credOwnM3u')}</p>` : ''}
+      <ul class="cred-list">
+        ${credLine('Username', u, 'u')}
+        ${credLine('Password', p, 'p')}
+        ${credLine('DNS', dns || '—', 'dns')}
+        ${credLine('M3U', m3uUrl, 'm3u')}
+      </ul>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="cred-all">${t('copyAll')}</button></div><div id="cred-all" style="display:none">${esc(allCreds)}</div>
+      <details class="setup-steps" open><summary>📲 ${t('setupTitle')}</summary>
+        <h4>${t('setupXtream')}</h4><ol class="guide-ol"><li>${t('setupX1')}</li><li>${t('setupX2')}</li><li>${t('setupX3')}</li><li>${t('setupX4')}</li></ol>
+        <h4>${t('setupM3u')}</h4><ol class="guide-ol"><li>${t('setupM1')}</li><li>${t('setupM2')}</li><li>${t('setupM3')}</li></ol>
+        <p class="small muted" style="margin:10px 0 0">${t('setupHint')}</p>
+      </details></div>` : '';
   const canOwn = me.dashboard.ownPlaylists !== false;
   return `<div class="card" id="acc-sources"><h3>${t('srcT')}</h3><p class="muted small" style="margin-top:0">${t('srcText')}</p>
-    ${row('', t('srcMain', { app }), '', false)}${svc}${list.map((x) => row(x.id, x.name, x.type === 'xtream' ? 'Xtream' : 'M3U', true)).join('')}
+    ${row('', t('srcMain', { app }), '', false)}${list.map((x) => row(x.id, x.name, x.type === 'xtream' ? 'Xtream' : 'M3U', true)).join('')}${svc}
     ${canOwn ? `<div class="row" style="margin-top:12px"><button class="btn" data-act="src-add" data-type="xtream">＋ Xtream Codes</button><button class="btn" data-act="src-add" data-type="m3u">＋ M3U</button></div>` : ''}</div>`;
 }
 // Android / TV app: the native player remembers the position; this brings it back for "Continue watching".
@@ -3454,7 +3498,7 @@ Object.assign(actions, {
   'dis-note': (el) => { modal('Add a note', `<form data-form="dis-note" data-id="${esc(el.dataset.id)}">${field('Note', 'note', '', { type: 'textarea', rows: 3, attrs: 'maxlength="1000"', ph: 'Internal note — visible to the team only' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Add note</button></div></form>`); },
 });
 Object.assign(forms, {
-  async 'tq-send'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/send', { id: f.dataset.id, m3u: f.m3u.value.trim() }); closeModal(); const msg = `Your free trial is ready 🎉\n\n👤 Username: ${r.username}\n🔑 Password: ${r.password}${r.dns ? '\n🌐 DNS: ' + r.dns : ''}${r.m3u ? '\n📋 M3U: ' + r.m3u : ''}`; const waDigits = String(r.whatsapp || r.phone || '').replace(/\D/g, ''); const tgUser = String(r.telegram || '').replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, ''); const waHref = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}` : ''; const tgHref = tgUser ? `https://t.me/${tgUser}` : ''; modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 6px"><b>${esc(r.name || '')}</b> got the trial${r.emailSent ? ' email' : ' (email NOT sent — check the address and Resend setup)'}.</p><p class="small muted" style="word-break:break-all">App login: <b>${esc(r.username)}</b>${r.dns ? ` · DNS: ${esc(r.dns)}` : ''}</p>${r.m3u ? `<p class="small muted" style="word-break:break-all">M3U: ${esc(r.m3u)}</p>` : ''}</div><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="tq-creds" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 WhatsApp</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No WhatsApp number on this request">💬 WhatsApp</span>`}${tgHref ? `<a class="btn" style="flex:1" target="_blank" rel="noopener" href="${esc(tgHref)}">✈️ Telegram</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No Telegram ID on this request">✈️ Telegram</span>`}</div><div id="tq-creds" style="display:none">${esc(msg)}</div><button class="btn block" data-act="close-modal" style="margin-top:10px">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
+  async 'tq-send'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/send', { id: f.dataset.id, m3u: f.m3u.value.trim() }); closeModal(); const msg = `Your free trial is ready 🎉\n\nUsername: ${r.username}\nPassword: ${r.password}\nDNS: ${r.dns || '—'}\nM3U: ${r.m3u || '—'}`; const waDigits = String(r.whatsapp || r.phone || '').replace(/\D/g, ''); const tgUser = String(r.telegram || '').replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, ''); const waHref = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}` : ''; const tgHref = tgUser ? `https://t.me/${tgUser}` : ''; modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 6px"><b>${esc(r.name || '')}</b> got the trial${r.emailSent ? ' email' : ' (email NOT sent — check the address and Resend setup)'}.</p><p class="small muted" style="word-break:break-all">Username: <b>${esc(r.username)}</b>${r.dns ? ` · DNS: ${esc(r.dns)}` : ''}</p>${r.m3u ? `<p class="small muted" style="word-break:break-all">M3U: ${esc(r.m3u)}</p>` : ''}${r.telegramSent ? '<p class="small pos" style="margin:6px 0 0">✈️ Sent on Telegram ✓</p>' : state.config.telegram?.link ? `<p class="small muted" style="margin:6px 0 0">Telegram not linked. Send the bot link: <a href="${esc(state.config.telegram.link)}" target="_blank" rel="noopener">${esc(state.config.telegram.link)}</a></p>` : ''}</div><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="tq-creds" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 WhatsApp</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No WhatsApp number on this request">💬 WhatsApp</span>`}${tgHref ? `<a class="btn" style="flex:1" target="_blank" rel="noopener" href="${esc(tgHref)}">✈️ Telegram</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No Telegram ID on this request">✈️ Telegram</span>`}</div><div id="tq-creds" style="display:none">${esc(msg)}</div><button class="btn block" data-act="close-modal" style="margin-top:10px">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'tq-reject'(f) { try { await api('POST', '/api/admin/trialq/reject', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Rejected'); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { toast(tErr(e.message), true); } },
   async 'report-problem'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const img = await pickedImage(f).catch(() => ''); await api('POST', '/api/admin/disputes', { kind: f.kind.value, subject: f.subject.value, details: f.details.value, priority: f.priority.value, image: img }); closeModal(); toast('Sent to the owner & technical manager ✓'); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'dis-resolve'(f) { try { await api('POST', '/api/admin/disputes/update', { id: f.dataset.id, status: 'resolved', resolution: f.resolution.value }); closeModal(); toast('Resolved ✓'); $('#admin-body').innerHTML = await adminDisputes(); } catch (e) { toast(tErr(e.message), true); } },

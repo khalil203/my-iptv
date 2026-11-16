@@ -1038,6 +1038,16 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 .svc-l { flex: 0 0 88px; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .svc-v { flex: 1; min-width: 0; word-break: break-all; font-size: .9rem; user-select: all; }
 .svc-c { border-radius: 8px; flex: 0 0 auto; }
+.cred-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.cred-list li { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-radius: 10px; }
+.cred-list li:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.cred-k { flex: 0 0 82px; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.cred-v { flex: 1; min-width: 0; word-break: break-all; font-size: .9rem; user-select: all; }
+.setup-steps { margin-top: 10px; border-top: 1px solid var(--line2); padding-top: 10px; }
+.setup-steps summary { cursor: pointer; font-weight: 800; color: var(--text); }
+.setup-steps h4 { margin: 12px 0 6px; font-size: .85rem; color: var(--accent); }
+.setup-steps .guide-ol { gap: 5px; font-size: .86rem; }
+@media (max-width: 560px) { .cred-k { flex-basis: 70px; } .cred-v { font-size: .82rem; } }
 .guide-ol { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.55; }
 @media (max-width: 899px) { .bnav-tail { display: none; } }
 

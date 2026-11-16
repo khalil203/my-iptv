@@ -1,16 +1,23 @@
 // Automated checks for the backend (run: node --test tests/). Uses an in-memory store and made-up test data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor } from '../public/core.js';
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 function setup() {
-  const db = new Map(); const mails = []; const calls = [];
+  const db = new Map(); const mails = []; const calls = []; const tg = [];
   const store = { get: async (k) => { const v = db.get(k); if (!v) return null; if (v.e && v.e < Date.now()) { db.delete(k); return null; } return JSON.parse(v.v); }, put: async (k, v, ttl) => { db.set(k, { v: JSON.stringify(v), e: ttl ? Date.now() + ttl * 1000 : 0 }); }, del: async (k) => { db.delete(k); } };
-  const fetchFn = async (url, init) => { calls.push(url); if (String(url).includes('api.resend.com')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm1' }) }; } return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
+  const fetchFn = async (url, init) => {
+    calls.push(url);
+    if (String(url).includes('api.resend.com')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm1' }) }; }
+    if (String(url).includes('api.telegram.org')) { tg.push(JSON.parse(init.body || '{}')); return { ok: true, status: 200, json: async () => ({ ok: true, result: { username: 'testbot' } }) }; }
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
+  };
   db.set('settings', { v: JSON.stringify({ security: { force2fa: false, captcha: false } }), e: 0 });
   const be = createBackend({ store, fetchFn, mode: 'server' });
   const call = (method, path, body, token, query) => be.handle({ method, path, body: body || {}, token, query: query || {} });
-  return { db, store, mails, calls, be, call };
+  return { db, store, mails, calls, tg, be, call };
 }
 async function adminToken(x) { const r = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' }); assert.equal(r.status, 200); return r.json.token; }
 async function signBylaws(x, token) {
@@ -856,4 +863,60 @@ test('owner reset maintenance: burned Iptv username bucket is flushed, IP bucket
   // IP buckets are untouched (lockout still works for abuse)
   const res2 = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv', ip: '1.2.3.4' });
   assert.equal(res2.status, 429, 'IP bucket must still enforce the lockout');
+});
+
+test('telegram: bot setup, /start linking, and automatic trial delivery', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  assert.equal((await x.call('PUT', '/api/admin/settings', {
+    trial: { enabled: true, mode: 'auto', hours: 24 },
+    telegram: { enabled: true, botToken: '123456:test-token_abc', adminChat: '999', webhookSecret: 's3cret', autoTrial: true, notifyAdmin: true },
+  }, tok)).status, 200);
+  const cfg = await x.call('GET', '/api/config');
+  assert.equal(cfg.status, 200);
+  assert.ok(Array.isArray(cfg.json.orderPackages), 'all order packages are exposed');
+  assert.ok(cfg.json.orderPackages.every((p) => p.kind === 'ibo' || p.kind === 'subscription'));
+  assert.ok(Array.isArray(cfg.json.resellerPackages), 'reseller packages are exposed');
+  assert.equal(cfg.json.telegram.link, '', 'the public link appears only after the bot is connected');
+
+  const setupRes = await x.call('POST', '/api/admin/telegram/setup', { url: 'https://app.example.com' }, tok);
+  assert.equal(setupRes.status, 200, JSON.stringify(setupRes.json));
+  assert.equal(setupRes.json.webhook, 'https://app.example.com/api/telegram/webhook');
+  assert.ok(x.calls.some((u) => u.includes('/setWebhook')), 'the webhook is registered with Telegram');
+  const cfg2 = (await x.call('GET', '/api/config')).json;
+  assert.equal(cfg2.telegram.bot, 'testbot');
+  assert.equal(cfg2.telegram.link, 'https://t.me/testbot');
+
+  const start = await x.call('POST', '/api/telegram/webhook', { __tgSecret: 's3cret', message: { chat: { id: 555 }, from: { username: 'cust' }, text: '/start trial.person@example.com' } });
+  assert.equal(start.status, 200);
+  const bad = await x.call('POST', '/api/telegram/webhook', { __tgSecret: 'wrong', message: { chat: { id: 1 }, text: '/start x@y.com' } });
+  assert.equal(bad.status, 403, 'a bad secret is refused');
+
+  x.db.set('trialpool', { v: JSON.stringify([{ u: 'line1', p: 'pass1', dns: 'http://dns.example:8080' }]), e: 0 });
+  const tr = await x.call('POST', '/api/trial', { name: 'Trial Person', email: 'trial.person@example.com', phone: '+212600000000', whatsapp: '+212600000000', telegram: 'cust' });
+  assert.equal(tr.status, 200, JSON.stringify(tr.json));
+  assert.equal(tr.json.telegram.sent, true, 'the login is sent automatically on Telegram');
+  assert.equal(tr.json.telegram.linked, true);
+  assert.equal(tr.json.dns, 'http://dns.example:8080');
+  assert.match(tr.json.m3u, /username=line1&password=pass1/);
+  const msgs = x.tg.filter((b) => b.text).map((b) => b.text).join('\n');
+  assert.match(msgs, /Username: line1/);
+  assert.match(msgs, /Password: pass1/);
+  assert.match(msgs, /DNS: http:\/\/dns\.example:8080/);
+  assert.match(msgs, /M3U: http:\/\/dns\.example:8080\/get\.php\?username=line1/);
+});
+
+test('telegram: the deep-link payload is base64url encoded and still links the chat', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const email = 'encoded.person@example.com';
+  await x.call('PUT', '/api/admin/settings', { trial: { enabled: true, mode: 'auto', hours: 24 }, telegram: { enabled: true, botToken: '123456:token_ok', adminChat: '999', webhookSecret: 'sec2', autoTrial: true, notifyAdmin: true } }, tok);
+  await x.call('POST', '/api/admin/telegram/setup', { url: 'https://app.example.com' }, tok);
+  const payload = 'e_' + Buffer.from(email).toString('base64url');
+  assert.equal((await x.call('POST', '/api/telegram/webhook', { __tgSecret: 'sec2', message: { chat: { id: 777 }, from: { username: 'deep' }, text: '/start ' + payload } })).status, 200);
+  x.db.set('trialpool', { v: JSON.stringify([{ u: 'line2', p: 'pass2', dns: 'http://dns2.example:8080' }]), e: 0 });
+  const tr = await x.call('POST', '/api/trial', { name: 'Encoded Person', email, phone: '+212611111111', whatsapp: '+212611111111', telegram: 'deep' });
+  assert.equal(tr.status, 200, JSON.stringify(tr.json));
+  assert.equal(tr.json.telegram.sent, true);
+  const last = x.tg.filter((b) => b.text && String(b.chat_id) === '777').pop();
+  assert.ok(last, 'the customer chat received the login');
+  assert.match(last.text, /^INTPROTO-TV — your free trial/);
 });

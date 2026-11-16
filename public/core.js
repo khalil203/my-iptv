@@ -115,6 +115,8 @@ export const DEFAULT_SETTINGS = () => ({
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false, mode: 'auto', notifyAdmin: true },
+  // Free-trial Telegram dispatch: the customer presses Start in the bot, then the trial login can be sent to the chat automatically.
+  telegram: { enabled: false, botToken: '', botUsername: '', adminChat: '', autoTrial: true, notifyAdmin: true, webhookSecret: '' },
   email: { lang: 'en', resendKey: '', from: '', adminEmail: '', appUrl: '', expiryReminders: true, reminderDays: 3, lowCreditAlerts: true, dns: '', supportEmail: '', website: '' },
   finance: {
     autoRates: true, ratesUpdatedAt: 0,
@@ -718,6 +720,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       await log('settings', 'Pricing schedule v3 applied (8 packages, EUR with mirrored USD, Package IDs per schedule)');
     }
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
+    if (!s.telegram.webhookSecret) { s.telegram.webhookSecret = uid(16); await store.put('settings', s); }
     applyMailTexts(s.mailTexts); setMailLang(s.email.lang);
     sCache = s; sAt = Date.now();
     return s;
@@ -1033,6 +1036,54 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const app = s.branding.appName || 'IPTV'; const url = String(s.email.appUrl || '').replace(/\/+$/, '');
     try { await sendEmail(s, to, `[${app}] ${subject}`, `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px;color:#121726"><h3 style="margin:0 0 12px">${escHtml(subject)}</h3><p style="white-space:pre-line;line-height:1.5">${escHtml(text)}</p>${url ? `<p><a href="${escHtml(url)}" style="background:#7C4DFF;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:bold;display:inline-block">Open the dashboard</a></p>` : ''}</div>`); } catch {}
   }
+  // ---------- Telegram (free-trial dispatch) ----------
+  const tgOn = (s) => !!(s.telegram && s.telegram.enabled && s.telegram.botToken);
+  const tgApi = async (s, method, payload) => {
+    if (!tgOn(s)) return { ok: false, skipped: true, error: 'Telegram is not connected yet.' };
+    const token = String(s.telegram.botToken || '').trim();
+    if (!/^\d+:[\w-]+$/.test(token)) return { ok: false, error: 'The Telegram bot token is not valid.' };
+    try {
+      const init = payload
+        ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }
+        : { method: 'GET' };
+      const res = await fetchFn(`https://api.telegram.org/bot${token}/${method}`, init);
+      let d = {}; try { d = await res.json(); } catch {}
+      return { ok: !!res.ok && d.ok !== false, status: res.status, data: d, result: d.result, error: d.description || (!res.ok ? 'Telegram error ' + res.status : '') };
+    } catch (e) { return { ok: false, error: e.message || 'Telegram is unreachable.' }; }
+  };
+  const tgSend = (s, chat, text) => chat
+    ? tgApi(s, 'sendMessage', { chat_id: String(chat), text: String(text || '').slice(0, 3900), disable_web_page_preview: true })
+    : Promise.resolve({ ok: false, error: 'No Telegram chat to send to.' });
+  const tgLinkKey = (x) => 'tgcontact:' + String(x || '').trim().toLowerCase().slice(0, 120);
+  const tgUserKey = (x) => 'tguser:' + String(x || '').replace(/^@/, '').trim().toLowerCase().slice(0, 40);
+  const tgPayload = (x) => {
+    try { return 'e_' + btoa(String.fromCharCode(...new TextEncoder().encode(String(x || '')))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+    catch { return ''; }
+  };
+  const tgUnpayload = (x) => {
+    const v = String(x || '').trim();
+    if (!v.startsWith('e_')) return v;
+    try { const b = atob(v.slice(2).replace(/-/g, '+').replace(/_/g, '/')); return new TextDecoder().decode(Uint8Array.from(b, (ch) => ch.charCodeAt(0))); }
+    catch { return v; }
+  };
+  async function tgFindChat(c) {
+    const tg = String(c.telegram || '').trim();
+    if (/^\d{4,}$/.test(tg)) return tg;
+    if (tg) { const hit = await store.get(tgUserKey(tg)); if (hit && hit.chat) return hit.chat; }
+    const keys = [c.email, c.phone, c.whatsapp].filter(Boolean).map((x) => tgLinkKey(x));
+    if (c.phone) keys.push(tgLinkKey(String(c.phone).replace(/\D/g, '')));
+    if (c.whatsapp) keys.push(tgLinkKey(String(c.whatsapp).replace(/\D/g, '')));
+    for (const k of keys) { const hit = await store.get(k); if (hit && hit.chat) return hit.chat; }
+    return '';
+  }
+  const tgBotLink = (s, payload) => s.telegram && s.telegram.botUsername ? `https://t.me/${s.telegram.botUsername}${payload ? '?start=' + tgPayload(payload) : ''}` : '';
+  function tgCreds(s, c, password) {
+    const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
+    const u = c.lineUsername || c.username || '';
+    const p = c.linePassword || password || c.loginPassword || '';
+    const m3u = dns && u && p ? `${dns}/get.php?username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}&type=m3u_plus&output=ts` : '';
+    return [`${s.branding.appName || 'IPTV'} — your free trial`, '', `Name: ${c.name || ''}`, `Username: ${u}`, `Password: ${p}`, dns ? `DNS: ${dns}` : '', m3u ? `M3U: ${m3u}` : '', '', `Valid until: ${new Date(c.expiresAt || Date.now()).toISOString().slice(0, 10)}`, '', 'Open the bot again any time and send /start to link this chat.'].filter((x, i) => x !== '' || i < 3).join('\n');
+  }
   async function panelCredits(s, force) {
     const r = await panelCall(force ? { ...s, reseller: { ...s.reseller, enabled: true } } : s, 'credits', {});
     const credits = r.ok && !r.skipped ? findCredits(r.data, s.reseller.creditsPath) : null;
@@ -1231,8 +1282,31 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/config')) {
         await getAdmin();
         const cur = s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
+        const rcur = s.resellerCurrency || 'EUR';
+        const kindOf = (p) => /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription';
+        const orderPackages = (s.orderPackages || []).filter((p) => (p.title || p.name) && Number(p.price) > 0).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', cur, kind: kindOf(p) }));
+        const resellerPackages = (s.resellerPackages || []).filter((p) => (p.name || p.title) && Number(p.price) > 0).map((p) => ({ id: p.id, name: p.name || p.title, title: p.name || p.title, credits: Number(p.credits) || 0, price: Number(p.price) || 0, cur: rcur, kind: 'reseller' }));
         return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail), captcha: s.security.captcha === false ? null : await captchaChallenge(s),
-          packages: (s.orderPackages || []).filter((p) => p.title && Number(p.price) > 0).map((p) => ({ title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur })) });
+          telegram: tgOn(s) ? { bot: s.telegram.botUsername || '', link: tgBotLink(s) } : null,
+          packages: orderPackages.filter((p) => p.kind !== 'ibo').map((p) => ({ title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur })), orderPackages, resellerPackages });
+      }
+      if (R('POST', '/api/telegram/webhook')) {
+        // Telegram calls this URL. The secret header is passed by the Worker; never trust the body alone.
+        const sec = String(s.telegram.webhookSecret || '');
+        if (!sec || String(body.__tgSecret || '') !== sec) return err(403, 'forbidden');
+        const msg = body.message || body.edited_message || null;
+        if (msg && msg.chat && msg.chat.id && /^\/start/i.test(String(msg.text || '').trim())) {
+          const from = msg.from || {};
+          const rec = { chat: String(msg.chat.id), username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '), at: Date.now() };
+          const payload = tgUnpayload(String(msg.text || '').trim().split(/\s+/).slice(1).join(' ').trim());
+          await store.put('tgchat:' + rec.chat, rec, 90 * 86400);
+          if (from.username) await store.put(tgUserKey(from.username), rec, 90 * 86400);
+          if (payload) await store.put(tgLinkKey(payload), rec, 90 * 86400);
+          await tgSend(s, rec.chat, payload
+            ? `✅ ${s.branding.appName || 'IPTV'}: this chat is linked (${payload}). Your free trial will arrive here as soon as it is ready.`
+            : `👋 ${s.branding.appName || 'IPTV'}\n\nTo receive your free trial here, send:\n/start your@email.com\n\nUse the same email or phone number as in your trial request.`);
+        }
+        return ok({ ok: true });
       }
       if (R('POST', '/api/trial')) {
         actorName = 'trial sign-up';
@@ -1267,7 +1341,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           tql.unshift(entry); await store.put('trialqueue', tql.slice(0, 300));
           await log('trial', `Free trial request queued for ${name} <${email}> (all-agents queue)`);
           await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for an agent to process it.\n\n${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\n\nOpen Trial queue in the dashboard, paste the M3U link from your panel and send the trial.`);
-          return ok({ ok: true, queued: true, hours: s.trial.hours });
+          if (tgOn(s) && s.telegram.adminChat) await tgSend(s, s.telegram.adminChat, `🎁 Free trial request waiting\n\n${name}\n${email}\n${phone}${telegram ? '\n@' + telegram : ''}\n\nOpen the dashboard → Trial queue, paste the M3U link and send.`);
+          return ok({ ok: true, queued: true, hours: s.trial.hours, telegram: tgOn(s) ? { bot: s.telegram.botUsername || '', link: tgBotLink(s), start: tgBotLink(s, email) } : null });
         }
         const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
         let username; do { username = 't' + rnd(6, '0123456789'); } while (list.some((c) => c.username === username));
@@ -1305,8 +1380,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const who = `${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\nApp login: ${username}`;
         if (!lineReady) await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for a line.\n\n${who}\n\n${panelError ? 'The panel API answered: ' + panelError + '\n\n' : ''}Open Customers → Alerts → “Waiting for a line”, tap Edit, paste the M3U link from your panel and save. The customer then gets the login email automatically.`);
         else if (s.trial.notifyAdmin !== false) await notifyAdmin(s, `New free trial: ${name}`, `A free trial was created.\n\n${who}`);
+        const tgChat = lineReady ? await tgFindChat(c) : '';
+        let tgSent = false;
+        if (tgChat) { const rr = await tgSend(s, tgChat, tgCreds(s, c, password)); tgSent = rr.ok; }
+        if (tgOn(s) && s.telegram.notifyAdmin !== false && s.telegram.adminChat) {
+          const startLink = tgBotLink(s, email);
+          await tgSend(s, s.telegram.adminChat, `🎁 New free trial\n\n${who}\n\n${lineReady ? `Line: ${c.lineUsername} / ${password}` : 'No line yet: waiting for one in the dashboard.'}${tgSent ? '\nTelegram: sent to the customer.' : telegram ? `\nTelegram: @${telegram} has not linked the bot yet. Ask them to open ${startLink || 'the bot'} and press Start.` : `\nTelegram: no chat linked. Send ${startLink || 'the bot link'} and ask them to send /start ${email}.`}`);
+        }
         const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
-        return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, username, password, pending: !lineReady, ...(lineReady && dns ? { dns, m3u: `${dns}/get.php?username=${encodeURIComponent(c.lineUsername)}&password=${encodeURIComponent(c.linePassword)}&type=m3u_plus&output=ts` } : {}) });
+        return ok({ ok: true, emailed: !!sent.ok, hours: s.trial.hours, username, password, pending: !lineReady, telegram: { sent: tgSent, linked: !!tgChat, bot: s.telegram.botUsername || '', link: tgBotLink(s, email) || tgBotLink(s) }, ...(lineReady && dns ? { dns, m3u: `${dns}/get.php?username=${encodeURIComponent(c.lineUsername)}&password=${encodeURIComponent(c.linePassword)}&type=m3u_plus&output=ts` } : {}) });
       }
       if (R('POST', '/api/diag')) { // client diagnostics beacon: why the app could not start on a device
         const ip = String(body.ip || '');
@@ -1461,13 +1543,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (R('POST', '/api/me/agree')) { c.agreedAt = Date.now(); await saveCustomers(list); await log('customer', `${c.username} accepted the terms of service`); return ok({ ok: true, agreed: true }); }
 
         if (R('POST', '/api/me/order')) { // customer asks to buy a package: the admin is told and sends a payment link
-          const pk = (s.orderPackages || []).find((p) => p.id === body.pkg) || (s.resellerPackages || []).find((p) => p.id === body.pkg); if (!pk) return err(400, 'Package not found.');
+          const opk = (s.orderPackages || []).find((p) => p.id === body.pkg); const rpk = (s.resellerPackages || []).find((p) => p.id === body.pkg); const pk = opk || rpk; if (!pk) return err(400, 'Package not found.');
+          const pkgTitle = pk.title || pk.name || 'Package';
+          const pkgLine = rpk ? `${Number(rpk.credits) || 0} reseller credits` : `${Number(pk.days) || 0} days · ${Number(pk.devices) || 1} device(s)`;
+          const pkgCur = rpk ? (s.resellerCurrency || 'EUR') : (s.orderCurrency || 'EUR');
           const k = 'buyreq:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
           if (n >= 5) return err(429, 'Too many requests today. Please contact us on WhatsApp.');
           await store.put(k, n + 1, 2 * 86400);
-          c.buyRequest = { pkg: pk.id, title: pk.title, price: pk.price, at: Date.now() }; await saveCustomers(list);
-          await log('customer', `🛒 ${c.username} wants to buy "${pk.title}" (${pk.price})`);
-          await notifyAdmin(s, `🛒 Order request: ${c.name || c.username} wants “${pk.title}”`, `${c.name || ''} (${c.username})\n${c.email || ''}\n${c.whatsapp || c.phone || ''}\n\nPackage: ${pk.title} · ${pk.days} days · ${pk.devices} device(s) · ${pk.price} ${s.orderCurrency || 'EUR'}\n\nOpen the app → Customers → 🛒 requests → 💳 on this customer, paste your payment link and send.`).catch(() => {});
+          c.buyRequest = { pkg: pk.id, title: pkgTitle, price: pk.price, at: Date.now() }; await saveCustomers(list);
+          await log('customer', `🛒 ${c.username} wants to buy "${pkgTitle}" (${pk.price})`);
+          await notifyAdmin(s, `🛒 Order request: ${c.name || c.username} wants “${pkgTitle}”`, `${c.name || ''} (${c.username})\n${c.email || ''}\n${c.whatsapp || c.phone || ''}\n\nPackage: ${pkgTitle} · ${pkgLine} · ${pk.price} ${pkgCur}\n\nOpen the app → Customers → 🛒 requests → 💳 on this customer, paste your payment link and send.`).catch(() => {});
           return ok({ ok: true });
         }
         if (R('GET', '/api/me')) {
@@ -1477,8 +1562,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({
             user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
-            orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
-            resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, credits: p.credits || 0, cur: s.resellerCurrency || 'EUR' })),
+            orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', kind: /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription', cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
+            resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.name || p.title, name: p.name || p.title, credits: Number(p.credits) || 0, days: 0, devices: 0, price: Number(p.price) || 0, badge: '', kind: 'reseller', cur: s.resellerCurrency || 'EUR' })),
             buyRequest: c.buyRequest || null,
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
@@ -1816,6 +1901,46 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ ok: true, dispute: publicDispute(d) });
       }
 
+      // ---------- Telegram: connect the bot, test it, and read its status ----------
+      if (R('GET', '/api/admin/telegram')) {
+        if (!can('settings')) return err(403, 'Not allowed.');
+        const st = { enabled: tgOn(s), bot: s.telegram.botUsername ? '@' + s.telegram.botUsername : '', adminChat: !!s.telegram.adminChat, autoTrial: s.telegram.autoTrial !== false, notifyAdmin: s.telegram.notifyAdmin !== false, link: tgBotLink(s) };
+        if (!tgOn(s)) return ok(st);
+        const me = await tgApi(s, 'getMe', null);
+        const wh = await tgApi(s, 'getWebhookInfo', null);
+        return ok({ ...st, tokenOk: me.ok, bot: me.result?.username ? '@' + me.result.username : st.bot, error: me.ok ? '' : me.error, webhook: wh.result || null });
+      }
+      if (R('POST', '/api/admin/telegram/setup')) {
+        if (!can('settings')) return err(403, 'Not allowed.');
+        const next = { ...s, telegram: { ...s.telegram } };
+        if (body.botToken && body.botToken !== '••••') next.telegram.botToken = String(body.botToken).trim().slice(0, 120);
+        if (body.adminChat !== undefined) next.telegram.adminChat = String(body.adminChat || '').trim().slice(0, 80);
+        if (body.enabled !== undefined) next.telegram.enabled = !!body.enabled;
+        if (body.autoTrial !== undefined) next.telegram.autoTrial = !!body.autoTrial;
+        if (body.notifyAdmin !== undefined) next.telegram.notifyAdmin = !!body.notifyAdmin;
+        if (!next.telegram.botToken) return err(400, 'Paste the bot token from @BotFather first.');
+        next.telegram.enabled = true;
+        const me = await tgApi(next, 'getMe', null);
+        const bot = me.result?.username || '';
+        if (!me.ok) { await saveSettings(next); return err(400, me.error || 'Telegram refused this bot token.'); }
+        next.telegram.botUsername = bot;
+        const base = String(body.url || s.email.appUrl || '').trim().replace(/\/+$/, '');
+        if (!/^https:\/\/[^\s]+$/i.test(base)) { await saveSettings(next); return err(400, 'Set your public app URL (Settings → Email → App URL) or paste the site URL so Telegram can reach the webhook.'); }
+        const hook = base + '/api/telegram/webhook';
+        const st = await tgApi(next, 'setWebhook', { url: hook, secret_token: next.telegram.webhookSecret, allowed_updates: ['message'], drop_pending_updates: false });
+        await saveSettings(next);
+        if (!st.ok) return err(400, st.error || 'The bot token works, but Telegram refused the webhook URL.');
+        if (next.telegram.adminChat) await tgSend(next, next.telegram.adminChat, `✅ ${s.branding.appName || 'IPTV'} Telegram is connected. Free-trial logins can be sent to customers here.`);
+        return ok({ ok: true, bot: bot ? '@' + bot : '', webhook: hook, link: tgBotLink(next) });
+      }
+      if (R('POST', '/api/admin/telegram/test')) {
+        if (!can('settings')) return err(403, 'Not allowed.');
+        const to = String(body.chat || s.telegram.adminChat || '').trim();
+        if (!to) return err(400, 'Add the admin chat ID first.');
+        const r = await tgSend(s, to, `✅ Test from ${s.branding.appName || 'IPTV'} — Telegram is working.\n\n${tgBotLink(s) ? 'Customers open ' + tgBotLink(s) + ' and press Start.' : ''}`);
+        return r.ok ? ok({ ok: true }) : err(400, r.error || 'Telegram refused the message.');
+      }
+
       // ---------- all-agents free trial queue (spec §4) ----------
       const trialSend = async (entry, m3uText) => {
         const ln = parseLineLink(String(m3uText || '').trim()); if (!ln) return { error: 'This does not look like an M3U link. Paste the full link (it contains username= and password=).' };
@@ -1831,8 +1956,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const dns = String(ln.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
         const m = accessEmail(s, c, password, 'trial', body.appUrl);
         const sent = await sendEmail(s, c.email, m.subject, m.html);
-        await log('trial', `Trial sent to ${c.username} for ${c.name} <${c.email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}`);
-        return { ok: true, username: c.username, emailSent: sent.ok, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours, phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: c.telegram || '' };
+        const tgChat = await tgFindChat(c);
+        let tgSent = false;
+        if (tgChat) { const rr = await tgSend(s, tgChat, tgCreds(s, c, password)); tgSent = rr.ok; }
+        if (tgOn(s) && s.telegram.adminChat) {
+          const startLink = tgBotLink(s, c.email);
+          await tgSend(s, s.telegram.adminChat, `🎁 Trial sent\n\n${c.name}\n${c.email}\nUsername: ${c.username}\nLine: ${ln.u} / ${ln.p}\n\n${tgSent ? 'Telegram: delivered to the customer.' : c.telegram ? `Telegram: @${String(c.telegram).replace(/^@/, '')} has not pressed Start yet. Send ${startLink || 'the bot link'}.` : `Telegram: no chat linked. Send ${startLink || 'the bot link'} and ask for /start ${c.email}.`}`);
+        }
+        await log('trial', `Trial sent to ${c.username} for ${c.name} <${c.email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}${tgSent ? ' · Telegram sent' : ''}`);
+        return { ok: true, username: c.username, emailSent: sent.ok, telegramSent: tgSent, telegramLinked: !!tgChat, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours, phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: c.telegram || '' };
       };
       if (R('GET', '/api/admin/trialq')) {
         const all = (await getTrialQueue()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.at - a.at);
@@ -2307,6 +2439,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           reseller: { ...src.reseller, baseUrl: src.reseller.baseUrl ? '••••' : '', apiKey: src.reseller.apiKey ? '••••' : '', username: src.reseller.username ? '••••' : '', password: src.reseller.password ? '••••' : '', actions: Object.fromEntries(Object.entries(src.reseller.actions || {}).map(([k, v]) => [k, { ...v, url: v.url && /api_key=|\{key\}/.test(v.url) ? '••••' : '••••', headers: '••••' }])) },
           email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '', transKeys: (src.email.transKeys || []).map((k) => (k ? '••••' : '')), transSenders: src.email.transSenders || [], transSubjects: src.email.transSubjects || [] },
           finance: { ...src.finance, stripeKey: src.finance.stripeKey ? '••••' : '', stripeWebhookSecrets: src.finance.stripeWebhookSecrets ? '••••' : '' },
+          telegram: { ...src.telegram, botToken: src.telegram?.botToken ? '••••' : '', webhookSecret: src.telegram?.webhookSecret ? '••••' : '' },
         });
         if (can('settings')) {
           const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
@@ -2318,13 +2451,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('PUT', '/api/admin/settings')) {
         // Absolute sovereignty (spec §1): only Nizar (Owner) and Khalil (Technical Manager) may show, add, edit or update
         // IPTV panel keys, Resend keys, Stripe keys and other API credentials. Everyone else is locked out at the API level.
-        const API_KEY_PATHS = [['panel', 'dino'], ['panel', 'xtream'], ['panel', 'mega'], ['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets']];
+        const API_KEY_PATHS = [['panel', 'dino'], ['panel', 'xtream'], ['panel', 'mega'], ['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets'], ['telegram', 'botToken'], ['telegram', 'webhookSecret']];
         const touchesKey = API_KEY_PATHS.some(([a, b]) => body?.[a] && (Array.isArray(body[a]) ? body[a].some((x) => Object.keys(x || {}).some((k) => k === b)) : Object.keys(body[a] || {}).some((k) => k === b)));
         const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
         if (touchesKey && !isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.');
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
         if (body?.email?.resendKey === '••••') delete body.email.resendKey;
+        if (body?.telegram?.botToken === '••••') delete body.telegram.botToken;
+        if (body?.telegram?.webhookSecret === '••••') delete body.telegram.webhookSecret;
         if (body?.reseller?.apiKey === '••••') delete body.reseller.apiKey;
         if (body?.reseller?.password === '••••') delete body.reseller.password;
         if (body?.reseller?.username === '••••') delete body.reseller.username;
@@ -2541,7 +2676,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
-        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = (query.cur && ['EUR','USD','USDT','ALL','MAD','THB'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
+        if (method === 'GET' && sub === 'orderpreview') { const pk0 = s.orderPackages.find((p) => p.id === query.pkg) || s.resellerPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk0) return err(400, 'No packages'); const pk = { ...pk0, title: pk0.title || pk0.name || 'Package', days: Number(pk0.days) || 0, devices: Number(pk0.devices) || 1 }; const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = (query.cur && ['EUR','USD','USDT','ALL','MAD','THB'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
         if (method === 'POST' && sub === 'order') {
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');

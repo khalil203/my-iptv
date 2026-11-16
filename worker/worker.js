@@ -53,6 +53,7 @@ export default {
       if (url.pathname === '/api/diag') { body.ip = request.headers.get('cf-connecting-ip') || ''; body.ua = request.headers.get('user-agent') || ''; }
       if (url.pathname === '/api/trial') body.ip = request.headers.get('cf-connecting-ip') || '';
       if (url.pathname === '/api/trial' && body && typeof body === 'object' && !body.appUrl) body.appUrl = url.origin;
+      if (url.pathname === '/api/telegram/webhook') body.__tgSecret = request.headers.get('x-telegram-bot-api-secret-token') || '';
       const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
       const r = await backend.handle({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body, token });
       return new Response(JSON.stringify(r.json), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS } });
