@@ -1,9 +1,9 @@
-import { createBackend } from './core.js?v=62';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=62';
-import { siteHtml } from './site.js?v=62';
-import { ic } from './icons.js?v=62';
-import { parseM3U, m3uAnswer } from './m3u.js?v=62';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=62';
+import { createBackend } from './core.js?v=63';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=63';
+import { siteHtml } from './site.js?v=63';
+import { ic } from './icons.js?v=63';
+import { parseM3U, m3uAnswer } from './m3u.js?v=63';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=63';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -932,6 +932,7 @@ async function adminApi(s) {
         ${field('Player identity (User-Agent)', 'player.userAgent', s.player.userAgent, { help: 'Some IPTV servers only accept known players. Default: IPTVSmartersPro.' })}
         <div class="grid3" style="margin-top:12px">${field('Test line username', 'tu', '', { attrs: 'data-skip id="test-u" autocapitalize="none"' })}${field('Test line password', 'tp', '', { attrs: 'data-skip id="test-p" autocapitalize="none"' })}<div class="field"><span>&nbsp;</span><button type="button" class="btn" data-act="test-player">Test server</button></div></div>
         <div id="test-player-out"></div>
+        ${r.enabled && !r.baseUrl ? `<div class="notice warning" role="alert" style="margin:0 0 14px"><b>⚠️ Reseller API base URL is empty.</b> The free-trial and renewal line creation will always fail and trials pile up in the waiting queue. Set it in this page (API base URL, e.g. <code>https://panel.example.com</code>), save, then test a trial.</div>` : ''}
         <h3 style="margin-top:8px">TVplus reseller API (create / renew lines)</h3>
         ${toggle('Enable reseller API', 'reseller.enabled', r.enabled)}
         ${toggle('Auto-sync enable/disable with the panel', 'reseller.autoSync', r.autoSync)}
@@ -3413,7 +3414,9 @@ async function adminTrialQueue() {
   const ui = (state.admin.tq ||= { f: 'pending' });
   const cnt = (f) => list.filter((x) => x.status === f).length;
   const shown = list.filter((x) => ui.f === 'all' || x.status === ui.f);
-  return `<p class="small muted">When “<b>All agents queue</b>” is on (Trial &amp; email setup), a customer who taps <b>Start free trial</b> on the website appears here instead of being auto-activated. Any team member with customer access can claim one, paste the M3U line from your panel and send the trial.</p>
+  const _r = state.admin.settings?.reseller || {};
+  const warn = _r.enabled && !_r.baseUrl ? `<div class="notice warning" role="alert" style="margin:0 0 12px"><b>⚠️ Provisioning is offline.</b> The reseller panel API base URL is empty — new free trials cannot create lines, they only queue here. Set it in <b>⚙️ Settings → API → TVplus reseller API → API base URL</b> (and the API key), save, then ask a customer (or yourself) to retry. Current mode: <b>${esc((state.admin.settings?.trial || {}).mode || 'auto')}</b>.</div>` : '';
+  return `${warn}<p class="small muted">When “<b>All agents queue</b>” is on (Trial &amp; email setup), a customer who taps <b>Start free trial</b> on the website appears here instead of being auto-activated. Any team member with customer access can claim one, paste the M3U line from your panel and send the trial.</p>
     <div class="chips">${[['pending', 'Pending'], ['done', 'Sent'], ['rejected', 'Rejected'], ['all', 'All']].map(([k, n]) => `<a class="${ui.f === k ? 'on' : ''}" data-act="tq-f" data-f="${k}">${n} · ${k === 'all' ? list.length : cnt(k)}</a>`).join('')}</div>
     ${shown.length ? shown.map((t) => `<div class="card"><div class="row"><div class="avatar">${esc(initials(t.name))}</div><div style="flex:1;min-width:180px"><b>${esc(t.name)}</b> ${t.status === 'pending' ? (t.claimedBy ? `<span class="pill st-expiring">claimed · ${esc(t.claimedBy)}</span>` : '<span class="pill st-open">waiting</span>') : `<span class="pill st-active">${esc(t.status)}</span>`}<div class="small muted">${esc(t.email)}${t.phone ? ' · ' + esc(t.phone) : ''}${t.telegram ? ' · ✈️ @' + esc(String(t.telegram).replace(/^@/, '')) : ''} · ${fmtDT(t.at)}${t.lang ? ' · ' + esc(t.lang.toUpperCase()) : ''}</div></div></div>
       ${t.status === 'pending' ? `<form data-form="tq-send" data-id="${esc(t.id)}" style="margin-top:10px">${field('M3U line from your panel', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'required autocapitalize="none" spellcheck="false" dir="ltr"', help: 'Username, password and DNS are read from the link automatically.' })}<div class="row"><button type="button" class="btn" data-act="tq-claim" data-id="${esc(t.id)}">${t.claimedBy ? 'Re-claim' : '✋ Claim for me'}</button><button type="button" class="btn danger" data-act="tq-reject" data-id="${esc(t.id)}">Reject</button><button type="submit" class="btn primary">Send trial</button></div></form>` : `<p class="small muted" style="margin:10px 0 0">${esc(t.handledBy || '')}${t.doneAt ? ' · ' + fmtDT(t.doneAt) : ''}${t.note ? ' · ' + esc(t.note) : ''}</p>`}</div>`).join('') : `<div class="empty"><span class="ic">⚡</span>${list.length ? 'Nothing in this list.' : 'No trial requests yet. They arrive when customers tap “Start free trial” on the website.'}</div>`}`;
