@@ -791,3 +791,26 @@ test('escalation copies: Technical Manager with a notify email gets the dispute 
   assert.ok(x.mails.some((m) => m.to[0] === 'khalil.tech@example.com'), 'technical manager got a copy');
   assert.ok(x.mails.some((m) => m.to[0] === 'owner@example.com'), 'owner got one too');
 });
+
+test('sales tracker: today/yesterday/month aggregation, 30-day series and reseller RSL ids + sheets gating', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const c1 = await addCustomer(x, tok, { username: 'tracker1', email: 't1@example.com', price: '19.50' });
+  const c2 = await addCustomer(x, tok, { username: 'tracker2', email: 't2@example.com', price: '9' });
+  const d = await x.call('GET', '/api/admin/sales-by-day', {}, tok);
+  assert.equal(d.status, 200, JSON.stringify(d.json));
+  assert.ok(d.json.today > 0, 'today total is positive');
+  assert.equal(d.json.todayN, 2, 'two sales today');
+  assert.equal(d.json.days30.length, 30); assert.equal(d.json.months.length, 12); assert.ok(d.json.recent.length >= 2);
+  const t1 = await x.call('POST', '/api/admin/reseller/toggle', { id: c1.id }, tok);
+  assert.equal(t1.status, 200); assert.equal(t1.json.rslId, 'RSL-01'); assert.equal(t1.json.isReseller, true);
+  const t2 = await x.call('POST', '/api/admin/reseller/toggle', { id: c2.id }, tok);
+  assert.equal(t2.json.rslId, 'RSL-02');
+  const list = await x.call('GET', '/api/admin/reseller', {}, tok);
+  assert.equal(list.json.list.length, 2);
+  // unflag one and confirm the list shrinks
+  await x.call('POST', '/api/admin/reseller/toggle', { id: c2.id }, tok);
+  const list2 = await x.call('GET', '/api/admin/reseller', {}, tok);
+  assert.equal(list2.json.list.length, 1);
+  const bad = await x.call('POST', '/api/admin/reseller/sync', {}, tok);
+  assert.equal(bad.status, 400, 'sync without a webhook url is refused');
+});

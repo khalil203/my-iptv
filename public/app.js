@@ -367,6 +367,8 @@ const ADMIN_TABS = [
   ['fb', '👍', 'Facebook Ads', 'ads', 'Marketing', 'facebook ads creatives description performance photo history'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
+  ['sales', '📈', 'Sales tracker', 'sales', 'Money', 'sales daily monthly revenue transactions tracker today month'],
+  ['resellers', '🤝', 'Resellers', 'resellers', 'Money', 'reseller rsl credits packages rank stock purchases sheets'],
   ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
   ['templates', '✍️', 'Message templates', 'settings', 'Messages', 'email whatsapp trial reminder renewal order wording text'],
   ['emails', '📬', 'Emails & bounces', 'customers_view', 'Messages', 'bounced spam delivered sent resend invalid'],
@@ -477,6 +479,8 @@ async function renderAdmin() {
     else if (t === 'finance') { body.innerHTML = await adminFinance(s) + (can('settings') ? await adminAutoPay(s) : ''); loadStripe(); }
     else if (t === 'profits') body.innerHTML = await adminProfits(s);
     else if (t === 'stock') body.innerHTML = await adminStock(s);
+    else if (t === 'sales') body.innerHTML = await adminSalesPage();
+    else if (t === 'resellers') body.innerHTML = await adminResellerPage();
     else if (t === 'trial') body.innerHTML = (await adminPool()) + adminTrial(s);
     else if (t === 'userdash') body.innerHTML = adminUserDash(s);
     else if (t === 'branding') body.innerHTML = adminBranding(s);
@@ -501,7 +505,7 @@ async function renderAdmin() {
 }
 
 async function adminOverview() {
-  const [st, cr, me] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me')]);
+  const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
   const max = Math.max(1, ...Object.values(st.byMonth || {}));
   const s = state.admin.settings;
   const setupTips = [];
@@ -517,6 +521,8 @@ async function adminOverview() {
   const panelErr = cr.enabled && !cr.ok && can('settings') ? `<div class="notice warning">🎟 <b>Panel credits could not be read.</b> ${esc(cr.error || '')} <a data-act="atab" data-tab="api" style="cursor:pointer">Open API settings →</a></div>` : '';
   return `${pwWarn}${panelErr}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
   <div class="stats">
+    ${sd ? `<div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('card', 20)}</i><span>Sales today</span><b>${usd(sd.today)}</b><span>${sd.todayN} sale${sd.todayN === 1 ? '' : 's'}${sd.yest || sd.yest === 0 ? ' · yest ' + usd(sd.yest) : ''}</span></div>
+    <div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('crown', 20)}</i><span>This month</span><b>${usd(sd.month)}</b><span>${sd.monthN} sale${sd.monthN === 1 ? '' : 's'} · avg ${usd(sd.avg)}</span></div>` : ''}
     <div class="stat"><i class="st-ic">${ic('user', 20)}</i><span>Customers</span><b>${st.total}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('check', 20)}</i><span>Active</span><b>${st.active}</b></div>
     <div class="stat c-warn"><i class="st-ic">${ic('clock', 20)}</i><span>Expiring soon</span><b>${st.expiring}</b></div>
@@ -536,6 +542,41 @@ async function adminOverview() {
   <div class="row"><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="new-tx" data-perm="finance_edit">💸 Add transaction</button><button class="btn" data-act="atab" data-tab="finance">🏦 Balances</button></div>`;
 }
 
+async function adminSalesPage() {
+  const d = await api('GET', '/api/admin/sales-by-day');
+  const max30 = Math.max(1, ...d.days30.map((x) => x.usd));
+  const maxM = Math.max(1, ...d.months.map((x) => x.usd));
+  const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const lab30 = (k) => { const [, m, dd] = k.split('-'); return `${dd}/${m}`; };
+  const labM = (k) => { const [y, m] = k.split('-'); return `${M[Number(m) - 1]} ${y.slice(2)}`; };
+  const rows = d.recent.map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc(x.username)}${x.accountName ? ' · ' + esc(x.accountName) : ''}</div></td><td>${esc(x.planName)}</td><td><b>${num(x.amount, x.currency)}</b><div class="small muted">$${x.amountUsd.toFixed(2)}</div></td><td>${x.credits ?? ''}</td></tr>`).join('');
+  return `<p class="small muted">Every sale the app records — trials excluded. Revenue shown in USD; MAD uses the finance rate.</p>
+  <div class="stats">
+    <div class="stat c-acc"><span>Today</span><b>${usd(d.today)}</b><span>${d.todayN} sale${d.todayN === 1 ? '' : 's'}</span></div>
+    <div class="stat"><span>Yesterday</span><b>${usd(d.yest)}</b><span>${d.yestN} sale${d.yestN === 1 ? '' : 's'}</span></div>
+    <div class="stat c-acc"><span>This month</span><b>${usd(d.month)}</b><span>${d.monthN} sale${d.monthN === 1 ? '' : 's'} · avg ${usd(d.avg)}</span></div>
+    <div class="stat"><span>Best day (30d)</span><b>${usd(d.bestUsd)}</b><span>${d.bestDay.split('-').reverse().join('/')}</span></div>
+  </div>
+  <div class="card"><div class="row"><h3 style="margin:0">Daily sales · last 30 days (USD)</h3><span class="spacer"></span><button class="btn sm" data-act="sales-csv">⬇ CSV</button></div><div class="bars">${d.days30.map((x) => `<div><span>${x.usd ? Number(x.usd).toLocaleString() : ''}</span><i style="height:${(x.usd / max30) * 100}%"></i><span>${lab30(x.d)}</span></div>`).join('')}</div></div>
+  <div class="card"><h3>Monthly sales · last 12 months (USD)</h3><div class="bars">${d.months.map((x) => `<div><span>${x.usd ? Number(x.usd).toLocaleString() : ''}</span><i style="height:${(x.usd / maxM) * 100}%"></i><span>${labM(x.k)}</span></div>`).join('')}</div></div>
+  <div class="card"><h3>Transactions <span class="small muted">(${d.recent.length})</span></h3>${d.recent.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Credits</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No sales recorded yet.</p>'}</div>`;
+}
+
+async function adminResellerPage() {
+  const [r, cs] = await Promise.all([api('GET', '/api/admin/reseller'), api('GET', '/api/admin/customers')]);
+  const sheets = r.sheets || {};
+  const rows = r.list.map((x) => `<tr><td><b>${esc(x.rslId)}</b></td><td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc(x.username)}</div></td><td class="small">${esc(x.email)}${x.phone ? '<br>' + esc(x.phone) : ''}</td><td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b><div class="small muted">${mad(x.spentMad)}</div></td><td>${usd(x.rate)} <span class="small muted">/c</span></td><td>#${x.rank}</td><td><button class="btn sm danger" data-act="reseller-toggle" data-id="${x.id}" title="Remove reseller flag">✕</button></td></tr>`).join('');
+  const notYet = (cs || []).filter((c) => !c.isReseller).slice(0, 500).map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.username)})</option>`).join('');
+  return `<p class="small muted">Dedicated reseller profiles — <b>RSL-01</b>, <b>RSL-02</b>… Rank is by credits purchased; rate is average USD per credit. Reseller lines are created on the reseller's own panel; this app tracks purchases, credit flow and rank.</p>
+  <div class="card"><h3>Add a reseller</h3>
+    <div class="row"><select id="rsl-pick" style="flex:1;min-width:220px"><option value="">Pick a customer…</option>${notYet}</select><button class="btn primary" data-act="reseller-add">＋ Add as reseller</button></div>
+  </div>
+  <div class="card"><h3>Resellers <span class="small muted">${r.list.length}</span></h3>${r.list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>RSL</th><th>Name</th><th>Contact</th><th>Purchases</th><th>Credits</th><th>Spent</th><th>Rate</th><th>Rank</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No resellers yet. Flag a customer above.</p>'}</div>
+  <div class="card"><h3>Google Sheets sync</h3><p class="small muted">Paste your Apps Script webhook URL. Each sync posts the reseller table (RSL id, name, username, email, phone, purchases, spent USD, credits, status) to your Sheet. Leave the token blank if your script doesn't check one.</p>
+    <div class="row"><input id="sheets-url" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(sheets.url || '')}" autocomplete="off" spellcheck="false" style="flex:1;min-width:260px"><input id="sheets-token" dir="ltr" placeholder="Optional token" autocomplete="off" style="width:170px"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" data-act="sheets-save">💾 Save</button><button class="btn primary" data-act="sheets-sync">↻ Sync now</button></div></div>`;
+}
+
 function filteredCustomers() {
   const { filter, q } = state.admin;
   const qq = q.trim().toLowerCase();
@@ -553,7 +594,7 @@ const contactChecks = (c) => {
   return `<span class="row" style="gap:4px;flex-wrap:nowrap" title="Contacted today?">${box('email', '📧', 'Emailed')}${box('whatsapp', '💬', 'WhatsApp sent')}${box('telegram', '✈️', 'Telegram sent')}</span>`;
 };
 function custActions(c) {
-  return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<a class="btn sm" href="tel:${esc(String(c.phone).replace(/[^\d+]/g, ''))}" title="Call">📞</a>` : ''}${can('customers_phone') && c.telegram ? `<a class="btn sm" href="https://t.me/${esc(String(c.telegram).trim().replace(/^@/, ''))}" target="_blank" rel="noopener" title="Telegram">✈️</a>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+  return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<button class="btn sm" data-act="copy-text" data-text="${esc(String(c.phone))}" title="Copy phone number" aria-label="Copy phone number">📞</button>` : ''}${can('customers_phone') && c.telegram ? `<a class="btn sm" href="https://t.me/${esc(String(c.telegram).trim().replace(/^@/, ''))}" target="_blank" rel="noopener" title="Telegram">✈️</a>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
@@ -3047,12 +3088,13 @@ async function persistStripeAccountsFromTable(silent) {
         balance: bTxt === '' ? null : Number(bTxt),
         balanceAt: bTxt === '' ? 0 : (Number(g('balanceAt')) || Date.now()),
         links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
-    }).filter((a) => a.name);
-    if (!stripeAccounts.length) return;
+    }).filter((a) => a.name || a.balance != null);
+
     try { await api('PUT', '/api/admin/settings', { stripeAccounts }); if (!silent) toast('Saved ✓'); } catch (e) { toast(e.message, true); }
 }
 Object.assign(actions, {
   'copy-el': async (el) => { const txt = document.getElementById(el.dataset.el)?.textContent || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
+  'copy-text': async (el) => { const txt = el.dataset.text || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
   'pool-del': async (el) => { await api('POST', '/api/admin/trialpool/remove', { u: el.dataset.u }); renderAdmin(); },
   'pool-clear': async () => { if (!confirm('Remove every ready trial line?')) return; await api('POST', '/api/admin/trialpool/remove', { all: true }); renderAdmin(); },
   'pool-export': async () => { const d = await api('GET', '/api/admin/trialpool'); download(`trial-lines-${isoDay(Date.now())}.csv`, toCsv(['Username', 'Server'], d.lines.map((x) => [x.u, x.dns])), 'text/csv'); },
@@ -3182,7 +3224,7 @@ Object.assign(actions, {
     el.disabled = true; const card = el.closest('.op-row'); const out = card.querySelector('.sa-bal'); out.textContent = 'Checking with Stripe…';
     try {
       const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(el.dataset.id)}/balance`);
-      out.textContent = r.connected ? `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}` : (r.error || 'Stripe not reached');
+      out.textContent = r.connected ? `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency} · lands ≈ ${r.projected || '—'} (${r.payoutDays || 7}-day payout)` : (r.error || 'Stripe not reached');
       if (r.connected) {
         card.querySelector('[data-k="balance"]').value = String(r.available);
         card.querySelector('[data-k="balanceAt"]').value = String(Date.now());
@@ -3199,7 +3241,7 @@ Object.assign(actions, {
       const id = card.dataset.sa; const out = card.querySelector('.sa-bal'); if (!id) continue;
       const bTxt = (card.querySelector('[data-k="balance"]') || {}).value || '';
       if (bTxt.trim() !== '') { const n = Number(bTxt) || 0; const cur = (card.querySelector('[data-k="currency"]') || {}).value || 'USD'; if (cur === 'EUR') totEur += n; else totUsd += n; okCount++; out.textContent = `Stored: Available ${n} ${cur}`; continue; }
-      try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(id)}/balance`); if (r.connected) { out.textContent = `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency}`; if (r.currency === 'EUR') totEur += Number(r.available) || 0; else totUsd += Number(r.available) || 0; okCount++; card.querySelector('[data-k="balance"]').value = String(r.available); card.querySelector('[data-k="balanceAt"]').value = String(Date.now()); } else { out.textContent = r.error || 'Stripe not reached'; fail++; } } catch (e) { out.textContent = e.message; fail++; }
+      try { const r = await api('GET', `/api/admin/stripe/account/${encodeURIComponent(id)}/balance`); if (r.connected) { out.textContent = `Available now: ${r.available} ${r.currency} · Pending: ${r.pending} ${r.currency} · lands ≈ ${r.projected || '—'} (${r.payoutDays || 7}d)`; if (r.currency === 'EUR') totEur += Number(r.available) || 0; else totUsd += Number(r.available) || 0; okCount++; card.querySelector('[data-k="balance"]').value = String(r.available); card.querySelector('[data-k="balanceAt"]').value = String(Date.now()); } else { out.textContent = r.error || 'Stripe not reached'; fail++; } } catch (e) { out.textContent = e.message; fail++; }
     }
     await persistStripeAccountsFromTable(true);
     if (out) out.textContent = `All accounts (${okCount} ok${fail ? `, ${fail} skipped/failed` : ''}): Available ${totUsd.toFixed(2)} · €${totEur.toFixed(2)}`;

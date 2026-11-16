@@ -261,6 +261,8 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/tx') || path === '/api/admin/rates/refresh' || path === '/api/admin/stripe/match') return 'finance_edit';
   if (path.startsWith('/api/admin/stock')) return 'stock';
   if (path === '/api/admin/profits') return 'profits';
+  if (path === '/api/admin/sales-by-day') return 'profits';
+  if (path.startsWith('/api/admin/reseller/')) return 'customers_edit';
   if (path === '/api/admin/log') return 'activity';
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
   if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
@@ -727,6 +729,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         sales.push({ id: uid(6), at: r.at, customerId: c.id, username: c.username, name: c.name, type: r.type, planId: r.planId, planName: plan ? plan.name : 'Custom', days: r.days, credits: r.credits ?? planCredits(plan), amount: r.price || 0, currency: s.currency, amountUsd: toUsd(r.price, s.currency, s.finance.rates), costUsd: 0, accountId: '' });
       }
       await store.put('sales', sales);
+      await store.put('salesBuilt', 1);
     }
     return sales;
   }
@@ -744,7 +747,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const amountUsd = toUsd(amount, currency, s.finance.rates);
     const costUsd = credits * (await creditCostUsd(s));
     const sale = { by: by || '', id: uid(6), at: at || Date.now(), customerId: c.id, username: c.username, name: c.name, type, planId: plan ? plan.id : (type === 'trial' ? 'trial' : 'custom'), planName: type === 'trial' ? 'Trial' : plan ? plan.name : 'Custom', days, credits, amount: Number(amount) || 0, currency, amountUsd, costUsd, accountId: acc ? acc.id : '' };
-    const sales = await getSales(); sales.push(sale); await store.put('sales', sales);
+    const sales = await getSales();
+    for (let i = sales.length - 1; i >= 0; i--) {
+      const m = sales[i];
+      if (Math.abs((m.at || 0) - (sale.at || 0)) < 5000 && m.customerId === c.id && m.planId === sale.planId && Number(m.amount) === Number(amount || 0) && m.currency === sale.currency) sales.splice(i, 1);
+    }
+    sales.push(sale); await store.put('sales', sales);
     if (acc && Number(amount) > 0) {
       const tx = await getTx();
       tx.push({ id: uid(6), by: by || '', at: sale.at, type: 'income', accountId: acc.id, amount: Number(amount), category: 'Sale', note: `${sale.planName} · ${c.name} (${c.username})`, saleId: sale.id });
@@ -834,6 +842,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     } catch {}
     return s;
   }
+  const addBizProjection = (t, n) => { const d = new Date(t); let a = 0; while (a < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) a++; } return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const addBizDays = (t, n) => { const d = new Date(t); let a = 0; while (a < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) a++; } return d; };
   function balances(s, tx) {
     const rates = s.finance.rates;
     return s.finance.accounts.map((a) => {
@@ -2608,7 +2618,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         try { const r = await fetchFn('https://api.stripe.com/v1/balance', { headers: { Authorization: 'Bearer ' + acct.rk } }); d = await r.json(); if (!r.ok) return ok({ connected: true, error: d.error?.message || 'Stripe error ' + r.status }); } catch (e) { return ok({ connected: true, error: e.message }); }
         const cur = String(acct.currency).toLowerCase();
         const sum = (arr) => (arr || []).filter((x) => x.currency === cur).reduce((a, x) => a + x.amount, 0) / 100;
-        return ok({ connected: true, accountId: acct.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending) });
+        const nDays = Number(acct.payoutDays) === 2 ? 2 : 7;
+        return ok({ connected: true, accountId: acct.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending), payoutDays: nDays, projected: addBizProjection(Date.now(), nDays) });
       }
       if (R('GET', '/api/admin/stripe/balance')) { // live balance from Stripe, compared with the app
         const key = s.finance.stripeKey;
@@ -2621,7 +2632,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const sum = (arr) => (arr || []).filter((x) => x.currency === cur).reduce((a, x) => a + x.amount, 0) / 100;
         const other = (arr) => (arr || []).filter((x) => x.currency !== cur).map((x) => `${x.amount / 100} ${x.currency.toUpperCase()}`);
         const appBal = acc ? balances(s, await getTx()).find((b) => b.id === acc.id).balance : 0;
-        return ok({ connected: true, accountId: acc?.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending), otherCurrencies: [...other(d.available), ...other(d.pending)], app: appBal });
+        const saMatch = (s.stripeAccounts || []).find((x) => x.id === (s.finance.stripeAccountId || 'stripe'));
+        const nDays = Number(saMatch?.payoutDays) === 2 ? 2 : 7;
+        return ok({ connected: true, accountId: acc?.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending), otherCurrencies: [...other(d.available), ...other(d.pending)], app: appBal, payoutDays: nDays, projected: addBizProjection(Date.now(), nDays) });
       }
       if (R('POST', '/api/admin/stripe/match')) { // add one adjustment so the app equals Stripe
         const acc = s.finance.accounts.find((a) => a.id === (s.finance.stripeAccountId || 'stripe'));
@@ -2637,6 +2650,29 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ ok: true, diff });
       }
       if (R('POST', '/api/admin/rates/refresh')) { const n = await refreshRates(s, true); return ok({ rates: n.finance.rates, ratesUpdatedAt: n.finance.ratesUpdatedAt }); }
+      if (R('GET', '/api/admin/sales-by-day')) {
+        const sales = (await getSales()).filter((x) => x.type !== 'trial');
+        const mk = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+        const monthKey = (t) => monthKeyOf(new Date(t));
+        const monthKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const today = mk(Date.now()), yest = mk(Date.now() - DAYMS);
+        const days = {}; for (let i = 29; i >= 0; i--) { const k = mk(Date.now() - i * DAYMS); days[k] = { usd: 0, n: 0 }; }
+        const months = {}; for (let i = 11; i >= 0; i--) { const d = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1); months[monthKeyOf(d)] = 0; }
+        let todayUsd = 0, todayN = 0, yestUsd = 0, yestN = 0, monthUsd = 0, monthN = 0; const curMonth = monthKeyOf(new Date());
+        for (const x of sales) {
+          const u = Number(x.amountUsd) || 0; const k = mk(x.at);
+          if (k in days) { days[k].usd += u; days[k].n++; }
+          if (k === today) { todayUsd += u; todayN++; } else if (k === yest) { yestUsd += u; yestN++; }
+          if (monthKey(x.at) === curMonth) { monthUsd += u; monthN++; }
+          const mk2 = monthKey(x.at); if (mk2 in months) months[mk2] += u;
+        }
+        for (const k in days) days[k].usd = Math.round(days[k].usd * 100) / 100;
+        for (const k in months) months[k] = Math.round(months[k] * 100) / 100;
+        const best = Object.entries(days).sort((a, b) => b[1].usd - a[1].usd)[0] || [today, { usd: 0, n: 0 }];
+        const avg = monthN ? Math.round((monthUsd / monthN) * 100) / 100 : 0;
+        const recent = sales.slice().sort((a, b) => b.at - a.at).slice(0, 50).map((x) => { const acc = s.finance.accounts.find((a) => a.id === x.accountId); return { id: x.id, at: x.at, name: x.name, username: x.username, planName: x.planName, type: x.type, amount: x.amount, currency: x.currency, amountUsd: Math.round((Number(x.amountUsd) || 0) * 100) / 100, credits: x.credits, accountName: acc ? acc.name : '' }; });
+        return ok({ today: Math.round(todayUsd * 100) / 100, todayN, yest: Math.round(yestUsd * 100) / 100, yestN, month: Math.round(monthUsd * 100) / 100, monthN, avg, bestDay: best[0], bestUsd: best[1] ? Math.round(best[1].usd * 100) / 100 : 0, days30: Object.entries(days).map(([k, v]) => ({ d: k, usd: v.usd, n: v.n })), months: Object.entries(months).map(([k, v]) => ({ k, usd: v })), recent });
+      }
       if (R('GET', '/api/admin/tx')) {
         const tx = await getTx();
         return ok(tx.filter((t) => !query.account || t.accountId === query.account || t.toAccountId === query.account).sort((a, b) => b.at - a.at).slice(0, Number(query.limit) || 300));
@@ -2891,6 +2927,32 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(x);
       }
       if (R('GET', '/api/admin/reseller-sales')) return ok((await getSales()).filter((x) => x.type === 'reseller').sort((a, b) => b.at - a.at));
+      if (R('POST', '/api/admin/reseller/toggle')) {
+        const list = await getCustomers(); const c = list.find((x) => x.id === String(body.id || '')); if (!c) return err(404, 'Not found.');
+        c.isReseller = !c.isReseller;
+        if (c.isReseller && !c.rslId) { s.resellerSeq = (Number(s.resellerSeq) || 0) + 1; await saveSettings(s); c.rslId = 'RSL-' + String(s.resellerSeq).padStart(2, '0'); }
+        await saveCustomers(list);
+        await log('customer', `${c.isReseller ? 'Flagged reseller' : 'Unflagged reseller'} ${c.username}${c.rslId ? ' (' + c.rslId + ')' : ''}`);
+        return ok({ id: c.id, isReseller: !!c.isReseller, rslId: c.rslId || '' });
+      }
+      if (R('GET', '/api/admin/reseller')) {
+        const sales = await getSales();
+        const list = (await getCustomers()).filter((c) => c.isReseller);
+        const byC = {};
+        for (const sa of sales) if (sa.type === 'reseller') { const e = (byC[sa.customerId] ||= { n: 0, usd: 0, credits: 0 }); e.n++; e.usd += Number(sa.amountUsd) || 0; e.credits += Number(sa.credits) || 0; }
+        const rows = list.map((c) => { const a = byC[c.id] || { n: 0, usd: 0, credits: 0 }; return { id: c.id, rslId: c.rslId || '—', name: c.name, username: c.username, email: c.email || '', phone: c.phone || '', status: c.status || 'active', purchases: a.n, spentUsd: Math.round(a.usd * 100) / 100, credits: a.credits, spentMad: Math.round(a.usd * (Number(s.finance?.rates?.MAD) || 10) * 100) / 100 }; }).sort((a, b) => b.credits - a.credits);
+        rows.forEach((r, i) => { r.rank = i + 1; r.rate = r.credits > 0 ? Math.round((r.spentUsd / r.credits) * 100) / 100 : 0; });
+        return ok({ list: rows, sheets: s.sheets || { url: '', enabled: false } });
+      }
+      if (R('POST', '/api/admin/reseller/sync')) {
+        const url = String(body.url || s.sheets?.url || '').trim(); if (!/^https?:\/\//.test(url)) return err(400, 'Add your Google Sheets webhook URL first.');
+        const sales = await getSales();
+        const list = (await getCustomers()).filter((c) => c.isReseller);
+        const byC = {};
+        for (const sa of sales) if (sa.type === 'reseller') { const e = (byC[sa.customerId] ||= { n: 0, usd: 0, credits: 0 }); e.n++; e.usd += Number(sa.amountUsd) || 0; e.credits += Number(sa.credits) || 0; }
+        const rows = list.map((c) => { const a = byC[c.id] || { n: 0, usd: 0, credits: 0 }; return [c.rslId || '', c.name, c.username, c.email || '', c.phone || '', a.n, Math.round(a.usd * 100) / 100, a.credits, c.status || 'active']; });
+        try { const r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'resellers', token: s.sheets?.token || '', rows, syncedAt: Date.now() }) }); const d = await r.json().catch(() => ({})); if (!r.ok) return err(502, 'Sheets webhook: ' + (d.error || 'HTTP ' + r.status)); await saveSettings({ ...s, sheets: { ...(s.sheets || {}), url, enabled: true } }); await log('settings', 'Reseller Google Sheets sync: ' + rows.length + ' rows'); return ok({ ok: true, sent: rows.length }); } catch (e) { return err(502, 'Sheets webhook unreachable: ' + e.message); }
+      }
 
       if (R('GET', '/api/admin/stats')) {
         const cs = (await getCustomers()).map((c) => viewP(c, s));
