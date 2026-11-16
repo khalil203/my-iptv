@@ -81,10 +81,14 @@ export const DEFAULT_SETTINGS = () => ({
     },
   },
   plans: [
-    { id: 'p1', name: '1 Month', days: 30, price: 10, connections: 1, package: '1', credits: 1 },
-    { id: 'p3', name: '3 Months', days: 90, price: 25, connections: 1, package: '2', credits: 3 },
-    { id: 'p6', name: '6 Months', days: 180, price: 45, connections: 1, package: '3', credits: 6 },
-    { id: 'p12', name: '12 Months', days: 365, price: 80, connections: 1, package: '4', credits: 12 },
+    { id: 'p1', name: '1 Month', days: 30, price: 29.99, connections: 1, package: '1', credits: 1 },
+    { id: 'p3', name: '3 Months', days: 90, price: 49.99, connections: 1, package: '2', credits: 3 },
+    { id: 'p6', name: '6 Months', days: 180, price: 59.99, connections: 1, package: '3', credits: 6 },
+    { id: 'p12', name: '1 Year', days: 365, price: 69.99, connections: 1, package: '1', credits: 12 },
+    { id: 'p24', name: '2 Years', days: 730, price: 99.99, connections: 1, package: '4', credits: 24 },
+    { id: 'p12d2', name: '2 Devices · 1 Year', days: 365, price: 109.99, connections: 2, package: '3', credits: 24 },
+    { id: 'p12d3', name: '3 Devices · 1 Year', days: 365, price: 129.99, connections: 3, package: '4', credits: 36 },
+    { id: 'p12d4', name: '4 Devices · 1 Year', days: 365, price: 139.99, connections: 4, package: '4', credits: 48 },
   ],
   currency: 'USD',
   resellerPackages: [
@@ -96,12 +100,16 @@ export const DEFAULT_SETTINGS = () => ({
   resellerCurrency: 'EUR',
   // Storefront packages (spec §3): IBO Player activations + multi-device yearly plans.
   orderPackages: [
+    { id: 's1m', title: '1 Month', days: 30, devices: 1, price: 29.99, badge: '', link: '' },
+    { id: 's3m', title: '3 Months', days: 90, devices: 1, price: 49.99, badge: '', link: '' },
+    { id: 's6m', title: '6 Months', days: 180, devices: 1, price: 59.99, badge: '', link: '' },
+    { id: 's1y', title: '1 Year', days: 365, devices: 1, price: 69.99, badge: '⭐ Best Seller', link: '' },
+    { id: 's2y', title: '2 Years', days: 730, devices: 1, price: 99.99, badge: '', link: '' },
+    { id: 's1y2d', title: '2 Devices · 1 Year', days: 365, devices: 2, price: 109.99, badge: '⭐ Best Value', link: '' },
+    { id: 's1y3d', title: '3 Devices · 1 Year', days: 365, devices: 3, price: 129.99, badge: '', link: '' },
+    { id: 's1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 139.99, badge: '', link: '' },
     { id: 'ibo1y', title: 'IBO Player · 1 Year', days: 365, devices: 1, price: 5.99, badge: '', link: '' },
     { id: 'ibolife', title: 'IBO Player · Lifetime', days: 36500, devices: 1, price: 11.98, badge: '⭐ Lifetime activation', link: '' },
-    { id: 'o1y1d', title: '1 Device · 1 Year', days: 365, devices: 1, price: 5.99, badge: '', link: '' },
-    { id: 'o1y2d', title: '2 Devices · 1 Year', days: 365, devices: 2, price: 11.98, badge: '⭐ Best Value', link: '' },
-    { id: 'o1y3d', title: '3 Devices · 1 Year', days: 365, devices: 3, price: 17.97, badge: '', link: '' },
-    { id: 'o1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 23.96, badge: '', link: '' },
   ],
   orderCurrency: 'EUR',
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
@@ -692,6 +700,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (!s.pricingV2) {
       if ((s.orderPackages || []).map((p) => p.id).join(',') === 'o1m,o3m,o6m,o1y,o2y,o1y2d,o1y3d,o1y4d') s.orderPackages = DEFAULT_SETTINGS().orderPackages;
       s.pricingV2 = true; await store.put('settings', s);
+    }
+    if (!s.pricingV3) {
+      const fresh = DEFAULT_SETTINGS();
+      const spec = fresh.orderPackages.filter((p) => !/^ibo/.test(p.id));
+      const byCat = new Map((s.orderPackages || []).map((p) => [`${p.days}x${p.devices || 1}`, p]));
+      const ibo = (s.orderPackages || []).filter((p) => /^ibo/.test(p.id));
+      const knownIds = new Set([...spec.map((p) => p.id), 'o1m', 'o3m', 'o6m', 'o1y', 'o2y', 'o1y1d', 'o1y2d', 'o1y3d', 'o1y4d', 'ibo1y', 'ibolife']);
+      const customPkgs = (s.orderPackages || []).filter((p) => !knownIds.has(p.id));
+      s.orderPackages = [...spec.map((p) => ({ ...p, stripeAccount: byCat.get(`${p.days}x${p.devices}`)?.stripeAccount || p.stripeAccount || undefined })), ...ibo.map((p) => ({ ...p })), ...customPkgs];
+      const knownPlans = new Set(['p1', 'p3', 'p6', 'p12', 'p24', 'p12d2', 'p12d3', 'p12d4']);
+      const customPlans = (s.plans || []).filter((p) => !knownPlans.has(p.id));
+      s.plans = [...fresh.plans, ...customPlans];
+      s.pricingV3 = true; await store.put('settings', s);
+      await log('settings', 'Pricing schedule v3 applied (8 packages, EUR with mirrored USD, Package IDs per schedule)');
     }
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
     applyMailTexts(s.mailTexts); setMailLang(s.email.lang);

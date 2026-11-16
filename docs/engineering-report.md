@@ -62,3 +62,8 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 - Bugs fixed: fresh-install double sales record (lazy history migration counted the just-created sale; deduped in recordSale with a 5s/customer/plan/amount/currency match) — caught by a new test; persistStripeAccountsFromTable silently dropped saves when the admin cleared the account list.
 - Call button on customer rows now copies the phone number instead of dialling.
 - NOT DONE (needs input): Mercury/Wise live balance API (no credentials in app or env; wire once read tokens exist — Mercury read-only API + Wise public API); full reseller portal (lines owned by resellers belong to their panel; rank/rate are computed from in-app purchases only); Google Sheets sync needs the user's Apps Script URL.
+
+## Addendum — pricing schedule v3 (2026-11-16)
+- Final 8 packages applied: 1M 30d/1cr/PkgID1 €29.99 · 3M 90d/3cr/ID2 €49.99 · 6M 180d/6cr/ID3 €59.99 · 1Y 365d/12cr/ID1 €69.99 · 2Y 730d/24cr/ID4 €99.99 · 2D-1Y 365d/24cr/2dev/ID3 €109.99 · 3D-1Y 365d/36cr/3dev/ID4 €129.99 · 4D-1Y 365d/48cr/4dev/ID4 €139.99. EUR is the canonical price; USD mirrors the same numbers (user decision); orderCurrency setting unchanged.
+- One-time auto-migration (pricingV3, runs in getSettings on deploy): rewrites plans + purchase-page packages, preserves IBO packages, preserves any hand-made custom packages/plans, and preserves per-package Stripe routing by matching days×devices (o1y1d→s1y=grenapp, o1y2d→s1y2d=waffim, o1y3d→s1y3d=grenapp verified in a simulated production KV).
+- Migration logged in activity log; admins can still edit everything in Plans & prices afterwards.
