@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
 
     private String offlinePage() {
         return "<html><body style='background:#060a12;color:#eaf6fb;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center'>"
-            + "<div><h2>INTPROTO-TV</h2><p>No internet connection / Pas de connexion / لا يوجد اتصال</p>"
+            + "<div><h2>INTPROTO-TV</h2><p>No internet connection / Pas de connexion</p>"
             + "<button autofocus style='padding:14px 26px;font-size:18px;border-radius:12px;border:0;background:#12bfd8;color:#fff' onclick=\"location.href='" + appUrl + "'\">Retry ⟳</button></div></body></html>";
     }
 

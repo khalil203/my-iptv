@@ -288,7 +288,7 @@ test('templates: the owner can reword emails and WhatsApp, preview unsaved text,
   assert.deepEqual(t1.custom, { AM: { en: { trialTitle: 'Saved title' } } }, 'unknown keys, layout keys and unchanged texts are not stored');
   assert.equal(t1.wa.pay.en, 'Pay here {link}'); assert.equal(t1.waCustom.length, 1);
   assert.match((await x.call('POST', '/api/admin/templates/preview', { kind: 'trial', lang: 'en', mailTexts: t1.custom }, tok)).json.html, /Saved title/);
-  for (const kind of ['welcome', 'renewal', 'order', 'expiry']) for (const lang of ['en', 'fr', 'ar']) assert.ok((await x.call('POST', '/api/admin/templates/preview', { kind, lang }, tok)).json.html.length > 200, kind + ' ' + lang);
+  for (const kind of ['welcome', 'renewal', 'order', 'expiry']) for (const lang of ['en', 'fr']) assert.ok((await x.call('POST', '/api/admin/templates/preview', { kind, lang }, tok)).json.html.length > 200, kind + ' ' + lang);
   const cust = await addCustomer(x, tok, { phone: '212600000001' });
   const own = await x.call('POST', `/api/admin/customers/${cust.id}/wamsg`, { type: 'c:' + t1.waCustom[0].id, lang: 'en' }, tok);
   assert.match(own.json.text, /Hi Test, welcome back to/);

@@ -53,15 +53,6 @@ const T = {
     wSteps: ['Ouvrez cette page dans <b>Chrome</b> ou <b>Edge</b>.', "Cliquez sur <b>Installer l'application</b> (ou l'icône dans la barre d'adresse).", 'Elle s’ouvre dans sa propre fenêtre et apparaît dans le menu Démarrer.'],
     mSteps: ["Dans <b>Chrome</b> ou <b>Edge</b> : cliquez sur <b>Installer l'application</b>.", 'Dans <b>Safari</b> : menu <b>Fichier → Ajouter au Dock</b>.', 'Ouvrez-la depuis le Dock ou le Launchpad.'],
     auto: "✨ Toutes les versions se mettent à jour automatiquement à la prochaine ouverture." },
-  ar: { winDl: '⬇ تحميل لويندوز', macDl: '⬇ تحميل لماك', wSteps2: ['اضغط <b>تحميل لويندوز</b> وافتح الملف.', 'إذا ظهر تحذير: <b>More info ← Run anyway</b>.', 'يفتح INTPROTO-TV مع اختصار على سطح المكتب. يتحدّث تلقائيًا.'], mSteps2: ['اضغط <b>تحميل لماك</b>، افتح الملف واسحب <b>INTPROTO-TV</b> إلى Applications.', 'أول مرة: انقر بالزر الأيمن على التطبيق ← <b>Open</b> (أو الإعدادات ← الخصوصية والأمان ← <b>Open Anyway</b>).', 'يتحدّث تلقائيًا.'], intro: 'ثبّت التطبيق على أي جهاز. يتحدّث تلقائيًا — لن تحتاج لتحميله مرة أخرى.', back: '→ رجوع',
-    android: 'هاتف وتابلت أندرويد', androidTV: 'أندرويد TV · تي في بوكس · Fire TV', iphone: 'آيفون وآيباد', windows: 'كمبيوتر ويندوز', mac: 'ماك', you: 'جهازك',
-    apk: '⬇ تحميل لأندرويد (APK)', install: '⬇ تثبيت التطبيق', open: 'فتح في المتصفح',
-    aSteps: ['اضغط <b>تحميل لأندرويد</b>.', 'افتح الملف واضغط <b>تثبيت</b> (اسمح بتثبيت التطبيقات غير المعروفة إن طُلب).', 'أو اضغط <b>تثبيت التطبيق</b> من كروم.'],
-    tvSteps: ['على التلفاز، ثبّت تطبيق <b>Downloader</b> المجاني.', 'افتح Downloader واكتب: <span class="code-url">{tv}</span>', 'ثبّت ثم افتح <b>INTPROTO-TV</b>. استخدم أسهم الريموت وزر OK.'],
-    iSteps: ['افتح هذه الصفحة في <b>Safari</b>.', 'اضغط زر <b>المشاركة</b>.', 'اختر <b>إضافة إلى الشاشة الرئيسية</b> ثم <b>إضافة</b>.'],
-    wSteps: ['افتح هذه الصفحة في <b>Chrome</b> أو <b>Edge</b>.', 'اضغط <b>تثبيت التطبيق</b> (أو أيقونة التثبيت في شريط العنوان).', 'يفتح في نافذة خاصة ويظهر في قائمة ابدأ.'],
-    mSteps: ['في <b>Chrome</b> أو <b>Edge</b>: اضغط <b>تثبيت التطبيق</b>.', 'في <b>Safari</b>: القائمة <b>ملف ← إضافة إلى Dock</b>.', 'افتحه من Dock أو Launchpad.'],
-    auto: '✨ جميع النسخ تتحدّث تلقائيًا عند فتح التطبيق.' },
 };
 let lang = localStorage.getItem('tvp_lang') || (navigator.languages || [navigator.language]).map((l) => String(l).slice(0, 2)).find((l) => T[l]) || 'en';
 const ua = navigator.userAgent;
@@ -85,7 +76,7 @@ function render() {
   document.getElementById('intro').textContent = L.intro;
   document.getElementById('auto').textContent = L.auto;
   document.getElementById('back').textContent = L.back;
-  document.getElementById('langs').innerHTML = [['en', 'English'], ['fr', 'Français'], ['ar', 'العربية']].map(([k, n]) => `<a class="${k === lang ? 'on' : ''}" data-l="${k}" tabindex="0">${n}</a>`).join(' · ');
+  document.getElementById('langs').innerHTML = [['en', 'English'], ['fr', 'Français']].map(([k, n]) => `<a class="${k === lang ? 'on' : ''}" data-l="${k}" tabindex="0">${n}</a>`).join(' · ');
   const apkBtn = apkOk === false ? `<a class="btn primary block" href="https://github.com/khalil203/my-iptv/releases/latest">${L.apk}</a>` : `<a class="btn primary block" href="${apkUrl}" download>${L.apk}</a>`;
   const installBtn = `<button class="btn block" onclick="installApp()" style="margin-top:8px">${L.install}</button>`;
   const card = (id, ic, title, steps, btns) => `<div class="plat ${me === id ? 'me' : ''}" style="order:${me === id ? 0 : 1}"><h3><span class="ic">${ic}</span>${title}${me === id ? `<span class="badge-me">${L.you}</span>` : ''}</h3>${btns}<ol>${steps.map((s) => `<li>${s.replace('{tv}', tvShort)}</li>`).join('')}</ol></div>`;

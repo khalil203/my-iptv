@@ -288,7 +288,7 @@ export function cleanEmail(x) {
 // Language of emails: one language for everyone (English unless changed in Trial & email setup), or each customer's own.
 let MAIL_LANG = 'en';
 export const setMailLang = (v) => { MAIL_LANG = ['en', 'fr', 'ar', 'customer'].includes(v) ? v : 'en'; };
-const ml = (c) => (MAIL_LANG !== 'customer' ? MAIL_LANG : ['en', 'fr', 'ar'].includes(c && c.lang) ? c.lang : 'en');
+const ml = (c) => (MAIL_LANG !== 'customer' ? MAIL_LANG : ['en', 'fr'].includes(c && c.lang) ? c.lang : 'en');
 // Reads the server, username and password out of a line link copied from the panel (get.php, player_api.php or /live/user/pass/…).
 export function parseLineLink(link) {
   const m = String(link || '').trim().match(/https?:\/\/[^\s"'<>]+/i); if (!m) return null;
@@ -363,11 +363,11 @@ const DAYMS = 86400000;
 const planCredits = (p) => (p && p.credits != null && p.credits !== '' ? Number(p.credits) : p ? Math.max(1, Math.round((p.days || 30) / 30)) : 1);
 const escHtml = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// Email texts in English, French and Arabic
+// Email texts in English and French
 const MAIL = {
   en: { trialSubject: 'Your free {hours}h trial is ready', welcomeSubject: 'Your account is ready', hello: 'Hello {name},', trialBody: 'Your free trial is active for {hours} hours. Sign in with these details:', welcomeBody: 'Your subscription is active. Sign in with these details:', user: 'Username', pass: 'Password', expires: 'Expires', open: 'Open the app', install: 'Tip: add the app to your home screen to use it like a normal app.', expirySubject: 'Your subscription ends in {days} days', expiryBody: 'Your subscription ends on {date}. Contact us to renew and keep watching.', thanks: 'Thank you!' },
   fr: { trialSubject: 'Votre essai gratuit de {hours}h est prêt', welcomeSubject: 'Votre compte est prêt', hello: 'Bonjour {name},', trialBody: 'Votre essai gratuit est actif pendant {hours} heures. Connectez-vous avec ces informations :', welcomeBody: 'Votre abonnement est actif. Connectez-vous avec ces informations :', user: "Nom d'utilisateur", pass: 'Mot de passe', expires: 'Expire le', open: "Ouvrir l'application", install: "Astuce : ajoutez l'application à votre écran d'accueil.", expirySubject: 'Votre abonnement se termine dans {days} jours', expiryBody: 'Votre abonnement se termine le {date}. Contactez-nous pour le renouveler.', thanks: 'Merci !' },
-  ar: { trialSubject: 'تجربتك المجانية لمدة {hours} ساعة جاهزة', welcomeSubject: 'حسابك جاهز', hello: 'مرحبًا {name}،', trialBody: 'تجربتك المجانية مفعّلة لمدة {hours} ساعة. سجّل الدخول بهذه المعلومات:', welcomeBody: 'اشتراكك مفعّل. سجّل الدخول بهذه المعلومات:', user: 'اسم المستخدم', pass: 'كلمة المرور', expires: 'ينتهي في', open: 'افتح التطبيق', install: 'نصيحة: أضف التطبيق إلى الشاشة الرئيسية لاستخدامه كتطبيق عادي.', expirySubject: 'ينتهي اشتراكك خلال {days} أيام', expiryBody: 'ينتهي اشتراكك في {date}. تواصل معنا للتجديد ومواصلة المشاهدة.', thanks: 'شكرًا لك!' },
+
 };
 const mt = (lang, k, v = {}) => String((MAIL[lang] || MAIL.en)[k] || MAIL.en[k]).replace(/\{(\w+)\}/g, (_, x) => v[x] ?? '');
 function mailHtml(s, lang, rows, intro, name) {
@@ -403,15 +403,7 @@ const AM = {
     help: "📞 Besoin d'aide ?", helpText: "Pour toute question ou aide à l'installation, notre service client est là pour vous.", support: 'Service client', email: 'E-mail', website: 'Site web', whatsapp: 'WhatsApp',
     closing: "Nous vous remercions de votre intérêt pour <b>{app}</b> et espérons que vous apprécierez l'expérience.", regards: 'Cordialement,', team: 'Service client',
     footer: "Merci pour votre confiance. Pour toute question, contactez notre service client — nous sommes là pour vous offrir la meilleure expérience IPTV." },
-  ar: { dir: 'rtl', trialTitle: 'تجربتك المجانية جاهزة 🎉', subTitle: 'اشتراكك مفعّل ✅', trialSub: 'تم التفعيل فورًا. ابدأ المشاهدة الآن.', subSub: 'خطّك مفعّل. ابدأ المشاهدة الآن.',
-    dear: 'عزيزي/عزيزتي {name}،', trialIntro: 'شكرًا لاختيارك <b>{app}</b>. يسعدنا إبلاغك بأن تجربتك المجانية جاهزة للاستخدام.', subIntro: 'شكرًا لاختيارك <b>{app}</b>. اشتراكك مفعّل وجاهز للاستخدام.',
-    trialNote: '<b>⏳ ملاحظة:</b> تنتهي تجربتك المجانية بعد <b>{hours} ساعة</b>.', subNote: '<b>📅 صالح حتى:</b> {date}',
-    details: '📺 معلومات الدخول', detailsIntro: 'شاهد في تطبيقنا، أو استخدم أي مشغّل IPTV متوافق بهذه المعلومات:', user: 'اسم المستخدم', pass: 'كلمة المرور', dns: 'DNS / البوابة', m3u: 'روابط M3U',
-    appTitle: '📲 شاهد في تطبيق {app}', appText: 'يعمل على أندرويد وأندرويد TV وآيفون وآيباد وويندوز وماك. يتحدّث تلقائيًا.', openApp: 'افتح التطبيق', getApp: 'حمّل التطبيق',
-    setup: '⚙️ طريقة الإعداد على مشغّلات IPTV الأخرى', s1: 'حمّل وثبّت مشغّل IPTV متوافق (مثل IPTV Smarters Pro أو XCIPTV أو TiviMate).', s2: 'افتحه واختر <b>Login with Xtream Codes API</b> أو <b>M3U Playlist URL</b>.', s3: 'أدخل <b>اسم المستخدم</b> و<b>كلمة المرور</b> و<b>رابط DNS</b> أعلاه.', s4: 'اضغط <b>Connect</b> أو <b>Add User</b>، وانتظر تحميل القنوات، واستمتع!',
-    help: '📞 تحتاج مساعدة؟', helpText: 'إذا كان لديك أي سؤال أو تحتاج مساعدة في الإعداد، فريق خدمة العملاء جاهز لمساعدتك.', support: 'خدمة العملاء', email: 'البريد', website: 'الموقع', whatsapp: 'واتساب',
-    closing: 'نشكرك على اهتمامك بـ <b>{app}</b> ونتمنى لك تجربة ممتعة.', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء',
-    footer: 'شكرًا لثقتك ودعمك. لأي سؤال تواصل مع فريق الدعم — نحن هنا لنجعل تجربتك مع IPTV استثنائية.' },
+
 };
 // The owner can reword every email. The built-in wording is kept as the default; their changes are laid on top.
 const tplDicts = () => ({ MAIL, AM, RM, OM });
@@ -442,11 +434,9 @@ export function accessEmail(s, c, password, kind, appUrl) {
   const u = c.lineUsername || c.username, p = c.linePassword || password;
   const q = `username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}`;
   const m3u = dns ? [`${dns}/get.php?${q}&type=m3u_plus&output=ts`, `${dns}/get.php?${q}&type=m3u_plus&output=m3u8`] : [];
-  const date = new Date(c.expiresAt).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' });
+  const date = new Date(c.expiresAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' });
   const trial = kind === 'trial';
-  const macNote = lang === 'ar'
-    ? 'تستعمل جهازًا بتقنية MAC Address (تلفاز ذكي، جهاز STB...)؟ أرسل عنوان MAC الخاص بك إلى الدعم عبر واتساب أو تيليجرام وسنفعل تفعيلك.'
-    : lang === 'fr'
+  const macNote = lang === 'fr'
       ? 'Vous utilisez un appareil basé sur une adresse MAC (TV connectée, STB…) ? Envoyez votre adresse MAC au support sur WhatsApp ou Telegram et nous activerons votre compte.'
       : 'Using a MAC-address device (Smart TV, STB, Formuler…)? Send your MAC address to support on WhatsApp or Telegram and we will activate it for you.';
   const P = '#0284c7', align = L.dir === 'rtl' ? 'right' : 'left';
@@ -498,11 +488,7 @@ const RM = {
     intro2: 'Nous serions ravis de vous retrouver avec notre offre spéciale de renouvellement :', offerLabel: 'Offre spéciale de retour', coupon: '🎁 Code promo exclusif', cta: "Renouveler maintenant →",
     how: 'Comment renouveler', h1: '🌐 Rendez-vous sur {site}', h2: '📺 Parcourez les formules et choisissez celle qui vous convient.', h3: '🎁 Saisissez {coupon} lors du paiement, si applicable.', h4: '🔒 Finalisez votre paiement en toute sécurité.', h5: "🔄 Une fois la commande confirmée, contactez notre support si vous avez besoin d'aide pour l'activation.",
     help: "Pour toute question ou aide au renouvellement, notre équipe support est là pour vous.", thanks: "Merci d'avoir choisi <b>{app}</b>. Nous serons heureux de vous servir à nouveau.", regards: 'Cordialement,', team: 'Service client', subject: 'Renouvelez votre abonnement {app} — offre spéciale 🎉' },
-  ar: { dir: 'rtl', badgeSub: 'انتهى الاشتراك • تذكير بالتجديد', badgeTrial: 'انتهت التجربة • عرض خاص', title: 'جدّد اشتراكك في {app} اليوم 🎉', dear: 'عزيزي/عزيزتي {name}،',
-    introTrial: '🌼 نتمنى أن تكون قد استمتعت بتجربتك مع <b>{app}</b>. شكرًا لتجربتك خدمتنا.', introSub: '🌼 شكرًا لمشاهدتك مع <b>{app}</b>. انتهى اشتراكك في <b>{date}</b>.',
-    intro2: 'يسعدنا أن نرحب بعودتك مع عرض التجديد الخاص:', offerLabel: 'باقة العودة الخاصة', coupon: '🎁 كود خصم حصري', cta: 'جدّد اشتراكك الآن ←',
-    how: 'طريقة التجديد', h1: '🌐 زر موقع {site}', h2: '📺 تصفح الباقات واختر ما يناسبك.', h3: '🎁 أدخل {coupon} عند الدفع إن أمكن.', h4: '🔒 أكمل الدفع عبر صفحة الدفع الآمنة.', h5: '🔄 بعد تأكيد الطلب، تواصل مع الدعم إذا احتجت مساعدة في التفعيل.',
-    help: 'إذا كان لديك أي سؤال أو تحتاج مساعدة في التجديد، فريق الدعم جاهز لمساعدتك.', thanks: 'شكرًا لاختيارك <b>{app}</b>. نتطلع لخدمتك مرة أخرى.', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: 'جدّد اشتراكك في {app} — عرض خاص 🎉' },
+
 };
 const OM = {
   en: { dir: 'ltr', badge: '{app} Order Checkout', title: 'Thank You for Choosing {app} 🎉', sub: 'Please place your order for your selected package below.', dear: 'Dear {name},', dearAny: 'Dear Valued Customer,',
@@ -515,11 +501,7 @@ const OM = {
     introMulti: 'Votre abonnement <strong>{pkg}</strong> est prêt. Regardez en même temps sur {n} appareils. Cliquez ci-dessous pour payer via Stripe.',
     access: 'Accès {d} jours', dev1: '📺 1 appareil', devN: '📺 {n} appareils en même temps', cta: '🔒 Commander {pkg} ({price}) →', ctaContact: '💬 Contactez-nous pour commander', contactNote: 'Écrivez-nous et nous vous envoyons votre lien de paiement personnel.', secure: 'Paiement Stripe 100 % sécurisé • Livraison immédiate par email',
     help: "📞 Besoin d'aide ?", regards: 'Cordialement,', team: 'Service client', subject: '{pkg} — {price} | commande {app}' },
-  ar: { dir: 'rtl', badge: 'طلب {app}', title: 'شكرًا لاختيارك {app} 🎉', sub: 'أكمل طلب الباقة التي اخترتها أدناه.', dear: 'عزيزي/عزيزتي {name}،', dearAny: 'عزيزي العميل،',
-    intro: 'باقة اشتراكك <strong>{pkg}</strong> جاهزة للدفع. اضغط على زر الدفع الآمن عبر Stripe لإتمام طلبك والحصول على تفعيل فوري.',
-    introMulti: 'باقة اشتراكك <strong>{pkg}</strong> جاهزة للدفع. شاهد على {n} أجهزة في نفس الوقت. اضغط أدناه للدفع عبر Stripe.',
-    access: 'وصول لمدة {d} يومًا', dev1: '📺 جهاز واحد', devN: '📺 {n} أجهزة في نفس الوقت', cta: '🔒 اطلب {pkg} ({price}) ←', ctaContact: '💬 تواصل معنا للطلب', contactNote: 'راسلنا وسنرسل لك رابط الدفع الخاص بك.', secure: 'دفع آمن 100% عبر Stripe • تسليم فوري بالبريد',
-    help: '📞 تحتاج مساعدة؟', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', subject: '{pkg} — {price} | طلب {app}' },
+
 };
 const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 // Random pay link for a package: from enabled Stripe accounts, in the email currency
@@ -565,11 +547,10 @@ ${s.email.supportEmail ? `📧 <a href="mailto:${e(s.email.supportEmail)}" style
 }
 // Newsletter / promotion email. camp = { id, content: { en: { subject, title, body, button }, fr, ar }, image, badge, coupon, link: 'site' | 'pkg:<id>' | url }
 const NL = { en: { dear: 'Hello {name},', dearAny: 'Hello,', coupon: '🎁 Your coupon code', help: '📞 Need assistance?', regards: 'Warm regards,', team: 'Customer Support Team', unsub: "Don't want these emails?", unsubLink: 'Unsubscribe', btn: 'See the offer →' },
-  fr: { dear: 'Bonjour {name},', dearAny: 'Bonjour,', coupon: '🎁 Votre code promo', help: "📞 Besoin d'aide ?", regards: 'Cordialement,', team: 'Service client', unsub: 'Vous ne souhaitez plus recevoir ces emails ?', unsubLink: 'Se désabonner', btn: "Voir l'offre →" },
-  ar: { dear: 'مرحبًا {name}،', dearAny: 'مرحبًا،', coupon: '🎁 كود الخصم الخاص بك', help: '📞 تحتاج مساعدة؟', regards: 'مع أطيب التحيات،', team: 'فريق خدمة العملاء', unsub: 'لا تريد هذه الرسائل؟', unsubLink: 'إلغاء الاشتراك', btn: 'شاهد العرض ←' } };
+  fr: { dear: 'Bonjour {name},', dearAny: 'Bonjour,', coupon: '🎁 Votre code promo', help: "📞 Besoin d'aide ?", regards: 'Cordialement,', team: 'Service client', unsub: 'Vous ne souhaitez plus recevoir ces emails ?', unsubLink: 'Se désabonner', btn: "Voir l'offre →" } };
 export function newsletterEmail(s, c, camp, appUrl, unsubUrl) {
   const pick = (l) => { const x = camp.content?.[l] || {}; return x.subject || x.title || x.body ? x : null; };
-  const lang = (camp.split && pick(c?.lang) ? c.lang : (camp.split ? (pick('en') ? 'en' : ['fr', 'ar'].find(pick) || 'en') : (['en', 'fr', 'ar'].includes(camp.lang) ? camp.lang : 'en')));
+  const lang = (camp.split && pick(c?.lang) ? c.lang : (camp.split ? (pick('en') ? 'en' : ['fr'].find(pick) || 'en') : (['en', 'fr'].includes(camp.lang) ? camp.lang : 'en')));
   const C = (camp.split ? pick(lang) : camp.content?.all || camp.content?.[lang]) || {}; const L = NL[camp.split ? lang : (camp.lang || 'en')] || NL.en;
   const dir = (camp.split ? lang : camp.lang) === 'ar' ? 'rtl' : 'ltr'; const al = dir === 'rtl' ? 'right' : 'left'; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const first = (c?.name || '').split(' ')[0];
@@ -610,27 +591,22 @@ export const WA_TPL = {
   pay: {
     en: 'Hello {name} 👋\n\nThank you for choosing *{app}* 🎉\nHere is your package:\n\n📺 *{package}*\n⏳ {days} days · {devices} device(s)\n💶 *{price}*\n\n🔒 Pay securely here:\n{link}\n\nYou get instant activation after payment. Any question? Just reply here 😊',
     fr: 'Bonjour {name} 👋\n\nMerci d\'avoir choisi *{app}* 🎉\nVoici votre formule :\n\n📺 *{package}*\n⏳ {days} jours · {devices} appareil(s)\n💶 *{price}*\n\n🔒 Payez en toute sécurité ici :\n{link}\n\nActivation immédiate après le paiement. Une question ? Répondez ici 😊',
-    ar: 'مرحبًا {name} 👋\n\nشكرًا لاختيارك *{app}* 🎉\nهذه باقتك:\n\n📺 *{package}*\n⏳ {days} يوم · {devices} جهاز\n💶 *{price}*\n\n🔒 ادفع بأمان من هنا:\n{link}\n\nالتفعيل فوري بعد الدفع. لأي سؤال، رد هنا 😊',
   },
   trial: {
     en: 'Hello {name} 👋\n\nYour free *{app}* trial is ready 🎁\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n⏳ Valid until: {expires}\n\n📋 M3U link:\n{m3u}\n\n📲 Watch in our app: {appUrl}\n\nEnjoy, and tell us what you think! When you are ready, we will send you the best offer.',
     fr: 'Bonjour {name} 👋\n\nVotre essai gratuit *{app}* est prêt 🎁\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n⏳ Valable jusqu’au : {expires}\n\n📋 Lien M3U :\n{m3u}\n\n📲 Regardez dans notre application : {appUrl}\n\nBon visionnage, et dites-nous ce que vous en pensez ! Quand vous serez prêt, nous vous enverrons la meilleure offre.',
-    ar: 'مرحبًا {name} 👋\n\nتجربتك المجانية في *{app}* جاهزة 🎁\n\n👤 اسم المستخدم: {username}\n🔑 كلمة المرور: {password}\n🌐 DNS: {dns}\n⏳ صالحة حتى: {expires}\n\n📋 رابط M3U:\n{m3u}\n\n📲 شاهد في تطبيقنا: {appUrl}\n\nمشاهدة ممتعة، وأخبرنا برأيك! عندما تكون جاهزًا نرسل لك أفضل عرض.',
   },
   thanks: {
     en: 'Hello {name} 👋\n\nThank you for your purchase 🎉 Your *{app}* subscription is active.\n\n📺 {package}\n📅 Valid until: {expires}\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n\n📲 Watch in our app: {appUrl}\n\nNeed anything? Just reply to this message.',
     fr: 'Bonjour {name} 👋\n\nMerci pour votre achat 🎉 Votre abonnement *{app}* est actif.\n\n📺 {package}\n📅 Valable jusqu’au : {expires}\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n\n📲 Regardez dans notre application : {appUrl}\n\nBesoin d’aide ? Répondez simplement à ce message.',
-    ar: 'مرحبًا {name} 👋\n\nشكرًا على شرائك 🎉 اشتراكك في *{app}* مفعّل.\n\n📺 {package}\n📅 صالح حتى: {expires}\n\n👤 اسم المستخدم: {username}\n🔑 كلمة المرور: {password}\n🌐 DNS: {dns}\n\n📲 شاهد في تطبيقنا: {appUrl}\n\nتحتاج أي شيء؟ فقط رد على هذه الرسالة.',
   },
   login: {
     en: 'Hello {name} 👋\n\nYour *{app}* subscription is ready ✅\n\n👤 Username: {username}\n🔑 Password: {password}\n🌐 DNS: {dns}\n📅 Expires: {expires}\n\n📋 M3U link:\n{m3u}\n\n📲 Watch in our app: {appUrl}\nEnjoy! 🍿',
     fr: 'Bonjour {name} 👋\n\nVotre abonnement *{app}* est prêt ✅\n\n👤 Identifiant : {username}\n🔑 Mot de passe : {password}\n🌐 DNS : {dns}\n📅 Expire le : {expires}\n\n📋 Lien M3U :\n{m3u}\n\n📲 Regardez dans notre application : {appUrl}\nBon visionnage ! 🍿',
-    ar: 'مرحبًا {name} 👋\n\nاشتراكك في *{app}* جاهز ✅\n\n👤 اسم المستخدم: {username}\n🔑 كلمة المرور: {password}\n🌐 DNS: {dns}\n📅 ينتهي في: {expires}\n\n📋 رابط M3U:\n{m3u}\n\n📲 شاهد في تطبيقنا: {appUrl}\nمشاهدة ممتعة! 🍿',
   },
   renew: {
     en: 'Hello {name} 👋\n\nYour *{app}* subscription {ends} *{expires}* ⏰\nRenew now and keep watching 📺\n\n*{package}* — *{price}*\n🔒 Pay here: {link}\n\nNeed help? Just reply here 😊',
     fr: 'Bonjour {name} 👋\n\nVotre abonnement *{app}* {ends} *{expires}* ⏰\nRenouvelez maintenant pour continuer à regarder 📺\n\n*{package}* — *{price}*\n🔒 Payez ici : {link}\n\nBesoin d\'aide ? Répondez ici 😊',
-    ar: 'مرحبًا {name} 👋\n\nاشتراكك في *{app}* {ends} *{expires}* ⏰\nجدّد الآن واستمر في المشاهدة 📺\n\n*{package}* — *{price}*\n🔒 ادفع من هنا: {link}\n\nتحتاج مساعدة؟ رد هنا 😊',
   },
 };
 export function renewalEmail(s, c, appUrl) {
@@ -638,7 +614,7 @@ export function renewalEmail(s, c, appUrl) {
   const app = s.branding.appName || 'IPTV';
   const site = String(o.url || s.email.website || s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const siteTxt = site.replace(/^https?:\/\//, '');
-  const date = new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' });
+  const date = new Date(c.expiresAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' });
   const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, n) => (n === 'app' ? e(app) : n === 'site' ? `<a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a>` : n === 'coupon' ? `<b style="color:#0f172a;background:#e0f2fe;padding:2px 6px;border-radius:4px;font-family:'Courier New',monospace">${e(o.coupon)}</b>` : e(x[n] ?? '')));
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
@@ -842,7 +818,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   function oldLoginMail(s, c, password, kind) {
     const lang = ml(c);
     const hours = s.trial.hours;
-    const exp = new Date(c.expiresAt).toLocaleString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const exp = new Date(c.expiresAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
     const rows = [[mt(lang, 'user'), c.username], [mt(lang, 'pass'), password], [mt(lang, 'expires'), exp]];
     return {
       subject: mt(lang, kind === 'trial' ? 'trialSubject' : 'welcomeSubject', { hours }),
@@ -1261,7 +1237,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         // All-agents queue mode (spec §4): the request goes to the shared panel; an authorized agent claims and processes it.
         if (s.trial.mode === 'agents') {
           const tql = (await store.get('trialqueue')) || [];
-          const entry = { id: uid(6), name, email, phone, whatsapp, telegram, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
+          const entry = { id: uid(6), name, email, phone, whatsapp, telegram, lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en', at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
           tql.unshift(entry); await store.put('trialqueue', tql.slice(0, 300));
           await log('trial', `Free trial request queued for ${name} <${email}> (all-agents queue)`);
           await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for an agent to process it.\n\n${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\n\nOpen Trial queue in the dashboard, paste the M3U link from your panel and send the trial.`);
@@ -1273,7 +1249,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const salt = uid(8);
         const now = Date.now();
         let lineReady = false; let panelError = '';
-        const c = { loginPassword: password, id: uid(8), name, email, phone, whatsapp, telegram, lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        const c = { loginPassword: password, id: uid(8), name, email, phone, whatsapp, telegram, lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en', note: 'Free trial', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: username, linePassword: password, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         if (s.reseller.enabled) {
           const panel = await panelCall(s, 'trial', { username, password, line_id: '', package: s.trial.package, connections: c.connections, days: 1, months: 1, hours: s.trial.hours, name, phone, note: 'trial' });
           if (!panel.ok && !panel.skipped) { panelError = panel.error || 'unknown error'; await log('trial', `Trial for ${email}: the panel refused (${panelError}). Using a ready line or the waiting list instead.`); }
@@ -1358,7 +1334,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             await store.put(k, n + 1, 86400);
             const tk = uid(20); await store.put('reset:' + tk, { id: c.id }, 1800);
             const base = String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, '');
-            const L = { en: ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'], fr: ['Réinitialiser votre mot de passe', 'Appuyez sur le bouton pour choisir un nouveau mot de passe. Le lien est valable 30 minutes.', 'Choisir un nouveau mot de passe', "Si vous n'avez rien demandé, ignorez cet e-mail."], ar: ['إعادة تعيين كلمة المرور', 'اضغط على الزر لاختيار كلمة مرور جديدة. الرابط صالح لمدة 30 دقيقة.', 'اختيار كلمة مرور جديدة', 'إذا لم تطلب ذلك، تجاهل هذه الرسالة.'] }[ml(c)] || null;
+            const L = { en: ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'], fr: ['Réinitialiser votre mot de passe', 'Appuyez sur le bouton pour choisir un nouveau mot de passe. Le lien est valable 30 minutes.', 'Choisir un nouveau mot de passe', "Si vous n'avez rien demandé, ignorez cet e-mail."] }[ml(c)] || null;
             const T = L || ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'];
             const app = escHtml(s.branding.appName || 'IPTV');
             const html = `<div dir="${ml(c) === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p style="font-size:16px"><b>${T[0]}</b></p><p>${T[1]}</p><p style="margin:24px 0"><a href="${base}/#reset=${tk}" style="background:#8065FF;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold;display:inline-block">${T[2]}</a></p><p style="color:#5A6478;font-size:13px">${T[3]}</p></div>`;
@@ -1581,7 +1557,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
           c.emailCode = { hash: await sha256(code + c.salt), exp: Date.now() + 15 * 60000, tries: 0 }; await saveCustomers(list);
           const app = escHtml(s.branding.appName || 'IPTV');
-          const T = { fr: ['Votre code de vérification', 'Saisissez ce code dans l’application. Il est valable 15 minutes.'], ar: ['رمز التحقق', 'أدخل هذا الرمز في التطبيق. صالح لمدة 15 دقيقة.'] }[ml(c)] || ['Your verification code', 'Enter this code in the app. It works for 15 minutes.'];
+          const T = { fr: ['Votre code de vérification', 'Saisissez ce code dans l’application. Il est valable 15 minutes.'] }[ml(c)] || ['Your verification code', 'Enter this code in the app. It works for 15 minutes.'];
           const html = `<div dir="${ml(c) === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p><b>${T[0]}</b></p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;margin:16px 0" dir="ltr">${code}</p><p style="color:#5A6478">${T[1]}</p></div>`;
           const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
           if (!r.ok) return err(502, 'em_fail');
@@ -1749,13 +1725,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await saveCustomers(list);
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.amount) || 0, accountId: String(body.accountId || ''), by: actorName });
           rc.status = 'approved'; rc.daysAdded = days;
-          const T = { fr: ['Paiement confirmé ✅', `Merci ! Votre abonnement est prolongé de ${days} jours.`], ar: ['تم تأكيد الدفع ✅', `شكرًا لك! تم تمديد اشتراكك ${days} يومًا.`] }[lang] || ['Payment confirmed ✅', `Thank you! Your subscription has been extended by ${days} days.`];
-          if (cleanEmail(c.email)) await sendEmail(s, c.email, `${s.branding.appName || 'IPTV'} — ${T[0]}`, mailHtml(s, ['en', 'fr', 'ar'].includes(lang) ? lang : 'en', [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' })]], T[1], c.name));
+          const T = { fr: ['Paiement confirmé ✅', `Merci ! Votre abonnement est prolongé de ${days} jours.`] }[lang] || ['Payment confirmed ✅', `Thank you! Your subscription has been extended by ${days} days.`];
+          if (cleanEmail(c.email)) await sendEmail(s, c.email, `${s.branding.appName || 'IPTV'} — ${T[0]}`, mailHtml(s, ['en', 'fr'].includes(lang) ? lang : 'en', [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), new Date(c.expiresAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' })]], T[1], c.name));
           await chatAdd(c, 's', s.branding.appName || 'Support', `${T[0]} ${T[1]}`);
           await log('payment', `Receipt approved for ${c.username}: +${days} days (${rc.pkgTitle})${renewed ? ' · renewed on the panel' : ' · renew the line on the panel'}`);
         } else {
           rc.status = 'rejected'; rc.reason = cleanText(body.reason, 300);
-          const T = { fr: 'Nous n’avons pas pu confirmer votre paiement.', ar: 'لم نتمكن من تأكيد دفعتك.' }[lang] || 'We could not confirm your payment.';
+          const T = { fr: 'Nous n’avons pas pu confirmer votre paiement.' }[lang] || 'We could not confirm your payment.';
           await chatAdd(c, 's', s.branding.appName || 'Support', `${T}${rc.reason ? ' ' + rc.reason : ''}`);
           await log('payment', `Receipt rejected for ${c.username}${rc.reason ? ': ' + rc.reason : ''}`);
         }
@@ -1822,7 +1798,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let username = String(entry.username || ln.u || '').trim() || ('t' + rnd(6, '0123456789'));
         let password = String(entry.password || ln.p || '').trim(); if (!password) password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const now = Date.now(); const salt = uid(8);
-        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, telegram: entry.telegram || '', lang: ['en', 'fr', 'ar'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, telegram: entry.telegram || '', lang: ['en', 'fr'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
         const dns = String(ln.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
@@ -2365,7 +2341,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         // Templates are replaced as a whole, so removing a change brings the built-in wording back.
         if (isObj(body.mailTexts)) next.mailTexts = cleanMailTexts(body.mailTexts);
-        if (isObj(body.waTemplates)) { next.waTemplates = {}; for (const ty of Object.keys(WA_TPL)) for (const lg of ['en', 'fr', 'ar']) { const v = body.waTemplates?.[ty]?.[lg]; if (typeof v === 'string' && v.trim() && v !== WA_TPL[ty][lg]) (next.waTemplates[ty] ||= {})[lg] = v.slice(0, 3000); } }
+        if (isObj(body.waTemplates)) { next.waTemplates = {}; for (const ty of Object.keys(WA_TPL)) for (const lg of ['en', 'fr']) { const v = body.waTemplates?.[ty]?.[lg]; if (typeof v === 'string' && v.trim() && v !== WA_TPL[ty][lg]) (next.waTemplates[ty] ||= {})[lg] = v.slice(0, 3000); } }
         if (Array.isArray(body.waCustom)) next.waCustom = body.waCustom.slice(0, 30).map((x) => ({ id: String(x.id || uid(4)).replace(/[^\w]/g, '').slice(0, 12) || uid(4), name: String(x.name || 'Message').slice(0, 40), text: { en: String(x.text?.en || '').slice(0, 3000), fr: String(x.text?.fr || '').slice(0, 3000), ar: String(x.text?.ar || '').slice(0, 3000) } })).filter((x) => x.text.en || x.text.fr || x.text.ar);
         if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
@@ -2398,7 +2374,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const salt = uid(8);
         const c = {
           id: uid(8), name: String(body.name || username), phone: String(body.phone || ''), note: String(body.note || ''),
-          email: cleanEmail(body.email) || String(body.email || '').trim().toLowerCase(), email2: cleanEmail(body.email2) || String(body.email2 || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en',
+          email: cleanEmail(body.email) || String(body.email || '').trim().toLowerCase(), email2: cleanEmail(body.email2) || String(body.email2 || '').trim().toLowerCase(), whatsapp: String(body.whatsapp || body.phone || ''), lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en',
           telegram: String(body.telegram || ''), macAddress: String(body.macAddress || ''), deviceApp: String(body.deviceApp || ''),
           statusFlag: ['normal', 'excellent', 'dispute'].includes(body.statusFlag) ? body.statusFlag : 'normal', callNotes: String(body.callNotes || ''),
           username, salt, passwordHash: await hashPassword(body.password, salt), loginPassword: String(body.password),
@@ -2550,7 +2526,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         if (method === 'POST' && sub === 'wamsg') { // WhatsApp message for this customer
           const waOwn = (s.waCustom || []).find((x) => 'c:' + x.id === body.type);
-          const type = waOwn ? body.type : WA_TPL[body.type] ? body.type : 'pay'; const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : (WA_TPL.pay[c.lang] ? c.lang : 'en');
+          const type = waOwn ? body.type : WA_TPL[body.type] ? body.type : 'pay'; const lang = ['en', 'fr'].includes(body.lang) ? body.lang : (WA_TPL.pay[c.lang] ? c.lang : 'en');
           const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
           const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
@@ -2562,9 +2538,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const lu = c.lineUsername || c.username, lp = c.linePassword || c.loginPassword || '';
           const vars = { name: (c.name || '').split(' ')[0], fullname: c.name || '', app: s.branding.appName || 'IPTV', package: pk.title, price, days: pk.days, devices: pk.devices,
             link: pl?.url || '', username: lu, password: lp, dns, m3u: dns && lp ? `${dns}/get.php?username=${encodeURIComponent(lu)}&password=${encodeURIComponent(lp)}&type=m3u_plus&output=ts` : '',
-            expires: new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
+            expires: new Date(c.expiresAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
             website: s.email.website || '', order: c.orderNo || '',
-            ends: c.expiresAt < Date.now() ? { en: 'ended on', fr: 's\'est terminé le', ar: 'انتهى في' }[lang] : { en: 'ends on', fr: 'se termine le', ar: 'ينتهي في' }[lang] };
+            ends: c.expiresAt < Date.now() ? { en: 'ended on', fr: 's\'est terminé le' }[lang] : { en: 'ends on', fr: 'se termine le' }[lang] };
           const tpl = String(body.template || (waOwn ? waOwn.text[lang] || waOwn.text.en || waOwn.text.fr || waOwn.text.ar : s.waTemplates?.[type]?.[lang] || WA_TPL[type][lang]));
           const out = []; // a line whose value is empty (e.g. no DNS yet) is left out, with its label line
           for (const line of tpl.split('\n')) {
@@ -2793,7 +2769,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('GET', '/api/admin/templates')) return ok({ defaults: tplDefaults(), custom: s.mailTexts || {}, waDefaults: WA_TPL, wa: s.waTemplates || {}, waCustom: s.waCustom || [] });
       if (R('POST', '/api/admin/templates/preview')) { // shows an email with wording that is not saved yet, using a made-up customer
-        const lang = ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en';
+        const lang = ['en', 'fr'].includes(body.lang) ? body.lang : 'en';
         const sample = { id: 'sample', name: 'Sara Example', username: 'sara2026', lang, email: 'sara@example.com', lineUsername: 'sara2026', linePassword: 'Pass1234', expiresAt: Date.now() + 30 * DAY, startAt: Date.now(), isTrial: body.kind === 'trial', connections: 1, planId: (s.plans[0] || {}).id };
         applyMailTexts(cleanMailTexts(body.mailTexts)); setMailLang('customer');
         let out;
@@ -2876,7 +2852,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)), badge: body.badge != null ? String(body.badge) : base.badge };
         const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
         const fixed = /^https:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
-        const who = { name: String(body.name || '').trim(), lang: ['en', 'fr', 'ar'].includes(body.lang) ? body.lang : 'en', note: String(body.note || '').trim().slice(0, 2000) };
+        const who = { name: String(body.name || '').trim(), lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en', note: String(body.note || '').trim().slice(0, 2000) };
         const m = orderEmail(st, who, pk, body.appUrl, fixed || undefined);
         if (body.subject) m.subject = String(body.subject).slice(0, 200);
         if (body.preview) return ok(m);
@@ -3155,7 +3131,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const left = Math.ceil((c.expiresAt - Date.now()) / DAYMS);
         if (to && !c.isTrial && c.status !== 'disabled' && left > 0 && left <= days && c.remindedFor !== c.expiresAt) {
           const lang = ml(c);
-          const date = new Date(c.expiresAt).toLocaleDateString(lang === 'ar' ? 'ar-MA' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium' });
+          const date = new Date(c.expiresAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium' });
           const r = await sendEmail(s, to, mt(lang, 'expirySubject', { days: left }), mailHtml(s, lang, [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), date]], mt(lang, 'expiryBody', { date }), c.name));
           if (r.ok) { c.remindedFor = c.expiresAt; changed = true; out.reminders++; }
         }
