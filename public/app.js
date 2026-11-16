@@ -1,9 +1,9 @@
-import { createBackend } from './core.js?v=57';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=57';
-import { siteHtml } from './site.js?v=57';
-import { ic } from './icons.js?v=57';
-import { parseM3U, m3uAnswer } from './m3u.js?v=57';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=57';
+import { createBackend } from './core.js?v=58';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=58';
+import { siteHtml } from './site.js?v=58';
+import { ic } from './icons.js?v=58';
+import { parseM3U, m3uAnswer } from './m3u.js?v=58';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=58';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -3097,7 +3097,7 @@ function phoneField(label, name, required = true, value = '') {
   const digits = String(value || '').replace(/\D/g, ''); const plus = String(value || '').trim().startsWith('+');
   const hit = plus ? DIAL.filter(([, d]) => digits.startsWith(d)).sort((x, y) => y[1].length - x[1].length)[0] : null;
   const g = hit ? hit[0] : value ? '' : guessCountry(); const rest = hit ? digits.slice(hit[1].length) : String(value || '');
-  return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" value="${esc(rest)}" ${required ? 'required' : ''} inputmode="tel" autocomplete="off" dir="ltr" placeholder="612345678" pattern="[0-9\(\)+ .\-]{6,20}"></div></label>`;
+  return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" value="${esc(rest)}" ${required ? 'required' : ''} inputmode="tel" autocomplete="off" dir="ltr" placeholder="612345678" autocomplete="tel-national"></div></label>`;
 }
 // "+212612345678" from the country code and the number typed (a leading 0 is dropped; a full +number typed by hand is kept).
 function fullPhone(f, name) {
