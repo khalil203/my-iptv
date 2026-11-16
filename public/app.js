@@ -1,9 +1,9 @@
-import { createBackend } from './core.js?v=58';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=58';
-import { siteHtml } from './site.js?v=58';
-import { ic } from './icons.js?v=58';
-import { parseM3U, m3uAnswer } from './m3u.js?v=58';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=58';
+import { createBackend } from './core.js?v=59';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=59';
+import { siteHtml } from './site.js?v=59';
+import { ic } from './icons.js?v=59';
+import { parseM3U, m3uAnswer } from './m3u.js?v=59';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=59';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -465,7 +465,7 @@ async function renderAdmin() {
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
-    else if (t === 'stripe') body.innerHTML = adminStripePage(s);
+    else if (t === 'stripe') { body.innerHTML = adminStripePage(s); setTimeout(() => { const b = body.querySelector('[data-act="sa-compare"]'); if (b) b.click(); }, 150); }
     else if (t === 'tasks') body.innerHTML = await adminTasksPage();
     else if (t === 'attendance') { body.innerHTML = await adminAttendancePage(); startTzClock(); loadShiftsAndLeaves().catch(() => {}); }
     else if (t === 'teamchat') { body.innerHTML = await adminTeamChatPage(); { const el = $('#tc-thread'); if (el) el.scrollTop = el.scrollHeight; } }
@@ -3132,7 +3132,7 @@ async function persistStripeAccountsFromTable(silent) {
     const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
       const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
       const bTxt = g('balance').trim();
-      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
+      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'), bankId: g('bankId') || undefined,
         balance: bTxt === '' ? null : Number(bTxt),
         balanceAt: bTxt === '' ? 0 : (Number(g('balanceAt')) || Date.now()),
         links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };
@@ -3225,12 +3225,24 @@ async function syncPanel(ids) {
   return { changed, bad, total, error };
 }
 // ---------------- multi-account Stripe control panel (spec §6) ----------------
-const saLinkRow = (l = {}) => `<div class="sa-link" data-link="${esc(l.id || '')}"><input data-k="label" value="${esc(l.label || '')}" placeholder="Label (e.g. 1 Year)" style="flex:1;min-width:110px"><input data-k="url" value="${esc(l.url || '')}" placeholder="https://buy.stripe.com/…" dir="ltr" style="flex:2;min-width:190px" autocomplete="off"><select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${l.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select><select data-k="tier" style="width:auto">${['Normal', 'Resellers', 'IBO'].map((t2) => `<option ${l.tier === t2 ? 'selected' : ''}>${t2}</option>`).join('')}</select><button class="btn sm danger" data-act="sa-del-link" title="Remove link">🗑</button></div>`;
-const saRow = (a) => `<div class="op-row card" data-sa="${esc(a.id || '')}" style="padding:12px;margin-bottom:12px">
+const saLinkRow = (l = {}) => {
+  let host = l.url; try { host = new URL(l.url).host.replace(/^www\./, ''); } catch {}
+  return `<div class="sa-link" data-link="${esc(l.id || '')}">
+    <a class="sa-link-chip" href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.url || '')}">🔗 ${esc(l.label || 'Link')}</a>
+    <span class="sa-link-host" title="${esc(l.url || '')}">${esc(host)}</span>
+    <input data-k="label" value="${esc(l.label || '')}" placeholder="Label" class="sa-link-label" style="width:110px">
+    <input data-k="url" value="${esc(l.url || '')}" placeholder="https://buy.stripe.com/…" dir="ltr" autocomplete="off" class="sa-link-url" style="flex:1;min-width:120px">
+    <select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${l.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    <select data-k="tier" style="width:auto">${['Normal', 'Resellers', 'IBO'].map((t2) => `<option ${l.tier === t2 ? 'selected' : ''}>${t2}</option>`).join('')}</select>
+    <button class="btn sm danger" data-act="sa-del-link" title="Remove link">🗑</button>
+  </div>`;
+};
+const saRow = (a, finAccounts) => `<div class="op-row card" data-sa="${esc(a.id || '')}" style="padding:12px;margin-bottom:12px">
   <div class="row" style="gap:8px;flex-wrap:wrap"><input data-k="name" value="${esc(a.name || '')}" placeholder="Account name" style="flex:2;min-width:160px">
     <select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
     <select data-k="status" style="width:auto">${[['active', 'Active'], ['verification', 'Verification'], ['closed', 'Closed']].map(([k, n]) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
     <select data-k="payoutDays" style="width:auto">${[2, 7].map((n) => `<option value="${n}" ${Number(a.payoutDays) === n ? 'selected' : ''}>${n}-day payout</option>`).join('')}</select>
+    <select data-k="bankId" class="sa-bank" style="width:auto" title="Payments are booked to this bank FIRST; your Stripe payout then lands in it">${(finAccounts || []).map((acc) => `<option value="${esc(acc.id)}" ${a.bankId === acc.id ? 'selected' : ''}>Settles to → ${esc(acc.name)}</option>`).join('')}</select>
     <button class="btn sm" data-act="sa-balance" data-id="${esc(a.id)}" title="Check the live balance (save first)">💰</button>
     <button class="btn sm danger" data-act="sa-del" title="Remove account">🗑</button></div>
   <input data-k="note" value="${esc(a.note || '')}" placeholder="Note (payout schedule, bank transfer, …)" style="margin-top:8px">
@@ -3242,6 +3254,7 @@ const saRow = (a) => `<div class="op-row card" data-sa="${esc(a.id || '')}" styl
     <button class="btn sm" data-act="sa-add-link">＋ Add link</button></div>
   <div class="sa-bal small muted" style="margin-top:6px"></div></div>`;
 function adminStripePage(s) {
+  const finAcc = (s.finance && s.finance.accounts) || [];
   const list = s.stripeAccounts || []; const links = list.flatMap((a) => a.links || []);
   const byTier = (t) => links.filter((l) => l.tier === t).length;
   const active = list.filter((a) => a.status === 'active').length;
@@ -3250,8 +3263,9 @@ function adminStripePage(s) {
   (list||[]).forEach((a)=>{ const b=Number(a.balance||0); if(!b) return; if(a.currency==='EUR')totEur+=b; else totUsd+=b; n++; });
   return `<p class="small muted">All your Stripe accounts in one place. Track <b>status</b> (Active / Verification / Closed), the <b>payout schedule</b> and your <b>package payment links</b> in USD and EUR. Links you add here are what you can put in package emails and IBO activations — deleting a link here does not remove it from Stripe.</p>
     <div class="chips" style="margin-bottom:12px"><a class="on">${list.length} account${list.length === 1 ? '' : 's'} · ${active} active</a><a class="on">${two} with 2-day payout · ${list.length - two} with 7-day payout</a><a class="on">${links.length} link${links.length === 1 ? '' : 's'} — Normal ${byTier('Normal')} · Resellers ${byTier('Resellers')} · IBO ${byTier('IBO')}</a></div>
+    <div class="card" id="sa-compare"><div class="row"><h3 style="margin:0">⚔ Account performance</h3><span class="spacer"></span><button class="btn sm" data-act="sa-compare">↻ Refresh</button></div><div id="sa-compare-body" class="small muted" style="margin-top:10px">Loading comparison…</div></div>
     <div id="sa-all-bal" class="small muted" style="margin-bottom:10px">${n ? `Stored balance across ${n} account${n===1?'':'s'}: $${totUsd.toFixed(2)} · €${totEur.toFixed(2)}` : `No stored balances yet — tap 💰 per account or press “💰 All balances (total)” to fetch live.`}</div>
-    <div id="sa-list">${list.map(saRow).join('')}</div>
+    <div id="sa-list">${list.map((a) => saRow(a, finAcc)).join('')}</div>
     <div class="row" style="margin-top:6px"><button class="btn" data-act="sa-add">＋ Add account</button><button class="btn" data-act="sa-balance-all">💰 All balances (total)</button><span class="spacer"></span><button class="btn primary" data-act="sa-save">💾 Save accounts</button></div>`;
 }
 Object.assign(actions, {
@@ -3259,11 +3273,28 @@ Object.assign(actions, {
   'sa-del': (el) => el.closest('.op-row').remove(),
   'sa-add-link': (el) => el.closest('.op-row').querySelector('.sa-links').insertAdjacentHTML('beforeend', saLinkRow()),
   'sa-del-link': (el) => el.closest('.sa-link').remove(),
+  'sa-compare': async () => {
+    const box = $('#sa-compare-body'); if (!box) return;
+    box.textContent = 'Loading comparison…';
+    const [r, settings] = await Promise.all([api('GET', '/api/admin/stripe/revenue').catch(() => null), api('GET', '/api/admin/settings').catch(() => null)]);
+    if (!r || !settings) { box.textContent = 'No revenue data yet.'; return; }
+    const stripe = settings.stripeAccounts || [];
+    const fin = (settings.finance && settings.finance.accounts) || [];
+    const byFin = {}; for (const x of r.revenue) byFin[x.accountId] = x;
+    const revOf = (a) => byFin[a.bankId] || byFin.stripe || byFin[(fin[0] || {}).id] || { usd: 0, usd30d: 0, n: 0, n30d: 0 };
+    const totals = stripe.map((a) => ({ name: a.name, rev: revOf(a), links: (a.links || []).length }));
+    const max = Math.max(1, ...totals.map((t) => t.rev.usd));
+    const sorted = [...totals].sort((a, b) => b.rev.usd - a.rev.usd);
+    box.innerHTML = `<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:10px">${totals.map((t) => `<div class="stat"><span>${esc(t.name)}</span><b>${usd(t.rev.usd30d)}</b><span>30d · ${t.rev.n30d} sales</span></div>`).join('')}</div>
+      <div class="hbars2">${sorted.map((t) => `<div><span>${esc(t.name)}</span><div class="hbar2" title="${esc(t.name)}: ${usd(t.rev.usd)} all time · ${t.rev.n} sales"><i style="width:${Math.round((t.rev.usd / max) * 100)}%"></i></div><span class="small muted">${t.rev.n} sales · ${usd(t.rev.usd)}</span></div>`).join('')}</div>
+      <p class="small muted" style="margin:10px 0 0">🏆 Best performer: <b>${esc(sorted[0].name)}</b> — ${usd(sorted[0].rev.usd)} all time · ${sorted[0].rev.n} sales</p>
+      <p class="small muted" style="margin:6px 0 0">Each account books income into its settled bank FIRST; the Stripe payout then lands in that bank automatically.</p>`;
+  },
   'sa-save': async () => {
     const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
       const g = (k) => (r.querySelector(`[data-k=${k}]`) || {}).value || '';
       const bTxt = g('balance').trim();
-      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'),
+      return { id: r.dataset.sa || undefined, name: g('name').trim(), currency: g('currency'), status: g('status'), payoutDays: Number(g('payoutDays')) || 7, note: g('note'), rk: g('rk'), bankId: g('bankId') || undefined,
         balance: bTxt === '' ? null : Number(bTxt),
         balanceAt: bTxt === '' ? 0 : Date.now(),
         links: [...r.querySelectorAll('.sa-link')].map((l) => { const h = (k) => (l.querySelector(`[data-k=${k}]`) || {}).value.trim(); return { id: l.dataset.link || undefined, label: h('label'), url: h('url'), currency: h('currency'), tier: h('tier') }; }).filter((l) => l.url) };

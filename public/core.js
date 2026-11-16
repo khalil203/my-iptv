@@ -270,6 +270,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/stock')) return 'stock';
   if (path === '/api/admin/profits') return 'profits';
   if (path === '/api/admin/sales-by-day') return 'profits';
+  if (path === '/api/admin/stripe/revenue') return 'profits';
   if (path.startsWith('/api/admin/reseller/')) return 'customers_edit';
   if (path === '/api/admin/log') return 'activity';
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
@@ -676,6 +677,21 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (!s.pricingV2) {
       if ((s.orderPackages || []).map((p) => p.id).join(',') === 'o1m,o3m,o6m,o1y,o2y,o1y2d,o1y3d,o1y4d') s.orderPackages = DEFAULT_SETTINGS().orderPackages;
       s.pricingV2 = true; await store.put('settings', s);
+    }
+    if (!s.stripeSettleV2) {
+      const defaults = [['grenapp', 'stripe'], ['waffim', 'waffim'], ['avixcloud', 'avixcloud'], ['bussalion', 'bussalion']];
+      let changed = 0;
+      s.stripeAccounts = (s.stripeAccounts || []).map((a) => {
+        if (a.bankId) return a;
+        const n = String(a.name || '').toLowerCase();
+        const hit = defaults.find(([k]) => n.includes(k));
+        if (hit) { changed++; return { ...a, bankId: hit[1] }; }
+        return a;
+      });
+      // also retag the webhook tag if the Grenapp account used to settle to Mercury directly
+      s.stripeSettleV2 = true;
+      await store.put('settings', s);
+      await log('settings', `Stripe settle map applied (${changed} account(s) now settle through Stripe)`);
     }
     if (!s.pricingV3) {
       const fresh = DEFAULT_SETTINGS();
@@ -2618,6 +2634,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const sum = (arr) => (arr || []).filter((x) => x.currency === cur).reduce((a, x) => a + x.amount, 0) / 100;
         const nDays = Number(acct.payoutDays) === 2 ? 2 : 7;
         return ok({ connected: true, accountId: acct.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending), payoutDays: nDays, projected: addBizProjection(Date.now(), nDays) });
+      }
+      if (R('GET', '/api/admin/stripe/revenue')) {
+        const tx = await getTx(); const cutoff = Date.now() - 30 * DAYMS;
+        const byAcc = {};
+        for (const x of tx) {
+          if (x.type !== 'income') continue;
+          const acc = (s.finance.accounts || []).find((a) => a.id === x.accountId); if (!acc) continue;
+          const usd = toUsd(Number(x.amount) || 0, acc.currency, s.finance.rates);
+          const e = (byAcc[acc.id] ||= { accountId: acc.id, usd: 0, n: 0, usd30d: 0, n30d: 0, lastAt: 0 });
+          e.usd = Math.round((e.usd + usd) * 100) / 100; e.n++;
+          if ((Number(x.at) || 0) >= cutoff) { e.usd30d = Math.round((e.usd30d + usd) * 100) / 100; e.n30d++; }
+          e.lastAt = Math.max(e.lastAt || 0, Number(x.at) || 0);
+        }
+        return ok({ revenue: Object.values(byAcc), total: Object.values(byAcc).reduce((a, x) => ({ usd: Math.round((a.usd + x.usd) * 100) / 100, n: a.n + x.n, usd30d: Math.round((a.usd30d + x.usd30d) * 100) / 100, n30d: a.n30d + x.n30d }), { usd: 0, n: 0, usd30d: 0, n30d: 0 }) });
       }
       if (R('GET', '/api/admin/stripe/balance')) { // live balance from Stripe, compared with the app
         const key = s.finance.stripeKey;

@@ -814,3 +814,14 @@ test('sales tracker: today/yesterday/month aggregation, 30-day series and resell
   const bad = await x.call('POST', '/api/admin/reseller/sync', {}, tok);
   assert.equal(bad.status, 400, 'sync without a webhook url is refused');
 });
+
+test('stripe revenue: income is attributed per bank account and shows 30d + all-time totals', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await addCustomer(x, tok, { username: 'revtest', email: 'rev@example.com', price: '30', accountId: 'stripe' });
+  const r = await x.call('GET', '/api/admin/stripe/revenue', {}, tok);
+  assert.equal(r.status, 200);
+  const acc = (r.json.revenue || []).find((a) => a.accountId === 'stripe');
+  assert.ok(acc && acc.usd > 0, 'stripe account shows revenue: ' + JSON.stringify(r.json));
+  assert.ok(acc.n30d >= 1 && acc.usd30d > 0, '30-day figures track the sale');
+  assert.ok(r.json.total.usd >= acc.usd, 'totals aggregate');
+});
