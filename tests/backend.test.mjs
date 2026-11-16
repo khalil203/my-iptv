@@ -544,6 +544,25 @@ test('all-agents trial queue: request queues, agent claims, M3U auto-extracts cr
   assert.equal((await x.call('POST', '/api/login', { username: 'LINEUSER', password: 'LINEPASS' })).status, 200, 'the new trial login works');
 });
 
+test('agent panel: pasted M3U fills the four fields and syncs the customer My Details', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const c = await addCustomer(x, tok);
+  const m3u = 'http://panel.example.com:8080/get.php?username=LINEU&password=LINEP&type=m3u_plus&output=ts';
+  const d = await x.call('POST', '/api/admin/trialq/direct', { customerId: c.id, m3u }, tok);
+  assert.equal(d.status, 200, JSON.stringify(d.json));
+  assert.equal(d.json.updated, true, 'existing customer is updated, not duplicated');
+  assert.equal(d.json.username, 'LINEU'); assert.equal(d.json.password, 'LINEP');
+  assert.equal(d.json.dns, 'http://panel.example.com:8080');
+  assert.equal(d.json.m3u, m3u, 'the pasted M3U is kept intact');
+  const u = await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' }); assert.equal(u.status, 200);
+  const me = await x.call('GET', '/api/me', {}, u.json.token);
+  assert.equal(me.status, 200, JSON.stringify(me.json));
+  assert.equal(me.json.stream.u, 'LINEU');
+  assert.equal(me.json.stream.p, 'LINEP');
+  assert.equal(me.json.stream.dns, 'http://panel.example.com:8080');
+  assert.equal(me.json.stream.m3u, m3u);
+});
+
 test('all-agents trial queue: dedicated dispatch entry takes free-trial credentials and dispatches', async () => {
   const x = setup(); const tok = await adminToken(x);
   await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents' }, email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);

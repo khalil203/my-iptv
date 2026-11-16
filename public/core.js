@@ -1586,6 +1586,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               mode: s.player.mode === 'direct' ? 'direct' : 'proxy', userAgent: s.player.userAgent || 'IPTVSmartersPro',
               relay: String(s.player.relayUrl || '').trim().replace(/\/+$/, ''),
               dns: String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, ''),
+              m3u: String(c.m3u || '').trim(),
             } : null,
           });
         }
@@ -1964,7 +1965,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let username = String(entry.username || ln.u || '').trim() || ('t' + rnd(6, '0123456789'));
         let password = String(entry.password || ln.p || '').trim(); if (!password) password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const now = Date.now(); const salt = uid(8);
-        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, telegram: entry.telegram || '', lang: ['en', 'fr'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, telegram: entry.telegram || '', lang: ['en', 'fr'].includes(entry.lang) ? entry.lang : 'en', note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, m3u: String(m3uText || '').trim(), lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
         const dns = String(ln.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
@@ -1980,29 +1981,49 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('trial', `Trial sent to ${c.username} for ${c.name} <${c.email}>${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}${tgSent ? ' · Telegram sent' : ''}`);
         return { ok: true, username: c.username, emailSent: sent.ok, telegramSent: tgSent, telegramLinked: !!tgChat, dns, m3u: dns ? `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts` : '', password, name: c.name, hours: s.trial.hours, phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: c.telegram || '' };
       };
-      if (R('POST', '/api/admin/trialq/direct')) { // dedicated staff entry: dispatch free-trial credentials straight to a customer
+      if (R('POST', '/api/admin/trialq/direct')) { // Agent Panel: paste an M3U line -> dispatch the trial and sync My Details
         const body2 = body || {};
         const custId = String(body2.customerId || '');
         const list = await getCustomers();
         const c = custId ? list.find((x) => x.id === custId) || null : null;
+        const paste = String(body2.m3u || '').trim();
+        let ln = parseLineLink(paste);
+        if (!ln) { const u0 = String(body2.username || '').trim(), p0 = String(body2.password || ''), d0 = String(body2.dns || '').trim().replace(/\/+$/, ''); if (u0 && p0) ln = { u: u0, p: p0, dns: d0 }; }
+        if (!ln || !ln.u || !ln.p) return err(400, 'Paste the full M3U link from your panel (it contains username= and password=).');
+        const dns = String(ln.dns || '').replace(/\/+$/, '');
+        const m3u = /username=[^&]+/i.test(paste) && /password=[^&]+/i.test(paste) ? paste : `${dns}/get.php?username=${encodeURIComponent(ln.u)}&password=${encodeURIComponent(ln.p)}&type=m3u_plus&output=ts`;
+        const hours = Number(s.trial.hours) || 24;
+        const iboText = String(body2.ibo || '');
+        if (c) { // existing customer: save the line under My Details and notify the same contact channels
+          c.lineUsername = ln.u; c.linePassword = ln.p; c.dns = dns; c.m3u = m3u;
+          if (c.isTrial) { const now = Date.now(); c.startAt = c.startAt || now; c.expiresAt = Math.max(Number(c.expiresAt) || 0, now + hours * 3600000); c.status = 'active'; }
+          await saveCustomers(list);
+          const m = accessEmail(s, c, c.loginPassword || '', 'trial', body2.appUrl);
+          const sent = c.email ? await sendEmail(s, c.email, m.subject, m.html) : { ok: false, error: 'no email' };
+          const tgChat = await tgFindChat(c); let tgSent = false;
+          if (tgChat) { const rr = await tgSend(s, tgChat, tgCreds(s, c, c.loginPassword || '')); tgSent = rr.ok; }
+          if (tgOn(s) && s.telegram.adminChat) {
+            const startLink = tgBotLink(s, c.email);
+            await tgSend(s, s.telegram.adminChat, `🎁 Trial line synced\n\n${c.name}\n${c.email}\nUsername: ${ln.u}\nLine: ${ln.u} / ${ln.p}\n\n${tgSent ? 'Telegram: delivered to the customer.' : c.telegram ? `Telegram: @${String(c.telegram).replace(/^@/, '')} has not pressed Start yet. Send ${startLink || 'the bot link'}.` : `Telegram: no chat linked. Send ${startLink || 'the bot link'} and ask for /start ${c.email}.`}`);
+          }
+          if (iboText) { try { await tgSend(s, s.telegram && s.telegram.adminChat, `🎮 IBO Player activation — ${c.name || c.username}\n${iboText}`); } catch {} }
+          await log('trial', `Free-trial details synced to ${c.username} (${c.name}) · line ${ln.u}${sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')}${tgSent ? ' · Telegram sent' : ''}`);
+          return ok({ ok: true, updated: true, customerId: c.id, name: c.name, username: ln.u, password: ln.p, dns, m3u, emailSent: sent.ok, telegramSent: tgSent, telegramLinked: !!tgChat, loginUsername: c.username, hours, phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: c.telegram || '', ibo: !!iboText });
+        }
         const entry = {
-          email: String(c?.email || body2.email || '').trim(),
-          phone: String(c?.phone || body2.phone || ''),
-          whatsapp: String(c?.whatsapp || body2.whatsapp || ''),
-          telegram: String(c?.telegram || body2.telegram || ''),
-          name: String(c?.name || body2.name || ''),
-          lang: ['en', 'fr'].includes(String(body2.lang || (c ? c.lang : '') || '')) ? String(body2.lang || c.lang) : 'en',
-          username: String(body2.username || (c ? c.username : '') || ''),
-          password: String(body2.password || (c ? c.loginPassword || c.password || '' : '') || ''),
+          email: String(body2.email || '').trim(),
+          phone: String(body2.phone || '').replace(/[^\d+]/g, '').slice(0, 20),
+          whatsapp: String(body2.phone || '').replace(/[^\d+]/g, '').slice(0, 20),
+          telegram: String(body2.telegram || ''),
+          name: String(body2.name || '').trim(),
+          lang: ['en', 'fr'].includes(String(body2.lang || '')) ? String(body2.lang) : 'en',
+          username: ln.u, password: ln.p,
         };
-        const dns = String(body2.dns || (c ? String(c.dns || '') : '') || '').replace(/\/+$/, '');
-        const m3u = String(body2.m3u || '').trim() || (entry.username && entry.password ? `${dns}/get.php?username=${encodeURIComponent(entry.username)}&password=${encodeURIComponent(entry.password)}&type=m3u_plus&output=ts` : '');
         const r = await trialSend(entry, m3u);
         if (r.error) return err(400, r.error);
-        const iboText = String(body2.ibo || '');
-        if (iboText) { try { await tgSend(s, s.telegram && s.telegram.adminChat, `🎮 IBO Player activation — ${entry.name || entry.username}\n${iboText}`); } catch {} }
-        await log('trial', `Dedicated free-trial dispatch via ${entry.email || entry.username}: email ${r.emailSent ? 'sent' : 'skipped'} · telegram ${r.telegramSent ? 'sent' : 'skipped'}`);
-        return ok({ ok: true, ...r, ibo: !!iboText });
+        if (iboText) { try { await tgSend(s, s.telegram && s.telegram.adminChat, `🎮 IBO Player activation — ${entry.name || ln.u}\n${iboText}`); } catch {} }
+        await log('trial', `Dedicated free-trial dispatch via ${entry.email || ln.u}: email ${r.emailSent ? 'sent' : 'skipped'} · telegram ${r.telegramSent ? 'sent' : 'skipped'}`);
+        return ok({ ok: true, ...r, updated: false, customerId: r.customerId || '', name: r.name || entry.name, username: ln.u, password: ln.p, dns, m3u, ibo: !!iboText });
       }
       if (R('GET', '/api/admin/trialq')) {
         const all = (await getTrialQueue()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.at - a.at);
