@@ -8,6 +8,21 @@ const CORS = {
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
 };
 
+// HTML must never be pinned at the Cloudflare edge; versioned assets (?v=N) live forever.
+function serveAsset(request, response) {
+  const type = response.headers.get('content-type') || '';
+  const u = new URL(request.url);
+  const h = new Headers(response.headers);
+  if (type.includes('text/html')) {
+    h.set('cache-control', 'no-store');
+    h.delete('expires');
+    h.delete('last-modified');
+  } else if (u.searchParams.get('v')) {
+    h.set('cache-control', 'public, max-age=31536000, immutable');
+  }
+  return new Response(response.body, { status: response.status, headers: h });
+}
+
 function kvStore(kv) {
   return {
     get: async (k) => { const v = await kv.get(k); return v ? JSON.parse(v) : null; },
@@ -49,10 +64,11 @@ export default {
     if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
     // Public landing pages served by the single-page app (clean URLs, no .html)
     if (url.pathname === '/freetrial' || url.pathname === '/resellers') {
-      return env.ASSETS.fetch(new Request(url.origin + '/index.html', { method: 'GET', headers: request.headers }));
+      const r = await env.ASSETS.fetch(new Request(url.origin + '/index.html', { method: 'GET', headers: request.headers }));
+      return serveAsset(request, r);
     }
 
-    return env.ASSETS.fetch(request);
+    return serveAsset(request, await env.ASSETS.fetch(request));
   },
   // Runs once a day (see wrangler.toml): low-credit alerts + expiry reminder emails.
   async scheduled(event, env, ctx) {
