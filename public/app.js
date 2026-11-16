@@ -1,9 +1,9 @@
-import { createBackend } from './core.js';
-import { loadLogos, logosReady, findLogo } from './logos.js';
-import { siteHtml } from './site.js';
-import { ic } from './icons.js';
-import { parseM3U, m3uAnswer } from './m3u.js';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js';
+import { createBackend } from './core.js?v=57';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=57';
+import { siteHtml } from './site.js?v=57';
+import { ic } from './icons.js?v=57';
+import { parseM3U, m3uAnswer } from './m3u.js?v=57';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=57';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
