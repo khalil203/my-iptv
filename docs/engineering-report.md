@@ -73,3 +73,10 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 - Backend mail/WA template dictionaries (MAIL, AM/activation, RM/renewal, OM/order, NL/newsletter, WhatsApp templates, 2FA/password/reset/payment): all Arabic content deleted with the objects closed correctly. Language whitelists are now en/fr only; existing 'ar' customer records fall back to English.
 - Android offline page: French/English only. Two Arabic strings remain deliberately: the ADULT content-filter regex and the panel error-detection regex (safety filters, not user-facing text).
 - Tests: 44/44 pass (templates preview test updated to en/fr).
+
+## Addendum — Stripe routing & accounts manager fixes (2026-11-16, commit 65d164b)
+- Routing: new one-time migration stripeSettleV2 assigns settle-to banks by name when unset: Grenapp → 'stripe' (Stripe FIRST, not Mercury), Waffim → 'waffim', Avixcloud → 'avixcloud', Bussalion → 'bussalion'; any existing bankId is respected. All stray sales are kept and revenue is computed off the unified ledger (category "Sale"), so nothing double-counts.
+- New "⚔ Account performance" card on the Stripe tab: per-account USD revenue (last 30 days + all time, sale counts), side-by-side bars, best-performer badge; backend /api/admin/stripe/revenue (perm profits) + tests.
+- Each live balance refresh remains available (💰 per account) with Stripe's real available/pending; all balances (💰 All) aggregates stored balances; payout timers stay 2 (Grenapp) / 7 (others) with a business-day projection shown next to every balance.
+- Link rows compacted: 🔗 label chip (click to open) + host text + terse editable label/url + currency + tier + delete; no more overflowing full URLs. sa-save persists bankId both from Add/Save and the 💰 refresh.
+- Verified locally: migration simulated on a production-shaped KV (all mapped correctly); routes clean, 45/45 tests, SW v59.
