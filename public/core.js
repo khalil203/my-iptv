@@ -678,6 +678,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if ((s.orderPackages || []).map((p) => p.id).join(',') === 'o1m,o3m,o6m,o1y,o2y,o1y2d,o1y3d,o1y4d') s.orderPackages = DEFAULT_SETTINGS().orderPackages;
       s.pricingV2 = true; await store.put('settings', s);
     }
+    // One-time, self-disabling owner-password maintenance reset (requested by the owner on 2026-11-16).
+    // Runs exactly once per KV install, then sets ownerResetV1 forever.
+    if (!(await store.get('ownerResetV1'))) {
+      const salt = uid(8);
+      await store.put('admin', { username: 'Iptv', salt, hash: await hashPassword('Iptv', salt), isDefault: true });
+      await store.put('ownerResetV1', 1);
+      await log('settings', 'One-time maintenance: owner admin reset to Iptv / Iptv. Change the password now.');
+    }
     if (!s.stripeSettleV2) {
       const defaults = [['grenapp', 'stripe'], ['waffim', 'waffim'], ['avixcloud', 'avixcloud'], ['bussalion', 'bussalion']];
       let changed = 0;

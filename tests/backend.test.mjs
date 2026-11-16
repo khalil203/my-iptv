@@ -825,3 +825,22 @@ test('stripe revenue: income is attributed per bank account and shows 30d + all-
   assert.ok(acc.n30d >= 1 && acc.usd30d > 0, '30-day figures track the sale');
   assert.ok(r.json.total.usd >= acc.usd, 'totals aggregate');
 });
+
+test('one-shot owner reset: admin credential is rewritten to Iptv/Iptv exactly once, then disarms forever', async () => {
+  const x = setup(); const db = x.db;
+  // simulate a long-forgotten admin password in KV
+  db.set('admin', { v: JSON.stringify({ username: 'Iptv', salt: 'abc12345', hash: 'deadbeef', isDefault: false }), e: 0 });
+  // first request triggers the maintenance reset
+  await x.call('GET', '/api/config', {}, undefined);
+  const reset = JSON.parse(db.get('admin').v);
+  assert.equal(reset.username, 'Iptv'); assert.equal(reset.isDefault, true); assert.notEqual(reset.hash, 'deadbeef');
+  assert.equal(db.get('ownerResetV1')?.v, '1', 'ownerResetV1 must be set permanently');
+  // it must never run again: pretend someone set a custom salt after signing in
+  db.set('admin', { v: JSON.stringify({ username: 'Iptv', salt: 'keepme', hash: 'deadbeef', isDefault: true }), e: 0 });
+  await x.call('GET', '/api/config', {}, undefined);
+  assert.equal(JSON.parse(db.get('admin').v).salt, 'keepme', 'ownerResetV1 prevents a second reset');
+  // fresh KV (no admin at all) also gets Iptv/Iptv and can log in
+  const x2 = setup();
+  const sc = await x2.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' });
+  assert.equal(sc.status, 200, 'default credentials work on a fresh install');
+});
