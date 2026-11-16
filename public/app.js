@@ -1,9 +1,9 @@
-import { createBackend } from './core.js?v=64';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=64';
-import { siteHtml } from './site.js?v=64';
-import { ic } from './icons.js?v=64';
-import { parseM3U, m3uAnswer } from './m3u.js?v=64';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=64';
+import { createBackend } from './core.js?v=65';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=65';
+import { siteHtml } from './site.js?v=65';
+import { ic } from './icons.js?v=65';
+import { parseM3U, m3uAnswer } from './m3u.js?v=65';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=65';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -3364,16 +3364,17 @@ Object.assign(actions, {
     const [r, settings] = await Promise.all([api('GET', '/api/admin/stripe/revenue').catch(() => null), api('GET', '/api/admin/settings').catch(() => null)]);
     if (!r || !settings) { box.textContent = 'No revenue data yet.'; return; }
     const stripe = settings.stripeAccounts || [];
-    const fin = (settings.finance && settings.finance.accounts) || [];
     const byFin = {}; for (const x of r.revenue) byFin[x.accountId] = x;
-    const revOf = (a) => byFin[a.bankId] || byFin.stripe || byFin[(fin[0] || {}).id] || { usd: 0, usd30d: 0, n: 0, n30d: 0 };
-    const totals = stripe.map((a) => ({ name: a.name, rev: revOf(a), links: (a.links || []).length }));
-    const max = Math.max(1, ...totals.map((t) => t.rev.usd));
-    const sorted = [...totals].sort((a, b) => b.rev.usd - a.rev.usd);
-    box.innerHTML = `<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:10px">${totals.map((t) => `<div class="stat"><span>${esc(t.name)}</span><b>${usd(t.rev.usd30d)}</b><span>30d · ${t.rev.n30d} sales</span></div>`).join('')}</div>
-      <div class="hbars2">${sorted.map((t) => `<div><span>${esc(t.name)}</span><div class="hbar2" title="${esc(t.name)}: ${usd(t.rev.usd)} all time · ${t.rev.n} sales"><i style="width:${Math.round((t.rev.usd / max) * 100)}%"></i></div><span class="small muted">${t.rev.n} sales · ${usd(t.rev.usd)}</span></div>`).join('')}</div>
-      <p class="small muted" style="margin:10px 0 0">🏆 Best performer: <b>${esc(sorted[0].name)}</b> — ${usd(sorted[0].rev.usd)} all time · ${sorted[0].rev.n} sales</p>
-      <p class="small muted" style="margin:6px 0 0">Each account books income into its settled bank FIRST; the Stripe payout then lands in that bank automatically.</p>`;
+    const zero = { usd: 0, usd30d: 0, n: 0, n30d: 0 };
+    const revOf = (a) => (a.bankId && byFin[a.bankId]) || zero;
+    const cash = (a, v) => `${a.cur === 'EUR' ? '\u20ac' : '$'}${Number(v || 0).toFixed(2)}`;
+    const totals = stripe.map((a) => ({ name: a.name || a.id, bal: Number(a.balance || 0), cur: a.currency || 'USD', days: Number(a.payoutDays) === 2 ? 2 : 7, rev: revOf(a) }));
+    const balMax = Math.max(1, ...totals.map((t) => t.bal));
+    const sorted = [...totals].sort((a, b) => b.bal - a.bal);
+    box.innerHTML = `<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:10px">${totals.map((t) => `<div class="stat"><span>${esc(t.name)}</span><b>${cash(t, t.bal)}</b><span>${t.days}-day payout · 30d ${t.rev.n30d} sale${t.rev.n30d === 1 ? '' : 's'}</span></div>`).join('')}</div>
+      <div class="hbars2">${sorted.map((t) => `<div><span>${esc(t.name)}</span><div class="hbar2" title="${esc(t.name)}: ${cash(t, t.bal)} stored · ${t.days}-day payout"><i style="width:${Math.round((t.bal / balMax) * 100)}%"></i></div><span class="small muted">${cash(t, t.bal)} · ${t.days}-day payout</span></div>`).join('')}</div>
+      <p class="small muted" style="margin:10px 0 0">💰 Largest balance: <b>${esc((sorted[0] || {}).name || '—')}</b> — ${cash(sorted[0] || { cur: 'USD' }, (sorted[0] || {}).bal)}</p>
+      <p class="small muted" style="margin:6px 0 0">Stored balances update with 💰 per account or “💰 All balances (total)”. Income booked through an account is added to the bank it settles to first.</p>`;
   },
   'sa-save': async () => {
     const stripeAccounts = [...document.querySelectorAll('#sa-list .op-row')].map((r) => {
