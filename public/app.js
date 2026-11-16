@@ -1221,8 +1221,9 @@ async function renderUser() {
   const { user, dashboard: d, branding: b } = u.me;
   setChatFab(u.me.chatUnread || 0);
   if (state.justPaid) { const how = state.justPaid; state.justPaid = null; setTimeout(() => modal(how === 'done' ? '✅ ' + t('paidTitle') : '💳 ' + t('paidBackTitle'), `<p>${how === 'done' ? t('paidText') : t('paidBackText')}</p><div class="row"><button class="btn primary" data-act="close-modal" style="flex:1">OK</button><button class="btn" data-act="rc-new" style="flex:1">🧾 ${t('rcBtn')}</button></div>`), 400); }
-  const tabs = [['home', ic('home'), t('home')], d.live && ['live', ic('tv'), t('live')], d.movies && ['movies', ic('film'), t('movies')], d.series && ['series', ic('series'), t('series')], ['account', ic('user'), t('account')]].filter(Boolean);
-  if (!tabs.some((t) => t[0] === u.tab)) u.tab = 'home';
+  const tabs = [['home', ic('home'), t('home')], ['account', ic('user'), t('account')]];
+  const canWatchTab = (u.tab === 'live' || u.tab === 'movies' || u.tab === 'series') && d[u.tab];
+  if (u.tab !== 'home' && u.tab !== 'account' && !canWatchTab) u.tab = 'home';
   $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
     <div class="ubody" id="ubody"></div>
     <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}</nav></div>`;
@@ -1272,25 +1273,16 @@ async function renderUserTab() {
     return;
   }
   if (u.tab === 'account') {
-    const sm = state.user.me.stream;
-    const m3uUrl = sm && sm.dns && sm.u ? (sm.dns + '/get.php?username=' + encodeURIComponent(sm.u) + '&password=' + encodeURIComponent(sm.p || '') + '&type=m3u_plus&output=ts') : '';
-    const sd = sm ? `<div class="card" id="acc-service"><h3>${t('serviceDetails')}</h3>
-        <div class="list-item"><span style="flex:1">${t('username')}</span><b dir="ltr" style="word-break:break-all">${esc(sm.u || '—')}</b></div>
-        <div class="list-item"><span style="flex:1">${t('password')}</span><b dir="ltr" style="word-break:break-all">${esc(sm.p || '—')}</b></div>
-        ${sm.dns ? `<div class="list-item"><span style="flex:1">DNS</span><b dir="ltr" style="word-break:break-all">${esc(sm.dns)}</b></div>` : ''}
-        ${m3uUrl ? `<div class="list-item"><span style="flex:1">${t('m3uOne')}</span><b dir="ltr" style="word-break:break-all;font-size:11px">${esc(m3uUrl)}</b></div><button class="btn block" data-act="copy-el" data-el="acc-m3u" style="margin-top:8px">${t('copyDetails')}</button><div id="acc-m3u" style="display:none">${esc(m3uUrl)}</div>` : ''}
-        <p class="small muted" style="margin-top:8px">IBO Player / TVPlus: enter the DNS and your username/password in the app, then pick your device bundle (1–4 devices).</p></div>` : '';
     el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
         ${user.email ? `<div class="list-item" style="margin-top:12px"><span style="flex:1;min-width:0;overflow-wrap:anywhere" dir="ltr">${esc(user.email)}</span>${user.emailVerified ? `<span class="pill st-active">${t('emVerified')}</span>` : `<button class="btn sm primary" data-act="em-send">${t('emVerify')}</button>`}</div>` : ''}</div>
       <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('linesN')}</span><b>${user.connections}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div>${(state.user.me.totalPaidUsd || 0) > 0 ? `<div class="list-item"><span style="flex:1">${t('totalPaid')}</span><b>$${Number(state.user.me.totalPaidUsd).toFixed(2)}</b></div>` : ''}
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
-      ${sd}
       ${plansCard()}
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-tickets"><div class="row"><h3 style="margin:0;flex:1">${t('supportT')}</h3><button class="btn sm primary" data-act="ticket-new">＋ ${t('newTicket')}</button></div><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-payments"><h3>${t('paymentsT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card"><h3>${t('tfaT')}</h3><p class="muted small" style="margin-top:0">${user.twoFactor ? t('tfaOnText') : t('tfaText')}</p>${user.twoFactor ? `<span class="pill st-active">${t('tfaOn')}</span> <button class="btn sm" data-act="utfa-off" style="margin-inline-start:8px">${t('turnOff')}</button>` : `<button class="btn primary" data-act="utfa-setup">${t('turnOn')}</button>`}</div>
-      ${d.ownPlaylists !== false ? sourcesCard() : ''}
+      ${sourcesCard()}
       ${parentalCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
@@ -2610,11 +2602,21 @@ function srcBanner() {
   return `<div class="notice info row"><span style="flex:1">${ic('list', 18)} ${t('srcNow', { name: esc(src.name) })}</span><button class="btn sm" data-act="src-use" data-id="">${t('srcBack', { app: esc(me.branding.appName) })}</button></div>`;
 }
 function sourcesCard() {
-  const list = getSources(); const act = activeSrc(); const app = state.user.me.branding.appName;
+  const me = state.user.me;
+  const list = getSources(); const act = activeSrc(); const app = me.branding.appName;
   const row = (id, name, tag, canDel) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(name)}</b>${tag ? ` <span class="tagp">${tag}</span>` : ''}</div>${act === id ? `<span class="pill st-active">${t('srcActive')}</span>` : `<button class="btn sm" data-act="src-use" data-id="${esc(id)}">${t('srcUse')}</button>`}${canDel ? `<button class="btn sm ghost" data-act="src-del" data-id="${esc(id)}" aria-label="${t('srcRemove')}">✕</button>` : ''}</div>`;
+  const st = me.stream;
+  const m3uUrl = st && st.dns && st.u ? (st.dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts') : '';
+  const svc = st ? `<div style="margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:color-mix(in srgb, var(--surface) 60%, transparent)">
+      <div class="list-item" style="border:0;padding:2px 0"><span style="flex:1">${t('username')}</span><b dir="ltr" style="word-break:break-all">${esc(st.u || '—')}</b></div>
+      <div class="list-item" style="border:0;padding:2px 0"><span style="flex:1">${t('password')}</span><b dir="ltr" style="word-break:break-all">${esc(st.p || '—')}</b></div>
+      ${st.dns ? `<div class="list-item" style="border:0;padding:2px 0"><span style="flex:1">DNS</span><b dir="ltr" style="word-break:break-all">${esc(st.dns)}</b></div>` : ''}
+      ${m3uUrl ? `<div class="list-item" style="border:0;padding:2px 0"><span style="flex:1">${t('m3uOne')}</span><b dir="ltr" style="word-break:break-all;font-size:11px">${esc(m3uUrl)}</b></div><button class="btn block" data-act="copy-el" data-el="svc-m3u" style="margin-top:8px">${t('copyDetails')}</button><div id="svc-m3u" style="display:none">${esc(m3uUrl)}</div>` : ''}
+      <p class="small muted" style="margin:8px 0 0">IBO Player / TVPlus: enter the DNS and your username/password in the app, then pick your device bundle (1–4 devices).</p></div>` : '';
+  const canOwn = me.dashboard.ownPlaylists !== false;
   return `<div class="card" id="acc-sources"><h3>${t('srcT')}</h3><p class="muted small" style="margin-top:0">${t('srcText')}</p>
-    ${row('', t('srcMain', { app }), '', false)}${list.map((x) => row(x.id, x.name, x.type === 'xtream' ? 'Xtream' : 'M3U', true)).join('')}
-    <div class="row" style="margin-top:12px"><button class="btn" data-act="src-add" data-type="xtream">＋ Xtream Codes</button><button class="btn" data-act="src-add" data-type="m3u">＋ M3U</button></div></div>`;
+    ${row('', t('srcMain', { app }), '', false)}${svc}${list.map((x) => row(x.id, x.name, x.type === 'xtream' ? 'Xtream' : 'M3U', true)).join('')}
+    ${canOwn ? `<div class="row" style="margin-top:12px"><button class="btn" data-act="src-add" data-type="xtream">＋ Xtream Codes</button><button class="btn" data-act="src-add" data-type="m3u">＋ M3U</button></div>` : ''}</div>`;
 }
 // Android / TV app: the native player remembers the position; this brings it back for "Continue watching".
 function noteNative(kind, id, url) { try { localStorage.setItem('tvp_lastnative', JSON.stringify({ kind, id, url })); } catch {} }
