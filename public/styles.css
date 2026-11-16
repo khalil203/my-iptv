@@ -404,7 +404,7 @@ html { transition: background-color .4s; }
 [data-theme=light] .nav a.on { color: var(--text); background: linear-gradient(90deg, rgba(14,165,196,.16), transparent); }
 [data-theme=light] .mobile-nav a.on, [data-theme=light] .chips a.on { color: #fff; }
 [data-theme=light] .bnav a.on { color: var(--primary2); background: color-mix(in srgb, var(--primary) 9%, transparent); }
-[data-theme=light] .brand-name { background-image: linear-gradient(90deg, #0A1E22 0%, #0E7490 50%, #0891B2 100%); }
+[data-theme=light] .brand-name { background: none; -webkit-text-fill-color: currentColor; color: var(--text); }
 [data-theme=light] #toast div { background: #fff; color: #0f172a; border-color: var(--line2); box-shadow: 0 10px 30px rgba(15,23,42,.15); }
 [data-theme=light] #toast div.err { color: #b91c1c; }
 [data-theme=light] .code { background: #f1f5f9; border-color: var(--line2); color: #0f172a; }
@@ -1016,3 +1016,6 @@ body::after { content:''; position: fixed; inset: 0; z-index: -1; pointer-events
 body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -webkit-mask-image: linear-gradient(180deg, black 55%, transparent 96%); }
 [data-theme=light] body::after { opacity: .5; background-image: radial-gradient(120vmax 42vmax at 50% -12%, rgba(8,145,178,.22), transparent 62%), linear-gradient(rgba(14,116,144,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(14,116,144,.16) 1px, transparent 1px); background-size: 100% 100%, 88px 88px, 88px 88px; }
 @media (prefers-reduced-motion: reduce) { body::after { -webkit-mask-image: none; mask-image: none; } }
+
+/* logo text: never behind a background */
+.brand-name, .brand-name.xl, [data-theme=light] .brand-name, [data-theme=dark] .brand-name { background: none !important; -webkit-text-fill-color: currentColor !important; }
