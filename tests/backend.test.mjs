@@ -563,6 +563,36 @@ test('agent panel: pasted M3U fills the four fields and syncs the customer My De
   assert.equal(me.json.stream.m3u, m3u);
 });
 
+test('paid accounts: M3U + IBO Player sync to My Details, trial accounts refused', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const c = await addCustomer(x, tok);
+  const m3u = 'http://paid.example.com:8080/get.php?username=PAIDU&password=PAIDP&type=m3u_plus&output=ts';
+  const r = await x.call('POST', `/api/admin/customers/${c.id}/line`, { m3u, iboMac: 'AA:BB:CC:DD:EE:FF', iboKey: 'KEY-123', sendEmail: false }, tok);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.username, 'PAIDU'); assert.equal(r.json.password, 'PAIDP');
+  assert.equal(r.json.dns, 'http://paid.example.com:8080');
+  assert.equal(r.json.m3u, m3u, 'the pasted M3U is kept intact');
+  assert.equal(r.json.ibo.mac, 'AA:BB:CC:DD:EE:FF'); assert.equal(r.json.ibo.key, 'KEY-123');
+  const u = await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' }); assert.equal(u.status, 200);
+  const me = await x.call('GET', '/api/me', {}, u.json.token);
+  assert.equal(me.status, 200, JSON.stringify(me.json));
+  assert.equal(me.json.stream.u, 'PAIDU'); assert.equal(me.json.stream.p, 'PAIDP');
+  assert.equal(me.json.stream.m3u, m3u);
+  assert.equal(me.json.stream.ibo.mac, 'AA:BB:CC:DD:EE:FF');
+  assert.equal(me.json.stream.ibo.key, 'KEY-123');
+  const r2 = await x.call('POST', `/api/admin/customers/${c.id}/line`, { iboMac: '11:22:33:44:55:66', iboKey: 'K2', sendEmail: false }, tok);
+  assert.equal(r2.status, 200, JSON.stringify(r2.json)); assert.equal(r2.json.iobOnly, true);
+  const me2 = await x.call('GET', '/api/me', {}, u.json.token);
+  assert.equal(me2.json.stream.ibo.mac, '11:22:33:44:55:66', 'IBO-only edit updates the device');
+  assert.equal(me2.json.stream.u, 'PAIDU', 'IBO-only edit keeps the line');
+  await x.call('POST', '/api/trial', { name: 'Trial Only', email: 'paidcheck@example.com', phone: '+212600998877', lang: 'en', ip: '8.8.8.8' });
+  const list = await x.call('GET', '/api/admin/customers', {}, tok);
+  const tr = list.json.find((y) => y.isTrial && y.email === 'paidcheck@example.com');
+  assert.ok(tr, 'the free-trial flow creates its own trial account');
+  const rej = await x.call('POST', `/api/admin/customers/${tr.id}/line`, { m3u }, tok);
+  assert.equal(rej.status, 400, 'paid M3U workflow refuses trial accounts');
+});
+
 test('all-agents trial queue: dedicated dispatch entry takes free-trial credentials and dispatches', async () => {
   const x = setup(); const tok = await adminToken(x);
   await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents' }, email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' } }, tok);

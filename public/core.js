@@ -437,7 +437,7 @@ export function accessEmail(s, c, password, kind, appUrl) {
   const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
   const u = c.lineUsername || c.username, p = c.linePassword || password;
   const q = `username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}`;
-  const m3u = dns ? [`${dns}/get.php?${q}&type=m3u_plus&output=ts`, `${dns}/get.php?${q}&type=m3u_plus&output=m3u8`] : [];
+  const m3u = String(c.m3u || '').trim() ? [String(c.m3u).trim()] : (dns ? [`${dns}/get.php?${q}&type=m3u_plus&output=ts`, `${dns}/get.php?${q}&type=m3u_plus&output=m3u8`] : []);
   const date = new Date(c.expiresAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' });
   const trial = kind === 'trial';
   const macNote = lang === 'fr'
@@ -466,7 +466,7 @@ ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="96" style="display:block;
 <tr><td class="mobile-pad" style="padding:0 40px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
 <tr><td style="padding:20px 24px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;text-align:${align}"><h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a">${L.details}</h2><p style="margin:6px 0 0;font-size:13px;color:#475569;line-height:1.5">${L.detailsIntro}</p></td></tr>
 <tr><td style="padding:20px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%">${row(L.user, e(u))}${row(L.pass, e(p))}${dns ? row(L.dns, `<a href="${e(dns)}" style="color:${P};text-decoration:none;font-size:14px">${e(dns)}</a>`) : ''}
-${m3u.length ? `<tr><td colspan="2" style="padding-top:16px;text-align:${align}"><div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${L.m3u}</div>${m3u.map((x, i) => `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-bottom:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">${i ? 'HLS' : 'TS'}:</b> ${e(x)}</div>`).join('')}</td></tr>` : ''}
+${m3u.length ? `<tr><td colspan="2" style="padding-top:16px;text-align:${align}"><div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${L.m3u}</div>${m3u.map((x, i) => `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-bottom:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">${i ? 'HLS' : 'TS'}:</b> ${e(x)}</div>`).join('')}</td></tr>` : ''}${c.ibo && c.ibo.mac ? row('Device MAC Address', e(c.ibo.mac)) : ''}${c.ibo && c.ibo.key ? row('Device Key', e(c.ibo.key)) : ''}
 </table></td></tr></table></td></tr>
 ${base ? `<tr><td class="mobile-pad" align="center" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#0c4a6e,#0284c7);border-radius:12px"><tr><td align="center" style="padding:24px;color:#fff"><h3 style="margin:0 0 6px;font-size:17px;color:#fff">${v('appTitle')}</h3><p style="margin:0 0 16px;font-size:13px;color:#e0f2fe">${L.appText}</p>
 <a href="${e(base)}/" style="display:inline-block;background:#fff;color:#0369a1;font-weight:700;padding:11px 18px;border-radius:10px;text-decoration:none;margin:4px">${L.openApp}</a> <a href="${e(base)}/download.html" style="display:inline-block;background:#38bdf8;color:#fff;font-weight:700;padding:11px 18px;border-radius:10px;text-decoration:none;margin:4px">${L.getApp}</a></td></tr></table></td></tr>` : ''}
@@ -1587,6 +1587,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               relay: String(s.player.relayUrl || '').trim().replace(/\/+$/, ''),
               dns: String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, ''),
               m3u: String(c.m3u || '').trim(),
+              ibo: c.ibo && (String(c.ibo.mac || '').trim() || String(c.ibo.key || '').trim()) ? { mac: String(c.ibo.mac || '').trim(), key: String(c.ibo.key || '').trim() } : null,
             } : null,
           });
         }
@@ -2632,6 +2633,45 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const c = list.find((x) => x.id === m[1]);
         if (!c) return err(404, 'Customer not found.');
         const sub = m[2];
+
+        if (method === 'POST' && sub === 'line') { // paid customers: staff paste the panel M3U line -> saved to My Details (+ IBO Player device)
+          if (c.isTrial) return err(400, 'Free-trial accounts use Trial queue → New free-trial dispatch.');
+          const paste = String(body.m3u || '').trim();
+          let ln = parseLineLink(paste);
+          if (!ln) {
+            const u0 = String(body.username || '').trim(), p0 = String(body.password || ''), d0 = String(body.dns || '').trim().replace(/\/+$/, '');
+            if (u0 && p0 && d0) ln = { u: u0, p: p0, dns: d0 };
+          }
+          const iboMac = String(body.iboMac || '').trim(), iboKey = String(body.iboKey || '').trim();
+          if (!ln && !iboMac && !iboKey) return err(400, 'Paste the full M3U link (or fill Username, Password and DNS), or add the IBO Player device fields.');
+          if (!ln && (paste || String(body.username || '').trim() || String(body.password || '') || String(body.dns || '').trim())) return err(400, 'Paste the full M3U link (or fill Username, Password and DNS).');
+          if (!ln) {
+            if (iboMac || iboKey) c.ibo = { mac: iboMac, key: iboKey, at: Date.now(), by: actorName || 'team' };
+            else if (body.clearIbo) delete c.ibo;
+            await saveCustomers(list);
+            await log('customer', `IBO Player details ${iboMac || iboKey ? 'saved' : 'cleared'} for paid customer ${c.username} (${c.name})${iboMac ? ' · ' + iboMac : ''}`);
+            return ok({ ok: true, customerId: c.id, name: c.name, username: c.lineUsername || '', password: c.linePassword || '', dns: String(c.dns || ''), m3u: String(c.m3u || ''), ibo: c.ibo || null, iobOnly: true, emailSent: false, telegramSent: false, telegramLinked: false, email: c.email || '', phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: String(c.telegram || '').replace(/^@/, ''), loginUsername: c.username, daysLeft: viewP(c, s).daysLeft, state: viewP(c, s).state, planName: viewP(c, s).planName, expiresAt: viewP(c, s).expiresAt });
+          }
+          const dns = String(ln.dns || '').replace(/\/+$/, '');
+          if (!/^https?:\/\//i.test(dns)) return err(400, 'DNS must start with http:// or https://.');
+          c.lineUsername = String(ln.u).trim(); c.linePassword = String(ln.p); c.dns = dns;
+          if (paste) c.m3u = paste;
+          delete c.pendingLine; delete c.lineBad;
+          if (c.status === 'disabled' && body.enable !== false) c.status = 'active';
+          if (iboMac || iboKey) c.ibo = { mac: iboMac, key: iboKey, at: Date.now(), by: actorName || 'team' };
+          else if (body.clearIbo) delete c.ibo;
+          await saveCustomers(list);
+          const wantMail = body.sendEmail !== false && !!c.email;
+          const m = accessEmail(s, c, c.loginPassword || '', 'sub', body.appUrl);
+          const sent = wantMail ? await sendEmail(s, c.email, m.subject, m.html) : { ok: false, error: 'not requested' };
+          const tgChat = wantMail ? await tgFindChat(c) : '';
+          let tgSent = false;
+          if (tgChat) { const rr = await tgSend(s, tgChat, tgCreds(s, c, c.loginPassword || '')); tgSent = rr.ok; }
+          if (tgOn(s) && s.telegram.adminChat) await tgSend(s, s.telegram.adminChat, `📺 Paid line ${paste ? 'assigned' : 'updated'} — ${c.name || c.username}\n\nUsername: ${c.lineUsername}\nDNS: ${c.dns}${iboMac ? `\nIBO MAC: ${iboMac}` : ''}${iboKey ? `\nIBO key: ${iboKey}` : ''}\n\n${sent.ok ? 'Email: sent' : 'Email: not sent'} · ${tgSent ? 'Telegram: sent' : 'Telegram: not linked'}`);
+          await log('customer', `M3U line synced for paid customer ${c.username} (${c.name}) · ${c.lineUsername}@${c.dns}${iboMac ? ' · IBO ' + iboMac : ''}${sent.ok ? ' · email sent' : ''}${tgSent ? ' · Telegram sent' : ''}`);
+          const v = viewP(c, s);
+          return ok({ ok: true, customerId: c.id, name: c.name, username: c.lineUsername, password: c.linePassword, dns: c.dns, m3u: String(c.m3u || ''), ibo: c.ibo || null, emailSent: !!sent.ok, telegramSent: tgSent, telegramLinked: !!tgChat, email: c.email || '', phone: c.phone || '', whatsapp: c.whatsapp || '', telegram: String(c.telegram || '').replace(/^@/, ''), loginUsername: c.username, daysLeft: v.daysLeft, state: v.state, planName: v.planName, expiresAt: v.expiresAt });
+        }
 
         if (method === 'PUT' && !sub) {
           // 24-hour auto-reset contact checkboxes (spec §4): checking marks "contacted" today; stale marks auto-expire in the UI

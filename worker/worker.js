@@ -64,7 +64,7 @@ export default {
     // Short links for TVs (type in the "Downloader" app): /tv or /apk → Android app
     if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
     // Public landing pages served by the single-page app (clean URLs, no .html)
-    if (url.pathname === '/freetrial' || url.pathname === '/resellers') {
+    if (url.pathname === '/freetrial' || url.pathname === '/resellers' || url.pathname === '/profile') {
       const r = await env.ASSETS.fetch(new Request(url.origin + '/index.html', { method: 'GET', headers: request.headers }));
       return serveAsset(request, r);
     }

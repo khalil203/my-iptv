@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink } from './core.js?v=66';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=66';
-import { siteHtml } from './site.js?v=66';
-import { ic } from './icons.js?v=66';
-import { parseM3U, m3uAnswer } from './m3u.js?v=66';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=66';
+import { createBackend, parseLineLink } from './core.js?v=67';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=67';
+import { siteHtml } from './site.js?v=67';
+import { ic } from './icons.js?v=67';
+import { parseM3U, m3uAnswer } from './m3u.js?v=67';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=67';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -200,6 +200,10 @@ function route() {
     if (!state.token && path === '/freetrial') return renderFreeTrial();
     if (!state.token && path === '/resellers') return renderResellers();
     if (state.token && path === '/resellers' && !isAdminUI()) return renderResellers();
+  }
+  if (path === '/profile') {
+    if (!state.token) { state.forceSite = false; state.showLogin = true; return renderLogin(); }
+    if (!isAdminUI()) return renderProfile();
   }
   if (!state.token) return wantsSite() ? renderSite() : renderLogin();
   if (isAdminUI()) return renderAdmin();
@@ -619,7 +623,13 @@ function adminCustomerProfile(c) {
     c.rslId ? `<div class="ilist"><span class="svc-l">Reseller</span><b>${esc(c.rslId)}</b></div>` : '',
   ].filter(Boolean).join('');
   const st = c.stream || {};
-  const m3u = st.dns && st.u ? (st.dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts') : '';
+  const cDns = String(c.dns || st.dns || '').replace(/\/+$/, '');
+  const cU = st.u || c.lineUsername || '';
+  const cP = st.p || c.linePassword || '';
+  const m3u = String(c.m3u || '').trim() || (cDns && cU ? (cDns + '/get.php?username=' + encodeURIComponent(cU) + '&password=' + encodeURIComponent(cP || '') + '&type=m3u_plus&output=ts') : '');
+  const ibo = c.ibo || null;
+  const hasIbo = !!(ibo && (ibo.mac || ibo.key));
+  const iboHtml = hasIbo ? (svcRow('Device MAC Address', ibo.mac || '—', 'mac') + svcRow('Device Key', ibo.key || '—', 'key')) : '';
   const svcRow = (label, value, key) => `<div class="svc-row"><span class="svc-l">${esc(label)}</span><b class="svc-v" dir="ltr">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="cp-${key}" aria-label="Copy ${esc(label)}">⧉</button><div id="cp-${key}" style="display:none">${esc(value)}</div></div>`;
   return `<div class="prof">
   <button class="btn ghost" data-act="back-list" style="margin-bottom:12px">← Back to customers</button>
@@ -628,8 +638,8 @@ function adminCustomerProfile(c) {
       <div class="prof-id"><div class="avatar xl">${esc(initials(c.name))}</div><div><h2 style="margin:0">${esc(c.name)}</h2><div class="muted">${esc(c.username)}${c.orderNo ? ' · #' + esc(c.orderNo) : ''}</div><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${pill(c.state)}${tier[0] !== 'Regular' ? `<span class="pill ${tier[1]}">${tier[0]}</span>` : ''}${c.isReseller ? `<span class="pill st-expiring">${esc(c.rslId || 'RSL')}</span>` : ''}${c.statusFlag === 'dispute' ? '<span class="pill st-expired">dispute</span>' : c.statusFlag === 'excellent' ? '<span class="pill st-active">excellent</span>' : ''}${c.isTrial ? '<span class="pill st-expiring">trial</span>' : ''}</div></div></div>
       <div class="prof-sub"><div><span class="dp-l">Plan</span><b>${esc(c.planName)}</b></div><div><span class="dp-l">Devices</span><b>${esc(c.connections)}</b></div><div><span class="dp-l">Started</span><b>${c.startAt ? fmtDate(c.startAt) : '—'}</b></div><div><span class="dp-l">Expires</span><b>${c.expiresAt ? fmtDate(c.expiresAt) : '—'}</b></div></div>
       <div style="margin-top:10px">${progress(c)}<div class="small muted" style="margin-top:6px">${c.state === 'expired' ? Math.abs(c.daysLeft) + ' days expired' + (c.lastLogin ? ' · last login ' + fmtDT(c.lastLogin) : '') : c.daysLeft + ' days left'}</div></div>
-      <h3 style="margin-top:14px">Connection details</h3>
-      <div class="svc-box" style="margin-top:6px">${svcRow('Username', st.u || c.lineUsername || '—', 'u')}${svcRow('Password', st.p || c.linePassword || '—', 'p')}${st.dns ? svcRow('DNS', st.dns, 'dns') : ''}${m3u ? svcRow('M3U', m3u, 'm3u') : ''}<p class="small muted" style="margin:8px 2px 0">IBO Player / TVPlus: enter the DNS and your username/password in the app, then pick your device bundle (1–4 devices).</p></div>
+      <div class="row" style="margin-top:14px"><h3 style="margin:0">Connection details</h3><span class="spacer"></span><button class="btn sm primary" data-act="paid-line" data-perm="customers_edit" data-id="${c.id}">📺 ${hasIbo ? 'Edit M3U / IBO' : 'Assign M3U / IBO'}</button></div>
+      <div class="svc-box" style="margin-top:6px">${svcRow('Username', cU || '—', 'u')}${svcRow('Password', cP || '—', 'p')}${cDns ? svcRow('DNS', cDns, 'dns') : ''}${m3u ? svcRow('M3U', m3u, 'm3u') : ''}${iboHtml}<p class="small muted" style="margin:8px 2px 0">Paste the panel M3U once — it fills the four <b>My Details</b> fields on the customer's paid profile. IBO Player: save the Device MAC Address and Device Key here; the customer sees them under My Details on intproto-tv.store/profile.</p></div>
       <h3 style="margin-top:14px">Contact</h3>
       <div class="prof-contacts">${contacts || '<p class="small muted">No contact details on file.</p>'}</div>
       ${c.callNotes ? `<h3 style="margin-top:14px">Call notes</h3><p class="small" style="white-space:pre-wrap">${esc(c.callNotes)}</p>` : ''}
@@ -1344,6 +1354,65 @@ async function renderUser() {
     <div class="ubody" id="ubody"></div>
     <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}<div class="bnav-tail"><button class="bnav-sup" data-act="goto-acc" data-to="acc-plans"><span class="ic">${ic('card')}</span>${t('managePlan')}</button><button class="bnav-sup" data-act="ticket-new"><span class="ic">${ic('chat')}</span>${t('contactSup')}</button></div></nav></div>`;
   renderUserTab();
+}
+
+async function renderProfile() {
+  const u = state.user;
+  if (u.me && u.me.agreed === false) return renderTermsScreen();
+  if (!u.me) {
+    $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); }
+    catch (e) {
+      const msg = String(e.message || '');
+      if (msg.includes('terms_required')) return renderTermsScreen();
+      $('#app').innerHTML = `<div class="block-screen"><div class="ic">📡</div><h2>Can’t reach ${esc(state.config?.branding?.appName || 'INTPROTO-TV')}</h2><p class="muted" style="max-width:320px">${esc(msg || 'Session expired or server unreachable.')}</p><button class="btn primary" onclick="location.reload()">Retry</button><button class="btn ghost" data-act="logout">Sign in again</button></div>`;
+      return;
+    }
+  }
+  const { user, branding: b } = u.me;
+  applyBranding(b);
+  setWaFab(b, t('waMsg', { app: b.appName, u: user.username }));
+  if (user.isTrial) {
+    $('#app').innerHTML = `<div class="block-screen"><div class="ic">🎁</div><h2>Paid accounts only</h2><p class="muted" style="max-width:430px"><b>${esc(b.appName || 'INTPROTO-TV')} /profile</b> is the paid-customer area. Your free trial stays separate — open the app to see your trial line and playlists.</p><div class="row" style="justify-content:center"><a class="btn primary" href="/">Open my trial app</a>${b.supportUrl ? `<a class="btn" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">Get a paid plan</a>` : ''}</div></div>`;
+    return;
+  }
+  $('#app').innerHTML = profilePage();
+}
+
+function profilePage() {
+  const me = state.user.me; const { user, branding: b } = me; const st = me.stream || {};
+  const ibo = st.ibo || null;
+  const dns = String(st.dns || st.server || '').replace(/\/+$/, '');
+  const uname = st.u || '—', pass = st.p || '—';
+  const m3u = String(st.m3u || '').trim() || (dns && st.u && st.p ? dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts' : '—');
+  const days = Math.max(0, Number(user.daysLeft) || 0);
+  const pct = Math.max(0, Math.min(100, (Number(user.daysLeft) || 0) / (Number(user.planDays) || 30) * 100));
+  const row = (label, value, key) => `<li><span class="cred-k">${label}</span><b class="cred-v" id="pf-${key}" dir="ltr" style="word-break:break-all">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="pf-${key}" aria-label="Copy ${label}" title="Copy">⧉</button></li>`;
+  const all = `Username: ${uname}\nPassword: ${pass}\nDNS: ${dns || '—'}\nM3U: ${m3u}${ibo?.mac ? `\nDevice MAC Address: ${ibo.mac}` : ''}${ibo?.key ? `\nDevice Key: ${ibo.key}` : ''}`;
+  const color = user.state === 'expired' ? '#ef4444' : user.state === 'expiring' ? '#f59e0b' : '#22c55e';
+  return `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span><button class="btn sm ghost" data-act="logout" title="${t('logout')}" aria-label="${t('logout')}">⎋</button></div>
+    <div class="ubody" style="max-width:760px;margin:0 auto;padding:14px">
+      <div class="card">
+        <div class="row"><h2 style="margin:0">Subscription balance</h2><span class="spacer"></span>${pill(user.state)}</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
+          <div><div class="muted small">Days left</div><b style="font-size:2.6rem;line-height:1" id="pf-days">${days}</b></div>
+          <div><div class="muted small">Plan</div><b>${esc(user.planName || 'Custom')}</b></div>
+          <div><div class="muted small">Expires</div><b>${fmtDate(user.expiresAt)}</b></div>
+          <div><div class="muted small">Devices</div><b>${esc(user.connections || 1)}</b></div>
+        </div>
+        <div style="height:8px;border-radius:6px;background:var(--line,#e2e8f0);overflow:hidden;margin-top:14px"><i style="display:block;height:100%;width:${pct}%;background:${color}"></i></div>
+        ${user.state === 'expired' ? `<p class="small" style="color:#ef4444;margin:10px 0 0">Your paid subscription has expired. Renew to keep watching.</p>` : user.state === 'expiring' ? `<p class="small" style="color:#b45309;margin:10px 0 0">Your subscription is ending soon.</p>` : ''}
+      </div>
+      <div class="card" id="acc-sources" style="margin-top:14px">
+        <h3 style="margin-top:0">My Details</h3>
+        <div class="svc-box creds"><ul class="cred-list">${row('Username', uname, 'u')}${row('Password', pass, 'p')}${row('DNS', dns || '—', 'dns')}${row('M3U', m3u, 'm3u')}${ibo?.mac ? row('Device MAC Address', ibo.mac, 'mac') : ''}${ibo?.key ? row('Device Key', ibo.key, 'key') : ''}</ul>
+        <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="pf-all">${t('copyAll')}</button></div><div id="pf-all" style="display:none">${esc(all)}</div>
+        ${ibo?.mac || ibo?.key ? `<p class="small muted" style="margin:10px 0 0">📺 IBO Player device registered — enter these details in the IBO Player app to activate your subscription.</p>` : ''}
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px"><a class="btn primary" href="/" style="flex:1">📺 Open my TV app</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener" style="flex:1">💬 ${t('whatsapp')}</a>` : ''}</div>
+      <p class="small muted" style="text-align:center;margin:14px 0 0">Signed in as <b>${esc(user.username)}</b> · <a href="#" data-act="logout">${t('logout')}</a></p>
+    </div></div>`;
 }
 
 function blockedScreen() {
@@ -2771,6 +2840,7 @@ function sourcesCard() {
   const list = getSources(); const act = activeSrc(); const app = me.branding.appName;
   const row = (id, name, tag, canDel) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(name)}</b>${tag ? ` <span class="tagp">${tag}</span>` : ''}</div>${act === id ? `<span class="pill st-active">${t('srcActive')}</span>` : `<button class="btn sm" data-act="src-use" data-id="${esc(id)}">${t('srcUse')}</button>`}${canDel ? `<button class="btn sm ghost" data-act="src-del" data-id="${esc(id)}" aria-label="${t('srcRemove')}">✕</button>` : ''}</div>`;
   const st = me.stream;
+  const ibo = st && st.ibo ? st.ibo : null;
   const src = list.find((x) => x.id === act);
   const m3uOnly = src?.type === 'm3u';
   const dns = m3uOnly ? '' : String(st?.dns || st?.server || '').replace(/\/+$/, '');
@@ -2778,7 +2848,7 @@ function sourcesCard() {
   const p = m3uOnly ? '—' : (st?.p || '—');
   const m3uUrl = m3uOnly ? (src.url || '—') : (String(st?.m3u || '').trim() || (dns && st?.u && st?.p ? dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts' : '—'));
   const credLine = (label, value, key) => `<li><span class="cred-k">${label}</span><b class="cred-v" id="cred-${key}" dir="ltr">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="cred-${key}" aria-label="Copy ${label}" title="Copy">⧉</button></li>`;
-  const allCreds = `Username: ${u}\nPassword: ${p}\nDNS: ${dns || '—'}\nM3U: ${m3uUrl}`;
+  const allCreds = `Username: ${u}\nPassword: ${p}\nDNS: ${dns || '—'}\nM3U: ${m3uUrl}${ibo?.mac ? `\nDevice MAC Address: ${ibo.mac}` : ''}${ibo?.key ? `\nDevice Key: ${ibo.key}` : ''}`;
   const svc = st ? `<div class="svc-box creds">
       ${m3uOnly ? `<p class="small muted" style="margin:0 0 4px">${t('credOwnM3u')}</p>` : ''}
       <ul class="cred-list">
@@ -2786,6 +2856,8 @@ function sourcesCard() {
         ${credLine('Password', p, 'p')}
         ${credLine('DNS', dns || '—', 'dns')}
         ${credLine('M3U', m3uUrl, 'm3u')}
+        ${ibo?.mac ? credLine('Device MAC Address', ibo.mac, 'mac') : ''}
+        ${ibo?.key ? credLine('Device Key', ibo.key, 'key') : ''}
       </ul>
       <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="cred-all">${t('copyAll')}</button></div><div id="cred-all" style="display:none">${esc(allCreds)}</div>
       <details class="setup-steps" open><summary>📲 ${t('setupTitle')}</summary>
@@ -3560,8 +3632,24 @@ const trialDispatchForm = () => `<form data-form="trial-add">
   <p class="small muted">Dispatches Username / Password / DNS / M3U by Email and Telegram, gives you a one-tap WhatsApp message, and saves the same details under the customer’s <b>My Details</b>.</p>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Send free trial</button></div>
 </form>`;
+
+const paidLineForm = (id) => {
+  const c = (state.admin.customers || []).find((x) => x.id === id) || {};
+  const ibo = c.ibo || {};
+  return `<form data-form="paid-line" data-id="${esc(id)}">
+  <p class="small muted" style="margin-top:0">Paid account — save the line once and it appears under <b>My Details</b> on <b>intproto-tv.store/profile</b>. Free trials use the separate Trial queue.</p>
+  ${field('M3U link from your panel', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'data-m3ufill="1" autocapitalize="none" spellcheck="false" dir="ltr"', help: 'Paste it once — Username, Password and DNS fill in automatically. Leave every line field empty to update only the IBO Player device.' })}
+  <div class="grid2">${field('Username', 'username', '', { attrs: 'autocapitalize="none" autocomplete="off" dir="ltr"' })}${field('Password', 'password', '', { type: 'password', attrs: 'autocomplete="off" dir="ltr"' })}</div>
+  ${field('DNS', 'dns', '', { ph: 'http://your-dns.com:8080', attrs: 'inputmode="url" autocapitalize="none" dir="ltr"' })}
+  <h4 style="margin:16px 0 4px">IBO Player activation <span class="small muted">(optional)</span></h4>
+  <div class="grid2">${field('Device MAC Address', 'iboMac', ibo.mac || '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="characters" dir="ltr"' })}${field('Device Key', 'iboKey', ibo.key || '', { attrs: 'autocapitalize="none" spellcheck="false" dir="ltr"' })}</div>
+  ${toggle('Email the updated details to the customer', 'sendEmail', true)}
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Save to paid profile</button></div>
+</form>`;
+};
 Object.assign(actions, {
   'trial-add': () => modal('🎁 Free trial details', trialDispatchForm()),
+  'paid-line': (el) => modal('📺 Paid account — M3U / IBO Player', paidLineForm(el.dataset.id)),
   'tq-f': async (el) => { state.admin.tq.f = el.dataset.f; $('#admin-body').innerHTML = await adminTrialQueue(); },
   'dis-f': async (el) => { state.admin.disUi.f = el.dataset.f; $('#admin-body').innerHTML = await adminDisputes(); },
   'tq-claim': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/trialq/claim', { id: el.dataset.id }); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { toast(tErr(e.message), true); el.disabled = false; } },
@@ -3572,6 +3660,7 @@ Object.assign(actions, {
   'dis-note': (el) => { modal('Add a note', `<form data-form="dis-note" data-id="${esc(el.dataset.id)}">${field('Note', 'note', '', { type: 'textarea', rows: 3, attrs: 'maxlength="1000"', ph: 'Internal note — visible to the team only' })}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Add note</button></div></form>`); },
 });
 Object.assign(forms, {
+  async 'paid-line'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; const id = f.dataset.id; try { const r = await api('POST', `/api/admin/customers/${id}/line`, { m3u: f.m3u.value.trim(), username: f.username.value.trim(), password: f.password.value, dns: f.dns.value.trim(), iboMac: f.iboMac.value.trim(), iboKey: f.iboKey.value.trim(), sendEmail: f.sendEmail ? f.sendEmail.checked : true }); closeModal(); const ibo = r.ibo || {}; const iboRows = `${ibo.mac ? `<li><span class="cred-k">Device MAC Address</span><b class="cred-v" dir="ltr">${esc(ibo.mac)}</b></li>` : ''}${ibo.key ? `<li><span class="cred-k">Device Key</span><b class="cred-v" dir="ltr" style="word-break:break-all">${esc(ibo.key)}</b></li>` : ''}`; const msg = r.iobOnly ? `IBO Player device saved\n\nDevice MAC Address: ${ibo.mac || '—'}\nDevice Key: ${ibo.key || '—'}` : `Your subscription details\n\nUsername: ${r.username}\nPassword: ${r.password}\nDNS: ${r.dns || '—'}\nM3U: ${r.m3u || '—'}${ibo.mac ? `\n\nIBO Player\nDevice MAC Address: ${ibo.mac}\nDevice Key: ${ibo.key || '—'}` : ''}`; const waDigits = String(r.whatsapp || r.phone || '').replace(/\D/g, ''); const tgUser = String(r.telegram || '').replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, ''); const waHref = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}` : ''; const tgHref = tgUser ? `https://t.me/${tgUser}` : ''; modal('Saved to the paid profile ✓', `<div class="notice success"><p style="margin:0 0 8px"><b>${esc(r.name || r.loginUsername || '')}</b> — synced to <b>intproto-tv.store/profile → My Details</b>${r.iobOnly ? ' (IBO Player device only)' : r.emailSent ? ' · email sent ✓' : ' · email not sent'}${r.telegramSent ? ' · Telegram sent ✓' : ''}.</p><ul class="cred-list"><li><span class="cred-k">Username</span><b class="cred-v" dir="ltr">${esc(r.username || '—')}</b></li><li><span class="cred-k">Password</span><b class="cred-v" dir="ltr">${esc(r.password || '—')}</b></li><li><span class="cred-k">DNS</span><b class="cred-v" dir="ltr">${esc(r.dns || '—')}</b></li><li><span class="cred-k">M3U</span><b class="cred-v" dir="ltr" style="word-break:break-all">${esc(r.m3u || '—')}</b></li>${iboRows}</ul></div><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="pl-creds" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 WhatsApp</a>` : ''}${tgHref ? `<a class="btn" style="flex:1" target="_blank" rel="noopener" href="${esc(tgHref)}">✈️ Telegram</a>` : ''}</div><div id="pl-creds" style="display:none">${esc(msg)}</div><button class="btn block" data-act="close-modal" style="margin-top:10px">OK</button>`); try { state.admin.customers = await api('GET', '/api/admin/customers'); } catch {} const body = $('#admin-body'); if (body && state.admin.profileId === id) body.innerHTML = adminCustomerProfile((state.admin.customers || []).find((x) => x.id === id)) || adminCustomers(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'trial-add'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/direct', { customerId: f.customerId.value, username: f.username.value.trim(), password: f.password.value, dns: f.dns.value.trim(), m3u: f.m3u.value.trim(), name: f.fullname ? f.fullname.value.trim() : '', email: f.email ? f.email.value.trim() : '', phone: f.phone ? f.phone.value.trim() : '', telegram: f.telegram ? f.telegram.value.trim() : '', ibo: f.ibo ? f.ibo.value.trim() : '' }); closeModal(); const msg = `Your free trial is ready 🎉\n\nUsername: ${r.username}\nPassword: ${r.password}\nDNS: ${r.dns}\nM3U: ${r.m3u}`; const waDigits = String(r.whatsapp || r.phone || '').replace(/\D/g, ''); const tgUser = String(r.telegram || '').replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, ''); const waHref = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}` : ''; const tgHref = tgUser ? `https://t.me/${tgUser}` : ''; modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 8px"><b>${esc(r.name || r.username)}</b> — saved to <b>My Details</b>${r.emailSent ? ' · email sent ✓' : ' · email not sent'}${r.telegramSent ? ' · Telegram sent ✓' : ''}.</p><ul class="cred-list"><li><span class="cred-k">Username</span><b class="cred-v" dir="ltr">${esc(r.username)}</b></li><li><span class="cred-k">Password</span><b class="cred-v" dir="ltr">${esc(r.password)}</b></li><li><span class="cred-k">DNS</span><b class="cred-v" dir="ltr">${esc(r.dns || '—')}</b></li><li><span class="cred-k">M3U</span><b class="cred-v" dir="ltr" style="word-break:break-all">${esc(r.m3u || '—')}</b></li></ul>${r.telegramSent ? '' : state.config.telegram?.link ? `<p class="small muted" style="margin:6px 0 0">Telegram not linked — send the bot link: <a href="${esc(state.config.telegram.link)}" target="_blank" rel="noopener">${esc(state.config.telegram.link)}</a></p>` : ''}</div><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="tq-creds" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 WhatsApp</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No WhatsApp number">💬 WhatsApp</span>`}${tgHref ? `<a class="btn" style="flex:1" target="_blank" rel="noopener" href="${esc(tgHref)}">✈️ Telegram</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No Telegram username">✈️ Telegram</span>`}</div><div id="tq-creds" style="display:none">${esc(msg)}</div><button class="btn block" data-act="close-modal" style="margin-top:10px">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'tq-send'(f) { const btn = f.querySelector('button[type=submit]'); btn.disabled = true; try { const r = await api('POST', '/api/admin/trialq/send', { id: f.dataset.id, m3u: f.m3u.value.trim() }); closeModal(); const msg = `Your free trial is ready 🎉\n\nUsername: ${r.username}\nPassword: ${r.password}\nDNS: ${r.dns || '—'}\nM3U: ${r.m3u || '—'}`; const waDigits = String(r.whatsapp || r.phone || '').replace(/\D/g, ''); const tgUser = String(r.telegram || '').replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, ''); const waHref = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}` : ''; const tgHref = tgUser ? `https://t.me/${tgUser}` : ''; modal('Trial sent ✓', `<div class="notice success"><p style="margin:0 0 6px"><b>${esc(r.name || '')}</b> got the trial${r.emailSent ? ' email' : ' (email NOT sent — check the address and Resend setup)'}.</p><p class="small muted" style="word-break:break-all">Username: <b>${esc(r.username)}</b>${r.dns ? ` · DNS: ${esc(r.dns)}` : ''}</p>${r.m3u ? `<p class="small muted" style="word-break:break-all">M3U: ${esc(r.m3u)}</p>` : ''}${r.telegramSent ? '<p class="small pos" style="margin:6px 0 0">✈️ Sent on Telegram ✓</p>' : state.config.telegram?.link ? `<p class="small muted" style="margin:6px 0 0">Telegram not linked. Send the bot link: <a href="${esc(state.config.telegram.link)}" target="_blank" rel="noopener">${esc(state.config.telegram.link)}</a></p>` : ''}</div><div class="row" style="margin-top:10px"><button class="btn" data-act="copy-el" data-el="tq-creds" style="flex:1">📋 Copy</button>${waHref ? `<a class="btn wa-btn" style="flex:1" target="_blank" rel="noopener" href="${esc(waHref)}">💬 WhatsApp</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No WhatsApp number on this request">💬 WhatsApp</span>`}${tgHref ? `<a class="btn" style="flex:1" target="_blank" rel="noopener" href="${esc(tgHref)}">✈️ Telegram</a>` : `<span class="btn" style="flex:1;opacity:.45" title="No Telegram ID on this request">✈️ Telegram</span>`}</div><div id="tq-creds" style="display:none">${esc(msg)}</div><button class="btn block" data-act="close-modal" style="margin-top:10px">OK</button>`); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { btn.disabled = false; toast(tErr(e.message), true); } },
   async 'tq-reject'(f) { try { await api('POST', '/api/admin/trialq/reject', { id: f.dataset.id, note: f.note.value }); closeModal(); toast('Rejected'); $('#admin-body').innerHTML = await adminTrialQueue(); } catch (e) { toast(tErr(e.message), true); } },
