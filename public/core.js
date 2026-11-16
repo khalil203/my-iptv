@@ -706,6 +706,19 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       await store.put('settings', s);
       await log('settings', `Stripe settle map applied (${changed} account(s) now settle through Stripe)`);
     }
+    if (!s.stripePayoutV3) {
+      const greenIds = new Set(['grenapp', 'greenapp']), sevenIds = new Set(['waffim', 'avixcloud', 'bussalion', 'zabi']);
+      let touched = 0;
+      s.stripeAccounts = (s.stripeAccounts || []).map((a) => {
+        const id = String(a.id || ''), isGreen = greenIds.has(id) || /grenapp/i.test(String(a.name || ''));
+        if (isGreen) { touched++; return { ...a, name: 'GreenApp Host LLC', payoutDays: 2, balance: 102.52, balanceAt: Date.now(), note: a.note || '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time' }; }
+        if (sevenIds.has(id)) { touched++; return { ...a, payoutDays: 7, balance: 0, balanceAt: Date.now() }; }
+        return a;
+      });
+      s.stripePayoutV3 = true;
+      await store.put('settings', s);
+      await log('settings', `Stripe accounts normalised (${touched}): GreenApp Host LLC naming, balances and payout schedules`);
+    }
     if (!s.pricingV3) {
       const fresh = DEFAULT_SETTINGS();
       const spec = fresh.orderPackages.filter((p) => !/^ibo/.test(p.id));

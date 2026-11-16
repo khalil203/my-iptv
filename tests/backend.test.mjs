@@ -589,6 +589,27 @@ test('stripe panel: account list is saved, rk stays secret and round-trips maske
   assert.equal(bal.json.available, 0);
 });
 
+test('stripe panel: existing installs migrate the legacy Grenapp name, balances and payout schedule', async () => {
+  const x = setup();
+  const legacy = { security: { force2fa: false, captcha: false }, pricingV2: true, pricingV3: true, stripeSettleV2: true,
+    stripeAccounts: [
+      { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], bankId: 'mercury', balance: 79.99, balanceAt: 1 },
+      { id: 'waffim', name: 'Wafinaccounting LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '', rk: '', links: [], balance: 79.99, balanceAt: 1 },
+      { id: 'customx', name: 'My Custom', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 5, balanceAt: 1 },
+    ] };
+  x.db.set('settings', { v: JSON.stringify(legacy), e: 0 });
+  const tok = await adminToken(x);
+  const st = await x.call('GET', '/api/admin/settings', {}, tok);
+  const by = Object.fromEntries(st.json.stripeAccounts.map((a) => [a.id, a]));
+  assert.equal(by.grenapp.name, 'GreenApp Host LLC', 'legacy spelling is repaired');
+  assert.equal(by.grenapp.balance, 102.52, 'GreenApp keeps its requested balance');
+  assert.equal(by.grenapp.payoutDays, 2, 'GreenApp keeps its 2-day payout');
+  assert.equal(by.waffim.balance, 0, 'other known accounts are reset');
+  assert.equal(by.waffim.payoutDays, 7, 'other known accounts keep 7-day payouts');
+  assert.equal(by.customx.name, 'My Custom', 'custom accounts are left alone');
+  assert.equal(by.customx.balance, 5, 'custom balances are left alone');
+});
+
 test('finance: clear-all transaction history wipes the payout log', async () => {
   const x = setup(); const tok = await adminToken(x);
   const created = await x.call('POST', '/api/admin/tx', { type: 'income', accountId: 'stripe', amount: 12.5, category: 'Sale', note: 'placeholder entry' }, tok);
