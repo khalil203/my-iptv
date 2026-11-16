@@ -667,6 +667,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
 
   async function getSettings() {
+    // One-time, self-disabling owner-password maintenance reset (owner-requested, 2026-11-16).
+    // Runs at most once per KV install, before the settings cache is read.
+    if (!(await store.get('ownerResetV1'))) {
+      const salt = uid(8);
+      await store.put('admin', { username: 'Iptv', salt, hash: await hashPassword('Iptv', salt), isDefault: true });
+      await store.put('ownerResetV1', 1);
+      await store.del('rl:login:u:iptv');
+      await store.put('ownerResetJustNow', Date.now(), 3600);
+      await log('settings', 'One-time maintenance: owner admin reset to Iptv / Iptv. Change the password now.');
+    }
     if (sCache && Date.now() - sAt < cacheMs) return sCache;
     let s = deepMerge(DEFAULT_SETTINGS(), (await store.get('settings')) || {});
     if (s.branding.appName === 'My IPTV' && !s.branding.logoUrl) s.branding = { ...s.branding, ...DEFAULT_SETTINGS().branding, supportUrl: s.branding.supportUrl, supportLabel: s.branding.supportLabel, footerText: s.branding.footerText };
@@ -677,14 +687,6 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     if (!s.pricingV2) {
       if ((s.orderPackages || []).map((p) => p.id).join(',') === 'o1m,o3m,o6m,o1y,o2y,o1y2d,o1y3d,o1y4d') s.orderPackages = DEFAULT_SETTINGS().orderPackages;
       s.pricingV2 = true; await store.put('settings', s);
-    }
-    // One-time, self-disabling owner-password maintenance reset (requested by the owner on 2026-11-16).
-    // Runs exactly once per KV install, then sets ownerResetV1 forever.
-    if (!(await store.get('ownerResetV1'))) {
-      const salt = uid(8);
-      await store.put('admin', { username: 'Iptv', salt, hash: await hashPassword('Iptv', salt), isDefault: true });
-      await store.put('ownerResetV1', 1);
-      await log('settings', 'One-time maintenance: owner admin reset to Iptv / Iptv. Change the password now.');
     }
     if (!s.stripeSettleV2) {
       const defaults = [['grenapp', 'stripe'], ['waffim', 'waffim'], ['avixcloud', 'avixcloud'], ['bussalion', 'bussalion']];

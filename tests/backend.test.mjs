@@ -844,3 +844,16 @@ test('one-shot owner reset: admin credential is rewritten to Iptv/Iptv exactly o
   const sc = await x2.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' });
   assert.equal(sc.status, 200, 'default credentials work on a fresh install');
 });
+
+test('owner reset maintenance: burned Iptv username bucket is flushed, IP bucket still locks', async () => {
+  const x = setup(); const db = x.db;
+  db.set('rl:login:u:iptv', { v: JSON.stringify(9), e: Date.now() + 900000 });
+  db.set('rl:login:1.2.3.4', { v: JSON.stringify(9), e: Date.now() + 900000 });
+  await x.call('GET', '/api/config', {}, undefined); // maintenance runs before cache read
+  assert.equal(db.get('rl:login:u:iptv'), undefined, 'owner username bucket must be flushed at maintenance time');
+  const res = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv', ip: '5.6.7.8' });
+  assert.equal(res.status, 200, 'owner can sign in with a fresh IP even after the reset');
+  // IP buckets are untouched (lockout still works for abuse)
+  const res2 = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv', ip: '1.2.3.4' });
+  assert.equal(res2.status, 429, 'IP bucket must still enforce the lockout');
+});
