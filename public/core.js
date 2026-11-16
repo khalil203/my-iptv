@@ -136,7 +136,7 @@ export const DEFAULT_SETTINGS = () => ({
   },
   // Multi-account Stripe control panel (spec §6): status, payout schedule, package links, optional read-only key for live balances.
     stripeAccounts: [
-      { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [], bankId: 'mercury', balance: 102.52, balanceAt: Date.now() },
+      { id: 'grenapp', name: 'GreenApp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '2-day payout · funds to Mercury on Day 3, 20:38 Thailand time', rk: '', links: [], bankId: 'mercury', balance: 102.52, balanceAt: Date.now() },
     { id: 'waffim', name: 'Wafinaccounting LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
     { id: 'avixcloud', name: 'Avixcloud LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
     { id: 'bussalion', name: 'Bussalion LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], balance: 0, balanceAt: Date.now() },
@@ -692,7 +692,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       s.pricingV2 = true; await store.put('settings', s);
     }
     if (!s.stripeSettleV2) {
-      const defaults = [['grenapp', 'stripe'], ['waffim', 'waffim'], ['avixcloud', 'avixcloud'], ['bussalion', 'bussalion']];
+      const defaults = [['greenapp', 'stripe'], ['waffim', 'waffim'], ['avixcloud', 'avixcloud'], ['bussalion', 'bussalion']];
       let changed = 0;
       s.stripeAccounts = (s.stripeAccounts || []).map((a) => {
         if (a.bankId) return a;
@@ -701,7 +701,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (hit) { changed++; return { ...a, bankId: hit[1] }; }
         return a;
       });
-      // also retag the webhook tag if the Grenapp account used to settle to Mercury directly
+      // also retag the webhook tag if the GreenApp account used to settle to Mercury directly
       s.stripeSettleV2 = true;
       await store.put('settings', s);
       await log('settings', `Stripe settle map applied (${changed} account(s) now settle through Stripe)`);

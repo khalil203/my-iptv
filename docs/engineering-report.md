@@ -57,7 +57,7 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 
 ## Addendum — financial batch (2026-11-16, commit 4ee02fc)
 - Sales tracker: /api/admin/sales-by-day (perm profits) aggregates the sales ledger (trials excluded): today/yesterday/month, 30-day per-day series, 12-month series, latest 50 transactions. Admin: new "Sales tracker" tab; overview home now shows Today + This-month tiles linking to it; 30-day and 12-month bar charts; CSV export. Tests: 44/44 pass.
-- Stripe payout projection: every live balance check now returns payoutDays (Grenapp Host LLC = 2, Waffim/Avixcloud/Bussalion = 7, enforced 2|7 in settings) + a Mon–Fri business-day projection of when pending lands; shown per account.
+- Stripe payout projection: every live balance check now returns payoutDays (GreenApp Host LLC = 2, Waffim/Avixcloud/Bussalion = 7, enforced 2|7 in settings) + a Mon–Fri business-day projection of when pending lands; shown per account.
 - Reseller module: customers flagged as resellers get auto RSL ids (RSL-01…, settings resellerSeq). New "Resellers" tab: flag/unflag, purchase history + credits bought, spend USD/MAD, USD per credit rate, rank by credits; Google Sheets Apps Script webhook config + "Sync now" posts the reseller table. Reseller downstream lines are NOT manageable here (they live on the reseller's own TVplus panel) — documented in the UI.
 - Bugs fixed: fresh-install double sales record (lazy history migration counted the just-created sale; deduped in recordSale with a 5s/customer/plan/amount/currency match) — caught by a new test; persistStripeAccountsFromTable silently dropped saves when the admin cleared the account list.
 - Call button on customer rows now copies the phone number instead of dialling.
@@ -75,8 +75,8 @@ Date 2026-11-16 (Asia/Bangkok). Status: never 100% complete; statuses below are 
 - Tests: 44/44 pass (templates preview test updated to en/fr).
 
 ## Addendum — Stripe routing & accounts manager fixes (2026-11-16, commit 65d164b)
-- Routing: new one-time migration stripeSettleV2 assigns settle-to banks by name when unset: Grenapp → 'stripe' (Stripe FIRST, not Mercury), Waffim → 'waffim', Avixcloud → 'avixcloud', Bussalion → 'bussalion'; any existing bankId is respected. All stray sales are kept and revenue is computed off the unified ledger (category "Sale"), so nothing double-counts.
+- Routing: new one-time migration stripeSettleV2 assigns settle-to banks by name when unset: GreenApp → 'stripe' (Stripe FIRST, not Mercury), Waffim → 'waffim', Avixcloud → 'avixcloud', Bussalion → 'bussalion'; any existing bankId is respected. All stray sales are kept and revenue is computed off the unified ledger (category "Sale"), so nothing double-counts.
 - New "⚔ Account performance" card on the Stripe tab: per-account USD revenue (last 30 days + all time, sale counts), side-by-side bars, best-performer badge; backend /api/admin/stripe/revenue (perm profits) + tests.
-- Each live balance refresh remains available (💰 per account) with Stripe's real available/pending; all balances (💰 All) aggregates stored balances; payout timers stay 2 (Grenapp) / 7 (others) with a business-day projection shown next to every balance.
+- Each live balance refresh remains available (💰 per account) with Stripe's real available/pending; all balances (💰 All) aggregates stored balances; payout timers stay 2 (GreenApp) / 7 (others) with a business-day projection shown next to every balance.
 - Link rows compacted: 🔗 label chip (click to open) + host text + terse editable label/url + currency + tier + delete; no more overflowing full URLs. sa-save persists bankId both from Add/Save and the 💰 refresh.
 - Verified locally: migration simulated on a production-shaped KV (all mapped correctly); routes clean, 45/45 tests, SW v59.

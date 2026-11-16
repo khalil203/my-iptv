@@ -51,7 +51,7 @@ the activity log with the actor's name. Anything that must never reach a non-own
 - One dashboard for all Stripe accounts (USD/EUR), add/remove accounts.
 - Map payment links to tiers (Normal, Resellers, IBO Player); status (Active/Verification/Closed)
   and payout schedule (2-day / 7-day).
-- Accounts: Grenapp Host LLC (2-day), Waffim, Avixcloud, Bussalion (7-day).
+- Accounts: GreenApp Host LLC (2-day), Waffim, Avixcloud, Bussalion (7-day).
 - Package link manager per currency (USD/EUR).
 
 ## Phase 6 — IBO Player panel (spec §7)

@@ -562,19 +562,36 @@ test('stripe panel: account list is saved, rk stays secret and round-trips maske
   const st = await x.call('GET', '/api/admin/settings', {}, tok); // seeds the five default accounts
   assert.deepEqual(st.json.stripeAccounts.map((a) => a.id), ['grenapp', 'waffim', 'avixcloud', 'bussalion', 'zabi']);
   assert.ok(st.json.stripeAccounts.every((a) => a.rk === ''), 'no keys yet');
+  const bySa = Object.fromEntries(st.json.stripeAccounts.map((a) => [a.id, a]));
+  assert.equal(bySa.grenapp.name, 'GreenApp Host LLC');
+  assert.equal(bySa.grenapp.balance, 102.52, 'GreenApp Host LLC keeps its balance');
+  assert.equal(bySa.grenapp.payoutDays, 2, 'GreenApp Host LLC keeps its 2-day payout');
+  for (const id of ['waffim', 'avixcloud', 'bussalion', 'zabi']) { assert.equal(bySa[id].balance, 0, id + ' is reset to 0'); assert.equal(bySa[id].payoutDays, 7, id + ' keeps its 7-day payout'); }
 
-  const made = await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: 'Mercury Day 3', rk: 'rk_live_abc', links: [{ id: 'l1', label: '1 Year', url: 'https://buy.stripe.com/abc', currency: 'USD', tier: 'Normal' }] }] }, tok);
+  const made = await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ id: 'grenapp', name: 'GreenApp Host LLC', currency: 'USD', status: 'active', payoutDays: 2, note: 'Mercury Day 3', rk: 'rk_live_abc', links: [{ id: 'l1', label: '1 Year', url: 'https://buy.stripe.com/abc', currency: 'USD', tier: 'Normal' }] }] }, tok);
   assert.equal(made.status, 200, JSON.stringify(made.json));
   // saved, never leaked back
   const st2 = await x.call('GET', '/api/admin/settings', {}, tok);
   const grenapp = st2.json.stripeAccounts[0]; assert.equal(grenapp.rk, '••••');
   assert.equal(grenapp.links[0].label, '1 Year'); assert.equal(grenapp.payoutDays, 2);
   // masked rk survives a save without wiping the stored key
-  await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ ...grenapp, name: 'Grenapp Host LLC2' }] }, tok);
+  await x.call('PUT', '/api/admin/settings', { stripeAccounts: [{ ...grenapp, name: 'GreenApp Host LLC2' }] }, tok);
   const bal = await x.call('GET', '/api/admin/stripe/account/grenapp/balance', {}, tok);
   assert.equal(bal.status, 200);
   assert.equal(bal.json.connected, true, 'the preserved read-only key was used, not wiped by the masked save');
   assert.equal(bal.json.available, 0);
+});
+
+test('finance: clear-all transaction history wipes the payout log', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const created = await x.call('POST', '/api/admin/tx', { type: 'income', accountId: 'stripe', amount: 12.5, category: 'Sale', note: 'placeholder entry' }, tok);
+  assert.equal(created.status, 200, JSON.stringify(created.json));
+  const before = await x.call('GET', '/api/admin/tx', {}, tok);
+  assert.equal(before.json.length, 1, 'one transaction was recorded');
+  const del = await x.call('DELETE', '/api/admin/tx', {}, tok);
+  assert.equal(del.status, 200); assert.equal(del.json.cleared, 1);
+  const after = await x.call('GET', '/api/admin/tx', {}, tok);
+  assert.deepEqual(after.json, [], 'the transaction history starts clean after clearing');
 });
 
 test('IBO panel: add client (uses a credit), lifetime, credits wallet, message build', async () => {
@@ -641,7 +658,7 @@ test('seo/gads/fb trackers: logs entries and rolls up daily spend', async () => 
   const post = await x.call('POST', '/api/admin/seo', { platform: 'Reddit', title: 'Posted about INTPROTO on r/IPTV', result: '12 upvotes' }, tok);
   assert.equal(post.status, 200);
   assert.equal((await x.call('GET', '/api/admin/seo', {}, tok)).json.today, 1);
-  const camp = await x.call('POST', '/api/admin/gads/campaign', { account: 'Grenapp Ads', domain: 'intproto-tv.store', name: 'Search NL', dailyBudget: 10 }, tok);
+  const camp = await x.call('POST', '/api/admin/gads/campaign', { account: 'GreenApp Ads', domain: 'intproto-tv.store', name: 'Search NL', dailyBudget: 10 }, tok);
   assert.equal(camp.status, 200); const cid = camp.json.campaign.id;
   assert.equal((await x.call('POST', '/api/admin/gads/entry', { campaignId: cid, spend: 15.5, clicks: 9, impressions: 300, results: 2 }, tok)).status, 200);
   const g = await x.call('GET', '/api/admin/gads', {}, tok);
