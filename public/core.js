@@ -516,10 +516,10 @@ const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 export function pickPayLink(s, pkg) { // only a link the admin types for one order (no stored Stripe links)
   return pkg?.link ? { url: pkg.link, acc: '' } : null;
 }
-export function orderEmail(s, c, pkg, appUrl, chosen) {
+export function orderEmail(s, c, pkg, appUrl, chosen, curParam) {
   const lang = ml(c); const L = OM[lang]; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const pl = chosen || pickPayLink(s, pkg);
-  const cur = s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR';
+  const cur = curParam || (s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR');
   const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
   const n = Math.max(1, Number(pkg.devices) || 1);
   const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, m) => (m === 'app' ? e(app) : m === 'pkg' ? e(pkg.title) : m === 'price' ? e(price) : m === 'n' ? n : m === 'd' ? pkg.days : e(x[m] ?? '')));
@@ -2505,7 +2505,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
-        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl)); }
+        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = (query.cur && ['EUR','USD','USDT','ALL'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
         if (method === 'POST' && sub === 'order') {
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');

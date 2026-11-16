@@ -642,15 +642,28 @@ const packageOptions = (s) => [
   ...(s.orderPackages || []).map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]),
   ...(s.resellerPackages || []).map((p) => [p.id, `${p.name} — ${Number(p.price) || 0} ${ORDER_CUR[s.resellerCurrency || "EUR"] || ""} ${s.resellerCurrency || "EUR"}`.trim()]),
 ];
-const opRow = (p = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
-  <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
+
+const resolvePkgPayLink = (s, pkgId) => {
+  const pk = (s.orderPackages || []).find((p) => p.id === pkgId) || (s.resellerPackages || []).find((p) => p.id === pkgId);
+  if (!pk) return null;
+  const cur = s.orderCurrency || 'EUR';
+  const choose = (acc) => { const links = acc.links || []; return links.find((l) => l.url && (l.currency === cur || !l.currency)) || links.find((l) => l.url); };
+  const acc = pk.stripeAccount ? (s.stripeAccounts || []).find((a) => a.id === pk.stripeAccount && a.status === 'active') : null;
+  const target = acc || (s.stripeAccounts || []).find((a) => a.status === 'active' && (a.links || []).length > 0);
+  if (!target) return null;
+  const link = choose(target);
+  if (!link) return null;
+  return { url: link.url, acc: target.id, currency: link.currency || cur };
+};
+const opRow = (p = {}, s = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
+  <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><select data-k="stripeAccount" style="width:auto">${((s.stripeAccounts||[]).filter((a)=>a.status==='active')).map((a)=>`<option value="${esc(a.id)}" ${p.stripeAccount===a.id?'selected':''}>${esc(a.name||a.id)}</option>`).join('')}<option value="">— none (use any account)</option></select><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
 function adminOrderSection(s) {
   const op = s.orderPackages || []; const cur = ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR';
   return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
     <p class="small muted">Customers see these packages in their account and tap <b>🛒 Request</b> or WhatsApp. You get an email and a 🛒 mark on the customer (filter <b>🛒 requests</b>). Then you send the package email (💳 on the customer) with <b>your own payment link</b> for that order. Without a link, the email button says "Contact us to order" and opens your WhatsApp.</p>
     <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
     <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages & prices</summary><div style="margin-top:10px">
-      <div id="ops">${op.map(opRow).join('')}</div>
+      <div id="ops">${op.map((p)=>opRow(p,s)).join('')}</div>
       <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${['EUR', 'USD', 'USDT'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
 }
 const waForm = () => { const f = $('[data-form=wa]'); const d = Object.fromEntries(new FormData(f)); return { ...d, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }; };
@@ -1652,7 +1665,7 @@ const actions = {
   'add-op': () => $('#ops').insertAdjacentHTML('beforeend', opRow()),
   'del-op': (el) => el.closest('.op-row').remove(),
   'save-op': async () => {
-    const orderPackages = [...document.querySelectorAll('#ops .op-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.op || undefined, title: g('title'), days: Number(g('days')), devices: Number(g('devices')), price: Number(g('price')), badge: g('badge'), link: g('link') }; }).filter((p) => p.title);
+    const orderPackages = [...document.querySelectorAll('#ops .op-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.op || undefined, title: g('title'), days: Number(g('days')), devices: Number(g('devices')), price: Number(g('price')), badge: g('badge'), link: g('link'), stripeAccount: g('stripeAccount') || undefined }; }).filter((p) => p.title);
     await saveSettings({ orderPackages, orderCurrency: $('#op-cur').value }); renderAdmin();
   },
 
@@ -1673,8 +1686,8 @@ const actions = {
       <div class="row"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
       ${c.buyRequest ? `<p class="small">🛒 Requested <b>${esc(c.buyRequest.title || '')}</b> on ${fmtDT(c.buyRequest.at)}${c.buyRequest.answeredAt ? ' · answered' : ''}</p>` : ''}
       ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}${c.orderSentLink ? ' · link: ' + esc(c.orderSentLink) : ''}</p>` : ''}`, { wide: true });
-    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&link=${encodeURIComponent($('#op-link').value.trim())}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
-    $('#op-pick').addEventListener('change', load); $('#op-link').addEventListener('change', load); load();
+    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const r = resolvePkgPayLink(s, $('#op-pick').value); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&link=${encodeURIComponent($('#op-link').value.trim())}&cur=${encodeURIComponent((r&&r.currency)||s.orderCurrency)}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
+    const fillOpLink = () => { if ($('#op-link').value.trim()) return; const r = resolvePkgPayLink(s, $('#op-pick').value); if (r) $('#op-link').value = r.url; }; $('#op-pick').addEventListener('change', () => { fillOpLink(); load(); }); $('#op-link').addEventListener('change', load); fillOpLink(); load();
   },
   'order-send': async (el) => {
     el.disabled = true;
@@ -1698,7 +1711,9 @@ const actions = {
       <p class="small muted" id="wa-info"></p></form>`, { wide: true });
     const f = $('[data-form=wa]', body); f.dataset.id = c.id;
     const show = () => { $('#wa-pkg').style.display = f.type.value === 'login' ? 'none' : ''; };
-    ['type', 'lang', 'pkg', 'title', 'price', 'currency', 'days', 'devices', 'link'].forEach((k) => f[k].addEventListener('change', () => { show(); waLoad(); }));
+    ['type', 'lang', 'title', 'price', 'currency', 'days', 'devices', 'link'].forEach((k) => f[k].addEventListener('change', () => { show(); waLoad(); }));
+    const fillWaLink = () => { if (f.link.value.trim()) return; const r = resolvePkgPayLink(s, f.pkg.value); if (r) { f.link.value = r.url; f.currency.value = r.currency; } };
+    f.pkg.addEventListener('change', () => { fillWaLink(); show(); waLoad(); });
     show(); waLoad();
   },
   'wa-refresh': () => waLoad(),
@@ -1782,7 +1797,7 @@ const actions = {
       <div class="row"><button type="button" class="btn" data-act="oc-preview">👁 Preview</button><span class="spacer"></span><button type="button" class="btn primary" data-act="oc-send">📨 Send email</button></div>
       <p class="small muted" id="oc-subj"></p><iframe id="oc-pv" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none"></iframe></form>`, { wide: true });
     const f = $('[data-form=order-custom]', body);
-    f.pkg.addEventListener('change', () => { const p = s.orderPackages.find((x) => x.id === f.pkg.value) || {}; f.title.placeholder = p.title || ''; f.price.placeholder = p.price ?? ''; f.days.placeholder = p.days ?? ''; f.devices.placeholder = p.devices ?? ''; });
+    f.pkg.addEventListener('change', () => { const p = s.orderPackages.find((x) => x.id === f.pkg.value) || {}; f.title.placeholder = p.title || ''; f.price.placeholder = p.price ?? ''; f.days.placeholder = p.days ?? ''; f.devices.placeholder = p.devices ?? ''; if (!f.link.value.trim()) { const r = resolvePkgPayLink(s, f.pkg.value); if (r) f.link.value = r.url; } });
   },
   'oc-preview': async () => {
     const f = $('[data-form=order-custom]'); const d = Object.fromEntries(new FormData(f));
@@ -3043,9 +3058,11 @@ function adminStripePage(s) {
   const byTier = (t) => links.filter((l) => l.tier === t).length;
   const active = list.filter((a) => a.status === 'active').length;
   const two = list.filter((a) => Number(a.payoutDays) === 2).length;
+  let totUsd=0, totEur=0, n=0;
+  (list||[]).forEach((a)=>{ const b=Number(a.balance||0); if(!b) return; if(a.currency==='EUR')totEur+=b; else totUsd+=b; n++; });
   return `<p class="small muted">All your Stripe accounts in one place. Track <b>status</b> (Active / Verification / Closed), the <b>payout schedule</b> and your <b>package payment links</b> in USD and EUR. Links you add here are what you can put in package emails and IBO activations — deleting a link here does not remove it from Stripe.</p>
     <div class="chips" style="margin-bottom:12px"><a class="on">${list.length} account${list.length === 1 ? '' : 's'} · ${active} active</a><a class="on">${two} with 2-day payout · ${list.length - two} with 7-day payout</a><a class="on">${links.length} link${links.length === 1 ? '' : 's'} — Normal ${byTier('Normal')} · Resellers ${byTier('Resellers')} · IBO ${byTier('IBO')}</a></div>
-    <div id="sa-all-bal" class="small muted" style="margin-bottom:10px"></div>
+    <div id="sa-all-bal" class="small muted" style="margin-bottom:10px">${n ? `Stored balance across ${n} account${n===1?'':'s'}: $${totUsd.toFixed(2)} · €${totEur.toFixed(2)}` : `No stored balances yet — tap 💰 per account or press “💰 All balances (total)” to fetch live.`}</div>
     <div id="sa-list">${list.map(saRow).join('')}</div>
     <div class="row" style="margin-top:6px"><button class="btn" data-act="sa-add">＋ Add account</button><button class="btn" data-act="sa-balance-all">💰 All balances (total)</button><span class="spacer"></span><button class="btn primary" data-act="sa-save">💾 Save accounts</button></div>`;
 }
