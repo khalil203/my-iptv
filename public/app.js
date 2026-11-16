@@ -462,7 +462,7 @@ async function renderAdmin() {
     }
     const body = $('#admin-body');
     if (t === 'overview') body.innerHTML = await adminOverview();
-    else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = adminCustomers(); }
+    else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
     else if (t === 'stripe') body.innerHTML = adminStripePage(s);
@@ -579,6 +579,59 @@ async function adminResellerPage() {
     <div class="row" style="margin-top:10px"><button class="btn" data-act="sheets-save">💾 Save</button><button class="btn primary" data-act="sheets-sync">↻ Sync now</button></div></div>`;
 }
 
+function adminCustomerProfile(c) {
+  if (!c) return null;
+  const s = state.admin.settings;
+  const tier = spendTier(c.totalPaidUsd);
+  const renewals = (c.renewals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
+  const mC = {};
+  for (const r of renewals) { const d = new Date(r.at); const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); mC[k] = (mC[k] || 0) + 1; }
+  const months = Object.entries(mC).sort((a, b) => a[0] < b[0] ? -1 : 1).slice(-12);
+  const maxM = Math.max(1, ...months.map(([, n]) => n));
+  const pName = (r) => (s.plans || []).find((p) => p.id === r.planId)?.name || (r.planId === 'trial' ? 'Trial' : r.planId === 'custom' ? 'Custom' : r.planId);
+  const row = (r) => `<tr><td class="small">${fmtDT(r.at)}</td><td>${esc(pName(r))}</td><td class="small muted">${esc(r.type || 'renew')}</td><td>${Number(r.price || 0).toFixed(2)}</td><td>${r.credits ?? ''}</td></tr>`;
+  const contacts = [
+    c.email ? `<div class="ilist"><span class="svc-l">Email</span><b dir="ltr" style="word-break:break-all;font-size:.9rem">${esc(c.email)}${c.emailVerified ? ' <span class="pill st-active" style="font-size:.68rem">✓ verified</span>' : ''}</b><button class="btn sm ghost svc-c" data-act="copy-text" data-text="${esc(c.email)}" aria-label="Copy email">⧉</button></div>` : '',
+    c.phone ? `<div class="ilist"><span class="svc-l">Phone</span><b dir="ltr">${esc(c.phone)}</b><button class="btn sm ghost svc-c" data-act="copy-text" data-text="${esc(c.phone)}" aria-label="Copy phone">⧉</button></div>` : '',
+    c.whatsapp && c.whatsapp !== c.phone ? `<div class="ilist"><span class="svc-l">WhatsApp</span><b dir="ltr">${esc(c.whatsapp)}</b><button class="btn sm ghost svc-c" data-act="copy-text" data-text="${esc(c.whatsapp)}" aria-label="Copy WhatsApp">⧉</button></div>` : '',
+    c.telegram ? `<div class="ilist"><span class="svc-l">Telegram</span><b dir="ltr">@${esc(String(c.telegram).replace(/^@/, ''))}</b><button class="btn sm ghost svc-c" data-act="copy-text" data-text="${esc(String(c.telegram).replace(/^@/, ''))}" aria-label="Copy Telegram">⧉</button></div>` : '',
+    c.macAddress ? `<div class="ilist"><span class="svc-l">MAC</span><b dir="ltr">${esc(c.macAddress)}</b><button class="btn sm ghost svc-c" data-act="copy-text" data-text="${esc(c.macAddress)}" aria-label="Copy MAC">⧉</button></div>` : '',
+    c.deviceApp ? `<div class="ilist"><span class="svc-l">Device</span><b>${esc(c.deviceApp)}</b></div>` : '',
+    c.country ? `<div class="ilist"><span class="svc-l">Country</span><b>${countryFlag(c.country)} ${esc(c.country)}</b></div>` : '',
+    c.paymentMethod ? `<div class="ilist"><span class="svc-l">Payment</span><b>${esc(c.paymentMethod)}</b></div>` : '',
+    c.rslId ? `<div class="ilist"><span class="svc-l">Reseller</span><b>${esc(c.rslId)}</b></div>` : '',
+  ].filter(Boolean).join('');
+  const st = c.stream || {};
+  const m3u = st.dns && st.u ? (st.dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts') : '';
+  const svcRow = (label, value, key) => `<div class="svc-row"><span class="svc-l">${esc(label)}</span><b class="svc-v" dir="ltr">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="cp-${key}" aria-label="Copy ${esc(label)}">⧉</button><div id="cp-${key}" style="display:none">${esc(value)}</div></div>`;
+  return `<div class="prof">
+  <button class="btn ghost" data-act="back-list" style="margin-bottom:12px">← Back to customers</button>
+  <div class="prof-grid">
+    <div class="card prof-side">
+      <div class="prof-id"><div class="avatar xl">${esc(initials(c.name))}</div><div><h2 style="margin:0">${esc(c.name)}</h2><div class="muted">${esc(c.username)}${c.orderNo ? ' · #' + esc(c.orderNo) : ''}</div><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${pill(c.state)}${tier[0] !== 'Regular' ? `<span class="pill ${tier[1]}">${tier[0]}</span>` : ''}${c.isReseller ? `<span class="pill st-expiring">${esc(c.rslId || 'RSL')}</span>` : ''}${c.statusFlag === 'dispute' ? '<span class="pill st-expired">dispute</span>' : c.statusFlag === 'excellent' ? '<span class="pill st-active">excellent</span>' : ''}${c.isTrial ? '<span class="pill st-expiring">trial</span>' : ''}</div></div></div>
+      <div class="prof-sub"><div><span class="dp-l">Plan</span><b>${esc(c.planName)}</b></div><div><span class="dp-l">Devices</span><b>${esc(c.connections)}</b></div><div><span class="dp-l">Started</span><b>${c.startAt ? fmtDate(c.startAt) : '—'}</b></div><div><span class="dp-l">Expires</span><b>${c.expiresAt ? fmtDate(c.expiresAt) : '—'}</b></div></div>
+      <div style="margin-top:10px">${progress(c)}<div class="small muted" style="margin-top:6px">${c.state === 'expired' ? Math.abs(c.daysLeft) + ' days expired' + (c.lastLogin ? ' · last login ' + fmtDT(c.lastLogin) : '') : c.daysLeft + ' days left'}</div></div>
+      <h3 style="margin-top:14px">Connection details</h3>
+      <div class="svc-box" style="margin-top:6px">${svcRow('Username', st.u || c.lineUsername || '—', 'u')}${svcRow('Password', st.p || c.linePassword || '—', 'p')}${st.dns ? svcRow('DNS', st.dns, 'dns') : ''}${m3u ? svcRow('M3U', m3u, 'm3u') : ''}<p class="small muted" style="margin:8px 2px 0">IBO Player / TVPlus: enter the DNS and your username/password in the app, then pick your device bundle (1–4 devices).</p></div>
+      <h3 style="margin-top:14px">Contact</h3>
+      <div class="prof-contacts">${contacts || '<p class="small muted">No contact details on file.</p>'}</div>
+      ${c.callNotes ? `<h3 style="margin-top:14px">Call notes</h3><p class="small" style="white-space:pre-wrap">${esc(c.callNotes)}</p>` : ''}
+      ${c.note ? `<h3 style="margin-top:14px">Internal notes</h3><p class="small" style="white-space:pre-wrap">${esc(c.note)}</p>` : ''}
+    </div>
+    <div class="prof-main">
+      <div class="stats">
+        <div class="stat c-acc"><i class="st-ic">${ic('card', 20)}</i><span>All-time paid</span><b>$${Number(c.totalPaidUsd || 0).toFixed(2)}</b><span>${renewals.length} renewal${renewals.length === 1 ? '' : 's'}</span></div>
+        <div class="stat"><i class="st-ic">${ic('clock', 20)}</i><span>Days subscribed</span><b>${Math.max(0, Math.round(((c.expiresAt || 0) - (c.startAt || 0)) / 86400000))}</b><span>lifetime</span></div>
+        <div class="stat"><i class="st-ic">${ic('crown', 20)}</i><span>Paid renewals</span><b>${renewals.filter((r) => (r.price || 0) > 0).length}</b><span>${tier[0]}</span></div>
+        <div class="stat"><i class="st-ic">${ic('tv', 20)}</i><span>Credits used</span><b>${renewals.reduce((a, r) => a + (Number(r.credits) || 0), 0)}</b><span>all time</span></div>
+      </div>
+      ${months.length ? `<div class="card"><h3>Renewals per month</h3><div class="bars">${months.map(([k, n]) => `<div><span>${n}</span><i style="height:${(n / maxM) * 100}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>` : ''}
+      <div class="card"><div class="row"><h3 style="margin:0">Purchase history <span class="small muted">(${renewals.length})</span></h3><span class="spacer"></span></div><div class="row" style="margin:8px 0 0;flex-wrap:wrap">${custActions(c)}</div>${renewals.length ? `<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Date</th><th>Plan</th><th>Type</th><th>Amount</th><th>Credits</th></tr></thead><tbody>${renewals.map(row).join('')}</tbody></table></div>` : '<p class="muted">No purchases yet.</p>'}</div>
+    </div>
+  </div>
+  </div>`;
+}
+
 function filteredCustomers() {
   const { filter, q } = state.admin;
   const qq = q.trim().toLowerCase();
@@ -615,21 +668,12 @@ function customerListHtml() {
   const list = all.slice(0, lim);
   const more = all.length > lim ? `<div style="text-align:center;margin:14px"><button class="btn" data-act="cust-more">Show more (${all.length - lim} left)</button></div>` : '';
   const narrow = matchMedia('(max-width: 760px)').matches;
-  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
+  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
       <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
     ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
-}
-function oldCustomerListHtml() {
-  const list = filteredCustomers();
-  return `<div class="tbl-wrap cust-table"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
-      <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
-    </tbody></table></div>
-    <div class="cust-cards">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
-      <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>`;
 }
 function adminCustomers() {
   const a = state.admin;
@@ -3099,6 +3143,8 @@ async function persistStripeAccountsFromTable(silent) {
 Object.assign(actions, {
   'copy-el': async (el) => { const txt = document.getElementById(el.dataset.el)?.textContent || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
   'copy-text': async (el) => { const txt = el.dataset.text || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
+  'view-customer': async (el) => { state.admin.profileId = el.dataset.id; const body = $('#admin-body'); if (body) body.innerHTML = adminCustomerProfile((state.admin.customers || []).find((x) => x.id === el.dataset.id)) || adminCustomers(); },
+  'back-list': () => { state.admin.profileId = ''; renderAdmin(); },
   'pool-del': async (el) => { await api('POST', '/api/admin/trialpool/remove', { u: el.dataset.u }); renderAdmin(); },
   'pool-clear': async () => { if (!confirm('Remove every ready trial line?')) return; await api('POST', '/api/admin/trialpool/remove', { all: true }); renderAdmin(); },
   'pool-export': async () => { const d = await api('GET', '/api/admin/trialpool'); download(`trial-lines-${isoDay(Date.now())}.csv`, toCsv(['Username', 'Server'], d.lines.map((x) => [x.u, x.dns])), 'text/csv'); },

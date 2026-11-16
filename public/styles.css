@@ -1040,3 +1040,20 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 .svc-c { border-radius: 8px; flex: 0 0 auto; }
 .guide-ol { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.55; }
 @media (max-width: 899px) { .bnav-tail { display: none; } }
+
+/* ===== customer profile page ===== */
+.prof-grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .prof-grid { grid-template-columns: 1fr; } }
+.prof-id { display: flex; gap: 16px; align-items: center; }
+.avatar.xl { width: 84px; height: 84px; font-size: 30px; border-radius: 22px; }
+.prof-sub { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; padding: 12px 0; border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); }
+.prof-sub > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.prof-sub b { font-size: .92rem; }
+.prof-contacts { display: flex; flex-direction: column; gap: 2px; }
+.ilist { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 10px; }
+.ilist:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.ilist .svc-l { flex: 0 0 74px; }
+.ilist b { flex: 1; min-width: 0; }
+.name-link { background: none; border: 0; color: var(--text); font: inherit; font-weight: 800; padding: 0; cursor: pointer; text-align: start; }
+.name-link:hover { color: var(--primary); text-decoration: underline; }
+@media (max-width: 1100px) { .prof-sub { grid-template-columns: repeat(2, 1fr); } }
