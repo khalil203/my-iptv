@@ -800,11 +800,11 @@ async function adminResellerSection(s) {
     <details><summary class="small muted" style="cursor:pointer">Edit packages</summary><div style="margin-top:10px">
       <div class="rp-row small muted"><span>Name</span><span>Credits</span><span>Price</span><span></span></div>
       <div id="rps">${rp.map(row).join('')}</div>
-      <div class="row"><button class="btn sm" data-act="add-rp">＋ Add package</button><select id="rp-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-rp">Save packages</button></div></div></details>
+      <div class="row"><button class="btn sm" data-act="add-rp">＋ Add package</button><select id="rp-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD', 'THB'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-rp">Save packages</button></div></div></details>
     ${sales.length ? `<h3 style="margin-top:16px">Reseller sales</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Reseller</th><th>Package</th><th>Paid</th><th>Profit</th></tr></thead><tbody>${sales.slice(0, 50).map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.name)}</b><div class="small muted">${esc([x.email, x.phone].filter(Boolean).join(' · '))}</div></td><td>${esc(x.planName)}</td><td>${num(x.amount, x.currency)}</td><td class="${x.amountUsd - x.costUsd < 0 ? 'neg' : 'pos'}">${usd(x.amountUsd - x.costUsd)}</td></tr>`).join('')}</tbody></table></div>` : ''}
   </div>`;
 }
-const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮' };
+const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'DH ', THB: '฿' };
 const orderPrice = (s, p) => (s.orderCurrency === 'ALL' ? Number(p.price).toFixed(2) + ' €/$' : (ORDER_CUR[s.orderCurrency || 'EUR'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[s.orderCurrency || 'EUR'] ? '' : ' ' + s.orderCurrency));
 const packageOptions = (s) => [
   ...(s.orderPackages || []).map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]),
@@ -826,13 +826,13 @@ const resolvePkgPayLink = (s, pkgId) => {
 const opRow = (p = {}, s = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
   <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><select data-k="stripeAccount" style="width:auto">${((s.stripeAccounts||[]).filter((a)=>a.status==='active')).map((a)=>`<option value="${esc(a.id)}" ${p.stripeAccount===a.id?'selected':''}>${esc(a.name||a.id)}</option>`).join('')}<option value="">— none (use any account)</option></select><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
 function adminOrderSection(s) {
-  const op = s.orderPackages || []; const cur = ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR';
+  const op = s.orderPackages || []; const cur = ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR';
   return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
     <p class="small muted">Customers see these packages in their account and tap <b>🛒 Request</b> or WhatsApp. You get an email and a 🛒 mark on the customer (filter <b>🛒 requests</b>). Then you send the package email (💳 on the customer) with <b>your own payment link</b> for that order. Without a link, the email button says "Contact us to order" and opens your WhatsApp.</p>
     <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
     <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages & prices</summary><div style="margin-top:10px">
       <div id="ops">${op.map((p)=>opRow(p,s)).join('')}</div>
-      <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${['EUR', 'USD', 'USDT'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
+      <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD', 'THB'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
 }
 const waForm = () => { const f = $('[data-form=wa]'); const d = Object.fromEntries(new FormData(f)); return { ...d, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }; };
 async function waLoad() {
@@ -872,7 +872,7 @@ function adminPlans(s) {
     <div class="plan-row small muted" style="margin-bottom:4px"><span>Name</span><span>Days</span><span>Price (${esc(s.currency)})</span><span>Credits</span><span>Devices</span><span>Package ID</span><span></span></div>
     <div id="plans">${s.plans.map(row).join('')}</div>
     <button class="btn sm" data-act="add-plan">＋ Add plan</button>
-    <div class="grid2" style="margin-top:16px">${field('Price currency', 'currency', s.currency, { type: 'select', options: [['EUR', '€ Euro (EUR)'], ['USD', '$ US Dollar (USD)'], ['USDT', '₮ Tether (USDT)'], ['MAD', 'Moroccan Dirham (MAD)']], attrs: 'id="currency"', help: 'Profits are converted to USD and MAD automatically.' })}</div>
+    <div class="grid2" style="margin-top:16px">${field('Price currency', 'currency', s.currency, { type: 'select', options: [['EUR', '€ Euro (EUR)'], ['USD', '$ US Dollar (USD)'], ['USDT', '₮ Tether (USDT)'], ['MAD', 'Moroccan Dirham (MAD)'], ['THB', '฿ Thai Baht (THB)']], attrs: 'id="currency"', help: 'Profits are converted to USD and MAD automatically.' })}</div>
     <button class="btn primary" data-act="save-plans">Save plans</button></div>`;
 }
 
@@ -1495,7 +1495,7 @@ async function xtFetch(action, params = {}) {
   }
   return (c[key] = await api('GET', '/api/xtream?' + q));
 }
-const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
+const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ', THB: 'THB ' };
 const priceTxt = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
 const WA_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" fill="#fff" aria-hidden="true"><path d="M16 3C9 3 3.3 8.6 3.3 15.6c0 2.5.7 4.8 1.9 6.8L3 29l6.8-2.2c1.9 1 4 1.6 6.2 1.6 7 0 12.7-5.7 12.7-12.7S23 3 16 3zm0 23.1c-2 0-3.9-.6-5.6-1.6l-.4-.2-4 1.3 1.3-3.9-.3-.4c-1.1-1.7-1.7-3.7-1.7-5.7C5.3 9.8 10.1 5 16 5s10.7 4.8 10.7 10.7S21.9 26.1 16 26.1zm5.9-8c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1c-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.2s0-.5.1-.6l.5-.6c.2-.2.2-.4.3-.6s0-.4 0-.6l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4s-1.2 1.1-1.2 2.7 1.2 3.2 1.4 3.4 2.4 3.6 5.7 5c.8.3 1.4.5 1.9.7.8.3 1.5.2 2.1.1.6-.1 1.9-.8 2.2-1.5s.3-1.4.2-1.5-.3-.2-.6-.4z"/></svg>';
 const waNum = (b) => String(b?.whatsapp || (/wa\.me\/(\d+)/.exec(b?.supportUrl || '') || [])[1] || '').replace(/\D/g, '');
@@ -1872,7 +1872,7 @@ const actions = {
       <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français']] })}${field('WhatsApp number', 'phone', String(c.whatsapp || c.phone || '').replace(/\D/g, ''), { type: 'tel', ph: '212612345678' })}</div>
       <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
-        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
+        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}</div>
       </details></div>
       <label class="field"><span>Message (you can edit it)</span><textarea id="wa-text" rows="12" dir="auto"></textarea></label>
@@ -1958,7 +1958,7 @@ const actions = {
       <div class="grid2">${field('Email address', 'to', '', { type: 'email', attrs: 'required autocapitalize="none"', ph: 'customer@gmail.com' })}${field('Customer name', 'name', '', { ph: 'Leave empty for "Dear Valued Customer"' })}</div>
       <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français']] })}${field('Package', 'pkg', p0.id, { type: 'select', options: packageOptions(s) })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">Change the details (optional)</summary>
-        <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT']] })}</div>
+        <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"', ph: String(p0.days ?? '') })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"', ph: String(p0.devices ?? '') })}${field('Top badge', 'badge', '', { ph: 'e.g. 🎁 Special offer' })}</div>
         ${field('Pay link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your payment link for this order', help: 'Empty = the button says "Contact us to order" and opens your WhatsApp.' })}
         ${field('Email subject', 'subject', '', { ph: 'Empty = automatic' })}

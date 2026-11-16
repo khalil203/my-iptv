@@ -1451,7 +1451,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({
             user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
-            orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
+            orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             buyRequest: c.buyRequest || null,
             orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
@@ -2514,7 +2514,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
-        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = (query.cur && ['EUR','USD','USDT','ALL'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
+        if (method === 'GET' && sub === 'orderpreview') { const pk = s.orderPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk) return err(400, 'No packages'); const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = (query.cur && ['EUR','USD','USDT','ALL','MAD','THB'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
         if (method === 'POST' && sub === 'order') {
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
@@ -2530,7 +2530,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
           const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
-          const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
+          const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL', 'MAD', 'THB'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
           const pl = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
           const cur = st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
           const price = (CUR_SIGN[cur] || '') + Number(pk.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
@@ -2850,7 +2850,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
         const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
         const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)), badge: body.badge != null ? String(body.badge) : base.badge };
-        const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
+        const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL', 'MAD', 'THB'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
         const fixed = /^https:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
         const who = { name: String(body.name || '').trim(), lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en', note: String(body.note || '').trim().slice(0, 2000) };
         const m = orderEmail(st, who, pk, body.appUrl, fixed || undefined);
