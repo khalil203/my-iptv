@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=80';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=80';
-import { siteHtml } from './site.js?v=80';
-import { ic } from './icons.js?v=80';
-import { parseM3U, m3uAnswer } from './m3u.js?v=80';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=80';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=81';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=81';
+import { siteHtml } from './site.js?v=81';
+import { ic } from './icons.js?v=81';
+import { parseM3U, m3uAnswer } from './m3u.js?v=81';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=81';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -604,10 +604,10 @@ function rsRowsHtml() {
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Reseller</th><th>Contact</th><th>Orders</th><th>Credits</th><th>Paid</th><th>Since</th><th>Last order</th><th></th></tr></thead><tbody>${list.map((x) => `<tr data-act="rs-open" data-id="${x.id}" style="cursor:pointer">
     <td><b>${esc(x.rslId)}</b>${x.status === 'paused' ? '<div><span class="pill st-expired">paused</span></div>' : ''}</td>
     <td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc([x.org, x.server, x.tag].filter(Boolean).join(' · '))}</div></td>
-    <td class="small">${esc(x.email || '—')}${x.phone ? '<br>' + esc(x.phone) : ''}</td>
+    <td class="small">${esc(x.email || '—')}${x.phone ? '<br>' + esc(x.phone) : ''}<div style="margin-top:4px">${sentChips(x, 'rs-mark')}</div></td>
     <td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b>${x.rate ? `<div class="small muted">${usd(x.rate)}/credit</div>` : ''}</td>
     <td class="small">${fmtDate(x.joinedAt)}</td><td class="small">${fmtDate(x.lastAt)}</td>
-    <td style="white-space:nowrap"><button class="btn sm" data-act="rs-email" data-id="${x.id}" title="Send an email">✉️</button> <button class="btn sm" data-act="rs-open" data-id="${x.id}" title="Edit everything">✎ Edit</button> <button class="btn sm danger" data-act="rs-del" data-id="${x.id}" title="Delete this reseller">🗑</button></td></tr>`).join('')}</tbody></table></div>`;
+    <td style="white-space:nowrap">${waBtn('rs-msg', x.id, (x.contact || {}).noWhatsapp || !x.phone ? 'disabled data-ch="wa"' : 'data-ch="wa"', (x.contact || {}).noWhatsapp ? 'Has no WhatsApp' : 'WhatsApp')} ${tgBtn('rs-msg', x.id, (x.contact || {}).noTelegram ? 'disabled data-ch="tg"' : 'data-ch="tg"', (x.contact || {}).noTelegram ? 'Has no Telegram' : 'Telegram')} ${x.email ? `<button class="btn sm" data-act="rs-email" data-id="${x.id}" title="Send an email">✉️</button>` : ''} ${x.phone && !/•/.test(x.phone) ? `<button class="btn sm" data-act="copy-text" data-text="${esc(x.phone)}" title="Copy phone number">📞</button>` : ''} <button class="btn sm" data-act="rs-copy" data-id="${x.id}" title="Copy details">📋</button> <button class="btn sm" data-act="rs-open" data-id="${x.id}" title="Edit everything">✎ Edit</button> <button class="btn sm danger" data-act="rs-del" data-id="${x.id}" title="Delete this reseller">🗑</button></td></tr>`).join('')}</tbody></table></div>`;
 }
 async function adminResellerPage() {
   const r = await api('GET', '/api/admin/reseller'); RS.data = r;
@@ -630,6 +630,8 @@ const rsProfileForm = (x = {}) => `<form data-form="rs-profile" onsubmit="return
   <div class="grid2">${field('Email', 'email', x.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}${field('More emails', 'emails', (x.emails || []).slice(1).join(', '), { ph: 'separate with a comma', attrs: 'autocapitalize="none"' })}</div>
   <div class="grid2">${field('Phone / WhatsApp', 'phone', x.phone || '', { type: 'tel', ph: '+66812345678' })}${field('Reseller since (date)', 'joined', rsDay(x.joinedAt), { type: 'date' })}</div>
   <div class="grid3">${field('Organization', 'org', x.org || '')}${field('Server', 'server', x.server || '', { ph: 'MEGA, DINO…' })}${field('Panel tag', 'tag', x.tag || '')}</div>
+  <div class="grid2">${field('Telegram username', 'telegram', x.telegram || '', { ph: 'without @', attrs: 'autocapitalize="none"' })}${field('Panel URL (for the email)', 'panelUrl', x.panelUrl || '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}</div>
+  <div class="grid2">${field('Panel username', 'panelUser', x.panelUser || '', { attrs: 'autocapitalize="none" autocomplete="off"' })}${field('Panel password', 'panelPass', x.panelPass || '', { attrs: 'autocapitalize="none" autocomplete="off"' })}</div>
   <div class="grid2">${field('Status', 'status', x.status || 'active', { type: 'select', options: [['active', 'Active'], ['paused', 'Paused']] })}${field('Note', 'note', x.note || '')}</div>
   <div class="row"><button type="button" class="btn primary" data-act="rs-save">💾 Save</button>${x.id ? `<span class="spacer"></span><button type="button" class="btn danger" data-act="rs-del" data-id="${x.id}">Delete reseller</button>` : ''}</div></form>`;
 function rsOpen(id) {
@@ -662,7 +664,7 @@ function rsEmailForm(id) {
     <p class="small">${x ? `To: <b>${esc(x.name)}</b> &lt;${esc(x.email || 'no email')}&gt;` : `To: <b>all active resellers with an email</b> (${n})`}</p>
     ${field('Subject', 'subject', tp.subject || '', { ph: 'e.g. New credit prices for {rsl}' })}${field('Title in the email (optional)', 'title', tp.title || '')}
     ${field('Message', 'body', tp.body || '', { type: 'textarea', rows: 8, ph: 'Hello {name}, …' })}
-    <p class="small muted" style="margin-top:-6px">You can use: {name} {fullname} {rsl} {credits} {orders} {spent} {last} {org} {server}. *text* = bold. Empty line = new paragraph.</p>
+    <p class="small muted" style="margin-top:-6px">You can use: {name} {fullname} {rsl} {url} {username} {password} {credits} {orders} {spent} {last} {org} {server}. *text* = bold. Empty line = new paragraph.</p>
     <div class="grid3">${field('Button text (optional)', 'button', tp.button || '')}${field('Button opens', 'linkSel', sel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['contact', 'Contact / WhatsApp'], ['app', 'The app'], ['url', 'A link…']] })}${field('Link', 'linkUrl', sel === 'url' ? link : '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}</div>
     <div class="row"><button type="button" class="btn" data-act="rs-mail-pv">👁 Preview</button><button type="button" class="btn" data-act="rs-mail-save">💾 Save as my template</button><span class="spacer"></span><button type="button" class="btn primary" data-act="rs-mail-send">📨 Send</button></div>
     <iframe id="rs-mail-frame" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe></form>`;
@@ -748,20 +750,24 @@ function filteredCustomers() {
 }
 // 24-hour auto-reset contact checkboxes (spec §4): a mark expires 24h after it was made, for the daily follow-up routine.
 const contactedRecently = (ts) => ts && Date.now() - ts < 24 * 3600000;
-const contactChecks = (c) => {
-  if (!can('customers_edit')) return '';
-  const ct = c.contact || {};
-  const box = (k, icn, tip) => `<button class="btn sm ${contactedRecently(ct[k]) ? 'primary' : ''}" data-act="contact-toggle" data-id="${c.id}" data-k="${k}" title="${tip}${contactedRecently(ct[k]) ? ' · marked ' + fmtDT(ct[k]) + ' — resets automatically after 24h' : ''}" aria-pressed="${contactedRecently(ct[k]) ? 'true' : 'false'}">${icn}${contactedRecently(ct[k]) ? '✓' : ''}</button>`;
-  return `<span class="row" style="gap:4px;flex-wrap:nowrap" title="Contacted today?">${box('email', '📧', 'Emailed')}${box('whatsapp', '💬', 'WhatsApp sent')}${box('telegram', '✈️', 'Telegram sent')}</span>`;
+// Brand marks for the WhatsApp and Telegram buttons come from the Simple Icons library (falls back to text if it cannot load).
+const brandImg = (n, alt) => `<img class="brand-ic" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/${n}.svg" alt="${alt}" width="16" height="16" loading="lazy" onerror="this.replaceWith(document.createTextNode('${alt}'))">`;
+const waBtn = (act, id, extra = '', title = 'Send a WhatsApp message') => `<button class="btn sm brand-btn wa" data-act="${act}" data-id="${id}" ${extra} title="${title}" aria-label="${title}">${brandImg('whatsapp', 'WA')}</button>`;
+const tgBtn = (act, id, extra = '', title = 'Send a Telegram message') => `<button class="btn sm brand-btn tg" data-act="${act}" data-id="${id}" ${extra} title="${title}" aria-label="${title}">${brandImg('telegram', 'TG')}</button>`;
+// The ✓ Sent marks: set automatically when you send (or by tapping), cleared after 24 hours. "No WhatsApp / No Telegram" marks stay until you remove them.
+const sentChips = (o, act) => {
+  const ct = o.contact || {};
+  const chip = (k, label) => { const no = k !== 'email' && ct['no' + k[0].toUpperCase() + k.slice(1)]; const on = !no && contactedRecently(ct[k]); return `<button class="sent-chip ${no ? 'no' : on ? 'on' : ''}" data-act="${act}" data-id="${o.id}" data-k="${k}" title="${no ? 'Has no ' + label : on ? label + ' sent ' + fmtDT(ct[k]) + ' · clears after 24h' : label + ' not sent today'}">${label} ${no ? '✕' : on ? '✓' : '·'}</button>`; };
+  return `<span class="sent-chips">${chip('email', 'Email')}${chip('whatsapp', 'WhatsApp')}${chip('telegram', 'Telegram')}</span>`;
 };
+async function custRefresh() { try { state.admin.customers = await api('GET', '/api/admin/customers'); const el = $('#cust-list'); if (el) el.innerHTML = customerListHtml(); } catch {} }
+const contactChecks = (c) => (can('customers_edit') ? sentChips(c, 'contact-menu') : '');
 function custActions(c) {
-  return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<button class="btn sm" data-act="copy-text" data-text="${esc(String(c.phone))}" title="Copy phone number" aria-label="Copy phone number">📞</button>` : ''}${can('customers_phone') && c.telegram ? `<a class="btn sm" href="https://t.me/${esc(String(c.telegram).trim().replace(/^@/, ''))}" target="_blank" rel="noopener" title="Telegram">✈️</a>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+  return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<button class="btn sm" data-act="copy-text" data-text="${esc(String(c.phone))}" title="Copy phone number" aria-label="Copy phone number">📞</button>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
-    <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
-    ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details" aria-label="Email login details">✉️</button>` : ''}
-    ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}" aria-label="Send a package order email">💳</button>` : ''}
-    ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}" aria-label="Send renewal offer">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
+    ${can('customers_edit') ? waBtn('wa-one', c.id, (c.contact || {}).noWhatsapp ? 'disabled' : '', (c.contact || {}).noWhatsapp ? 'Has no WhatsApp' : 'Send a WhatsApp message') + tgBtn('tg-one', c.id, (c.contact || {}).noTelegram ? 'disabled' : '', (c.contact || {}).noTelegram ? 'Has no Telegram' : 'Send a Telegram message') : ''}
+    ${c.email ? `<button class="btn sm" data-act="mail-menu" data-perm="customers_edit" data-id="${c.id}" title="Send an email" aria-label="Send an email">✉️ ▾</button>` : ''}
     <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details" aria-label="Copy login details">📋</button>
     ${c.twoFactor ? `<button class="btn sm" data-act="cust-tfa-off" data-perm="customers_edit" data-id="${c.id}" title="Two-step sign-in is on. Tap to turn it off (lost phone)." aria-label="Turn off two-step sign-in">🔐</button>` : ''}
     <button class="btn sm" data-act="chat-with" data-id="${c.id}" title="Open the live chat with this customer" aria-label="Live chat">🗨</button>
@@ -2048,6 +2054,66 @@ const actions = {
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
 
+  'mail-menu': (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (!c) return;
+    const last = (t) => (t ? `<span class="small muted">sent ${fmtDate(t)}</span>` : '<span class="small muted">not sent yet</span>');
+    const item = (act, icon, name, desc, t) => `<button class="list-item mail-pick" data-act="${act}" data-id="${c.id}" style="width:100%;text-align:start;background:none;border:0;cursor:pointer;color:inherit"><span style="font-size:22px">${icon}</span><div style="flex:1"><b>${name}</b><div class="small muted">${desc}</div></div>${last(t)}</button>`;
+    modal(`✉️ Email ${esc(c.name)}`, `<p class="small muted" style="margin-top:0">To ${esc(c.email)}. Each one opens a preview before it is sent.</p>
+      ${item('mail-profile', '👤', 'Profile details', 'App username and password, with a button to their intproto-tv.store/profile page', c.profileMailAt)}
+      ${item('email-login', '📺', 'Order details: TVplus line + M3U', 'Line username, password, DNS and M3U links', c.lineMailAt)}
+      ${item('order-one', '💳', 'Payment link', 'A package with your payment link', c.orderSentAt)}
+      ${item('renewal-one', '🔁', 'Renewal', 'Renewal offer for an ended or ending subscription', c.renewalSentAt)}`);
+  },
+  'mail-profile': async (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id);
+    const appUrl = location.origin;
+    const pv = await api('GET', `/api/admin/customers/${c.id}/profilepreview?appUrl=${encodeURIComponent(appUrl)}`);
+    const body = modal('👤 Profile details email', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b></p><iframe id="mail-pv" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+      <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="mail-profile-send" data-id="${c.id}">Send email</button></div>`, { wide: true });
+    $('#mail-pv', body).srcdoc = pv.html;
+  },
+  'mail-profile-send': async (el) => {
+    el.disabled = true;
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/profilemail`, { to: $('#mail-to').value, appUrl: location.origin }); toast(t('emailSent')); closeModal(); await custRefresh(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'contact-menu': (el) => {
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (!c) return; const k = el.dataset.k; const ct = c.contact || {};
+    const name = { email: 'Email', whatsapp: 'WhatsApp', telegram: 'Telegram' }[k]; const noK = k === 'email' ? '' : 'no' + k[0].toUpperCase() + k.slice(1);
+    const on = contactedRecently(ct[k]);
+    modal(`${name} · ${esc(c.name)}`, `<p class="small muted" style="margin-top:0">${on ? `Marked sent ${fmtDT(ct[k])}. It clears by itself 24 hours later.` : 'Not marked as sent in the last 24 hours. Sending from the app marks it by itself.'}</p>
+      <div class="row" style="gap:8px">${on ? `<button class="btn" data-act="contact-set" data-id="${c.id}" data-k="${k}" data-v="0">Clear ✓</button>` : `<button class="btn primary" data-act="contact-set" data-id="${c.id}" data-k="${k}" data-v="1">✓ Mark as sent</button>`}
+      ${noK ? `<button class="btn ${ct[noK] ? '' : 'danger'}" data-act="contact-set" data-id="${c.id}" data-k="${noK}" data-v="${ct[noK] ? 0 : 1}">${ct[noK] ? `✓ They have ${name} after all` : `✕ Has no ${name}`}</button>` : ''}</div>`);
+  },
+  'contact-set': async (el) => {
+    el.disabled = true;
+    try { await api('PUT', '/api/admin/customers/' + el.dataset.id, { contact: { [el.dataset.k]: el.dataset.v === '1' } }); closeModal(); await custRefresh(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'tg-one': async (el) => {
+    await actions['wa-one'](el);
+    const f = $('[data-form=wa]'); if (!f) return; f.dataset.channel = 'telegram';
+    const h = document.querySelector('.modal-head h3'); if (h) h.textContent = '✈️ Telegram message';
+    const c = state.admin.customers.find((x) => x.id === el.dataset.id);
+    const b = f.querySelector('[data-act=wa-open]'); if (b) { b.dataset.act = 'tg-open'; b.className = 'btn primary brand-send tg'; b.textContent = '✈️ Send on Telegram'; }
+    f.insertAdjacentHTML('afterbegin', `<label class="field"><span>Telegram username (optional)</span><input id="tg-user" value="${esc(String(c.telegram || '').replace(/^@/, ''))}" placeholder="username, without @" autocapitalize="none"></label>`);
+  },
+  'tg-open': async (el) => {
+    const f = $('[data-form=wa]'); const text = $('#wa-text').value; const id = el.dataset.id; el.disabled = true;
+    try {
+      const r = await api('POST', `/api/admin/customers/${id}/tgsend`, { text });
+      if (r.sent) { toast('Sent by your Telegram bot ✓'); closeModal(); return custRefresh(); }
+      // the customer has not started your bot: copy the message and open their Telegram chat
+      try { await navigator.clipboard.writeText(text); } catch {}
+      const user = ($('#tg-user')?.value || '').trim().replace(/^@/, ''); const phone = f.phone.value.replace(/\D/g, '');
+      if (!user && !phone) { el.disabled = false; return toast('Add their Telegram username or phone number.', true); }
+      window.open(user ? `https://t.me/${encodeURIComponent(user)}` : `https://t.me/+${phone}`, '_blank', 'noopener');
+      toast('Message copied. Paste it in the Telegram chat.');
+      await api('POST', `/api/admin/customers/${id}/wamsg`, { ...waForm(), channel: 'telegram', log: true });
+      if (user) await api('PUT', `/api/admin/customers/${id}`, { telegram: user }).catch(() => {});
+      closeModal(); await custRefresh();
+    } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
   'wa-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
@@ -2374,7 +2440,37 @@ renew: async (el) => {
     const csv = rows.map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     download('subscriptions.csv', '﻿' + csv, 'text/csv');
   },
-'rs-open': (el) => rsOpen(el.dataset.id),
+  'rs-open': (el) => rsOpen(el.dataset.id),
+  'rs-copy': async (el) => { const x = rsGet(el.dataset.id); const txt = [x.name + ' (' + x.rslId + ')', x.email, /•/.test(x.phone) ? '' : x.phone, x.panelUrl && 'URL: ' + x.panelUrl, x.panelUser && 'Username: ' + x.panelUser, x.panelPass && 'Password: ' + x.panelPass].filter(Boolean).join('\n'); try { await navigator.clipboard.writeText(txt); toast('Details copied ✓'); } catch { toast(txt); } },
+  'rs-mark': (el) => {
+    const x = rsGet(el.dataset.id); const k = el.dataset.k; const ct = x.contact || {}; const name = { email: 'Email', whatsapp: 'WhatsApp', telegram: 'Telegram' }[k]; const noK = k === 'email' ? '' : 'no' + k[0].toUpperCase() + k.slice(1); const on = contactedRecently(ct[k]);
+    modal(`${name} · ${esc(x.name)}`, `<p class="small muted" style="margin-top:0">${on ? `Marked sent ${fmtDT(ct[k])}. It clears by itself 24 hours later.` : 'Not marked as sent in the last 24 hours.'}</p><div class="row" style="gap:8px">${on ? `<button class="btn" data-act="rs-mark-set" data-id="${x.id}" data-k="${k}" data-v="0">Clear ✓</button>` : `<button class="btn primary" data-act="rs-mark-set" data-id="${x.id}" data-k="${k}" data-v="1">✓ Mark as sent</button>`}${noK ? `<button class="btn ${ct[noK] ? '' : 'danger'}" data-act="rs-mark-set" data-id="${x.id}" data-k="${noK}" data-v="${ct[noK] ? 0 : 1}">${ct[noK] ? `✓ They have ${name} after all` : `✕ Has no ${name}`}</button>` : ''}</div>`);
+  },
+  'rs-mark-set': async (el) => { try { await api('POST', '/api/admin/reseller/contact', { id: el.dataset.id, k: el.dataset.k, v: el.dataset.v === '1' }); await rsReload(); } catch (e) { toast(e.message, true); } },
+  'rs-msg': (el) => {
+    const x = rsGet(el.dataset.id); const tg = el.dataset.ch === 'tg'; const tp = RS.data.emailTpl || {};
+    const fill = (t) => String(t || '').replace(/\{(\w+)\}/g, (m, k) => ({ name: x.name.split(' ')[0], fullname: x.name, rsl: x.rslId, url: x.panelUrl, username: x.panelUser, password: x.panelPass, credits: x.credits, orders: x.purchases, spent: usd(x.spentUsd), org: x.org, server: x.server })[k] ?? m);
+    const def = `Hello ${x.name.split(' ')[0]} 👋\n\nYour reseller panel (${x.rslId}):\n${x.panelUrl ? '🌐 URL: ' + x.panelUrl + '\n' : ''}${x.panelUser ? '👤 Username: ' + x.panelUser + '\n' : ''}${x.panelPass ? '🔑 Password: ' + x.panelPass + '\n' : ''}\nAny question, just reply here.`;
+    modal(`${tg ? '✈️ Telegram' : '💬 WhatsApp'} · ${esc(x.name)}`, `<form data-form="rs-msg" onsubmit="return false" data-id="${x.id}" data-ch="${tg ? 'tg' : 'wa'}">
+      ${tg ? field('Telegram username', 'tgUser', x.telegram || '', { ph: 'without @ (empty = phone number)', attrs: 'autocapitalize="none"' }) : field('WhatsApp number', 'phone', /•/.test(x.phone) ? '' : String(x.phone || '').replace(/\D/g, ''), { type: 'tel' })}
+      ${field('Message', 'text', tp.body ? fill(tp.body) : def, { type: 'textarea', rows: 9 })}
+      <div class="row"><span class="spacer"></span><button type="button" class="btn primary ${tg ? 'brand-send tg' : 'wa-btn'}" data-act="rs-msg-go">${tg ? '✈️ Send on Telegram' : '💬 Open WhatsApp'}</button></div></form>`, { wide: true });
+  },
+  'rs-msg-go': async (el) => {
+    const f = el.closest('form'); const id = f.dataset.id; const text = f.text.value; el.disabled = true;
+    try {
+      if (f.dataset.ch === 'wa') {
+        const ph = f.phone.value.replace(/\D/g, ''); if (!ph || ph.startsWith('0')) { el.disabled = false; return toast(t('waNoLeadingZero'), true); }
+        window.open(`https://wa.me/${ph}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+        await api('POST', '/api/admin/reseller/contact', { id, k: 'whatsapp', v: true });
+      } else {
+        const r = await api('POST', '/api/admin/reseller/tgsend', { id, text });
+        if (r.sent) toast('Sent by your Telegram bot ✓');
+        else { try { await navigator.clipboard.writeText(text); } catch {} const u = f.tgUser.value.trim().replace(/^@/, ''); const x = rsGet(id); const ph = String(x.phone || '').replace(/\D/g, ''); if (!u && (!ph || /•/.test(x.phone))) { el.disabled = false; return toast('Add their Telegram username.', true); } window.open(u ? `https://t.me/${encodeURIComponent(u)}` : `https://t.me/+${ph}`, '_blank', 'noopener'); toast('Message copied. Paste it in the Telegram chat.'); await api('POST', '/api/admin/reseller/contact', { id, k: 'telegram', v: true }); }
+      }
+      await rsReload();
+    } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
   'rs-new': () => modal('＋ Add a reseller', rsProfileForm()),
   'rs-save': async (el) => {
     const f = el.closest('form'); if (!f.name.reportValidity()) return; const d = Object.fromEntries(new FormData(f));

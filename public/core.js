@@ -634,6 +634,16 @@ export function applyMailTexts(custom) {
     tplDicts()[d][lang][k] = k !== 'dir' && typeof v === 'string' && v.trim() ? v : tplDefaults()[d][lang][k];
   }
 }
+// "My profile" email: the app sign-in (username + password) and a button to the customer's /profile page
+export function profileEmail(s, c, appUrl) {
+  const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, ''); const fr = c.lang === 'fr'; const app = s.branding.appName || 'IPTV';
+  const pass = c.loginPassword || (c.ownPassword ? '' : c.linePassword) || '';
+  const body = fr
+    ? `Voici vos identifiants pour vous connecter à ${app} et voir votre profil (abonnement, date de fin, vos coordonnées).\n\n*Nom d'utilisateur :* ${c.username}\n*Mot de passe :* ${pass || '(celui que vous avez choisi)'}\n\nAppuyez sur le bouton pour ouvrir votre profil.`
+    : `Here are your details to sign in to ${app} and see your profile (subscription, end date and your contact details).\n\n*Username:* ${c.username}\n*Password:* ${pass || '(the one you chose)'}\n\nTap the button to open your profile.`;
+  const camp = { split: false, lang: fr ? 'fr' : 'en', content: { all: { subject: fr ? `Votre profil ${app}` : `Your ${app} profile`, title: fr ? 'Votre profil' : 'Your profile', body, button: fr ? 'Ouvrir mon profil' : 'Open my profile' } }, link: base ? base + '/profile' : 'site' };
+  return newsletterEmail(s, c, camp, appUrl, '');
+}
 export function accessEmail(s, c, password, kind, appUrl) {
   const lang = ml(c); const L = AM[lang] || AM.en; const e = escHtml;
   const app = s.branding.appName || 'IPTV';
@@ -963,6 +973,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
   async function saveSettings(s) { await store.put('settings', s); applyMailTexts(s.mailTexts); setMailLang(s.email.lang); sCache = s; sAt = Date.now(); }
   const getCustomers = async () => (await store.get('customers')) || [];
+  const markSent = (c, k) => { c.contact = { ...(c.contact || {}), [k]: Date.now() }; }; // the ✓ Sent mark (shown for 24 hours)
   const saveCustomers = (c) => store.put('customers', c);
   // ---------- resellers: dedicated profiles (RSL ids) with their own order history ----------
   // A profile can be typed in by hand, made from customer rows (one person can have many order rows) or read from pasted text.
@@ -1036,7 +1047,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const byId = new Map(customers.map((c) => [c.id, c]));
     const rows = rs.map((p) => {
       const t = rsTotals(p, s, salesBy); const c0 = (p.customerIds || []).map((i) => byId.get(i)).find(Boolean);
-      return { id: p.id, rslId: p.rslId || '—', name: p.name, username: c0 ? c0.username : '', email: p.email || '', emails: p.emails || [], phone: p.phone || '', org: p.org || '', server: p.server || '', tag: p.tag || '', note: p.note || '', status: p.status || 'active', ...t, spentMad: rsRound(t.spentUsd * (Number(s.finance?.rates?.MAD) || 10)), customerIds: (p.customerIds || []).filter((i) => byId.has(i)), orders: [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), createdAt: p.createdAt || 0, joinedAt: p.joinedAt || t.firstAt || p.createdAt || 0, emailedAt: p.emailedAt || 0, emailedSubject: p.emailedSubject || '' };
+      return { id: p.id, rslId: p.rslId || '—', name: p.name, username: c0 ? c0.username : '', email: p.email || '', emails: p.emails || [], phone: p.phone || '', org: p.org || '', server: p.server || '', tag: p.tag || '', note: p.note || '', status: p.status || 'active', ...t, spentMad: rsRound(t.spentUsd * (Number(s.finance?.rates?.MAD) || 10)), customerIds: (p.customerIds || []).filter((i) => byId.has(i)), orders: [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), createdAt: p.createdAt || 0, joinedAt: p.joinedAt || t.firstAt || p.createdAt || 0, emailedAt: p.emailedAt || 0, emailedSubject: p.emailedSubject || '', telegram: p.telegram || '', panelUrl: p.panelUrl || '', panelUser: p.panelUser || '', panelPass: p.panelPass || '', contact: p.contact || {} };
     }).sort((a, b) => b.credits - a.credits || b.spentUsd - a.spentUsd || a.name.localeCompare(b.name));
     rows.forEach((r, i) => { r.rank = i + 1; });
     return rows;
@@ -2984,7 +2995,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           // 24-hour auto-reset contact checkboxes (spec §4): checking marks "contacted" today; stale marks auto-expire in the UI
           if (body.contact && typeof body.contact === 'object') {
             const ct = { ...(c.contact || {}) };
-            for (const k of ['email', 'whatsapp', 'telegram']) {
+            for (const k of ['email', 'whatsapp', 'telegram', 'noWhatsapp', 'noTelegram']) {
               if (k in body.contact) { const v = body.contact[k]; ct[k] = v === 'toggle' ? (ct[k] ? 0 : Date.now()) : v ? Date.now() : 0; }
             }
             c.contact = ct; await saveCustomers(list);
@@ -3079,6 +3090,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!to) return err(400, 'This customer has no email address.');
           const m = accessEmail(s, c, c.linePassword, c.isTrial ? 'trial' : 'sub', body.appUrl);
           const r = await sendEmail(s, to, m.subject, m.html);
+          if (r.ok) { markSent(c, 'email'); c.lineMailAt = Date.now(); await saveCustomers(list); }
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
@@ -3088,9 +3100,25 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
           const fixedL = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
           const m = orderEmail(s, c, pk, body.appUrl, fixedL); const r = await sendEmail(s, to, m.subject, m.html);
-          if (r.ok) { c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentLink = fixedL?.url || ''; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); await saveCustomers(list); }
+          if (r.ok) { markSent(c, 'email'); c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentLink = fixedL?.url || ''; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); await saveCustomers(list); }
           await log('customer', `Package email "${pk.title}" to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
+        if (method === 'GET' && sub === 'profilepreview') return ok(profileEmail(s, c, query.appUrl));
+        if (method === 'POST' && sub === 'profilemail') {
+          const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
+          const m = profileEmail(s, c, body.appUrl); const r = await sendEmail(s, to, m.subject, m.html);
+          if (r.ok) { markSent(c, 'email'); c.profileMailAt = Date.now(); await saveCustomers(list); }
+          await log('customer', `Profile email to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
+          return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
+        if (method === 'POST' && sub === 'tgsend') { // sends a text through your Telegram bot, when this customer has started the bot
+          const text = String(body.text || '').slice(0, 3800).trim(); if (!text) return err(400, 'Write a message first.');
+          const chat = await tgFindChat(c);
+          if (!chat) return ok({ sent: false, linked: false });
+          const rr = await tgSend(s, chat, text); if (!rr.ok) return err(502, 'Telegram: ' + (rr.error || 'not sent'));
+          markSent(c, 'telegram'); await saveCustomers(list); await log('customer', `Telegram message to ${c.username}`);
+          return ok({ sent: true, linked: true });
         }
         if (method === 'POST' && sub === 'wamsg') { // WhatsApp message for this customer
           const waOwn = (s.waCustom || []).find((x) => 'c:' + x.id === body.type);
@@ -3118,7 +3146,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           }
           const text = out.join('\n').replace(/\n{3,}/g, '\n\n');
           const phone = String(body.phone || c.whatsapp || c.phone || '').replace(/\D/g, '');
-          if (body.log) { c.waSentAt = Date.now(); c.waSentType = type; if (type !== 'login') { c.orderSentPkg = pk.id; c.orderSentAcc = pl?.acc || ''; } await saveCustomers(list); await log('customer', `WhatsApp "${type}" message to ${c.username}${type !== 'login' ? ` (${pk.title}, ${price})` : ''}`); }
+          if (body.log) { markSent(c, body.channel === 'telegram' ? 'telegram' : 'whatsapp'); if (body.channel !== 'telegram') c.waSentAt = Date.now(); c.waSentType = type; if (type !== 'login') { c.orderSentPkg = pk.id; c.orderSentAcc = pl?.acc || ''; } await saveCustomers(list); await log('customer', `WhatsApp "${type}" message to ${c.username}${type !== 'login' ? ` (${pk.title}, ${price})` : ''}`); }
           return ok({ text, phone, lang, type, payAcc: pl?.acc || '', template: tpl, isDefault: waOwn ? true : !s.waTemplates?.[type]?.[lang] });
         }
         if (method === 'GET' && sub === 'renewalpreview') return ok(renewalEmail(s, c, query.appUrl));
@@ -3127,7 +3155,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!to) return err(400, 'This customer has no email address.');
           const m = renewalEmail(s, c, body.appUrl);
           const r = await sendEmail(s, to, m.subject, m.html);
-          if (r.ok) { c.renewalSentFor = c.expiresAt; c.renewalSentAt = Date.now(); await saveCustomers(list); const t = await sentToday(); await store.put(t.k, t.n + 1, 2 * 86400); }
+          if (r.ok) { markSent(c, 'email'); c.renewalSentFor = c.expiresAt; c.renewalSentAt = Date.now(); await saveCustomers(list); const t = await sentToday(); await store.put(t.k, t.n + 1, 2 * 86400); }
           await log('customer', `Renewal email to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
         }
@@ -3427,7 +3455,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!batch.length) return ok({ sent: 0 });
         const r = await sendBatch(s, batch.map(({ c, m }) => ({ to: c.email, subject: m.subject, html: m.html })));
         if (!r.ok) return err(502, r.error);
-        const now = Date.now(); for (const { c, p, m } of batch) { c.orderSentAt = now; c.orderSentPkg = p.id; c.orderSentAcc = m.payAcc; }
+        const now = Date.now(); for (const { c, p, m } of batch) { markSent(c, 'email'); c.orderSentAt = now; c.orderSentPkg = p.id; c.orderSentAcc = m.payAcc; }
         await saveCustomers(list);
         await log('customer', `Package emails sent to ${batch.length} customers (${body.pkg === 'random' ? 'random packages' : batch[0].p.title})`);
         return ok({ sent: batch.length });
@@ -3511,7 +3539,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const batch = renewalTargets(list, body.onlyRecentDays).sort((a, b) => b.expiresAt - a.expiresAt).slice(0, Math.min(body.all ? 100 : 50, left));
         const r = await sendBatch(s, batch.map((c) => ({ to: cleanEmail(c.email) || cleanEmail(c.email2), ...renewalEmail(s, c, body.appUrl) })));
         if (!r.ok) return err(502, r.error);
-        const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; });
+        const now = Date.now(); batch.forEach((c) => { markSent(c, 'email'); c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; });
         await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400);
         await log('customer', `Renewal emails sent to ${batch.length} customers`);
         return ok({ sent: batch.length, waiting: renewalTargets(list).length, limitReached: !body.all && t.n + batch.length >= (Number(s.renewalOffer.dailyLimit) || 90) });
@@ -3591,6 +3619,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (wantId && wantId !== p.rslId) { p.rslId = wantId; p.rslAuto = false; }
         }
         p.org = rsText(body.org, 80); p.server = rsText(body.server, 40); p.tag = rsText(body.tag, 80); p.note = rsText(body.note, 500);
+        if (body.panelUrl !== undefined) { const u = String(body.panelUrl || '').trim(); if (u && !/^https?:\/\/\S+$/.test(u)) return err(400, 'The panel address must start with http:// or https://'); p.panelUrl = u.slice(0, 300); }
+        if (body.panelUser !== undefined) p.panelUser = rsText(body.panelUser, 80);
+        if (body.panelPass !== undefined) p.panelPass = String(body.panelPass || '').replace(/[<>\s]/g, '').slice(0, 80);
+        if (body.telegram !== undefined) p.telegram = String(body.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '').replace(/[^\w+]/g, '').slice(0, 40);
         p.status = body.status === 'paused' ? 'paused' : 'active'; p.updatedAt = Date.now();
         if (body.joined !== undefined) { const j = String(body.joined || '').trim() ? parseLooseDate(body.joined) : 0; if (String(body.joined || '').trim() && !j) return err(400, 'The date is not valid.'); if (j) p.joinedAt = j; else delete p.joinedAt; }
         await saveResellers(rs); if (s.resellerSeq !== seq0) await saveSettings(s);
@@ -3698,6 +3730,18 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('customer', `Removed an order from reseller ${p.name} (${p.rslId})`);
         return ok({ ok: true });
       }
+      if (R('POST', '/api/admin/reseller/contact')) { // ✓ Sent marks and "has no WhatsApp / Telegram" for a reseller
+        const rs = await getResellers(); const p = rs.find((x) => x.id === String(body.id || '')); if (!p) return err(404, 'Reseller not found.');
+        const k = String(body.k || ''); if (!['email', 'whatsapp', 'telegram', 'noWhatsapp', 'noTelegram'].includes(k)) return err(400, 'Unknown mark.');
+        p.contact = { ...(p.contact || {}), [k]: body.v ? Date.now() : 0 }; await saveResellers(rs); return ok({ ok: true, contact: p.contact });
+      }
+      if (R('POST', '/api/admin/reseller/tgsend')) {
+        const rs = await getResellers(); const p = rs.find((x) => x.id === String(body.id || '')); if (!p) return err(404, 'Reseller not found.');
+        const text = String(body.text || '').slice(0, 3800).trim(); if (!text) return err(400, 'Write a message first.');
+        const chat = await tgFindChat({ telegram: p.telegram, email: p.email, phone: p.phone }); if (!chat) return ok({ sent: false });
+        const rr = await tgSend(s, chat, text); if (!rr.ok) return err(502, 'Telegram: ' + (rr.error || 'not sent'));
+        markSent(p, 'telegram'); await saveResellers(rs); return ok({ sent: true });
+      }
       if (R('POST', '/api/admin/reseller/email')) { // an email you write yourself, to one, several or all resellers; the text can be kept as your template
         const tpl = { subject: rsText(body.subject, 160), title: rsText(body.title, 120), body: String(body.body || '').replace(/[<>]/g, '').slice(0, 6000).trim(), button: rsText(body.button, 60), link: /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? String(body.link).trim() : (['site', 'contact', 'app'].includes(body.link) ? body.link : '') };
         if (body.save) { await saveSettings({ ...s, resellerEmail: tpl }); if (body.saveOnly) return ok({ ok: true, saved: true }); }
@@ -3706,14 +3750,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(String));
         const to = rows.filter((r) => (body.all ? r.status !== 'paused' : ids.has(r.id)) && cleanEmail(r.email)).slice(0, 100);
         const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '');
-        const fill = (x, r) => String(x || '').replace(/\{(rsl|credits|orders|spent|last|fullname|org|server)\}/g, (_, k) => ({ rsl: r.rslId, credits: r.credits, orders: r.purchases, spent: '$' + r.spentUsd.toFixed(2), last: day(r.lastAt), fullname: r.name, org: r.org, server: r.server })[k] ?? '');
+        const fill = (x, r) => String(x || '').replace(/\{(rsl|credits|orders|spent|last|fullname|org|server|url|username|password)\}/g, (_, k) => ({ rsl: r.rslId, credits: r.credits, orders: r.purchases, spent: '$' + r.spentUsd.toFixed(2), last: day(r.lastAt), fullname: r.name, org: r.org, server: r.server, url: r.panelUrl || '', username: r.panelUser || '', password: r.panelPass || '' })[k] ?? '');
         const make = (r) => newsletterEmail(s, { name: r.name, lang: 'en' }, { split: false, lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en', content: { all: { subject: fill(tpl.subject, r), title: fill(tpl.title, r), body: fill(tpl.body, r), button: tpl.button } }, link: tpl.link }, body.appUrl, '');
         if (body.preview) { const r = to[0] || rows.find((x) => ids.has(x.id)) || rows[0] || { rslId: 'RSL-01', name: 'Reseller Name', credits: 0, purchases: 0, spentUsd: 0, lastAt: 0, org: '', server: '' }; return ok(make(r)); }
         if (!to.length) return err(400, 'None of the chosen resellers has a valid email address.');
         const msgs = to.map((r) => { const m = make(r); return { to: r.email, subject: m.subject, html: m.html }; });
         const res = msgs.length === 1 ? await sendEmail(s, msgs[0].to, msgs[0].subject, msgs[0].html) : await sendBatch(s, msgs);
         if (!res.ok) return err(502, res.error || 'Email failed');
-        const rs = await getResellers(); const now = Date.now(); for (const p of rs) if (to.some((r) => r.id === p.id)) { p.emailedAt = now; p.emailedSubject = tpl.subject; } await saveResellers(rs);
+        const rs = await getResellers(); const now = Date.now(); for (const p of rs) if (to.some((r) => r.id === p.id)) { p.emailedAt = now; p.emailedSubject = tpl.subject; markSent(p, 'email'); } await saveResellers(rs);
         await log('customer', `Reseller email "${tpl.subject}" sent to ${to.length}`);
         return ok({ sent: to.length });
       }
@@ -3911,7 +3955,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const batch = renewalTargets(list, Number(s.renewalOffer.autoDays) || 3).slice(0, Math.min(50, left));
       if (batch.length) {
         const r = await sendBatch(s, batch.map((c) => ({ to: cleanEmail(c.email) || cleanEmail(c.email2), ...renewalEmail(s, c, s.email.appUrl) })));
-        if (r.ok) { const now = Date.now(); batch.forEach((c) => { c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; }); await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400); out.reminders += batch.length; }
+        if (r.ok) { const now = Date.now(); batch.forEach((c) => { markSent(c, 'email'); c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; }); await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400); out.reminders += batch.length; }
       }
     }
     if (out.alert || out.reminders) await log('daily', `Daily check: ${out.reminders} reminder(s)${out.alert ? ', low-credit alert sent' : ''}`);

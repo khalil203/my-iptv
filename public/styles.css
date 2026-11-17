@@ -1089,3 +1089,13 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 
 /* order-card section headings */
 .op-sec { margin: 16px 0 8px; font-size: .82rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 800; border-bottom: 1px solid var(--line2); padding-bottom: 6px; }
+/* WhatsApp / Telegram logo buttons and the ✓ Sent marks */
+.brand-btn { display: inline-grid; place-items: center; min-width: 36px; padding-inline: 8px; border: 0; }
+.brand-btn.wa { background: #25D366; } .brand-btn.tg { background: #229ED9; }
+.brand-btn .brand-ic { filter: brightness(0) invert(1); display: block; }
+.brand-btn[disabled] { opacity: .35; filter: grayscale(1); cursor: not-allowed; }
+.brand-send.tg { background: #229ED9; border-color: #229ED9; color: #fff; }
+.sent-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; margin-inline-end: 6px; }
+.sent-chip { font: inherit; font-size: .72rem; font-weight: 700; padding: 3px 8px; border-radius: 99px; border: 1px solid var(--line2, rgba(127,127,127,.3)); background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.sent-chip.on { background: color-mix(in srgb, var(--ok) 18%, transparent); border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--ok); }
+.sent-chip.no { background: color-mix(in srgb, var(--bad) 14%, transparent); border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); text-decoration: line-through; }

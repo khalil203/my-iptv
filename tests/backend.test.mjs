@@ -1382,3 +1382,38 @@ test('resellers: a recorded reseller sale lands in the profile once; staff limit
   assert.equal(new Date((await x.call('GET', '/api/admin/reseller', {}, tok)).json.list[0].joinedAt).toISOString().slice(0, 10), '2023-10-30');
 });
 
+
+test('contact: emails mark ✓ Email sent, profile email links /profile, Telegram falls back when no bot chat, no-WhatsApp mark', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'a@example.com', appUrl: 'https://tv.example.com' } }, tok);
+  await addCustomer(x, tok, { phone: '+15550100001' });
+  const c = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((z) => z.username === 'testuser');
+  const pv = await x.call('GET', `/api/admin/customers/${c.id}/profilepreview`, {}, tok);
+  assert.match(pv.json.html, /https:\/\/tv\.example\.com\/profile/); assert.match(pv.json.html, /testuser/);
+  const sent = await x.call('POST', `/api/admin/customers/${c.id}/profilemail`, {}, tok);
+  assert.equal(sent.status, 200, JSON.stringify(sent.json));
+  let c2 = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((z) => z.id === c.id);
+  assert.ok(c2.contact.email > 0, 'sending an email marks ✓ Email');
+  const tg = await x.call('POST', `/api/admin/customers/${c.id}/tgsend`, { text: 'Hello' }, tok);
+  assert.deepEqual(tg.json, { sent: false, linked: false });
+  await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'pay', channel: 'telegram', log: true }, tok);
+  await x.call('PUT', `/api/admin/customers/${c.id}`, { contact: { noWhatsapp: true } }, tok);
+  c2 = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((z) => z.id === c.id);
+  assert.ok(c2.contact.telegram > 0 && !c2.contact.whatsapp && c2.contact.noWhatsapp > 0);
+});
+
+test('resellers: panel URL / username / password fill the email, ✓ marks and no-Telegram mark', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'a@example.com' } }, tok);
+  const r = await x.call('POST', '/api/admin/reseller/save', { name: 'Robin Tester', email: 'robin@example.com', panelUrl: 'https://panel.example.com', panelUser: 'robin1', panelPass: 'p4ss', telegram: '@robin_t' }, tok);
+  const id = r.json.reseller.id;
+  assert.equal((await x.call('POST', '/api/admin/reseller/save', { id, name: 'Robin Tester', panelUrl: 'ftp://bad' }, tok)).status, 400);
+  const pv = await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Panel', body: 'URL {url} user {username} pass {password}', preview: true }, tok);
+  assert.match(pv.json.html, /URL https:\/\/panel\.example\.com user robin1 pass p4ss/);
+  await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Panel', body: 'Hi' }, tok);
+  await x.call('POST', '/api/admin/reseller/contact', { id, k: 'noTelegram', v: true }, tok);
+  assert.equal((await x.call('POST', '/api/admin/reseller/contact', { id, k: 'bogus', v: true }, tok)).status, 400);
+  const row = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list[0];
+  assert.equal(row.telegram, 'robin_t'); assert.ok(row.contact.email > 0 && row.contact.noTelegram > 0);
+  assert.deepEqual((await x.call('POST', '/api/admin/reseller/tgsend', { id, text: 'hi' }, tok)).json, { sent: false });
+});
