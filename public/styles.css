@@ -679,7 +679,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .s-ic { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; margin-bottom: 12px; background: color-mix(in srgb, var(--primary) 20%, transparent); color: color-mix(in srgb, var(--primary) 55%, #fff); }
 .s-plan { position: relative; padding-top: var(--s-5); } .s-plan h3 { display: flex; align-items: center; gap: 8px; } .s-plan h3 svg { color: var(--warn); }
 .s-plan.feat { border-color: var(--primary); background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 30%, var(--surface)), var(--surface)); box-shadow: 0 0 0 1px var(--primary), 0 24px 60px -30px color-mix(in srgb, var(--primary) 90%, transparent); }
-.s-plan .s-badge { position: absolute; top: -11px; inset-inline-start: 16px; background: var(--primary); color: #fff; }
+.s-plan .s-badge { position: absolute; top: -11px; inset-inline-start: 16px; background: var(--primary); color: #05171A; }
 .s-list { list-style: none; padding: 0; margin: 4px 0 14px; display: grid; gap: 8px; } .s-list li { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: .92rem; } .s-list svg { color: var(--ok); }
 .s-plan .btn { border-radius: 99px; }
 @media (max-width: 860px) { .s-hero { grid-template-columns: 1fr; } }
