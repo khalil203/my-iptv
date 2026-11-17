@@ -113,6 +113,9 @@ export const DEFAULT_SETTINGS = () => ({
   ],
   orderCurrency: 'EUR',
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
+  // Seasonal promotion (Black Friday). When it is on and today is between the dates, the code is added to renewal emails,
+  // WhatsApp / Telegram messages for renewals, trials and orders, and it is ready as a newsletter and a Telegram channel post.
+  promo: { on: false, name: 'Black Friday', code: 'BLACKFRIDAY', offer: '', from: '2026-11-17', to: '2026-12-01', email: true, whatsapp: true, telegram: true },
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false, mode: 'auto', notifyAdmin: true },
   // Free-trial Telegram dispatch: the customer presses Start in the bot, then the trial login can be sent to the chat automatically.
@@ -250,6 +253,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/order/send') return 'customers_edit';
   if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
+  if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
@@ -508,6 +512,78 @@ export function parseLineLink(link) {
   if (!user || !pass || /\.(php|m3u8?|ts)$/i.test(user)) return null;
   return { dns: u.origin, u: user, p: pass };
 }
+// ---- Connections: one customer can have several lines (devices), each with its own type and M3U ----
+export const CONN_TYPES = { xtream1: 'Xtream Codes 1 + M3U', xtream2: 'Xtream Codes 2 + M3U', unlimited: 'Unlimited M3U' };
+export function connM3u(x) {
+  const m = String(x.m3u || '').trim(); if (m) return m;
+  const dns = String(x.dns || '').replace(/\/+$/, '');
+  return dns && x.u ? `${dns}/get.php?username=${encodeURIComponent(x.u)}&password=${encodeURIComponent(x.p || '')}&type=m3u_plus&output=ts` : '';
+}
+// Cleans the extra connections typed in the dashboard. A pasted M3U link fills username, password and DNS.
+export function cleanConns(arr) {
+  return (Array.isArray(arr) ? arr : []).slice(0, 20).map((r) => {
+    r = r || {}; const type = CONN_TYPES[r.type] ? r.type : 'xtream1';
+    let u = String(r.u ?? r.username ?? '').trim().slice(0, 80), p = String(r.p ?? r.password ?? '').trim().slice(0, 80);
+    let dns = String(r.dns || '').trim().replace(/\/+$/, '').slice(0, 200); const m3u = String(r.m3u || '').trim().slice(0, 1500);
+    if (m3u && (!u || !p || !dns)) { const ln = parseLineLink(m3u); if (ln) { u = u || ln.u; p = p || ln.p; dns = dns || ln.dns; } }
+    if (dns && !/^https?:\/\//i.test(dns)) dns = 'http://' + dns;
+    return { id: /^[\w-]{1,24}$/.test(String(r.id || '')) ? String(r.id) : uid(5), type, u, p, dns, m3u, devices: Math.max(1, Math.min(50, Math.round(Number(r.devices) || 1))), label: String(r.label || '').trim().slice(0, 40) };
+  }).filter((x) => x.m3u || (x.u && x.p));
+}
+// Every connection of a customer, the main line first: what the profile page, emails and messages show.
+export function customerConns(c, s) {
+  const dns = String(c.dns || s?.email?.dns || s?.player?.serverUrl || '').replace(/\/+$/, '');
+  const main = { id: 'main', main: true, type: CONN_TYPES[c.lineType] ? c.lineType : 'xtream1', u: c.lineUsername || '', p: c.linePassword || '', dns, m3u: String(c.m3u || '').trim(), devices: Math.max(1, Number(c.connections) || 1), label: '' };
+  const out = (main.u || main.m3u) ? [main] : [];
+  for (const x of cleanConns(c.lines)) out.push({ ...x, main: false });
+  return out.map((x) => ({ ...x, typeName: CONN_TYPES[x.type], m3u: connM3u(x) }));
+}
+export const connDevices = (c) => customerConns(c).reduce((a, x) => a + x.devices, 0) || Math.max(1, Number(c.connections) || 1);
+// Plain-text list of the extra connections (for WhatsApp / Telegram).
+function connsText(c, s, lang) {
+  const extra = customerConns(c, s).filter((x) => !x.main); if (!extra.length) return '';
+  const fr = lang === 'fr';
+  return extra.map((x, i) => `📡 *${fr ? 'Connexion' : 'Connection'} ${i + 2}* — ${x.label ? x.label + ' · ' : ''}${x.typeName} · ${x.devices} ${fr ? 'appareil(s)' : 'device(s)'}${x.u ? `\n👤 ${fr ? 'Identifiant' : 'Username'}: ${x.u}\n🔑 ${fr ? 'Mot de passe' : 'Password'}: ${x.p}` : ''}${x.dns && x.u ? `\n🌐 DNS: ${x.dns}` : ''}${x.m3u ? `\n📋 M3U:\n${x.m3u}` : ''}`).join('\n\n');
+}
+// ---- Seasonal promotion (Black Friday) ----
+const dayStart = (d) => { const t = Date.parse(String(d || '') + 'T00:00:00Z'); return isNaN(t) ? null : t; };
+export function promoLive(s, channel, now = Date.now()) {
+  const p = s.promo || {}; if (!p.on || !String(p.code || '').trim()) return null;
+  if (channel && p[channel] === false) return null;
+  const a = dayStart(p.from), b = dayStart(p.to);
+  if (a !== null && now < a) return null; if (b !== null && now >= b + 86400000) return null;
+  return p;
+}
+const promoEnd = (p, lang) => { const b = dayStart(p.to); return b === null ? '' : new Date(b).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }); };
+// The promotion paragraph added to WhatsApp / Telegram messages, in the customer's language.
+export function promoText(s, lang, p) {
+  p = p || s.promo || {}; const app = s.branding?.appName || 'IPTV'; const code = String(p.code || '').trim(); const name = String(p.name || 'Black Friday').trim();
+  const offer = String(p.offer || '').trim(); const end = promoEnd(p, lang); const site = String(s.renewalOffer?.url || s.email?.website || '').replace(/\/+$/, '');
+  if (lang === 'fr') return `🖤 *Le ${name} est là !*\n${offer ? `Profitez de *${offer}* sur toutes les formules ${app}` : `Profitez de notre plus grosse réduction de l'année sur toutes les formules ${app}`} avec le code *${code}*${site ? ` sur ${site}` : ''}.${end ? `\n⏳ Offre valable jusqu'au ${end} seulement.` : ''}`;
+  return `🖤 *${name} is here!*\n${offer ? `Get *${offer}* on every ${app} plan` : `Get our biggest discount of the year on every ${app} plan`} with code *${code}*${site ? ` at ${site}` : ''}.${end ? `\n⏳ Offer ends ${end}, don't miss it.` : ''}`;
+}
+// Ready-made Black Friday newsletter (English + French) for the newsletter tool.
+export function promoCampaign(s) {
+  const p = s.promo || {}; const app = s.branding?.appName || 'IPTV'; const code = String(p.code || '').trim(); const name = String(p.name || 'Black Friday').trim();
+  const offer = String(p.offer || '').trim(); const enEnd = promoEnd(p, 'en'), frEnd = promoEnd(p, 'fr');
+  return { split: true, lang: 'en', badge: `🖤 ${name}`, coupon: code, link: 'site', image: '',
+    content: {
+      all: { subject: '', title: '', body: '', button: '' },
+      en: { subject: `🖤 ${name}: ${offer || 'our biggest discount of the year'} on ${app}`, title: `${name} is here!`,
+        body: `Our ${name} sale has started, and it is the best time of the year to get or renew your ${app} subscription.\n\n${offer ? `Get *${offer}* on every plan` : 'Get our *biggest discount of the year* on every plan'}, from 1 month to 2 years, and for 1 to 4 devices.\n\nUse the code *${code}* at checkout.${enEnd ? `\n\nThe offer ends on *${enEnd}*, so don't wait too long.` : ''}\n\nAny question? Just reply to this email or message us on WhatsApp, we are happy to help.`,
+        button: 'Get the offer' },
+      fr: { subject: `🖤 ${name} : ${offer || 'notre plus grosse réduction de l’année'} sur ${app}`, title: `Le ${name} est là !`,
+        body: `Notre offre ${name} a commencé : c'est le meilleur moment de l'année pour prendre ou renouveler votre abonnement ${app}.\n\n${offer ? `Profitez de *${offer}* sur toutes les formules` : 'Profitez de *notre plus grosse réduction de l’année* sur toutes les formules'}, de 1 mois à 2 ans, pour 1 à 4 appareils.\n\nUtilisez le code *${code}* lors du paiement.${frEnd ? `\n\nL'offre se termine le *${frEnd}*, ne tardez pas.` : ''}\n\nUne question ? Répondez simplement à cet email ou écrivez-nous sur WhatsApp, nous sommes là pour vous aider.`,
+        button: "Profiter de l'offre" },
+    } };
+}
+const promoBanner = (lang, p) => { const offer = String(p.offer || '').trim(); const code = String(p.code || '').trim();
+  return lang === 'fr' ? `${offer ? offer + ' sur toutes les formules' : 'Notre plus grosse réduction de l’année'} avec le code ${code}` : `${offer ? offer + ' on every plan' : 'Our biggest discount of the year'} with code ${code}`; };
+// Post for the public Telegram channel.
+export function promoChannelPost(s) {
+  const p = s.promo || {}; const app = s.branding?.appName || 'IPTV'; const site = String(s.renewalOffer?.url || s.email?.website || '').replace(/\/+$/, '');
+  return `${promoText(s, 'en', p).replace(/\*/g, '')}\n\n📺 Live TV, movies and series on all your devices: Smart TV, phone, tablet, Firestick and more.\n${site ? `👉 ${site}\n` : ''}💬 Questions? Message us anytime.\n\n#${String(p.name || 'BlackFriday').replace(/\W+/g, '')} #${app.replace(/\W+/g, '')}`;
+}
 // Finds the credit balance in a panel answer: the path from API settings first, then the usual field names.
 const CREDIT_KEYS = ['credits', 'credit', 'balance', 'credit_balance', 'available_credits', 'reseller_credits', 'points'];
 const toNum = (v) => { if (typeof v === 'number' && isFinite(v)) return v; if (typeof v === 'string') { const m = v.replace(/,/g, '').match(/-?\d+(\.\d+)?/); if (m && v.length < 40) return Number(m[0]); } return null; };
@@ -642,7 +718,9 @@ export function profileEmail(s, c, appUrl) {
   const body = fr
     ? `Voici vos identifiants pour vous connecter à ${app} et voir votre profil (abonnement, date de fin, vos coordonnées).\n\n*Email :* ${mail || '—'}\n*Nom d'utilisateur :* ${c.username}\n*Mot de passe :* ${pass || '(celui que vous avez choisi)'}\n*Votre profil :* ${profile}\n\nAppuyez sur le bouton ou ouvrez le lien ci-dessus pour voir votre profil.`
     : `Here are your details to sign in to ${app} and see your profile (subscription, end date and your contact details).\n\n*Email:* ${mail || '—'}\n*Username:* ${c.username}\n*Password:* ${pass || '(the one you chose)'}\n*Your profile:* ${profile}\n\nTap the button or open the link above to see your profile.`;
-  const camp = { split: false, lang: fr ? 'fr' : 'en', content: { all: { subject: fr ? `Votre profil ${app}` : `Your ${app} profile`, title: fr ? 'Votre profil' : 'Your profile', body, button: fr ? 'Ouvrir mon profil' : 'Open my profile' } }, link: profile };
+  const n = customerConns(c, s).length;
+  const extraTxt = n > 1 ? (fr ? `\n\nVous avez *${n} connexions*. Les identifiants et le lien M3U de chacune sont sur votre profil.` : `\n\nYou have *${n} connections*. The login details and M3U link of each one are on your profile.`) : '';
+  const camp = { split: false, lang: fr ? 'fr' : 'en', content: { all: { subject: fr ? `Votre profil ${app}` : `Your ${app} profile`, title: fr ? 'Votre profil' : 'Your profile', body: body + extraTxt, button: fr ? 'Ouvrir mon profil' : 'Open my profile' } }, link: profile };
   return newsletterEmail(s, c, camp, appUrl, '');
 }
 export function accessEmail(s, c, password, kind, appUrl) {
@@ -657,6 +735,8 @@ export function accessEmail(s, c, password, kind, appUrl) {
   const m3u = String(c.m3u || '').trim() ? [String(c.m3u).trim()] : (dns ? [`${dns}/get.php?${q}&type=m3u_plus&output=ts`, `${dns}/get.php?${q}&type=m3u_plus&output=m3u8`] : []);
   const date = new Date(c.expiresAt).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short' });
   const trial = kind === 'trial';
+  const others = customerConns(c, s).filter((x) => !x.main); const fr = lang === 'fr';
+  const extraHtml = () => others.length ? `<tr><td class="mobile-pad" style="padding:0 40px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden"><tr><td style="padding:20px 24px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;text-align:${align}"><h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a">📡 ${fr ? 'Vos autres connexions' : 'Your other connections'}</h2><p style="margin:6px 0 0;font-size:13px;color:#475569;line-height:1.5">${fr ? 'Chaque connexion a ses propres identifiants. Utilisez-en une par appareil.' : 'Each connection has its own login details. Use one per device.'}</p></td></tr>${others.map((x, i) => `<tr><td style="padding:16px 24px;border-bottom:1px solid #e2e8f0;text-align:${align}"><div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:6px">${fr ? 'Connexion' : 'Connection'} ${i + 2}${x.label ? ' · ' + e(x.label) : ''} <span style="display:inline-block;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:2px 8px;border-radius:50px">${e(x.typeName)}</span> <span style="font-size:12px;color:#64748b;font-weight:600">${x.devices} ${fr ? 'appareil(s)' : 'device(s)'}</span></div><table border="0" cellpadding="0" cellspacing="0" width="100%">${x.u ? row(L.user, e(x.u)) + row(L.pass, e(x.p)) : ''}${x.dns && x.u ? row(L.dns, `<a href="${e(x.dns)}" style="color:${P};text-decoration:none;font-size:14px">${e(x.dns)}</a>`) : ''}</table>${x.m3u ? `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-top:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">M3U</b><br><a href="${e(x.m3u)}" style="color:#0369a1;text-decoration:none">${e(x.m3u)}</a></div>` : ''}</td></tr>`).join('')}</table></td></tr>` : '';
   const macNote = lang === 'fr'
       ? 'Vous utilisez un appareil basé sur une adresse MAC (TV connectée, STB…) ? Envoyez votre adresse MAC au support sur WhatsApp ou Telegram et nous activerons votre compte.'
       : 'Using a MAC-address device (Smart TV, STB, Formuler…)? Send your MAC address to support on WhatsApp or Telegram and we will activate it for you.';
@@ -685,7 +765,7 @@ ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="96" style="display:block;
 <tr><td style="padding:20px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%">${row(L.user, e(u))}${row(L.pass, e(p))}${dns ? row(L.dns, `<a href="${e(dns)}" style="color:${P};text-decoration:none;font-size:14px">${e(dns)}</a>`) : ''}
 ${m3u.length ? `<tr><td colspan="2" style="padding-top:16px;text-align:${align}"><div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${L.m3u}</div>${m3u.map((x, i) => `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-bottom:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">${i ? 'HLS' : 'TS'}:</b> ${e(x)}</div>`).join('')}</td></tr>` : ''}${c.ibo && c.ibo.mac ? row('Device MAC Address', e(c.ibo.mac)) : ''}${c.ibo && c.ibo.key ? row('Device Key', e(c.ibo.key)) : ''}
 </table></td></tr></table></td></tr>
-${base ? `<tr><td class="mobile-pad" align="center" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#0c4a6e,#0284c7);border-radius:12px"><tr><td align="center" style="padding:24px;color:#fff"><h3 style="margin:0 0 6px;font-size:17px;color:#fff">${v('appTitle')}</h3><p style="margin:0 0 16px;font-size:13px;color:#e0f2fe">${L.appText}</p>
+${extraHtml()}${base ? `<tr><td class="mobile-pad" align="center" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#0c4a6e,#0284c7);border-radius:12px"><tr><td align="center" style="padding:24px;color:#fff"><h3 style="margin:0 0 6px;font-size:17px;color:#fff">${v('appTitle')}</h3><p style="margin:0 0 16px;font-size:13px;color:#e0f2fe">${L.appText}</p>
 <a href="${e(base)}/" style="display:inline-block;background:#fff;color:#0369a1;font-weight:700;padding:11px 18px;border-radius:10px;text-decoration:none;margin:4px">${L.openApp}</a> <a href="${e(base)}/download.html" style="display:inline-block;background:#38bdf8;color:#fff;font-weight:700;padding:11px 18px;border-radius:10px;text-decoration:none;margin:4px">${L.getApp}</a></td></tr></table></td></tr>` : ''}
 <tr><td class="mobile-pad" style="padding:0 40px 30px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px"><tr><td style="padding:24px;text-align:${align}"><h3 style="margin:0 0 14px;font-size:16px;font-weight:700;color:#166534">${L.setup}</h3>
 <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;line-height:1.6">${step(1, L.s1)}${step(2, L.s2)}${step(3, L.s3)}${step(4, L.s4)}</table></td></tr></table></td></tr>
@@ -699,15 +779,17 @@ ${sup ? `<div style="font-size:13px;font-weight:700;color:${P};text-transform:up
 
 // ---- Renewal email (your "subscription expired" template), English / French / Arabic ----
 const RM = {
-  en: { dir: 'ltr', badgeSub: 'Subscription expired • Renewal reminder', badgeTrial: 'Free trial ended • Special offer', title: 'Renew Your {app} Subscription Today 🎉', dear: 'Dear {name},',
-    introTrial: '🌼 We hope you enjoyed your recent trial with <b>{app}</b>. Thank you for giving our service a try.', introSub: '🌼 Thank you for watching with <b>{app}</b>. Your subscription ended on <b>{date}</b>.',
-    intro2: 'We’d be delighted to welcome you back with our special renewal offer:', offerLabel: 'Special Welcome-Back Package', coupon: '🎁 Exclusive Coupon Code', cta: 'Renew Subscription Now →',
-    how: 'How to Renew', h1: '🌐 Visit {site}', h2: '📺 Browse the available subscription plans and select the package that suits you.', h3: '🎁 Enter {coupon} at checkout, if applicable.', h4: '🔒 Complete your payment through the secure checkout.', h5: '🔄 Once your order is confirmed, contact our support team if you need help with activation.',
-    help: 'If you have any questions or need help with your renewal, our support team is happy to assist.', thanks: 'Thank you for choosing <b>{app}</b>. We appreciate your support and look forward to serving you again.', regards: 'Best regards,', team: 'Customer Support Team', subject: 'Renew your {app} subscription — special offer inside 🎉' },
+  en: { dir: 'ltr', badgeSub: 'Subscription ended • Renewal reminder', badgeTrial: 'Free trial ended • Special offer', title: 'Renew Your {app} Subscription Today!', dear: 'Dear {name},',
+    introTrial: 'Thank you for Choosing <b>{app}</b>! We hope you enjoyed your recent trial and had a great streaming experience.', introSub: 'Thank you for Choosing <b>{app}</b>! We hope you enjoyed your subscription and had a great streaming experience.',
+    intro2Trial: 'Your trial period has now ended, but you can continue enjoying our service by renewing your subscription today.', intro2Sub: 'Your subscription ended on <b>{date}</b>, but you can continue enjoying our service by renewing your subscription today.',
+    offerLabel: 'Special Welcome-Back Package', coupon: '🎁 Exclusive Coupon Code', cta: 'Renew Subscription Now →',
+    how: 'How to Renew Your Subscription', h1: 'Visit {site}.', h2: 'Browse our available subscription plans.', h2b: 'Select the package that best suits your needs.', h3: 'Enter the coupon code {coupon} at checkout, if applicable.', h4: 'Complete your payment through the available checkout process.', h5: 'Once your order is confirmed, contact our support team if you need assistance with activation.',
+    helpTitle: 'Need Help?', help: 'If you have any questions or need assistance with your renewal, please contact our support team:', emailL: 'Email:', webL: 'Website:', thanks: 'Thank you for choosing <b>{app}</b>. We appreciate your support and look forward to welcoming you back!', regards: 'Best regards,', team: 'Customer Support Team', subject: 'Renew Your {app} Subscription Today!' },
   fr: { dir: 'ltr', badgeSub: 'Abonnement expiré • Rappel de renouvellement', badgeTrial: 'Essai terminé • Offre spéciale', title: 'Renouvelez votre abonnement {app} 🎉', dear: 'Cher/Chère {name},',
     introTrial: "🌼 Nous espérons que vous avez apprécié votre essai avec <b>{app}</b>. Merci d'avoir essayé notre service.", introSub: '🌼 Merci de regarder avec <b>{app}</b>. Votre abonnement a pris fin le <b>{date}</b>.',
-    intro2: 'Nous serions ravis de vous retrouver avec notre offre spéciale de renouvellement :', offerLabel: 'Offre spéciale de retour', coupon: '🎁 Code promo exclusif', cta: "Renouveler maintenant →",
-    how: 'Comment renouveler', h1: '🌐 Rendez-vous sur {site}', h2: '📺 Parcourez les formules et choisissez celle qui vous convient.', h3: '🎁 Saisissez {coupon} lors du paiement, si applicable.', h4: '🔒 Finalisez votre paiement en toute sécurité.', h5: "🔄 Une fois la commande confirmée, contactez notre support si vous avez besoin d'aide pour l'activation.",
+    intro2Trial: "Votre période d'essai est terminée, mais vous pouvez continuer à profiter de notre service en renouvelant votre abonnement dès aujourd'hui.", intro2Sub: "Votre abonnement a pris fin le <b>{date}</b>, mais vous pouvez continuer à profiter de notre service en le renouvelant dès aujourd'hui.",
+    helpTitle: "Besoin d'aide ?", emailL: 'Email :', webL: 'Site web :', h2b: 'Choisissez la formule qui vous convient le mieux.', offerLabel: 'Offre spéciale de retour', coupon: '🎁 Code promo exclusif', cta: "Renouveler maintenant →",
+    how: 'Comment renouveler', h1: 'Rendez-vous sur {site}.', h2: 'Parcourez nos formules disponibles.', h3: 'Saisissez le code {coupon} lors du paiement, si applicable.', h4: 'Finalisez votre paiement en toute sécurité.', h5: "Une fois la commande confirmée, contactez notre support si vous avez besoin d'aide pour l'activation.",
     help: "Pour toute question ou aide au renouvellement, notre équipe support est là pour vous.", thanks: "Merci d'avoir choisi <b>{app}</b>. Nous serons heureux de vous servir à nouveau.", regards: 'Cordialement,', team: 'Service client', subject: 'Renouvelez votre abonnement {app} — offre spéciale 🎉' },
 
 };
@@ -832,7 +914,7 @@ export const WA_TPL = {
   },
 };
 export function renewalEmail(s, c, appUrl) {
-  const lang = ml(c); const L = RM[lang] || RM.en; const e = escHtml; const o = s.renewalOffer || {};
+  const lang = ml(c); const L = RM[lang] || RM.en; const e = escHtml; const pr = promoLive(s, 'email'); const o = pr ? { ...(s.renewalOffer || {}), coupon: String(pr.code).trim() } : s.renewalOffer || {};
   const app = s.branding.appName || 'IPTV';
   const site = String(o.url || s.email.website || s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const siteTxt = site.replace(/^https?:\/\//, '');
@@ -851,11 +933,11 @@ export function renewalEmail(s, c, appUrl) {
 <tr><td height="6" style="background:linear-gradient(90deg,#0284c7 0%,#0ea5e9 50%,#38bdf8 100%);font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td align="center" class="mobile-pad" style="padding:40px 40px 30px;background:linear-gradient(180deg,#f8fafc 0%,#fff 100%);border-bottom:1px solid #f1f5f9">
 ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="95" style="display:block;border-radius:50%;border:3px solid #0ea5e9;box-shadow:0 4px 12px rgba(14,165,233,.2);margin:0 auto 18px">` : ''}
-<div style="display:inline-block;background:#fef3c7;border:1px solid #fde68a;color:#b45309;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${L[trial ? 'badgeTrial' : 'badgeSub']}</div>
+<div style="display:inline-block;background:${pr ? '#0f172a' : '#fef3c7'};border:1px solid ${pr ? '#0f172a' : '#fde68a'};color:${pr ? '#fbbf24' : '#b45309'};font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:50px;margin-bottom:14px">${pr ? `🖤 ${e(pr.name || 'Black Friday')}${pr.offer ? ' • ' + e(pr.offer) : ''}` : L[trial ? 'badgeTrial' : 'badgeSub']}</div>
 <h1 class="header-title" style="margin:0;font-size:26px;font-weight:800;color:#0f172a;line-height:1.3">${v('title')}</h1></td></tr>
 <tr><td class="mobile-pad" style="padding:32px 40px 20px;text-align:${al}"><p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a">${v('dear', { name: c.name || '' })}</p>
-<p style="margin:0 0 14px;font-size:15px;line-height:1.65">${v(trial ? 'introTrial' : 'introSub', { date })}</p><p style="margin:0;font-size:15px;line-height:1.65">${L.intro2}</p></td></tr>
-<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:2px solid #7dd3fc;border-radius:14px;overflow:hidden"><tr><td align="center" style="padding:26px 24px;text-align:center">
+<p style="margin:0 0 14px;font-size:15px;line-height:1.65">${v(trial ? 'introTrial' : 'introSub', { date })}</p><p style="margin:0;font-size:15px;line-height:1.65">${v(trial ? 'intro2Trial' : 'intro2Sub', { date })}</p></td></tr>
+${pr ? `<tr><td class="mobile-pad" style="padding:0 40px 18px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#0f172a;border-radius:14px"><tr><td align="center" style="padding:22px 24px;text-align:center;color:#fff"><div style="font-size:12px;font-weight:800;letter-spacing:3px;color:#fbbf24;text-transform:uppercase;margin-bottom:6px">🖤 ${e(pr.name || 'Black Friday')}</div><div dir="auto" style="font-size:20px;font-weight:800;line-height:1.35;color:#fff">${e(promoBanner(lang, pr))}</div>${promoEnd(pr, lang) ? `<div style="font-size:13px;color:#cbd5e1;margin-top:8px">⏳ ${lang === 'fr' ? 'Jusqu’au' : 'Until'} ${e(promoEnd(pr, lang))}</div>` : ''}</td></tr></table></td></tr>` : ''}<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:2px solid #7dd3fc;border-radius:14px;overflow:hidden"><tr><td align="center" style="padding:26px 24px;text-align:center">
 <div style="font-size:13px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">${L.offerLabel}</div>
 <div dir="auto" style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.3;margin-bottom:6px">${e(o.title || '')}</div>
 ${o.price ? `<div dir="auto" style="font-size:32px;font-weight:900;color:#0284c7;margin-bottom:8px">${e(o.price)}</div>` : ''}
@@ -864,13 +946,13 @@ ${o.coupon ? `<div style="background:#fff;border:2px dashed #38bdf8;border-radiu
 ${site ? `<a href="${e(site)}" class="cta-btn" style="display:inline-block;background:#0284c7;color:#fff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;box-shadow:0 4px 12px rgba(2,132,199,.25)">${L.cta}</a>` : ''}
 </td></tr></table></td></tr>
 <tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px"><tr><td style="padding:24px;text-align:${al}"><h2 style="margin:0 0 16px;font-size:17px;font-weight:700;color:#0f172a">${L.how}</h2>
-<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;line-height:1.6">${site ? step(1, v('h1')) : ''}${step(site ? 2 : 1, L.h2)}${o.coupon ? step(site ? 3 : 2, v('h3')) : ''}${step(4 - (site ? 0 : 1) - (o.coupon ? 0 : 1), L.h4)}${step(5 - (site ? 0 : 1) - (o.coupon ? 0 : 1), L.h5)}</table></td></tr></table></td></tr>
-<tr><td class="mobile-pad" style="padding:0 40px 32px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0"><tr><td style="padding:22px 24px;text-align:${al}"><p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#166534">${L.help}</p>
-<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;color:#166534">${s.email.supportEmail ? `<tr><td style="padding:4px 0">📧 <a href="mailto:${e(s.email.supportEmail)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.email.supportEmail)}</a></td></tr>` : ''}${site ? `<tr><td style="padding:4px 0">🌐 <a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a></td></tr>` : ''}${s.branding.supportUrl ? `<tr><td style="padding:4px 0">💬 <a href="${e(s.branding.supportUrl)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.branding.supportLabel || 'WhatsApp')}</a></td></tr>` : ''}</table></td></tr></table></td></tr>
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;line-height:1.6">${[site && v('h1'), L.h2, L.h2b, o.coupon && v('h3'), L.h4, L.h5].filter(Boolean).map((t, n) => step(n + 1, t)).join('')}</table></td></tr></table></td></tr>
+<tr><td class="mobile-pad" style="padding:0 40px 32px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0"><tr><td style="padding:22px 24px;text-align:${al}"><div style="font-size:16px;font-weight:700;color:#166534;margin-bottom:6px">${L.helpTitle}</div><p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#166534">${L.help}</p>
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:14px;color:#166534">${s.email.supportEmail ? `<tr><td style="padding:4px 0">📧 ${L.emailL} <a href="mailto:${e(s.email.supportEmail)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.email.supportEmail)}</a></td></tr>` : ''}${site ? `<tr><td style="padding:4px 0">🌐 ${L.webL} <a href="${e(site)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(siteTxt)}</a></td></tr>` : ''}${s.branding.supportUrl ? `<tr><td style="padding:4px 0">💬 <a href="${e(s.branding.supportUrl)}" style="color:#0284c7;text-decoration:none;font-weight:600">${e(s.branding.supportLabel || 'WhatsApp')}</a></td></tr>` : ''}</table></td></tr></table></td></tr>
 <tr><td class="mobile-pad" style="padding:0 40px 36px;border-bottom:1px solid #f1f5f9;text-align:${al}"><p style="margin:0 0 18px;font-size:14px;line-height:1.65">${v('thanks')}</p><p style="margin:0;font-size:14px;line-height:1.6;color:#64748b">${L.regards}<br><b style="color:#0f172a;font-size:15px">${e(app)}</b><br><span style="color:#0284c7;font-weight:600">${L.team}</span></p></td></tr>
 <tr><td align="center" class="mobile-pad" style="padding:24px 40px;background:#f8fafc;text-align:center">${site ? `<a href="${e(site)}" style="font-size:13px;font-weight:700;color:#0284c7;text-decoration:none;letter-spacing:.5px">${e(siteTxt)}</a>` : ''}</td></tr>
 </table></td></tr></table></body></html>`;
-  return { subject: v('subject').replace(/<[^>]+>/g, ''), html };
+  return { subject: (pr ? `🖤 ${pr.name || 'Black Friday'}: ` : '') + v('subject').replace(/<[^>]+>/g, ''), html };
 }
 
 export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) {
@@ -1900,7 +1982,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ ok: true });
         }
         if (R('GET', '/api/me')) {
-          const { lineUsername, linePassword, loginPassword, ...pub } = v;
+          const { lineUsername, linePassword, loginPassword, lines: _lines, ...pub } = v; pub.devicesTotal = connDevices(c);
           const sales = (await getSales()).filter((x) => x.customerId === c.id && Number(x.amount) > 0);
           const totalPaidUsd = Math.round(sales.reduce((a, x) => a + (Number(x.amountUsd) || 0), 0) * 100) / 100;
           return ok({
@@ -1917,6 +1999,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               relay: String(s.player.relayUrl || '').trim().replace(/\/+$/, ''),
               dns: String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, ''),
               m3u: String(c.m3u || '').trim(),
+              lineType: CONN_TYPES[c.lineType] ? c.lineType : 'xtream1', lines: customerConns(c, s).filter((x) => !x.main),
               ibo: c.ibo && (String(c.ibo.mac || '').trim() || String(c.ibo.key || '').trim()) ? { mac: String(c.ibo.mac || '').trim(), key: String(c.ibo.key || '').trim() } : null,
             } : null,
           });
@@ -2875,6 +2958,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let newRows = null;
         if (body?.email && Array.isArray(body.email.transRows)) { if (!isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.'); newRows = normRows(body.email.transRows, transRowsOf(s)); delete body.email.transRows; }
         const next = deepMerge(s, body || {});
+        if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
+          next.promo = { on: !!q.on, name: String(q.name || 'Black Friday').trim().slice(0, 40) || 'Black Friday', code: String(q.code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 30), offer: String(q.offer || '').trim().slice(0, 60), from: day(q.from), to: day(q.to), email: q.email !== false, whatsapp: q.whatsapp !== false, telegram: q.telegram !== false }; }
         if (newRows) { next.email.transRows = newRows; next.email.transKeys = []; next.email.transDomains = []; }
         next.security.proxySecret = s.security.proxySecret;
         next.branding.whatsapp = String(next.branding.whatsapp || '').replace(/\D/g, '');
@@ -2957,6 +3042,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           renewals: [{ at: Date.now(), type: 'new', planId: plan ? plan.id : 'custom', days: Math.round((expiresAt - startAt) / DAY), price: Number(body.price) || 0, credits: plan ? planCredits(plan) : Number(body.credits) || 0 }],
         };
         if (ln0) { c.lineUsername = ln0.u; c.linePassword = ln0.p; c.dns = ln0.dns; }
+        if (CONN_TYPES[body.lineType]) c.lineType = body.lineType;
+        if (Array.isArray(body.lines)) { const ls = cleanConns(body.lines); if (ls.length) c.lines = ls; }
         let panel = null;
         if (body.createOnPanel && !ln0) {
           panel = await panelCall(s, 'create', panelVars(c, s));
@@ -3050,6 +3137,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           }
           if (c.lineUsername + '\n' + c.linePassword !== lineWas && !body.password) await adoptLine(list, c);
           if (body.connections !== undefined) c.connections = Number(body.connections) || 1;
+          if (body.lineType !== undefined) c.lineType = CONN_TYPES[body.lineType] ? body.lineType : 'xtream1';
+          if (body.lines !== undefined) { c.lines = cleanConns(body.lines); if (!c.lines.length) delete c.lines; }
           if (body.username && body.username !== c.username) {
             const u = String(body.username).trim();
             if (list.some((x) => x !== c && x.username.toLowerCase() === u.toLowerCase())) return err(400, 'This username is already used.');
@@ -3166,7 +3255,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const vars = { name: (c.name || '').split(' ')[0], fullname: c.name || '', app: s.branding.appName || 'IPTV', package: pk.title, price, days: pk.days, devices: pk.devices,
             link: pl?.url || '', username: lu, password: lp, dns, m3u: dns && lp ? `${dns}/get.php?username=${encodeURIComponent(lu)}&password=${encodeURIComponent(lp)}&type=m3u_plus&output=ts` : '',
             expires: new Date(c.expiresAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
-            website: s.email.website || '', order: c.orderNo || '',
+            website: s.email.website || '', order: c.orderNo || '', connections: connsText(c, s, lang),
+            promo: promoLive(s, body.channel === 'telegram' ? 'telegram' : 'whatsapp') ? promoText(s, lang, s.promo) : '', code: promoLive(s) ? String(s.promo.code) : '',
             ends: c.expiresAt < Date.now() ? { en: 'ended on', fr: 's\'est terminé le' }[lang] : { en: 'ends on', fr: 'se termine le' }[lang] };
           const tpl = String(body.template || (waOwn ? waOwn.text[lang] || waOwn.text.en || waOwn.text.fr || waOwn.text.ar : s.waTemplates?.[type]?.[lang] || WA_TPL[type][lang]));
           const out = []; // a line whose value is empty (e.g. no DNS yet) is left out, with its label line
@@ -3175,7 +3265,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             if (empty) { if (/^\s*\{\w+\}\s*$/.test(line) && /:\s*$/.test(out.at(-1) || '')) out.pop(); continue; }
             out.push(line.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)));
           }
-          const text = out.join('\n').replace(/\n{3,}/g, '\n\n');
+          let text = out.join('\n').replace(/\n{3,}/g, '\n\n');
+          // Extra connections are added to the login / welcome messages; the promotion to renewal, trial and order messages.
+          if (vars.connections && ['login', 'thanks', 'trial'].includes(type) && !/\{connections\}/.test(tpl)) text = text.trimEnd() + '\n\n' + vars.connections;
+          if (vars.promo && ['renew', 'trial', 'pay'].includes(type) && !/\{promo\}/.test(tpl)) text = text.trimEnd() + '\n\n' + vars.promo;
           const phone = String(body.phone || c.whatsapp || c.phone || '').replace(/\D/g, '');
           if (body.log) { markSent(c, body.channel === 'telegram' ? 'telegram' : 'whatsapp'); if (body.channel !== 'telegram') c.waSentAt = Date.now(); c.waSentType = type; if (type !== 'login') { c.orderSentPkg = pk.id; c.orderSentAcc = pl?.acc || ''; } await saveCustomers(list); await log('customer', `WhatsApp "${type}" message to ${c.username}${type !== 'login' ? ` (${pk.title}, ${price})` : ''}`); }
           return ok({ text, phone, lang, type, payAcc: pl?.acc || '', template: tpl, isDefault: waOwn ? true : !s.waTemplates?.[type]?.[lang] });
@@ -3436,7 +3529,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let out;
         try {
           const url = String(s.email.appUrl || body.appUrl || '');
-          if (body.kind === 'renewal') out = renewalEmail(s, sample, url);
+          if (body.kind === 'renewal') out = renewalEmail(isObj(body.promo) ? { ...s, promo: { ...(s.promo || {}), ...body.promo, on: true, from: '' } } : s, sample, url);
           else if (body.kind === 'order') out = orderEmail(s, sample, (s.orderPackages || [])[0] || { id: 'x', title: '1 Month', days: 30, devices: 1, price: 29.99 }, url);
           else if (body.kind === 'expiry') out = { subject: mt(lang, 'expirySubject', { days: 3 }), html: mailHtml(s, lang, [[mt(lang, 'user'), sample.username], [mt(lang, 'expires'), new Date(sample.expiresAt).toLocaleDateString()]], mt(lang, 'expiryBody', { date: new Date(sample.expiresAt).toLocaleDateString() }), sample.name) };
           else out = accessEmail(s, sample, 'Pass1234', body.kind === 'trial' ? 'trial' : 'sub', url);
@@ -3490,6 +3583,17 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await saveCustomers(list);
         await log('customer', `Package emails sent to ${batch.length} customers (${body.pkg === 'random' ? 'random packages' : batch[0].p.title})`);
         return ok({ sent: batch.length });
+      }
+      if (R('GET', '/api/admin/promo')) return ok({ promo: s.promo || {}, live: !!promoLive(s), campaign: promoCampaign(s), post: promoChannelPost(s), wa: { en: promoText(s, 'en'), fr: promoText(s, 'fr') }, channel: s.branding.telegramChannel || '' });
+      if (R('POST', '/api/admin/promo/telegram')) { // posts the promotion in your public Telegram channel (your bot must be an admin there)
+        const ch = String(body.channel || s.branding.telegramChannel || '').trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
+        if (!ch) return err(400, 'Add your public Telegram channel in Login & branding first.');
+        if (!tgOn(s)) return err(400, 'Set up your Telegram bot first (Login & branding → Telegram).');
+        const text = String(body.text || promoChannelPost(s)).slice(0, 3800).trim();
+        const r = await tgSend(s, /^-?\d+$/.test(ch) ? ch : '@' + ch, text);
+        await log('marketing', `Telegram channel post @${ch}${r.ok ? '' : ' — failed: ' + r.error}`);
+        if (!r.ok) return err(502, `Telegram: ${r.error || 'not sent'}. Add your bot to the channel as an admin who can post messages, then try again.`);
+        return ok({ ok: true });
       }
       if (R('GET', '/api/admin/newsletter')) { // groups and saved draft
         const list = await getCustomers(); const w = Number(s.userDashboard.expiryWarningDays) || 7; const camp = (await store.get('newsletter')) || null;

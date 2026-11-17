@@ -1446,3 +1446,62 @@ test('Resend keys: unlimited rows for customer and marketing emails, masked, kep
   assert.equal((await x.call('POST', '/api/admin/email/test-key', { scope: 'trans', key: 're_new', domain: '' }, tok)).status, 400);
   assert.equal(JSON.parse(x.db.get('mkt').v).rows[0].testOk, true);
 });
+
+test('connections: a customer keeps several lines (Xtream 1, Xtream 2, Unlimited M3U) and sees them all on /profile', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const c = await addCustomer(x, tok, { username: 'main1', lineSame: false, lineUsername: 'main1', linePassword: 'pw1', m3u: 'http://dns.test:8080/get.php?username=main1&password=pw1&type=m3u_plus', lineType: 'xtream1', connections: 1,
+    lines: [{ type: 'xtream2', devices: 2, label: 'Kids TV', m3u: 'http://dns2.test:8080/get.php?username=second2&password=pw2&type=m3u_plus' }, { type: 'unlimited', m3u: 'https://lists.example.com/my.m3u' }, { type: 'bogus', u: '', p: '' }] });
+  const list = (await x.call('GET', '/api/admin/customers', {}, tok)).json; const row = list.find((v) => v.id === c.id);
+  assert.equal(row.lines.length, 2, 'empty rows are dropped');
+  assert.deepEqual(row.lines.map((l) => [l.type, l.u, l.p, l.dns]), [['xtream2', 'second2', 'pw2', 'http://dns2.test:8080'], ['unlimited', '', '', '']]);
+  // edit: change a type, remove one
+  const up = await x.call('PUT', `/api/admin/customers/${c.id}`, { lineType: 'xtream2', lines: [{ ...row.lines[0], type: 'xtream1', devices: 3 }] }, tok); assert.equal(up.status, 200);
+  const u = await x.call('POST', '/api/login', { username: 'main1', password: 'pw1' }); assert.equal(u.status, 200, 'signs in with the line');
+  const me = (await x.call('GET', '/api/me', {}, u.json.token)).json;
+  assert.equal(me.user.lines, undefined, 'lines are not in the public user object');
+  assert.equal(me.stream.lineType, 'xtream2');
+  assert.equal(me.stream.lines.length, 1); assert.equal(me.stream.lines[0].typeName, 'Xtream Codes 1 + M3U'); assert.equal(me.user.devicesTotal, 4);
+  assert.match(me.stream.lines[0].m3u, /username=second2&password=pw2/);
+  // the line email lists the other connection
+  const cust = JSON.parse(x.db.get('customers').v).find((v) => v.id === c.id);
+  const m = accessEmail({ branding: { appName: 'INTPROTO-TV', logoUrl: '' }, email: {}, player: {}, trial: { hours: 24 } }, cust, 'secret12', 'sub', 'https://app.test');
+  assert.match(m.html, /Your other connections/); assert.match(m.html, /Kids TV/); assert.match(m.html, /second2/);
+  // WhatsApp login message adds the other connection
+  const wa = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'login', lang: 'en' }, tok)).json;
+  assert.match(wa.text, /Connection 2\* — Kids TV · Xtream Codes 1 \+ M3U · 3 device\(s\)/);
+});
+
+test('Black Friday: code added to renewal email and WhatsApp only while on and between the dates', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const c = await addCustomer(x, tok, { phone: '+212600000001' });
+  const today = new Date().toISOString().slice(0, 10), later = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+  let wa = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', lang: 'en' }, tok)).json;
+  assert.doesNotMatch(wa.text, /BLACKFRIDAY/, 'off by default');
+  assert.equal((await x.call('PUT', '/api/admin/settings', { promo: { on: true, code: ' bf 26 ', offer: '30% OFF', from: today, to: later } }, tok)).status, 200);
+  const st = (await x.call('GET', '/api/admin/promo', {}, tok)).json; assert.equal(st.live, true); assert.equal(st.promo.code, 'BF26');
+  wa = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', lang: 'en' }, tok)).json;
+  assert.match(wa.text, /Black Friday is here!\*\nGet \*30% OFF\* on every .* plan with code \*BF26\*/);
+  const fr = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'trial', lang: 'fr' }, tok)).json; assert.match(fr.text, /Le Black Friday est là/);
+  const login = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'login', lang: 'en' }, tok)).json; assert.doesNotMatch(login.text, /BF26/, 'not in login details');
+  const rn = (await x.call('GET', `/api/admin/customers/${c.id}/renewalpreview`, {}, tok)).json;
+  assert.match(rn.subject, /^🖤 Black Friday: /); assert.match(rn.html, /BF26/); assert.doesNotMatch(rn.html, /LION001/);
+  // only WhatsApp turned off: Telegram text still has it
+  await x.call('PUT', '/api/admin/settings', { promo: { whatsapp: false } }, tok);
+  assert.doesNotMatch((await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', lang: 'en' }, tok)).json.text, /BF26/);
+  assert.match((await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', lang: 'en', channel: 'telegram' }, tok)).json.text, /BF26/);
+  // dates in the past: nothing
+  await x.call('PUT', '/api/admin/settings', { promo: { from: '2020-11-20', to: '2020-11-30' } }, tok);
+  assert.equal((await x.call('GET', '/api/admin/promo', {}, tok)).json.live, false);
+  assert.match((await x.call('GET', `/api/admin/customers/${c.id}/renewalpreview`, {}, tok)).json.html, /LION001/);
+});
+
+test('Black Friday: newsletter preset and Telegram channel post', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { promo: { on: true, code: 'BLACKFRIDAY', offer: '', from: '', to: '2026-12-01' } }, tok);
+  const d = (await x.call('GET', '/api/admin/promo', {}, tok)).json;
+  assert.equal(d.campaign.coupon, 'BLACKFRIDAY'); assert.match(d.campaign.content.en.body, /biggest discount of the year/); assert.match(d.campaign.content.fr.title, /Le Black Friday est là/);
+  assert.equal((await x.call('POST', '/api/admin/promo/telegram', {}, tok)).status, 400, 'no channel yet');
+  await x.call('PUT', '/api/admin/settings', { branding: { telegramChannel: 'intprototv' }, telegram: { enabled: true, botToken: '123:abc' } }, tok);
+  const r = await x.call('POST', '/api/admin/promo/telegram', {}, tok); assert.equal(r.status, 200, JSON.stringify(r.json));
+  const sent = x.tg.at(-1); assert.equal(sent.chat_id, '@intprototv'); assert.match(sent.text, /Black Friday is here!/); assert.match(sent.text, /BLACKFRIDAY/);
+});

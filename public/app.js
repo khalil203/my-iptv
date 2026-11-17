@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=83';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=84';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=83';
 import { ic } from './icons.js?v=83';
@@ -780,10 +780,10 @@ function customerListHtml() {
   const list = all.slice(0, lim);
   const more = all.length > lim ? `<div style="text-align:center;margin:14px"><button class="btn" data-act="cust-more">Show more (${all.length - lim} left)</button></div>` : '';
   const narrow = matchMedia('(max-width: 760px)').matches;
-  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
+  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${connChip(c)}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
       <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${connChip(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
@@ -794,6 +794,24 @@ function adminCustomers() {
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial', 'request'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f === 'request' ? '🛒 requests' : f} (${counts(f)})</a>`).join('')}</div>
     <div id="cust-list">${customerListHtml()}</div>`;
 }
+
+const CONN_UI = [['xtream1', 'Xtream Codes 1 + M3U'], ['xtream2', 'Xtream Codes 2 + M3U'], ['unlimited', 'Unlimited M3U']];
+const connName = (t) => (CONN_UI.find((x) => x[0] === t) || CONN_UI[0])[1];
+// One extra connection (device line) in the customer form. Inputs carry data-skip so the form reader leaves them to connRead().
+function connRow(x = {}, n = '') {
+  const a = (k) => `data-skip data-cn="${k}" autocapitalize="none" spellcheck="false"`;
+  return `<div class="conn-row" data-cid="${esc(x.id || '')}" style="border:1px solid var(--line,#e2e8f0);border-radius:12px;padding:10px 12px;margin:8px 0">
+    <div class="row" style="gap:6px;margin-bottom:4px"><b class="conn-n" style="flex:1">📡 Connection ${n}</b><button type="button" class="btn sm danger" data-act="conn-del" title="Remove this connection">✕ Remove</button></div>
+    <div class="grid3">${field('Type', 'cn_type', x.type || 'xtream1', { type: 'select', options: CONN_UI, attrs: 'data-skip data-cn="type"' })}${field('Devices', 'cn_devices', x.devices || 1, { type: 'number', attrs: 'data-skip data-cn="devices" min="1" max="50"' })}${field('Name (optional)', 'cn_label', x.label || '', { ph: 'Living room TV, Son…', attrs: 'data-skip data-cn="label" maxlength="40"' })}</div>
+    ${field('M3U link', 'cn_m3u', x.m3u || '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: a('m3u') + ' dir="ltr" data-input="conn-m3u"', help: 'Paste the link and the username, password and DNS fill in by themselves.' })}
+    <div class="grid3">${field('Username', 'cn_u', x.u || '', { attrs: a('u') })}${field('Password', 'cn_p', x.p || '', { attrs: a('p') })}${field('DNS', 'cn_dns', x.dns || '', { ph: 'http://your-dns.com:8080', attrs: a('dns') + ' dir="ltr"' })}</div></div>`;
+}
+const connNumber = () => document.querySelectorAll('#conn-list .conn-row .conn-n').forEach((b, i) => (b.textContent = `📡 Connection ${i + 2}`));
+function connRead(f) {
+  return [...f.querySelectorAll('#conn-list .conn-row')].map((r) => { const g = (k) => (r.querySelector(`[data-cn="${k}"]`)?.value || '').trim(); return { id: r.dataset.cid || undefined, type: g('type'), devices: Number(g('devices')) || 1, label: g('label'), m3u: g('m3u'), u: g('u'), p: g('p'), dns: g('dns') }; }).filter((x) => x.m3u || x.u);
+}
+const connChip = (c) => (c.lines || []).length ? ` <span class="pill st-open" title="${esc([connName(c.lineType), ...(c.lines || []).map((x) => (x.label ? x.label + ': ' : '') + connName(x.type))].join(' · '))}">📡 ${(c.lines || []).length + 1} lines · ${connTotal(c)} devices</span>` : '';
+const connTotal = (c) => Math.max(1, Number(c.connections) || 1) + (c.lines || []).reduce((a, x) => a + (Number(x.devices) || 1), 0);
 
 function customerForm(c) {
   const s = state.admin.settings;
@@ -817,8 +835,13 @@ function customerForm(c) {
     <h3>IPTV line (TVplus)</h3>
     ${isNew ? toggle('Use the same username & password for the IPTV line', 'lineSame', true, 'Turn off if the line on the panel has different details.') : ''}
     <div class="grid3" id="line-fields" style="${isNew ? 'display:none' : ''}">${field('Line username', 'lineUsername', c.lineUsername || '')}${field('Line password', 'linePassword', c.linePassword || '')}${field('Panel line ID', 'lineId', c.lineId || '', { help: 'Filled automatically when created through the API.' })}</div>
+    <h3 style="margin-top:6px">Connections (devices)</h3>
+    <p class="small muted" style="margin:0 0 6px">Connection 1 is the line above. Add one more for each extra line the customer has (for example a 4-device subscription with separate lines). Everything shows on the customer's /profile page and in the line email.</p>
+    <div class="grid2">${field('Connection 1 type', 'lineType', c.lineType || 'xtream1', { type: 'select', options: CONN_UI })}${field('Connection 1 devices', 'connections', c.connections || 1, { type: 'number', attrs: 'min="1" max="50"' })}</div>
+    <div id="conn-list">${(c.lines || []).map((x, i) => connRow(x, i + 2)).join('')}</div>
+    <button type="button" class="btn sm" data-act="conn-add" style="margin:2px 0 12px">＋ Add a connection</button>
     <h3 style="margin-top:6px">Subscription</h3>
-    <div class="grid2">${field('Plan', 'planId', c.planId, { type: 'select', options: planOpts })}${field('Devices (connections)', 'connections', c.connections || 1, { type: 'number', attrs: 'min="1" max="10"' })}</div>
+    <div class="grid2">${field('Plan', 'planId', c.planId, { type: 'select', options: planOpts })}<div class="field"><span>Devices in total</span><b id="conn-total" style="display:block;padding:10px 0">${connTotal(c)}</b></div></div>
     <div class="grid2">${field('Start date', 'startAt', isoDay(c.startAt || Date.now()), { type: 'date' })}${field('Expiry date', 'expiresAt', c.expiresAt ? isoDay(c.expiresAt) : '', { type: 'date', help: isNew ? 'Leave empty to calculate from the plan.' : '' })}</div>
     ${isNew ? `<div class="grid2">${accountSelect(s, 'accountId', '')}${stripeSelect(s, 'stripeAccountId', '')}${field('Amount received', 'price', s.plans[0]?.price || 0, { type: 'number', attrs: 'min="0" step="any"', help: 'In the currency of the chosen account.' })}</div>
       ${toggle('Email the login details to the customer', 'sendEmail', !!s.email.resendKey, s.email.resendKey ? 'Sent with Resend in the language above.' : 'Set up Resend in "Trial & email" first.')}
@@ -1482,7 +1505,7 @@ async function renderProfile() {
 
 function profilePage() {
   const me = state.user.me; const { user, branding: b } = me; const st = me.stream || {};
-  const ibo = st.ibo || null;
+  const ibo = st.ibo || null; const lines = Array.isArray(st.lines) ? st.lines : [];
   const dns = String(st.dns || st.server || '').replace(/\/+$/, '');
   const uname = st.u || '—', pass = st.p || '—';
   const m3u = String(st.m3u || '').trim() || (dns && st.u && st.p ? dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts' : '—');
@@ -1499,18 +1522,22 @@ function profilePage() {
           <div><div class="muted small">Days left</div><b style="font-size:2.6rem;line-height:1" id="pf-days">${days}</b></div>
           <div><div class="muted small">Plan</div><b>${esc(user.planName || 'Custom')}</b></div>
           <div><div class="muted small">Expires</div><b>${fmtDate(user.expiresAt)}</b></div>
-          <div><div class="muted small">Devices</div><b>${esc(user.connections || 1)}</b></div>
+          <div><div class="muted small">Devices</div><b>${esc(user.devicesTotal || user.connections || 1)}</b></div>
         </div>
         <div style="height:8px;border-radius:6px;background:var(--line,#e2e8f0);overflow:hidden;margin-top:14px"><i style="display:block;height:100%;width:${pct}%;background:${color}"></i></div>
         ${user.state === 'expired' ? `<p class="small" style="color:#ef4444;margin:10px 0 0">Your paid subscription has expired. Renew to keep watching.</p>` : user.state === 'expiring' ? `<p class="small" style="color:#b45309;margin:10px 0 0">Your subscription is ending soon.</p>` : ''}
       </div>
       <div class="card" id="acc-sources" style="margin-top:14px">
-        <h3 style="margin-top:0">My Details</h3>
+        <div class="row" style="gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">${lines.length ? 'Connection 1' : 'My Details'}</h3>${lines.length || st.lineType ? `<span class="pill st-open">${esc(connName(st.lineType))}</span>` : ''}${lines.length ? `<span class="small muted">${esc(user.connections || 1)} device(s)</span>` : ''}</div>
         <div class="svc-box creds"><ul class="cred-list">${row('Username', uname, 'u')}${row('Password', pass, 'p')}${row('DNS', dns || '—', 'dns')}${row('M3U', m3u, 'm3u')}${ibo?.mac ? row('Device MAC Address', ibo.mac, 'mac') : ''}${ibo?.key ? row('Device Key', ibo.key, 'key') : ''}</ul>
         <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="pf-all">${t('copyAll')}</button></div><div id="pf-all" style="display:none">${esc(all)}</div>
         ${ibo?.mac || ibo?.key ? `<p class="small muted" style="margin:10px 0 0">📺 IBO Player device registered — enter these details in the IBO Player app to activate your subscription.</p>` : ''}
         </div>
       </div>
+      ${lines.map((x, i) => { const k = 'c' + i; const txt = [x.u && `Username: ${x.u}`, x.p && `Password: ${x.p}`, x.dns && x.u && `DNS: ${x.dns}`, x.m3u && `M3U: ${x.m3u}`].filter(Boolean).join('\n');
+        return `<div class="card" style="margin-top:14px"><div class="row" style="gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">Connection ${i + 2}${x.label ? ' · ' + esc(x.label) : ''}</h3><span class="pill st-open">${esc(x.typeName || connName(x.type))}</span><span class="small muted">${esc(x.devices || 1)} device(s)</span></div>
+        <div class="svc-box creds"><ul class="cred-list">${x.u ? row('Username', x.u, k + 'u') + row('Password', x.p || '—', k + 'p') : ''}${x.dns && x.u ? row('DNS', x.dns, k + 'dns') : ''}${row('M3U', x.m3u || '—', k + 'm3u')}</ul>
+        <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="pf-${k}all">${t('copyAll')}</button></div><div id="pf-${k}all" style="display:none">${esc(txt)}</div></div></div>`; }).join('')}
       <div class="row" style="margin-top:14px"><a class="btn primary" href="/" style="flex:1">📺 Open my TV app</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener" style="flex:1">💬 ${t('whatsapp')}</a>` : ''}</div>
       <p class="small muted" style="text-align:center;margin:14px 0 0">Signed in as <b>${esc(user.username)}</b> · <a href="#" data-act="logout">${t('logout')}</a></p>
     </div></div>`;
@@ -2172,6 +2199,32 @@ const actions = {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
     api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { const sent = state.admin.customers.find((x) => x.id === el.dataset.id); if (sent) sent.waSentAt = Date.now(); document.querySelectorAll(`[data-act="wa-one"][data-id="${el.dataset.id}"]`).forEach((b) => { b.classList.remove('wa-todo'); b.classList.add('wa-sent'); b.title = 'WhatsApp message sent ' + fmtDate(Date.now()) + ' — tap to send another'; }); if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
   },
+  'promo-pv': async () => {
+    const o = promoForm(); const lang = 'en';
+    try {
+      const r = await api('POST', '/api/admin/templates/preview', { kind: 'renewal', lang, promo: o, appUrl: location.origin });
+      modal('👁 Renewal email with the promotion', `<div class="seg" style="margin-bottom:10px"><button type="button" class="on" data-act="promo-pv-l" data-l="en">English</button><button type="button" data-act="promo-pv-l" data-l="fr">Français</button></div><p class="small muted" style="margin:0 0 8px">Subject: <b id="pv-subj">${esc(r.subject)}</b></p><iframe title="Email preview" sandbox="" style="width:100%;height:62vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe>`, { wide: true });
+      $('.modal-body iframe').srcdoc = r.html; state.admin.promoPv = o;
+    } catch (e) { toast(e.message, true); }
+  },
+  'promo-pv-l': async (el) => { el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el)); try { const r = await api('POST', '/api/admin/templates/preview', { kind: 'renewal', lang: el.dataset.l, promo: state.admin.promoPv || {}, appUrl: location.origin }); $('#pv-subj').textContent = r.subject; $('.modal-body iframe').srcdoc = r.html; } catch (e) { toast(e.message, true); } },
+  'promo-nl': async () => {
+    try { const f = $('[data-form=promo]'); if (f) await saveSettings({ promo: { ...promoForm(), code: String(promoForm().code || '').trim().toUpperCase() } }, true); const d = await api('GET', '/api/admin/promo');
+      try { localStorage.setItem('tvp_nl_draft', JSON.stringify({ ...nlBlank(), ...d.campaign, group: 'active' })); } catch {}
+      await actions['nl-open'](); toast('Black Friday email loaded: choose who gets it, preview, then Send.');
+    } catch (e) { toast(e.message, true); }
+  },
+  'promo-tg': async () => {
+    try { const f = $('[data-form=promo]'); if (f) await saveSettings({ promo: { ...promoForm(), code: String(promoForm().code || '').trim().toUpperCase() } }, true); const d = await api('GET', '/api/admin/promo');
+      modal('✈️ Post in your Telegram channel', `<p class="small muted" style="margin-top:0">Your bot must be an <b>admin of the channel</b> with “Post messages” allowed. You can change the text before posting.</p>
+        ${field('Channel', 'promo-ch', d.channel || '', { ph: '@yourchannel', attrs: 'id="promo-ch" autocapitalize="none"' })}
+        <textarea id="promo-tg-text" rows="12" style="width:100%">${esc(d.post)}</textarea>
+        <div class="row" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="button" class="btn primary" data-act="promo-tg-go">✈️ Post now</button></div>`);
+    } catch (e) { toast(e.message, true); }
+  },
+  'promo-tg-go': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/promo/telegram', { channel: $('#promo-ch').value.trim(), text: $('#promo-tg-text').value }); closeModal(); toast('Posted in your Telegram channel ✓'); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'conn-add': () => { const l = $('#conn-list'); if (!l) return; l.insertAdjacentHTML('beforeend', connRow({})); connNumber(); l.lastElementChild.querySelector('[data-cn="m3u"]')?.focus(); },
+  'conn-del': (el) => { const r = el.closest('.conn-row'); const f = r?.closest('form'); r?.remove(); connNumber(); const t = $('#conn-total'); if (t && f) t.textContent = (Number(f.connections?.value) || 1) + connRead(f).reduce((a, x) => a + x.devices, 0); },
   'nl-open': async () => {
     const st = await api('GET', '/api/admin/newsletter'); const s = state.admin.settings;
     let d; try { d = JSON.parse(localStorage.getItem('tvp_nl_draft')); } catch {}
@@ -2615,6 +2668,12 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async promo(f) {
+    const o = formToObj(f); if (!String(o.code || '').trim()) return toast('Type the promo code first.', true);
+    if (o.from && o.to && o.to < o.from) return toast('The end date is before the start date.', true);
+    o.code = String(o.code).trim().toUpperCase().replace(/\s+/g, '');
+    await saveSettings({ promo: o }); renderAdmin();
+  },
   async 'rp-sale'(f) {
     const o = formToObj(f); delete o.phone_cc;
     if (String(f.phone?.value || '').trim()) { const full = fullPhone(f, 'phone'); if (!full) return toast(t('phoneInvalid'), true); o.phone = full; }
@@ -2691,6 +2750,7 @@ async tx(f) {
       o[k] = full; delete o[k + '_cc'];
     }
     if (!o.whatsapp) o.whatsapp = o.phone;
+    o.lines = connRead(f);
     const btn = f.querySelector('button.primary'); btn.disabled = true; let panelNote = '';
     try {
       if (id) { if (!o.password) delete o.password; if (!o.expiresAt) delete o.expiresAt; await api('PUT', `/api/admin/customers/${id}`, o); toast('Customer updated'); }
@@ -3395,6 +3455,25 @@ const TPL_GROUPS = [
 const WA_NAMES = { pay: '💳 Payment link (place an order)', trial: '🎁 Free trial details', thanks: '🙏 Thank you for your purchase', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
 const LANG3 = [['en', 'English'], ['fr', 'Français']];
 const nice = (k) => k.replace(/([A-Z0-9])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+// Black Friday (seasonal) promotion: one switch, the code goes into renewal emails and WhatsApp / Telegram messages.
+async function promoCard() {
+  let d; try { d = await api('GET', '/api/admin/promo'); } catch { return ''; }
+  const p = d.promo || {}; state.admin.promo = d;
+  return `<div class="card" id="promo-card" style="margin-bottom:14px;border:2px solid #0f172a">
+    <div class="row" style="gap:8px"><h3 style="margin:0;flex:1">🖤 ${esc(p.name || 'Black Friday')} promotion</h3><span class="pill ${d.live ? 'st-active' : 'st-expired'}">${d.live ? 'Live now' : p.on ? 'On, outside the dates' : 'Off'}</span></div>
+    <p class="small muted" style="margin:6px 0 10px">While it is on and today is between the dates, the code is added to: <b>renewal emails</b> (after a trial and after a subscription, the automatic ones too), and the <b>WhatsApp and Telegram messages</b> for renewals, trials and orders. For everyone else, send the ready newsletter and post it in your Telegram channel with the buttons below.</p>
+    <form data-form="promo">
+      ${toggle('Promotion on', 'on', !!p.on, 'Turn off any time: messages go back to normal at once.')}
+      <div class="grid3">${field('Name', 'name', p.name || 'Black Friday', { attrs: 'maxlength="40"' })}${field('Promo code', 'code', p.code || '', { attrs: 'required maxlength="30" autocapitalize="characters"', help: 'Must work at checkout on your website.' })}${field('Discount (optional)', 'offer', p.offer || '', { ph: '30% OFF', attrs: 'maxlength="60"', help: 'Empty = “our biggest discount of the year”.' })}</div>
+      <div class="grid2">${field('Starts', 'from', p.from || '', { type: 'date' })}${field('Ends (last day)', 'to', p.to || '', { type: 'date' })}</div>
+      <div class="grid3">${toggle('Emails', 'email', p.email !== false)}${toggle('WhatsApp', 'whatsapp', p.whatsapp !== false)}${toggle('Telegram', 'telegram', p.telegram !== false)}</div>
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"><button class="btn primary" data-perm="templates_edit">💾 Save</button><button type="button" class="btn" data-act="promo-pv">👁 Renewal email</button><button type="button" class="btn" data-act="promo-nl">📣 Newsletter to customers</button><button type="button" class="btn" data-act="promo-tg">✈️ Post in Telegram channel</button></div>
+    </form>
+    <details style="margin-top:10px"><summary class="small">Text added to WhatsApp / Telegram messages</summary><div class="grid2" style="margin-top:6px"><pre class="small" style="white-space:pre-wrap;background:var(--soft,#f1f5f9);padding:10px;border-radius:10px">${esc(d.wa.en)}</pre><pre class="small" style="white-space:pre-wrap;background:var(--soft,#f1f5f9);padding:10px;border-radius:10px">${esc(d.wa.fr)}</pre></div></details>
+  </div>`;
+}
+const promoForm = () => { const f = $('[data-form=promo]'); return f ? formToObj(f) : {}; };
+
 async function adminTemplates() {
   const ui = (state.admin.tp ||= { g: 'AM', lang: 'en', q: '', only: false });
   if (!ui.data) ui.data = await api('GET', '/api/admin/templates');
@@ -3419,7 +3498,8 @@ async function adminTemplates() {
       ${keys.map((k) => { const def = d.defaults[ui.g][ui.lang][k]; const cur = edits[k]; const long = (cur || def).length > 70;
         return `<div class="tpl-f"><label><b>${esc(nice(k))}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label>${long ? `<textarea rows="${Math.min(8, Math.ceil((cur || def).length / 60) + 1)}" data-tk="${k}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || def)}</textarea>` : `<input data-tk="${k}" value="${esc(cur || def)}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">`}${cur ? `<button type="button" class="btn sm" data-act="tp-reset" data-perm="templates_edit" data-k="${k}">Back to the original</button>` : ''}</div>`; }).join('') || '<p class="muted small">Nothing matches.</p>'}`;
   }
-  return `<div class="chips">${TPL_GROUPS.map(([g, , n]) => `<a class="${ui.g === g ? 'on' : ''}" data-act="tp-g" data-g="${g}">${n}${changedCount(g) ? ' · ' + changedCount(g) : ''}</a>`).join('')}<a class="${wa ? 'on' : ''}" data-act="tp-g" data-g="WA">💬 WhatsApp messages${changedCount('WA') ? ' · ' + changedCount('WA') : ''}</a><a class="${own ? 'on' : ''}" data-act="tp-g" data-g="OWN">✍️ My own WhatsApp messages · ${d.waCustom.length}</a></div>
+  const promo = await promoCard();
+  return promo + `<div class="chips">${TPL_GROUPS.map(([g, , n]) => `<a class="${ui.g === g ? 'on' : ''}" data-act="tp-g" data-g="${g}">${n}${changedCount(g) ? ' · ' + changedCount(g) : ''}</a>`).join('')}<a class="${wa ? 'on' : ''}" data-act="tp-g" data-g="WA">💬 WhatsApp messages${changedCount('WA') ? ' · ' + changedCount('WA') : ''}</a><a class="${own ? 'on' : ''}" data-act="tp-g" data-g="OWN">✍️ My own WhatsApp messages · ${d.waCustom.length}</a></div>
     <div class="card"><div class="row" style="margin-bottom:10px"><div class="seg">${LANG3.map(([k, n]) => `<button type="button" class="${ui.lang === k ? 'on' : ''}" data-act="tp-lang" data-lang="${k}">${n}</button>`).join('')}</div><span class="spacer"></span>${grp ? `<button type="button" class="btn" data-act="tp-preview">👁 Preview email</button>` : ''}<button type="button" class="btn primary" data-act="tp-save" data-perm="templates_edit">Save</button></div>
       <fieldset id="tpl-fields" ${canEdit ? "" : "disabled"} style="border:none;margin:0;padding:0">${body}</fieldset>
       <div class="row" style="margin-top:14px;justify-content:space-between"><div class="row"><button type="button" class="btn sm" data-act="tp-export" data-perm="exports">⬇ Export all templates</button><button type="button" class="btn sm" data-act="tp-import" data-perm="templates_edit">⬆ Import</button></div><button type="button" class="btn primary" data-act="tp-save" data-perm="templates_edit">Save</button></div></div>`;
@@ -3531,6 +3611,12 @@ function parseLineLinkClient(link) {
   return user && pass && !/\.(php|m3u8?|ts)$/i.test(user) ? { u: user, p: pass, dns: u.origin } : null;
 }
 document.addEventListener('input', (e) => {
+  if (e.target.form?.dataset?.form === 'customer' && (e.target.dataset?.cn === 'devices' || e.target.name === 'connections')) { const t = $('#conn-total'); if (t) t.textContent = (Number(e.target.form.connections?.value) || 1) + connRead(e.target.form).reduce((a, x) => a + x.devices, 0); }
+  if (e.target.dataset?.input === 'conn-m3u') {
+    const r = e.target.closest('.conn-row'); const ln = parseLineLinkClient(e.target.value); if (!r || !ln) return;
+    const set = (k, v) => { const el = r.querySelector(`[data-cn="${k}"]`); if (el) el.value = v; }; set('u', ln.u); set('p', ln.p); set('dns', ln.dns);
+    return toast(`Connection found: ${ln.u} on ${ln.dns}`);
+  }
   if (e.target.dataset?.input !== 'm3u-paste') return;
   const f = e.target.form; const ln = parseLineLinkClient(e.target.value); if (!f || !ln) return;
   if (f.username && !f.username.value) f.username.value = ln.u;
