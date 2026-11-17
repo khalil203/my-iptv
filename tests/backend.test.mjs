@@ -1521,3 +1521,17 @@ test('new customers of a month: sign-ups, packages, reseller credits, IBO and de
   assert.equal((await x.call('PUT', `/api/admin/customers/${a.id}`, { note: 'checked' }, tok)).status, 200);
   assert.ok(JSON.parse(x.db.get('customers').v).find((c) => c.id === a.id).updatedAt > 0);
 });
+
+test('last month retention: renewed, lost and still running', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  for (const u of ['rt1', 'rt2', 'rt3']) await addCustomer(x, tok, { username: u });
+  const cs = JSON.parse(x.db.get('customers').v); const TZ = 7 * 3600000; const n = new Date(Date.now() + TZ); const D = 86400000;
+  const mid = Date.UTC(n.getUTCFullYear(), n.getUTCMonth() - 1, 3) - TZ;
+  cs.forEach((c) => { c.createdAt = mid; c.renewals = [{ at: mid, type: 'new', days: 30, price: 10 }]; });
+  cs[0].renewals.push({ at: mid + 29 * D, type: 'renew', days: 30, price: 12 }); cs[0].expiresAt = Date.now() + 20 * D;
+  cs[1].expiresAt = Date.now() - D; cs[2].expiresAt = Date.now() + 5 * D;
+  x.db.set('customers', { v: JSON.stringify(cs), e: 0 });
+  const d = (await x.call('GET', '/api/admin/customers/newstats', {}, tok)).json;
+  assert.equal(d.retention.renewed, 1); assert.equal(d.retention.lost, 1); assert.equal(d.retention.waiting, 1); assert.equal(d.retention.rate, 50);
+  assert.equal(d.customers.find((c) => c.id === cs[1].id).renew, 'lost');
+});

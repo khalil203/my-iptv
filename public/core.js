@@ -3023,6 +3023,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const rs = await getResellers(); const rOrders = rs.flatMap((r) => (r.orders || []).filter((o) => inM(o.at)).map((o) => ({ ...o, rsl: r.rslId, name: r.name })));
         const ibo = ((await store.get('ibo')) || []).filter((x) => inM(x.createdAt || x.startAt));
         const iboCust = list.filter((c) => c.ibo && (c.ibo.mac || c.ibo.key)).length;
+        // Retention: did each new customer pay again after joining? renewed / lost (ended without paying) / waiting (still running)
+        const later = (c) => { const tr = (c.renewals || [])[0]?.type === 'trial'; return (c.renewals || []).filter((r) => Number(r.at) > Number(c.createdAt) + 120000 && (r.type === 'renew' || (tr && r.type === 'new'))); }; // a first purchase only counts for trial customers
+        const renewOf = (c) => later(c).length ? 'renewed' : c.expiresAt < t ? 'lost' : 'waiting';
+        const ren = count(list, renewOf); ren.renewed = ren.renewed || 0; ren.lost = ren.lost || 0; ren.waiting = ren.waiting || 0;
+        const trialsL = list.filter((c) => c.isTrial || (c.renewals || [])[0]?.type === 'trial'); const conv = trialsL.filter((c) => later(c).length || !c.isTrial).length;
+        // All renewals paid during the month (every customer), and subscriptions that ended in the month
+        const paidIn = all.flatMap((c) => (c.renewals || []).filter((r) => r.type === 'renew' && inM(r.at)));
+        const endedIn = all.filter((c) => inM(c.expiresAt) || (c.renewals || []).some((r) => r.type === 'renew' && inM(r.at) && Number(c.createdAt) < from));
+        const endedRenewed = endedIn.filter((c) => (c.renewals || []).some((r) => r.type === 'renew' && Number(r.at) >= from)).length;
         return ok({ month, from, to,
           total: list.length, paid: list.filter((c) => !c.isTrial).length, trials: list.filter((c) => c.isTrial).length,
           standard: { count: list.filter((c) => !c.isTrial).length, plans: count(list.filter((c) => !c.isTrial), plan) },
@@ -3030,7 +3039,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           ibo: { activations: ibo.length + iboCust, panel: ibo.length, onCustomers: iboCust, trials: ibo.filter((x) => x.isTrial).length },
           balance: count(list, state), devices: list.reduce((a, c) => a + connDevices(c), 0), multi: list.filter((c) => (c.lines || []).length).length,
           sent, notSent: none.length,
-          customers: list.sort((a, b) => b.createdAt - a.createdAt).map((c) => ({ id: c.id, name: c.name, username: c.username, createdAt: c.createdAt, plan: plan(c), isTrial: !!c.isTrial, state: state(c), expiresAt: c.expiresAt, ibo: !!(c.ibo && (c.ibo.mac || c.ibo.key)),
+          retention: { ...ren, rate: ren.renewed + ren.lost ? Math.round(ren.renewed / (ren.renewed + ren.lost) * 100) : null, trials: trialsL.length, trialsConverted: conv,
+            month: { renewals: paidIn.length, amount: Math.round(paidIn.reduce((a, r) => a + (Number(r.price) || 0), 0) * 100) / 100, due: endedIn.length, dueRenewed: endedRenewed, dueLost: endedIn.filter((c) => c.expiresAt < t && !(c.renewals || []).some((r) => r.type === 'renew' && Number(r.at) >= from)).length } },
+          customers: list.sort((a, b) => b.createdAt - a.createdAt).map((c) => ({ id: c.id, name: c.name, username: c.username, createdAt: c.createdAt, plan: plan(c), isTrial: !!c.isTrial, state: state(c), expiresAt: c.expiresAt, renew: renewOf(c), renewedAt: later(c).at(-1)?.at || 0, ibo: !!(c.ibo && (c.ibo.mac || c.ibo.key)),
             email: ct(c, 'email') || !!c.loginMailAt || !!c.profileMailAt, whatsapp: ct(c, 'whatsapp') || !!c.waSentAt, telegram: ct(c, 'telegram'), noWhatsapp: ct(c, 'noWhatsapp'), noTelegram: ct(c, 'noTelegram') })) });
       }
       if (R('GET', '/api/admin/customers')) {
