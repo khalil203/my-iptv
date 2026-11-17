@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=73';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=73';
-import { siteHtml } from './site.js?v=73';
-import { ic } from './icons.js?v=73';
-import { parseM3U, m3uAnswer } from './m3u.js?v=73';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=73';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=74';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=74';
+import { siteHtml } from './site.js?v=74';
+import { ic } from './icons.js?v=74';
+import { parseM3U, m3uAnswer } from './m3u.js?v=74';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=74';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -376,6 +376,7 @@ function renderSetup() {
 const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
+  ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
   ['alerts', '🔔', 'Alerts', 'customers_view', 'Customers', 'expiring expired trials attention reminders follow up'],
   ['subs', '📅', 'Subscriptions', 'customers_view', 'Customers', 'tracker csv expiry'],
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
@@ -398,7 +399,6 @@ const ADMIN_TABS = [
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['sales', '📈', 'Sales tracker', 'sales', 'Money', 'sales daily monthly revenue transactions tracker today month'],
-  ['resellers', '🤝', 'Resellers', 'resellers', 'Money', 'reseller rsl credits packages rank stock purchases sheets'],
   ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
   ['templates', '✍️', 'Message templates', 'settings', 'Messages', 'email whatsapp trial reminder renewal order wording text'],
   ['emails', '📬', 'Emails & bounces', 'customers_view', 'Messages', 'bounced spam delivered sent resend invalid'],
