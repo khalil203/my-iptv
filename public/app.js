@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=86';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=87';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=83';
 import { ic } from './icons.js?v=83';
@@ -1000,6 +1000,8 @@ function adminOrderSection(s) {
       <div id="ops">${op.map((p)=>opRow(p,s)).join('')}</div>
       <div class="row"><button class="btn sm" data-act="add-op">＋ Add package</button><select id="op-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD', 'THB'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-op">Save packages</button></div></div></details></div>`;
 }
+// Full international number for wa.me / t.me: country code box + number (never only the local part).
+const intlDigits = (f, name = 'phone') => (fullPhone(f, name) || String(f[name]?.value || '')).replace(/\D/g, '').replace(/^00/, '');
 const waForm = () => { const f = $('[data-form=wa]'); const d = Object.fromEntries(new FormData(f)); if ('phone' in d) { d.phone = fullPhone(f, 'phone') || String(f.phone.value || '').replace(/[^\d+]/g, ''); delete d.phone_cc; } return { ...d, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }; };
 async function waLoad() {
   const f = $('[data-form=wa]'); if (!f) return;
@@ -2188,7 +2190,7 @@ const actions = {
       if (r.sent) { toast('Sent by your Telegram bot ✓'); closeModal(); return custRefresh(); }
       // the customer has not started your bot: copy the message and open their Telegram chat
       try { await navigator.clipboard.writeText(text); } catch {}
-      const user = ($('#tg-user')?.value || '').trim().replace(/^@/, ''); const phone = f.phone.value.replace(/\D/g, '');
+      const user = ($('#tg-user')?.value || '').trim().replace(/^@/, ''); const phone = intlDigits(f);
       if (!user && !phone) { el.disabled = false; return toast('Add their Telegram username or phone number.', true); }
       window.open(user ? `https://t.me/${encodeURIComponent(user)}` : `https://t.me/+${phone}`, '_blank', 'noopener');
       toast('Message copied. Paste it in the Telegram chat.');
@@ -2224,9 +2226,9 @@ const actions = {
 'wa-tpl-reset': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: '' } } }); toast(t('backToDefault')); waLoad(); },
 'wa-tpl-save': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: $('#wa-tpl-text').value } } }); toast(t('templateSaved')); waLoad(); },
   'wa-open': async (el) => {
-    const f = $('[data-form=wa]'); const phone = f.phone.value.replace(/\D/g, ''); const text = $('#wa-text').value;
+    const f = $('[data-form=wa]'); const phone = intlDigits(f); const text = $('#wa-text').value;
     if (!phone) return toast(t('waEnterNumber'), true);
-    if (phone.startsWith('0')) return toast(t('waNoLeadingZero'), true);
+    if (phone.startsWith('0') || phone.length < 8) return toast(t('waNoLeadingZero'), true);
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
     api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { const sent = state.admin.customers.find((x) => x.id === el.dataset.id); if (sent) sent.waSentAt = Date.now(); document.querySelectorAll(`[data-act="wa-one"][data-id="${el.dataset.id}"]`).forEach((b) => { b.classList.remove('wa-todo'); b.classList.add('wa-sent'); b.title = 'WhatsApp message sent ' + fmtDate(Date.now()) + ' — tap to send another'; }); if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
   },
