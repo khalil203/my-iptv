@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=78';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=78';
-import { siteHtml } from './site.js?v=78';
-import { ic } from './icons.js?v=78';
-import { parseM3U, m3uAnswer } from './m3u.js?v=78';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=78';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=79';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=79';
+import { siteHtml } from './site.js?v=79';
+import { ic } from './icons.js?v=79';
+import { parseM3U, m3uAnswer } from './m3u.js?v=79';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=79';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -2300,7 +2300,7 @@ trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }
   },
   'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
-  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); document.body.className = ''; await refreshConfig(); route(); },
+  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); state.showLogin = false; document.body.className = ''; await refreshConfig(); route(); },
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
   'menu-open': () => { $('#side')?.classList.add('open'); document.querySelector('.side-bg')?.classList.add('open'); setTimeout(() => $('.nav-search')?.focus(), 50); },
   'menu-close': () => { $('#side')?.classList.remove('open'); document.querySelector('.side-bg')?.classList.remove('open'); },
@@ -2726,7 +2726,8 @@ document.addEventListener('keydown', (e) => {
 // ---------------- public website ----------------
 const isStandalone = () => { try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch { return false; } };
 // Visitors see the website. The installed apps, and devices that have signed in before, open the sign-in screen directly.
-const wantsSite = () => !bridge() && (state.forceSite || (!state.showLogin && !isStandalone() && !localStorage.getItem('tvp_known')));
+// In a browser the link always opens the home page; Sign in is one tap from there. The installed apps open the sign-in directly.
+const wantsSite = () => !bridge() && (state.forceSite || (!state.showLogin && !isStandalone()));
 function renderSite() {
   const b = state.config.branding; setWaFab(b, t('waMsg', { app: b.appName, u: '' }));
   $('#app').innerHTML = siteHtml({ config: state.config, lang: getLang(), langs: LANGS, page: state.sitePage || 'home' });
