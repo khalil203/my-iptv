@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=76';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=76';
-import { siteHtml } from './site.js?v=76';
-import { ic } from './icons.js?v=76';
-import { parseM3U, m3uAnswer } from './m3u.js?v=76';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=76';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=77';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=77';
+import { siteHtml } from './site.js?v=77';
+import { ic } from './icons.js?v=77';
+import { parseM3U, m3uAnswer } from './m3u.js?v=77';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=77';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -377,17 +377,17 @@ const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
   ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
+  ['trialq', '⚡', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
   ['alerts', '🔔', 'Alerts', 'customers_view', 'Customers', 'expiring expired trials attention reminders follow up'],
   ['subs', '📅', 'Subscriptions', 'customers_view', 'Customers', 'tracker csv expiry'],
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
   ['chat', '🗨', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
   ['support', '💬', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['tasks', '✅', 'Tasks', 'tasks', 'Team', 'tasks daily weekly plan status priority deadline completed delayed blocked assignee'],
   ['attendance', '🕒', 'Attendance & shifts', 'attendance', 'Team', 'attendance check in out breaks night shift timezone leave days off reports weekly performance clock'],
   ['teamchat', '💬', 'Team chat', null, 'Team', 'team chat internal handover announcements staff channel'],
-  ['trialq', '⚡', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
   ['cc', '💳', 'CC Collection', 'owner', 'Money', 'cc collection card kast trade okx epay exchangers live declined owner'],
-  ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['stripe', '💳', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
