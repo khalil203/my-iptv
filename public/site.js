@@ -2,7 +2,7 @@
 // Pages: home (features, devices, pricing, setup, FAQ, contact), about, privacy, terms.
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
-import { ic } from './icons.js?v=70';
+import { ic } from './icons.js?v=71';
 
 const T = {
   en: {
@@ -68,7 +68,7 @@ export function siteHtml({ config, lang, langs, page }) {
     const title = fill(page === 'about' ? L.aboutT : page === 'privacy' ? L.privT : L.termsT, { app });
     const body = page === 'about' ? L.about.map((p) => `<p>${fill(esc(p), { app })}</p>`).join('')
       : (page === 'privacy' ? L.priv : L.terms).map(([t, d]) => `<h3>${esc(t)}</h3><p>${esc(d)}</p>`).join('') + `<p class="muted small">${fill(L.legalNote, { d: UPDATED })}</p>`;
-    return `<div class="site">${head}<main class="s-doc"><a href="#" class="s-back" data-act="site-page" data-page="home">${L.back}</a><h1>${title}</h1>${body}</main>${foot}</div>`;
+    return `<div class="site">${head}<main class="s-doc" id="main"><a href="#" class="s-back" data-act="site-page" data-page="home">${L.back}</a><h1>${title}</h1>${body}</main>${foot}</div>`;
   }
   const cards = (list, cls = '', icons = []) => `<div class="s-grid ${cls}">${list.map(([t, d], i) => `<div class="s-card">${icons[i] ? `<span class="s-ic">${ic(icons[i], 24)}</span>` : ''}<h3>${esc(t)}</h3><p>${esc(d)}</p></div>`).join('')}</div>`;
   const h1 = esc(L.h1).replace(esc(L.hl), `<span class="grad">${esc(L.hl)}</span>`);
@@ -77,7 +77,7 @@ export function siteHtml({ config, lang, langs, page }) {
   const price = (p) => `${SIGN[p.cur] ?? p.cur + ' '}${Number(p.price).toLocaleString(undefined, { minimumFractionDigits: Number(p.price) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
   const cta = trialOn ? `<button class="btn primary lg" data-act="trial">${fill(L.trial, { h })}</button><a class="btn lg" href="#pricing" data-act="site-jump" data-to="pricing">${L.seePlans}</a>`
     : `<a class="btn primary lg" href="#pricing" data-act="site-jump" data-to="pricing">${L.seePlans}</a><button class="btn lg" data-act="site-login">${L.signIn}</button>`;
-  return `<div class="site">${head}<main>
+  return `<div class="site">${head}<main id="main">
     <section class="s-hero"><div><h1>${h1}</h1><p class="s-sub">${esc(L.sub)}</p><div class="s-cta">${cta}</div></div>
       <div class="s-tiles">${L.tiles.map(([t, d], i) => `<div class="s-tile">${ic(['tv', 'film', 'devices', 'chat'][i], 30)}<b>${esc(t)}</b><span>${esc(d)}</span></div>`).join('')}</div></section>
     <section class="s-show" aria-hidden="true"><div class="s-preview"><div class="s-pv-bar"><span></span><span></span><span></span><b>${app}</b></div>
