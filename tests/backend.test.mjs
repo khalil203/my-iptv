@@ -1409,7 +1409,7 @@ test('resellers: panel URL / username / password fill the email, ✓ marks and n
   const id = r.json.reseller.id;
   assert.equal((await x.call('POST', '/api/admin/reseller/save', { id, name: 'Robin Tester', panelUrl: 'ftp://bad' }, tok)).status, 400);
   const pv = await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Panel', body: 'URL {url} user {username} pass {password}', preview: true }, tok);
-  assert.match(pv.json.html, /URL https:\/\/panel\.example\.com user robin1 pass p4ss/);
+  assert.match(pv.json.html, /URL <a href="https:\/\/panel\.example\.com"[^>]*>https:\/\/panel\.example\.com<\/a> user robin1 pass p4ss/);
   await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Panel', body: 'Hi' }, tok);
   await x.call('POST', '/api/admin/reseller/contact', { id, k: 'noTelegram', v: true }, tok);
   assert.equal((await x.call('POST', '/api/admin/reseller/contact', { id, k: 'bogus', v: true }, tok)).status, 400);
