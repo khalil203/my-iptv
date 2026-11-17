@@ -638,10 +638,11 @@ export function applyMailTexts(custom) {
 export function profileEmail(s, c, appUrl) {
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, ''); const fr = c.lang === 'fr'; const app = s.branding.appName || 'IPTV';
   const pass = c.loginPassword || (c.ownPassword ? '' : c.linePassword) || '';
+  const profile = (base || 'https://intproto-tv.store') + '/profile'; const mail = cleanEmail(c.email);
   const body = fr
-    ? `Voici vos identifiants pour vous connecter à ${app} et voir votre profil (abonnement, date de fin, vos coordonnées).\n\n*Nom d'utilisateur :* ${c.username}\n*Mot de passe :* ${pass || '(celui que vous avez choisi)'}\n\nAppuyez sur le bouton pour ouvrir votre profil.`
-    : `Here are your details to sign in to ${app} and see your profile (subscription, end date and your contact details).\n\n*Username:* ${c.username}\n*Password:* ${pass || '(the one you chose)'}\n\nTap the button to open your profile.`;
-  const camp = { split: false, lang: fr ? 'fr' : 'en', content: { all: { subject: fr ? `Votre profil ${app}` : `Your ${app} profile`, title: fr ? 'Votre profil' : 'Your profile', body, button: fr ? 'Ouvrir mon profil' : 'Open my profile' } }, link: base ? base + '/profile' : 'site' };
+    ? `Voici vos identifiants pour vous connecter à ${app} et voir votre profil (abonnement, date de fin, vos coordonnées).\n\n*Email :* ${mail || '—'}\n*Nom d'utilisateur :* ${c.username}\n*Mot de passe :* ${pass || '(celui que vous avez choisi)'}\n*Votre profil :* ${profile}\n\nAppuyez sur le bouton ou ouvrez le lien ci-dessus pour voir votre profil.`
+    : `Here are your details to sign in to ${app} and see your profile (subscription, end date and your contact details).\n\n*Email:* ${mail || '—'}\n*Username:* ${c.username}\n*Password:* ${pass || '(the one you chose)'}\n*Your profile:* ${profile}\n\nTap the button or open the link above to see your profile.`;
+  const camp = { split: false, lang: fr ? 'fr' : 'en', content: { all: { subject: fr ? `Votre profil ${app}` : `Your ${app} profile`, title: fr ? 'Votre profil' : 'Your profile', body, button: fr ? 'Ouvrir mon profil' : 'Open my profile' } }, link: profile };
   return newsletterEmail(s, c, camp, appUrl, '');
 }
 export function accessEmail(s, c, password, kind, appUrl) {
@@ -775,7 +776,8 @@ export function newsletterEmail(s, c, camp, appUrl, unsubUrl) {
   const dir = (camp.split ? lang : camp.lang) === 'ar' ? 'rtl' : 'ltr'; const al = dir === 'rtl' ? 'right' : 'left'; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const first = (c?.name || '').split(' ')[0];
   const fillTxt = (t) => String(t || '').replace(/\{name\}/g, first || '').replace(/\{app\}/g, app);
-  const para = (t) => e(fillTxt(t)).replace(/\*(.+?)\*/g, '<b>$1</b>').split(/\n{2,}/).map((p) => `<p dir="auto" style="margin:0 0 14px;font-size:15px;line-height:1.65">${p.replace(/\n/g, '<br>')}</p>`).join('');
+  const linkify = (h) => h.replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)]/g, (u) => `<a href="${u}" style="color:#0284c7;font-weight:600">${u}</a>`).replace(/(^|[\s>(])([a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})/gi, (m0, pre, m) => `${pre}<a href="mailto:${m}" style="color:#0284c7;font-weight:600">${m}</a>`);
+  const para = (t) => linkify(e(fillTxt(t))).replace(/\*(.+?)\*/g, '<b>$1</b>').split(/\n{2,}/).map((p) => `<p dir="auto" style="margin:0 0 14px;font-size:15px;line-height:1.65">${p.replace(/\n/g, '<br>')}</p>`).join('');
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const logo = /^https?:/.test(s.branding.logoUrl) ? s.branding.logoUrl : base ? `${base}/${String(s.branding.logoUrl || 'logo.png').replace(/^\//, '')}` : '';
   const site = String(s.email.website || s.renewalOffer?.url || '').replace(/\/+$/, ''); const siteTxt = site.replace(/^https?:\/\//, '');
