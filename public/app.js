@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=75';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=75';
-import { siteHtml } from './site.js?v=75';
-import { ic } from './icons.js?v=75';
-import { parseM3U, m3uAnswer } from './m3u.js?v=75';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=75';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=76';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=76';
+import { siteHtml } from './site.js?v=76';
+import { ic } from './icons.js?v=76';
+import { parseM3U, m3uAnswer } from './m3u.js?v=76';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=76';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -617,7 +617,7 @@ async function adminResellerPage() {
     <div class="stat"><i class="st-ic">${ic('list', 20)}</i><span>Orders</span><b>${tot.n}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('star', 20)}</i><span>Credits sold</span><b>${tot.c}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('card', 20)}</i><span>Total paid</span><b>${usd(tot.u)}</b></div></div>
-  ${found.length ? `<div class="card"><div class="row"><h3 style="margin:0">🔎 Found in your data: ${found.length} reseller${found.length > 1 ? 's' : ''}</h3><span class="spacer"></span><button class="btn primary" data-act="rs-found-all">＋ Add all</button></div>
+  ${found.length ? `<div class="card"><div class="row"><h3 style="margin:0">🔎 Found in your data: ${found.length} reseller${found.length > 1 ? 's' : ''}</h3><span class="spacer"></span><button class="btn danger" data-act="rs-found-clear">✕ Delete all</button><button class="btn primary" data-act="rs-found-all">＋ Add all</button></div>
     <p class="small muted">These rows have “Reseller”, “RSL” or credits in them. Adding them moves them out of the customer list and into a reseller profile, each row as one order.</p>
     ${found.map((f, i) => `<div class="list-item"><div class="avatar">${esc(initials(f.name))}</div><div style="flex:1;min-width:0"><b>${esc(f.name)}</b>${f.into ? ` <span class="tagp">goes to ${esc(f.into.rslId)}</span>` : ''}<div class="small muted">${f.n} order${f.n > 1 ? 's' : ''} · ${usd(f.totalUsd)}${f.credits ? ' · ' + f.credits + ' credits' : ''} · ${esc(f.refs.slice(0, 4).join(', '))}${f.refs.length > 4 ? '…' : ''}</div><div class="small muted">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</div></div><button class="btn sm" data-act="rs-found-add" data-i="${i}">＋ Add</button> <button class="btn sm danger" data-act="rs-found-skip" data-i="${i}" title="Not a reseller: remove from this box">✕</button></div>`).join('')}</div>` : ''}
   <div class="card"><div class="row" style="gap:8px"><input data-input="rs-q" value="${esc(RS.q)}" placeholder="🔍 Search name, RSL id, email, phone, server, order…" style="flex:1;min-width:200px" autocomplete="off">
@@ -2400,6 +2400,7 @@ renew: async (el) => {
   'rs-order-del': async (el) => { if (!confirm('Remove this order from the history?')) return; try { await api('POST', '/api/admin/reseller/order-delete', { id: el.dataset.id, orderId: el.dataset.oid }); await rsReload(el.dataset.id); } catch (e) { toast(e.message, true); } },
   'rs-found-add': async (el) => { const f = RS.data.found[Number(el.dataset.i)]; el.disabled = true; try { const r = await api('POST', '/api/admin/reseller/from-customers', { ids: f.ids }); toast(`${f.name}: ${r.orders} order${r.orders === 1 ? '' : 's'} added ✓`); await rsReload(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'rs-found-skip': async (el) => { const f = RS.data.found[Number(el.dataset.i)]; try { await api('POST', '/api/admin/reseller/dismiss', { ids: f.ids }); toast('Removed from the box'); await rsReload(); } catch (e) { toast(e.message, true); } },
+  'rs-found-clear': async () => { if (!confirm('Remove all of these from the box? They stay normal customers.')) return; try { await api('POST', '/api/admin/reseller/dismiss', { ids: RS.data.found.flatMap((f) => f.ids) }); toast('Box cleared'); await rsReload(); } catch (e) { toast(e.message, true); } },
   'rs-found-all': async (el) => { el.disabled = true; try { const r = await api('POST', '/api/admin/reseller/from-customers', { ids: RS.data.found.flatMap((f) => f.ids) }); toast(`${r.made} reseller${r.made === 1 ? '' : 's'} added with ${r.orders} orders ✓`); await rsReload(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'rs-pick': async () => {
     RS.pick = new Set(); RS.pq = '';

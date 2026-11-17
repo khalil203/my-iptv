@@ -2,7 +2,7 @@
 // Pages: home (features, devices, pricing, setup, FAQ, contact), about, privacy, terms.
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
-import { ic } from './icons.js?v=75';
+import { ic } from './icons.js?v=76';
 
 const T = {
   en: {
