@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink } from './core.js?v=71';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=71';
-import { siteHtml } from './site.js?v=71';
-import { ic } from './icons.js?v=71';
-import { parseM3U, m3uAnswer } from './m3u.js?v=71';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=71';
+import { createBackend, parseLineLink } from './core.js?v=72';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=72';
+import { siteHtml } from './site.js?v=72';
+import { ic } from './icons.js?v=72';
+import { parseM3U, m3uAnswer } from './m3u.js?v=72';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=72';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -2746,7 +2746,7 @@ Object.assign(actions, {
   'terms-agree': async () => { try { await api('POST', '/api/me/agree', {}); if (state.user.me) state.user.me.agreed = true; toast('Thank you ✓'); renderUser(); } catch (e) { toast(e.message, true); } },
   'site-login': () => { state.showLogin = true; state.forceSite = false; route(); window.scrollTo(0, 0); },
   'site-page': (el) => { state.forceSite = true; state.sitePage = el.dataset.page; route(); window.scrollTo(0, 0); },
-  'site-jump': (el) => { document.getElementById(el.dataset.to)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); },
+  'site-jump': (el) => { document.getElementById(el.dataset.to)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); const d = document.querySelector('.s-menu[open]'); if (d) d.removeAttribute('open'); const l = document.querySelector('.s-menu[open] nav a'); if (l) l.blur(); },
   forgot: () => { modal('🔑 ' + t('forgot'), `<p class="muted" style="margin-top:0">${t('forgotText')}</p><form data-form="forgot">${field(t('loginOrEmail'), 'login', '', { attrs: 'required autocapitalize="none" dir="ltr"' })}<button class="btn primary block">${t('sendLink')}</button></form>`); },
   'hist-clear': () => { localStorage.removeItem(histKey()); toast(t('histCleared')); renderUserTab(); },
   'pin-unlock': () => { const b = modal('🔒 ' + t('parentalT'), `<form data-form="pin-unlock">${field(t('enterPin'), 'pin', '', { type: 'password', attrs: 'required inputmode="numeric" maxlength="4" autocomplete="off" dir="ltr"' })}<button class="btn primary block">${t('unlock')}</button></form>`); b.querySelector('input').focus(); },
