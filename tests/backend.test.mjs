@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor } from '../public/core.js';
+import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail } from '../public/core.js';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 function setup() {
@@ -1013,4 +1013,85 @@ test('telegram: the deep-link payload is base64url encoded and still links the c
   const last = x.tg.filter((b) => b.text && String(b.chat_id) === '777').pop();
   assert.ok(last, 'the customer chat received the login');
   assert.match(last.text, /^INTPROTO-TV — your free trial/);
+});
+
+// ---- email: all templates render, all send paths work ----
+test('email templates: login/trial, renewal, order and newsletter render in English and French with no leftover placeholders', () => {
+  const s = { branding: { appName: 'Test TV', logoUrl: 'https://cdn.test/logo.png', supportUrl: 'https://wa.me/212600000000', supportLabel: 'WhatsApp' },
+    email: { appUrl: 'https://app.test', supportEmail: 'help@test.example', website: 'https://test.example', dns: 'http://line.test:8080' },
+    trial: { hours: 24 }, player: { serverUrl: 'http://line.test:8080' },
+    renewalOffer: { title: '1-Year Plan', price: '$99.99', bonus: '2 months free', coupon: 'SAVE10', url: 'https://test.example' },
+    orderCurrency: 'EUR' };
+  const c = { name: 'Sara & Co', lang: 'en', username: 'sara', loginPassword: 'Login1234', lineUsername: 'line_sara', linePassword: 'p@ss&1',
+    dns: 'http://line.test:8080', expiresAt: Date.parse('2027-01-31T12:00:00Z'),
+    m3u: 'http://line.test/get.php?username=line_sara&password=p%40ss%261&type=m3u_plus', ibo: { mac: 'AA:BB:CC:DD:EE:FF', key: 'KEY-123' } };
+  const clean = (html) => { for (const bad of ['undefined', 'NaN', '{name}', '{app}', '{date}', '{pkg}', '{price}', '{coupon}', '{site}', '{hours}', '{days}']) assert.ok(!html.includes(bad), 'placeholder ' + bad + ' left in email'); return html; };
+  for (const lang of ['en', 'fr']) {
+    const trial = accessEmail(s, { ...c, lang }, 'Pass1234', 'trial');
+    assert.ok(trial.subject.length > 5); assert.ok(trial.html.includes('line_sara'));
+    assert.ok(trial.html.includes('Pass1234') || trial.html.includes('p@ss&amp;1'));
+    assert.ok(trial.html.includes('http://line.test:8080')); assert.ok(trial.html.includes('SAVE') === false);
+    assert.ok(trial.html.includes('AA:BB:CC:DD:EE:FF')); assert.ok(trial.html.includes('KEY-123'));
+    assert.ok(trial.html.includes('type=m3u_plus'), 'the saved M3U link is in the email');
+    const both = accessEmail(s, { ...c, lang, m3u: '' }, 'Pass1234', 'trial').html;
+    assert.ok(/TS:/.test(both) && /HLS:/.test(both), 'without a saved M3U both generated links are in the email'); clean(both);
+    clean(trial.html);
+    const sub = accessEmail(s, { ...c, lang }, 'Login1234', 'sub');
+    assert.ok(sub.html.includes('line_sara') && sub.html.includes('AA:BB:CC:DD:EE:FF')); clean(sub.html);
+    assert.notEqual(sub.subject, trial.subject);
+    const ren = renewalEmail(s, { ...c, lang, isTrial: false });
+    assert.ok(ren.subject.length > 5); assert.ok(ren.html.includes('SAVE10') && ren.html.includes('test.example')); clean(ren.html);
+    const pkg = { id: 'o1m', title: '1 Month', days: 30, devices: 2, price: 29.99 };
+    const ord = orderEmail(s, { ...c, lang }, pkg);
+    assert.ok(ord.subject.includes('1 Month') && ord.subject.includes('€29.99')); assert.ok(ord.html.includes('1 Month') && ord.html.includes('€29.99')); clean(ord.html);
+    const camp = { id: 'c1', split: true, lang, coupon: 'SAVE10', link: 'site', content: { en: { subject: 'Big summer sale', title: 'Big summer sale', body: 'Hello {name}, save now.', button: 'See the offer' }, fr: { subject: 'Grande promo d’été', title: 'Grande promo d’été', body: 'Bonjour {name}, profitez-en.', button: 'Voir l’offre' } } };
+    const nl = newsletterEmail(s, { ...c, lang }, camp, 'https://app.test', 'https://app.test/unsubscribe?t=1');
+    assert.ok(nl.subject.length > 5); assert.ok(nl.html.includes('https://app.test/unsubscribe?t=1')); clean(nl.html);
+  }
+});
+
+test('sending: a dead primary key falls back to the "Send from" address and the transactional key/domain rotation never sends from an empty domain', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_main', from: 'My Brand <hi@brand.test>' } }, tok);
+  const one = await x.call('POST', '/api/admin/email/test', { to: 'first@example.com' }, tok);
+  assert.equal(one.status, 200); assert.equal(one.json.ok, true);
+  assert.equal(x.mails.at(-1).from, 'My Brand <hi@brand.test>');
+  await x.call('PUT', '/api/admin/settings', { email: { transKeys: ['k0', '', 'k2'], transDomains: ['a.test', '', 'c.test'], transSenders: ['S0', '', 'S2'] } }, tok);
+  const froms = new Set();
+  for (let i = 0; i < 40; i++) { const r = await x.call('POST', '/api/admin/email/test', { to: 'rot@example.com' }, tok); assert.equal(r.json.ok, true); froms.add(x.mails.at(-1).from); }
+  assert.deepEqual([...froms].sort(), ['S0 <noreply@a.test>', 'S2 <noreply@c.test>'], 'blank key slots keep their own domain and never send from an empty domain');
+});
+
+test('sending: bounce reading and recent emails try the transactional keys when the main Resend key is dead', async () => {
+  const db = new Map(); const stored = (k, v) => db.set(k, JSON.stringify(v));
+  const seen = [];
+  const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
+  stored('settings', { security: { force2fa: false, captcha: false }, email: { resendKey: 're_dead', transKeys: ['re_live'], transDomains: ['intproto-tv.online'] } });
+  const fetchFn = async (url, init) => {
+    url = String(url); const auth = String((init && init.headers && init.headers.Authorization) || ''); seen.push(auth);
+    if (!url.startsWith('https://api.resend.com')) return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
+    if (auth === 'Bearer re_dead') return { ok: false, status: 401, json: async () => ({ message: 'API key is invalid' }) };
+    if (url.includes('limit=1') && !url.includes('limit=100')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    return { ok: true, status: 200, json: async () => ({ data: [{ id: 'm1', to: ['bounced@example.com'], subject: 'Hello', last_event: 'bounced', created_at: '2026-11-17T01:00:00Z' }], has_more: false }) };
+  };
+  const be = createBackend({ store, fetchFn, mode: 'server' });
+  const call = (m, p, b, t) => be.handle({ method: m, path: p, body: b || {}, token: t, query: {} });
+  const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
+  const sync = await call('POST', '/api/admin/email/bounces/sync', {}, tok);
+  assert.equal(sync.status, 200, JSON.stringify(sync.json)); assert.equal(sync.json.added, 1);
+  const recent = await call('GET', '/api/admin/email/recent', {}, tok);
+  assert.equal(recent.status, 200, JSON.stringify(recent.json)); assert.equal(recent.json.list.length, 1);
+  assert.ok(seen.includes('Bearer re_live'), 'the working transactional key was used');
+});
+
+test('sending: a stored Arabic mail language no longer breaks a real customer email', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { lang: 'ar', resendKey: 're_test', from: 'App <no-reply@test.example>' } }, tok);
+  const made = await x.call('POST', '/api/admin/customers', { name: 'Lang Test', username: 'langtest', password: 'secret12', email: 'lang@example.com', planId: 'p1' }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  const id = (made.json.customer || made.json).id;
+  const line = await x.call('POST', `/api/admin/customers/${id}/line`, { m3u: 'http://line.test:8080/get.php?username=langline&password=pw9&type=m3u_plus' }, tok);
+  assert.equal(line.status, 200, JSON.stringify(line.json)); assert.equal(line.json.emailSent, true);
+  assert.equal(x.mails.length, 1); assert.equal(x.mails[0].to[0], 'lang@example.com');
+  assert.match(x.mails[0].subject, /Subscription Is Active/, 'falls back to English instead of crashing');
 });

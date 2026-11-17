@@ -291,7 +291,7 @@ export function cleanEmail(x) {
 }
 // Language of emails: one language for everyone (English unless changed in Trial & email setup), or each customer's own.
 let MAIL_LANG = 'en';
-export const setMailLang = (v) => { MAIL_LANG = ['en', 'fr', 'ar', 'customer'].includes(v) ? v : 'en'; };
+export const setMailLang = (v) => { MAIL_LANG = ['en', 'fr', 'customer'].includes(v) ? v : 'en'; };
 const ml = (c) => (MAIL_LANG !== 'customer' ? MAIL_LANG : ['en', 'fr'].includes(c && c.lang) ? c.lang : 'en');
 // Reads the server, username and password out of a line link copied from the panel (get.php, player_api.php or /live/user/pass/…).
 export function parseLineLink(link) {
@@ -429,7 +429,7 @@ export function applyMailTexts(custom) {
   }
 }
 export function accessEmail(s, c, password, kind, appUrl) {
-  const lang = ml(c); const L = AM[lang]; const e = escHtml;
+  const lang = ml(c); const L = AM[lang] || AM.en; const e = escHtml;
   const app = s.branding.appName || 'IPTV';
   const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, n) => (n === 'app' ? e(app) : e(x[n] ?? '')));
   const base = String(s.email.appUrl || appUrl || '').replace(/\/+$/, '');
@@ -513,7 +513,7 @@ export function pickPayLink(s, pkg) { // only a link the admin types for one ord
   return pkg?.link ? { url: pkg.link, acc: '' } : null;
 }
 export function orderEmail(s, c, pkg, appUrl, chosen, curParam) {
-  const lang = ml(c); const L = OM[lang]; const e = escHtml;
+  const lang = ml(c); const L = OM[lang] || OM.en; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const pl = chosen || pickPayLink(s, pkg);
   const cur = curParam || (s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR');
   const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
@@ -614,7 +614,7 @@ export const WA_TPL = {
   },
 };
 export function renewalEmail(s, c, appUrl) {
-  const lang = ml(c); const L = RM[lang]; const e = escHtml; const o = s.renewalOffer || {};
+  const lang = ml(c); const L = RM[lang] || RM.en; const e = escHtml; const o = s.renewalOffer || {};
   const app = s.branding.appName || 'IPTV';
   const site = String(o.url || s.email.website || s.email.appUrl || appUrl || '').replace(/\/+$/, '');
   const siteTxt = site.replace(/^https?:\/\//, '');
@@ -801,19 +801,34 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     }
     return sale;
   }
+  function fromIdentity(s) { // "Send from" may be "Name <addr>" or just an address
+    const raw = String(s.email.from || '').trim();
+    const m = raw.match(/<([^>]+)>/);
+    const addr = (m ? m[1] : raw).trim();
+    const name = (m ? raw.slice(0, m.index) : '').replace(/["']/g, '').trim();
+    return { addr: /^\S+@\S+\.\S+$/.test(addr) ? addr : '', name, domain: addr.includes('@') ? addr.split('@')[1].trim() : '' };
+  }
+  function transPairs(s) { // pairs keep their original index: a blank key never shifts another key's domain
+    const ks = s.email.transKeys || [], ds = s.email.transDomains || [], ns = s.email.transSenders || [];
+    const out = [];
+    for (let i = 0; i < ks.length; i++) { const key = String(ks[i] || '').trim(); if (!key) continue; out.push({ key, domain: String(ds[i] || '').trim(), fromName: String(ns[i] || '').trim() }); }
+    return out;
+  }
   function transPair(s) {
-    const ks = (s.email.transKeys || []).filter((k) => String(k || '').trim());
-    const ds = (s.email.transDomains || []);
-    const n = ks.length;
-    if (!n) return { key: s.email.resendKey || '', domain: s.email.dns || (String(s.email.website || '').replace(/^https?:\/\//, '').split('/')[0] || ''), fromName: String(s.branding.appName || 'INTPROTO-TV') };
-    const i = Math.floor(Math.random() * n);
-    return { key: ks[i], domain: ds[i] || s.email.dns || (String(s.email.website || '').replace(/^https?:\/\//, '').split('/')[0] || ''), fromName: (s.email.transSenders || [])[i] || String(s.branding.appName || 'INTPROTO-TV') };
+    const list = transPairs(s);
+    if (list.length) return list[Math.floor(Math.random() * list.length)];
+    const f = fromIdentity(s);
+    const domain = f.domain || String(s.email.dns || '').trim().replace(/^https?:\/\//, '').split('/')[0] || String(s.email.website || '').trim().replace(/^https?:\/\//, '').split('/')[0];
+    return { key: s.email.resendKey || '', domain, fromName: f.name || String(s.branding.appName || 'INTPROTO-TV'), address: f.addr };
   }
   function transFrom(s, p) {
-    const fromName = p.fromName || 'INTPROTO-TV';
-    const domain = p.domain || 'intproto-tv.store';
-    return `${fromName} <noreply@${domain}>`;
+    const f = fromIdentity(s);
+    const name = (p.fromName || f.name || s.branding.appName || 'INTPROTO-TV').replace(/[<>]/g, '').trim();
+    const domain = String(p.domain || '').trim();
+    const addr = p.address || (domain ? `noreply@${domain}` : f.addr);
+    return `${name} <${addr || 'noreply@intproto-tv.store'}>`;
   }
+  const mailKeys = (s) => { const out = []; for (const k of [s.email.resendKey, ...(s.email.transKeys || [])]) { const v = String(k || '').trim(); if (v && !out.includes(v)) out.push(v); } return out; };
   async function sendEmail(s, to, subject, html) {
     const e = s.email;
     to = cleanEmail(to);
@@ -1109,11 +1124,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Addresses that bounced or complained: never emailed again until the owner allows it.
   const getBad = async () => (await store.get('badEmails')) || {};
   async function syncBounces(s) {
-    if (!s.email.resendKey) return { ok: false, error: 'Email is not set up (Resend key missing).' };
-    const bad = await getBad(); let added = 0, checked = 0, after = '';
+    const keys = mailKeys(s);
+    if (!keys.length) return { ok: false, error: 'Email is not set up (Resend key missing).' };
+    const bad = await getBad(); let added = 0, checked = 0, after = '', readKey = '', lastErr = '';
+    for (const k of keys) { // try the main key, then each transactional key, until one can read
+      let res, d;
+      try { res = await fetchFn('https://api.resend.com/emails?limit=1', { headers: { Authorization: 'Bearer ' + k } }); d = await res.json().catch(() => ({})); }
+      catch (e) { lastErr = 'Could not reach Resend: ' + e.message; continue; }
+      if (res.ok) { readKey = k; break; }
+      lastErr = res.status === 401 || res.status === 403 || /restricted/i.test(d.name || d.message || '') ? 'Your Resend API key can only send. To read bounces, create a key with "Full access" in Resend and paste it in Trial & email.' : d.message || 'Resend error ' + res.status;
+    }
+    if (!readKey) return { ok: false, error: lastErr };
     for (let page = 0; page < 3; page++) {
       let res, d;
-      try { res = await fetchFn(`https://api.resend.com/emails?limit=100${after ? '&after=' + encodeURIComponent(after) : ''}`, { headers: { Authorization: 'Bearer ' + s.email.resendKey } }); d = await res.json().catch(() => ({})); }
+      try { res = await fetchFn(`https://api.resend.com/emails?limit=100${after ? '&after=' + encodeURIComponent(after) : ''}`, { headers: { Authorization: 'Bearer ' + readKey } }); d = await res.json().catch(() => ({})); }
       catch (e) { return { ok: false, error: 'Could not reach Resend: ' + e.message }; }
       if (!res.ok) return { ok: false, error: res.status === 401 || res.status === 403 || /restricted/i.test(d.name || d.message || '') ? 'Your Resend API key can only send. To read bounces, create a key with "Full access" in Resend and paste it in Trial & email.' : d.message || 'Resend error ' + res.status };
       const rows = Array.isArray(d.data) ? d.data : [];
@@ -3065,10 +3089,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ subject: out.subject, html: out.html });
       }
       if (R('GET', '/api/admin/email/recent')) { // the latest emails Resend sent for this account, with their delivery status
-        if (!s.email.resendKey) return err(400, 'Email is not set up (Resend key missing).');
-        let res, d; try { res = await fetchFn('https://api.resend.com/emails?limit=100', { headers: { Authorization: 'Bearer ' + s.email.resendKey } }); d = await res.json().catch(() => ({})); } catch (e) { return err(502, 'Could not reach Resend: ' + e.message); }
-        if (!res.ok) return err(400, res.status === 401 || res.status === 403 || /restricted/i.test(d.name || d.message || '') ? 'Your Resend API key can only send. To read the sent emails, create a key with "Full access" in Resend and paste it in Trial & email setup.' : d.message || 'Resend error ' + res.status);
-        return ok({ list: (Array.isArray(d.data) ? d.data : []).map((m) => ({ id: m.id, to: [].concat(m.to || []).join(', '), subject: m.subject || '', at: Date.parse(m.created_at || '') || 0, status: m.last_event || 'sent' })) });
+        if (!mailKeys(s).length) return err(400, 'Email is not set up (Resend key missing).');
+        let res, d, lastErr = '', okData = null;
+        for (const k of mailKeys(s)) {
+          try { res = await fetchFn('https://api.resend.com/emails?limit=100', { headers: { Authorization: 'Bearer ' + k } }); d = await res.json().catch(() => ({})); } catch (e) { lastErr = 'Could not reach Resend: ' + e.message; continue; }
+          if (res.ok) { okData = d; break; }
+          lastErr = res.status === 401 || res.status === 403 || /restricted/i.test(d.name || d.message || '') ? 'Your Resend API key can only send. To read the sent emails, create a key with "Full access" in Resend and paste it in Trial & email setup.' : d.message || 'Resend error ' + res.status;
+        }
+        if (!okData) return err(400, lastErr);
+        return ok({ list: (Array.isArray(okData.data) ? okData.data : []).map((m) => ({ id: m.id, to: [].concat(m.to || []).join(', '), subject: m.subject || '', at: Date.parse(m.created_at || '') || 0, status: m.last_event || 'sent' })) });
       }
       if (R('POST', '/api/admin/email/bounces/clearall')) {
         const bad = await getBad(); const only = Array.isArray(body.emails) ? body.emails.map(cleanEmail) : null; let n = 0;
