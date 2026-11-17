@@ -119,6 +119,30 @@ test('password reset by email: link works once, old sessions end, unknown accoun
   assert.equal((await x.call('POST', '/api/login', { username: 'testuser', password: 'newpass99' })).status, 200);
 });
 
+test('Stripe revenue: sales are attributed to the Stripe account from the webhook secret, used by the accounts page', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', {
+    orderPackages: [{ id: 'o1m', title: '1 Month', days: 30, devices: 1, price: 29.99, badge: '', link: '' }],
+    stripeAccounts: [{ id: 'norm', name: 'Normal', currency: 'USD', status: 'active', payoutDays: 7, bankId: 'stripe', links: [] }, { id: 'sold', name: 'Seller', currency: 'EUR', status: 'active', payoutDays: 2, bankId: '', links: [] }],
+    finance: { stripeWebhookSecrets: 'whsec_norm:norm\nwhsec_sold:sold' }
+  }, tok);
+  const c1 = await addCustomer(x, tok, { username: 'buyer_norm', email: 'norm@example.com' });
+  const c2 = await addCustomer(x, tok, { username: 'buyer_sold', email: 'sold@example.com' });
+  const event = (id, ref, email) => JSON.stringify({ id, type: 'checkout.session.completed', data: { object: { id: 'cs_' + id, payment_status: 'paid', amount_total: 2999, currency: 'usd', client_reference_id: ref, customer_details: { email }, metadata: { package: 'o1m' } } } });
+  for (const [ev, sec, ref, email] of [['evt_a', 'whsec_norm', c1.id, 'norm@example.com'], ['evt_b', 'whsec_sold', c2.id, 'sold@example.com']]) {
+    const raw = event(ev, ref, email);
+    const r = await x.call('POST', '/api/stripe/webhook', { raw, sig: await stripeSign(raw, sec) });
+    assert.equal(r.json.result, 'activated', JSON.stringify(r.json));
+  }
+  const rev = await x.call('GET', '/api/admin/stripe/revenue', {}, tok);
+  assert.equal(rev.status, 200, JSON.stringify(rev.json));
+  const by = Object.fromEntries((rev.json.stripeAccounts || []).map((e) => [e.accountId, e]));
+  assert.equal(by.norm?.n, 1, 'the Normal account got one recorded sale');
+  assert.ok(by.norm.usd > 29.9, 'and its amount is in USD');
+  assert.equal(by.sold?.n, 1, 'the Seller account got the other');
+  assert.equal(rev.json.unattributedN, 0);
+});
+
 test('Stripe webhook: only signed, paid events activate; never twice; records are kept', async () => {
   const x = setup(); const tok = await adminToken(x); const secret = 'whsec_test_123';
   await x.call('PUT', '/api/admin/settings', { orderPackages: [{ id: 'o3m', title: '3 Months', days: 90, devices: 1, price: 49.99, badge: '', link: '' }] }, tok);

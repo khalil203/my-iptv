@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink } from './core.js?v=69';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=69';
-import { siteHtml } from './site.js?v=69';
-import { ic } from './icons.js?v=69';
-import { parseM3U, m3uAnswer } from './m3u.js?v=69';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=69';
+import { createBackend, parseLineLink } from './core.js?v=70';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=70';
+import { siteHtml } from './site.js?v=70';
+import { ic } from './icons.js?v=70';
+import { parseM3U, m3uAnswer } from './m3u.js?v=70';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=70';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -26,20 +26,29 @@ const b64 = (s) => { try { return decodeURIComponent(escape(atob(s))); } catch {
 function toast(msg, isErr) {
   const d = document.createElement('div');
   d.textContent = msg; if (isErr) d.className = 'err';
+  d.setAttribute('role', isErr ? 'alert' : 'status');
   $('#toast').appendChild(d);
   setTimeout(() => d.remove(), 3200);
 }
 function modal(title, html, { wide = false, onClose } = {}) {
   closeModal();
   const root = $('#modal-root');
-  root.innerHTML = `<div class="modal-bg" data-act="modal-bg"><div class="modal ${wide ? 'wide' : ''}"><div class="modal-head"><h3>${title}</h3><button class="x" data-act="close-modal">×</button></div><div class="modal-body">${html}</div></div></div>`;
+  const prev = (document.activeElement && document.activeElement.focus) ? document.activeElement : null;
+  const titleId = 'modal-title-' + Math.random().toString(36).slice(2, 9);
+  const closeLabel = esc(t('close'));
+  root.innerHTML = `<div class="modal-bg" data-act="modal-bg"><div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="${titleId}"><div class="modal-head"><h3 id="${titleId}">${title}</h3><button class="x" data-act="close-modal" aria-label="${closeLabel}" title="${closeLabel}">×</button></div><div class="modal-body">${html}</div></div></div>`;
   root._onClose = onClose;
+  root._prevFocus = prev;
+  const first = root.querySelector('.modal-body input:not([type=hidden]):not([disabled]), .modal-body select:not([disabled]), .modal-body textarea:not([disabled]), .modal-body button:not([disabled])');
+  if (first) try { first.focus(); } catch {}
   return $('.modal-body', root);
 }
 function closeModal() {
   const root = $('#modal-root');
   if (root._onClose) { try { root._onClose(); } catch {} root._onClose = null; }
   root.innerHTML = '';
+  const prev = root._prevFocus; root._prevFocus = null;
+  if (prev && document.contains(prev)) { try { prev.focus(); } catch {} }
 }
 const field = (label, name, value, o = {}) => `<label class="field"><span>${label}</span>${
   o.type === 'textarea' ? `<textarea name="${name}" rows="${o.rows || 3}" placeholder="${esc(o.ph || '')}" ${o.attrs || ''}>${esc(value)}</textarea>`
@@ -230,14 +239,14 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       ${error ? `<div class="err-box">${esc(error)}</div>` : ''}
       <form ${preview ? '' : 'data-form="login"'}>
         ${field(t('username'), 'username', '', { attrs: 'autocomplete="username" autocapitalize="none" required' })}
-        <label class="field"><span>${t('password')}</span><div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" data-act="pw-eye">👁</button></div></label>
+        <label class="field"><span>${t('password')}</span><div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" data-act="pw-eye" title="Show password" aria-label="Show password">👁</button></div></label>
         ${!preview && state.config?.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : ''}
         <button class="btn primary block" ${preview ? 'type="button"' : ''}>${t('signIn')}</button>
       </form>
       ${preview ? '' : `<div class="login-foot" style="margin-top:10px"><a href="#" data-act="forgot">${t('forgot')}</a></div>`}
       ${state.config?.trial?.enabled ? `<button class="btn block" style="margin-top:10px;border-color:var(--accent);color:var(--accent)" ${preview ? '' : 'data-act="trial"'}>🎁 ${t('startTrial', { hours: state.config.trial.hours })}</button>` : ''}
       ${preview ? '' : `<a class="btn block ghost" href="download.html" style="margin-top:8px">📲 ${t('getApp')}</a>`}
-      ${preview ? '' : `<div class="login-foot"><a data-act="theme" style="cursor:pointer;text-decoration:none">🌗</a></div>`}
+      ${preview ? '' : `<div class="login-foot"><a data-act="theme" href="#" style="cursor:pointer;text-decoration:none" title="Theme" aria-label="Change theme">🌗</a></div>`}
       ${preview ? '' : `<div class="login-foot lang-sw">${LANGS.map(([k, n]) => `<a data-act="lang" data-lang="${k}" class="${getLang() === k ? 'on' : ''}">${n}</a>`).join(' · ')}</div>`}
       ${waNum(b) ? `<a class="btn block wa-btn" style="margin-top:8px" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: '' })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
       ${b.footerText ? `<div class="login-foot">${esc(b.footerText)}</div>` : ''}
@@ -256,7 +265,7 @@ function trialForm() {
     ${toggle(t('sameWhatsapp'), 'same', true)}
     <div id="wa-field" style="display:none">${phoneField(t('whatsapp'), 'whatsapp', false)}</div>
     ${state.config?.captcha ? `<label class="field" style="flex-direction:row;align-items:center;gap:10px"><span style="min-width:130px">${t('captchaQ', { q: esc(state.config.captcha.q) })}</span><input name="captchaAnswer" inputmode="numeric" autocomplete="off" required placeholder="=" style="width:110px;text-align:center" aria-label="captcha"></label><input type="hidden" name="captchaId" value="${esc(state.config.captcha.id)}">` : ''}
-    <div id="trial-err"></div>
+    <div id="trial-err" aria-live="polite"></div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">🎁 ${t('getTrial')}</button></div>
   </form>`;
 }
@@ -287,10 +296,10 @@ function renderFreeTrial() {
         ${toggle(t('sameWhatsapp'), 'same', true)}
         <div id="wa-field" style="display:none">${phoneField(t('whatsapp'), 'whatsapp', false)}</div>
         ${cap}
-        <div id="trial-err"></div>
+        <div id="trial-err" aria-live="polite"></div>
         <button class="btn primary block" style="margin-top:10px">🎁 ${esc(t('getTrial'))}</button>
       </form>`;
-  $('#app').innerHTML = `<div class="site"><main class="s-doc" style="max-width:560px;margin:0 auto">
+  $('#app').innerHTML = `<div class="site"><main class="s-doc" id="main" style="max-width:560px;margin:0 auto">
     <a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>
     <h1>🎁 ${esc(t('trialTitle', { hours: tr.hours }))}</h1>
     <p class="s-sub">${esc(t('trialIntro'))}</p>
@@ -312,7 +321,7 @@ function renderResellers() {
   const b = state.config.branding || {};
   const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
   setWaFab(b, t('waMsg', { app: b.appName || 'INTPROTO-TV', u: '' }));
-  $('#app').innerHTML = `<div class="site"><main class="s-doc" style="max-width:720px;margin:0 auto">
+  $('#app').innerHTML = `<div class="site"><main class="s-doc" id="main" style="max-width:720px;margin:0 auto">
     <a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>
     <h1>🤝 ${esc(t('resellerPanel'))}</h1>
     <p class="s-sub">${esc(t('resellerIntro'))}</p>
@@ -404,7 +413,7 @@ const ADMIN_TABS = [
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
   ['activity', '🧾', 'Activity', 'activity', 'System', 'log audit history'],
 ];
-const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
+const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
 
 async function renderBylawsGate(me) {
@@ -464,11 +473,11 @@ async function renderAdmin() {
     <aside class="side" id="side">${brandHtml(b, false)}<input class="nav-search" type="search" placeholder="🔎 Find a page…" data-input="nav-search" aria-label="Find a page" autocomplete="off"><nav class="nav" id="nav">${navHtml(tabs, t)}<div class="nav-none muted small" hidden>No page matches.</div></nav>
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
-    <div class="main">
+    <main class="main" id="main">
       <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
-      <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
+      <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
-    </div></div>`;
+    </main></div>`;
   try {
     const s = await api('GET', '/api/admin/settings');
     state.admin.settings = s;
@@ -486,7 +495,7 @@ async function renderAdmin() {
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
-    else if (t === 'stripe') { body.innerHTML = adminStripePage(s); setTimeout(() => { const b = body.querySelector('[data-act="sa-compare"]'); if (b) b.click(); }, 150); }
+    else if (t === 'stripe') { body.innerHTML = await adminStripePage(s); setTimeout(() => { const b = body.querySelector('[data-act="sa-compare"]'); if (b) b.click(); }, 150); }
     else if (t === 'tasks') body.innerHTML = await adminTasksPage();
     else if (t === 'attendance') { body.innerHTML = await adminAttendancePage(); startTzClock(); loadShiftsAndLeaves().catch(() => {}); }
     else if (t === 'teamchat') { body.innerHTML = await adminTeamChatPage(); { const el = $('#tc-thread'); if (el) el.scrollTop = el.scrollHeight; } }
@@ -585,7 +594,7 @@ async function adminSalesPage() {
 async function adminResellerPage() {
   const [r, cs] = await Promise.all([api('GET', '/api/admin/reseller'), api('GET', '/api/admin/customers')]);
   const sheets = r.sheets || {};
-  const rows = r.list.map((x) => `<tr><td><b>${esc(x.rslId)}</b></td><td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc(x.username)}</div></td><td class="small">${esc(x.email)}${x.phone ? '<br>' + esc(x.phone) : ''}</td><td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b><div class="small muted">${mad(x.spentMad)}</div></td><td>${usd(x.rate)} <span class="small muted">/c</span></td><td>#${x.rank}</td><td><button class="btn sm danger" data-act="reseller-toggle" data-id="${x.id}" title="Remove reseller flag">✕</button></td></tr>`).join('');
+  const rows = r.list.map((x) => `<tr><td><b>${esc(x.rslId)}</b></td><td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc(x.username)}</div></td><td class="small">${esc(x.email)}${x.phone ? '<br>' + esc(x.phone) : ''}</td><td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b><div class="small muted">${mad(x.spentMad)}</div></td><td>${usd(x.rate)} <span class="small muted">/c</span></td><td>#${x.rank}</td><td><button class="btn sm danger" data-act="reseller-toggle" data-id="${x.id}" title="Remove reseller flag" aria-label="Remove reseller flag">✕</button></td></tr>`).join('');
   const notYet = (cs || []).filter((c) => !c.isReseller).slice(0, 500).map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.username)})</option>`).join('');
   const maxC = Math.max(1, ...r.list.map((x) => x.credits));
   const bars = r.list.slice(0, 10).map((x) => `<div><span>${esc(x.rslId)}</span><div class="hbar2" title="${esc(x.rslId)} · ${x.credits} credits"><i style="width:${Math.round((x.credits / maxC) * 100)}%"></i></div><span class="small muted">${x.credits}</span></div>`).join('');
@@ -680,13 +689,13 @@ function custActions(c) {
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     <button class="btn sm ${c.waSentAt ? 'wa-sent' : c.whatsapp || c.phone ? 'wa-todo' : ''}" data-act="wa-one" data-perm="customers_edit" data-id="${c.id}" title="${c.waSentAt ? 'WhatsApp message sent ' + fmtDate(c.waSentAt) + ' — tap to send another' : 'Send a WhatsApp message'}" aria-label="${c.waSentAt ? 'WhatsApp message already sent' : 'Send a WhatsApp message'}">💬</button>
-    ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details">✉️</button>` : ''}
-    ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}">💳</button>` : ''}
-    ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
-    <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details">📋</button>
-    ${c.twoFactor ? `<button class="btn sm" data-act="cust-tfa-off" data-perm="customers_edit" data-id="${c.id}" title="Two-step sign-in is on. Tap to turn it off (lost phone).">🔐</button>` : ''}
+    ${c.email ? `<button class="btn sm" data-act="email-login" data-perm="customers_edit" data-id="${c.id}" title="Email login details" aria-label="Email login details">✉️</button>` : ''}
+    ${c.email ? `<button class="btn sm" data-act="order-one" data-perm="customers_edit" data-id="${c.id}" title="Send a package order email${c.orderSentAt ? ' (last sent ' + fmtDate(c.orderSentAt) + ')' : ''}" aria-label="Send a package order email">💳</button>` : ''}
+    ${c.email && c.state === 'expired' ? `<button class="btn sm" data-act="renewal-one" data-perm="customers_edit" data-id="${c.id}" title="Send renewal offer${c.renewalSentAt ? ' (sent ' + fmtDate(c.renewalSentAt) + ')' : ''}" aria-label="Send renewal offer">🔁${c.renewalSentFor === c.expiresAt ? '✓' : ''}</button>` : ''}
+    <button class="btn sm" data-act="copy-login" data-perm="customers_view" data-id="${c.id}" title="Copy login details" aria-label="Copy login details">📋</button>
+    ${c.twoFactor ? `<button class="btn sm" data-act="cust-tfa-off" data-perm="customers_edit" data-id="${c.id}" title="Two-step sign-in is on. Tap to turn it off (lost phone)." aria-label="Turn off two-step sign-in">🔐</button>` : ''}
     <button class="btn sm" data-act="chat-with" data-id="${c.id}" title="Open the live chat with this customer" aria-label="Live chat">🗨</button>
-    <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}">🗑</button>`;
+    <button class="btn sm danger" data-act="del-customer" data-perm="customers_delete" data-id="${c.id}" title="Delete customer" aria-label="Delete customer">🗑</button>`;
 }
 function customerListHtml() {
   const all = filteredCustomers();
@@ -820,7 +829,7 @@ async function adminDups() {
 async function adminResellerSection(s) {
   const sales = can('customers_view') ? await api('GET', '/api/admin/reseller-sales').catch(() => []) : [];
   const rp = s.resellerPackages || [];
-  const row = (p) => `<div class="rp-row" data-rp="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="credits" type="number" value="${p.credits}" placeholder="Credits"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><button class="btn sm danger" data-act="del-rp">✕</button></div>`;
+  const row = (p) => `<div class="rp-row" data-rp="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="credits" type="number" value="${p.credits}" placeholder="Credits"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><button class="btn sm danger" data-act="del-rp" title="Remove reseller plan" aria-label="Remove reseller plan">✕</button></div>`;
   const cur = s.resellerCurrency || 'EUR';
   return `<div class="card"><div class="row"><h3 style="margin:0">🤝 Reseller packages</h3><span class="spacer"></span><button class="btn primary sm" data-act="sell-rp" data-perm="customers_edit">＋ Sell a package</button></div>
     <div class="plans-grid" style="margin:14px 0">${rp.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, cur)}</div><div class="small muted">${p.credits} credits · ${priceTxt(Math.round((p.price / p.credits) * 100) / 100, cur)} each</div></div>`).join('')}</div>
@@ -894,7 +903,7 @@ function resellerSaleForm(s) {
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Record sale</button></div></form>`;
 }
 function adminPlans(s) {
-  const row = (p) => `<div class="plan-row" data-plan="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="days" type="number" value="${p.days}" placeholder="Days"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><input data-k="credits" type="number" value="${p.credits ?? ''}" placeholder="Credits"><input data-k="connections" type="number" value="${p.connections}" placeholder="Devices"><input data-k="package" value="${esc(p.package)}" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan">✕</button></div>`;
+  const row = (p) => `<div class="plan-row" data-plan="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="days" type="number" value="${p.days}" placeholder="Days"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><input data-k="credits" type="number" value="${p.credits ?? ''}" placeholder="Credits"><input data-k="connections" type="number" value="${p.connections}" placeholder="Devices"><input data-k="package" value="${esc(p.package)}" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan" title="Remove plan" aria-label="Remove plan">✕</button></div>`;
   return `<div class="card"><h3>Plans & prices</h3><p class="muted small">"Credits" = how many panel credits one sale of this plan uses (for stock and profit). "Package ID" is the package number on your TVplus panel, sent as <code>{package}</code>.</p>
     <div class="plan-row small muted" style="margin-bottom:4px"><span>Name</span><span>Days</span><span>Price (${esc(s.currency)})</span><span>Credits</span><span>Devices</span><span>Package ID</span><span></span></div>
     <div id="plans">${s.plans.map(row).join('')}</div>
@@ -1067,7 +1076,7 @@ async function adminTeam() {
     ${m.bank && m.bankDetails ? `<div class="small muted">💳 ${esc(m.bank)} · <code>•••• ${esc(String(m.bankDetails).slice(-4))}</code></div>` : ''}
     ${m.traineeUntil && m.traineeUntil > Date.now() ? `<div class="notice warning" style="margin:6px 0">⏳ Unpaid trainee · ${Math.ceil((m.traineeUntil - Date.now()) / 86400000)} day(s) left · view/tasks/attendance only</div>` : ''}
     <div class="small muted">Last sign-in: ${m.lastLogin ? fmtDT(m.lastLogin) : 'never'}</div>
-    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="edit-member" data-id="${m.id}">Edit</button>${m.traineeUntil && m.traineeUntil > Date.now() ? `<button class="btn sm primary" data-act="promote-member" data-id="${m.id}">🎓 Promote</button>` : ''}<button class="btn sm" data-act="toggle-member" data-id="${m.id}">${m.status === 'disabled' ? 'Enable' : 'Disable'}</button><button class="btn sm danger" data-act="del-member" data-id="${m.id}">🗑</button></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="edit-member" data-id="${m.id}">Edit</button>${m.traineeUntil && m.traineeUntil > Date.now() ? `<button class="btn sm primary" data-act="promote-member" data-id="${m.id}">🎓 Promote</button>` : ''}<button class="btn sm" data-act="toggle-member" data-id="${m.id}">${m.status === 'disabled' ? 'Enable' : 'Disable'}</button><button class="btn sm danger" data-act="del-member" data-id="${m.id}" title="Remove team member" aria-label="Remove team member">🗑</button></div>
   </div>`).join('')}</div>` : `<div class="empty card"><span class="ic">🛡</span>No team members yet.</div>`}
   ${me.role === 'owner' && sigs.length ? `<div class="card" style="margin-top:16px"><h3>📜 Staff bylaws — signature archive</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Signed by</th><th>Role</th><th>Version</th><th>Date</th><th>IP</th></tr></thead><tbody>${sigs.map((x) => `<tr><td>${esc(x.name)}<div class="small muted">${esc(x.by)}</div></td><td class="small">${esc(x.role || '')}</td><td class="small">${esc(x.version)}</td><td class="small">${fmtDT(x.at)}</td><td class="small">${esc(x.ip || '—')}</td></tr>`).join('')}</tbody></table></div><p class="small muted" style="margin-top:8px">Signatures are archived with username, timestamp and IP. Bylaw violations lead to immediate removal.</p></div>` : ''}`;
 }
@@ -1157,7 +1166,7 @@ async function adminFinance(s) {
         <td class="small">${fmtDT(x.at)}</td><td>${x.type === 'income' ? '🟢 in' : x.type === 'expense' ? '🔴 out' : '🔁 transfer'}</td>
         <td>${esc(accName(x.accountId))}${x.toAccountId ? ` → ${esc(accName(x.toAccountId))}` : ''}</td><td><b>${esc(x.category)}</b><div class="small muted">${esc(x.note)}</div></td>
         <td style="text-align:right;white-space:nowrap" class="${x.type === 'income' ? 'pos' : x.type === 'expense' ? 'neg' : ''}">${x.type === 'expense' ? '−' : x.type === 'income' ? '+' : ''}${num(x.amount, accCur(x.accountId))}${x.toAccountId ? `<div class="small muted">→ ${num(x.toAmount, accCur(x.toAccountId))}</div>` : ''}</td>
-        <td><button class="btn sm ghost" data-act="del-tx" data-perm="finance_edit" data-id="${x.id}">🗑</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No transactions yet.</p>'}
+        <td><button class="btn sm ghost" data-act="del-tx" data-perm="finance_edit" data-id="${x.id}" title="Delete transaction" aria-label="Delete transaction">🗑</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No transactions yet.</p>'}
     </div>
     <details class="card" data-perm="finance_edit"><summary style="cursor:pointer"><b>⚙️ Banks, wallets & exchange rates</b></summary>
       <div style="margin-top:12px"><div class="acc-row small muted"><span>Name</span><span>Currency</span><span>Opening balance</span><span>Color</span><span></span></div>
@@ -1171,7 +1180,7 @@ async function adminFinance(s) {
       <button class="btn primary" data-act="save-accounts" style="margin-top:10px">Save banks & rates</button></div>
     </details>`;
 }
-const accRow = (a) => `<div class="acc-row" data-acc="${esc(a.id || '')}"><input data-k="name" value="${esc(a.name)}" placeholder="Name"><select data-k="currency">${['MAD', 'USD', 'USDT', 'EUR', 'THB'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select><input data-k="opening" type="number" step="any" value="${a.opening || 0}"><input data-k="color" type="color" value="${esc(a.color || '#7c5cff')}"><button class="btn sm danger" data-act="del-acc">✕</button></div>`;
+const accRow = (a) => `<div class="acc-row" data-acc="${esc(a.id || '')}"><input data-k="name" value="${esc(a.name)}" placeholder="Name"><select data-k="currency">${['MAD', 'USD', 'USDT', 'EUR', 'THB'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select><input data-k="opening" type="number" step="any" value="${a.opening || 0}"><input data-k="color" type="color" value="${esc(a.color || '#7c5cff')}"><button class="btn sm danger" data-act="del-acc" title="Remove account" aria-label="Remove account">✕</button></div>`;
 
 async function loadStripe() {
   const box = $('#stripe-box'); if (!box) return;
@@ -1248,7 +1257,7 @@ async function adminStock(s) {
       <div class="grid2">${field('Credits per pack', 'stock.packCredits', pk.packCredits, { type: 'number' })}${field('Pack price (USD)', 'stock.packPrice', pk.packPrice, { type: 'number', attrs: 'step="any"' })}</div>
       ${field('Remind me when credits are at or below', 'stock.lowCreditsAlert', pk.lowCreditsAlert, { type: 'number', help: 'Shown on the dashboard, and emailed daily if set up in "Trial & email".' })}
       <button class="btn primary">Save</button></form></div>
-    <div class="card"><h3>Purchases</h3>${st.purchases.length ? st.purchases.map((x) => `<div class="list-item"><span>🎟</span><div style="flex:1"><b>${x.credits} credits</b> · ${esc(x.supplier)}<div class="small muted">${fmtDate(x.at)} · ${num(x.cost, x.currency)} (${usd(x.costUsd)})</div></div><button class="btn sm ghost" data-act="del-stock" data-id="${x.id}">🗑</button></div>`).join('') : '<p class="muted">No purchases yet.</p>'}</div>`;
+    <div class="card"><h3>Purchases</h3>${st.purchases.length ? st.purchases.map((x) => `<div class="list-item"><span>🎟</span><div style="flex:1"><b>${x.credits} credits</b> · ${esc(x.supplier)}<div class="small muted">${fmtDate(x.at)} · ${num(x.cost, x.currency)} (${usd(x.costUsd)})</div></div><button class="btn sm ghost" data-act="del-stock" data-id="${x.id}" title="Delete purchase" aria-label="Delete purchase">🗑</button></div>`).join('') : '<p class="muted">No purchases yet.</p>'}</div>`;
 }
 
 // ---------------- trial & email ----------------
@@ -1350,9 +1359,9 @@ async function renderUser() {
   if (state.justPaid) { const how = state.justPaid; state.justPaid = null; setTimeout(() => modal(how === 'done' ? '✅ ' + t('paidTitle') : '💳 ' + t('paidBackTitle'), `<p>${how === 'done' ? t('paidText') : t('paidBackText')}</p><div class="row"><button class="btn primary" data-act="close-modal" style="flex:1">OK</button><button class="btn" data-act="rc-new" style="flex:1">🧾 ${t('rcBtn')}</button></div>`), 400); }
   const tabs = [['home', ic('home'), t('home')], ['account', ic('user'), t('account')]];
   if (u.tab !== 'home' && u.tab !== 'account') u.tab = 'home';
-  $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
-    <div class="ubody" id="ubody"></div>
-    <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}<div class="bnav-tail"><button class="bnav-sup" data-act="goto-acc" data-to="acc-plans"><span class="ic">${ic('card')}</span>${t('managePlan')}</button><button class="bnav-sup" data-act="ticket-new"><span class="ic">${ic('chat')}</span>${t('contactSup')}</button></div></nav></div>`;
+  $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" aria-label="Change theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
+    <main class="ubody" id="main"></main>
+    <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" ${u.tab === k ? 'aria-current="page"' : ''} data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}<div class="bnav-tail"><button class="bnav-sup" data-act="goto-acc" data-to="acc-plans"><span class="ic">${ic('card')}</span>${t('managePlan')}</button><button class="bnav-sup" data-act="ticket-new"><span class="ic">${ic('chat')}</span>${t('contactSup')}</button></div></nav></div>`;
   renderUserTab();
 }
 
@@ -1427,7 +1436,7 @@ function blockedScreen() {
 
 async function renderUserTab() {
   if (state.user.me) setWaFab(state.user.me.branding, t('waMsg', { app: state.user.me.branding.appName, u: state.user.me.user.username }));
-  const u = state.user; const el = $('#ubody');
+  const u = state.user; const el = $('#main');
   const { user, dashboard: d, branding: b } = u.me;
   if (u.tab === 'home') {
     const renew = b.supportUrl ? `<a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${t('renewNow')}</a>` : t('contactRenew');
@@ -1495,7 +1504,7 @@ async function renderUserTab() {
       : { kind: 'series', id: i.series_id, name: i.name, icon: i.cover });
     el.innerHTML = `${d.search ? `<input placeholder="${t('search')}" value="${esc(u.q)}" data-input="u-search" style="margin-bottom:12px">` : ''}
       <div class="chips">${kind === 'live' ? `<a class="${cat === '*' ? 'on' : ''}" data-act="ucat" data-cat="*">${t('all')}</a>` : ''}${(Array.isArray(cats) ? cats : []).map((c) => `<a class="${String(c.category_id) === String(cat) ? 'on' : ''}" data-act="ucat" data-cat="${esc(c.category_id)}">${esc(c.category_name)}</a>`).join('')}${hiddenCats.size ? `<a data-act="pin-unlock">${t('locked')}</a>` : ''}</div>
-      ${kind === 'live' && d.epg && !state.user.me.stream?.m3u && mapped.length ? `<div class="seg" role="tablist"><button class="${u.guide ? '' : 'on'}" data-act="guide-mode" data-on="">${ic('tv', 18)} ${t('channelsV')}</button><button class="${u.guide ? 'on' : ''}" data-act="guide-mode" data-on="1">${ic('clock', 18)} ${t('tvGuide')}</button></div>` : ''}
+      ${kind === 'live' && d.epg && !state.user.me.stream?.m3u && mapped.length ? `<div class="seg" role="tablist"><button role="tab" aria-selected="${u.guide ? 'false' : 'true'}" class="${u.guide ? '' : 'on'}" data-act="guide-mode" data-on="">${ic('tv', 18)} ${t('channelsV')}</button><button role="tab" aria-selected="${u.guide ? 'true' : 'false'}" class="${u.guide ? 'on' : ''}" data-act="guide-mode" data-on="1">${ic('clock', 18)} ${t('tvGuide')}</button></div>` : ''}
       <div id="items">${mapped.length ? (kind === 'live' && u.guide && d.epg ? guideHtml(mapped.slice(0, Math.min(u.limit, 40))) : itemsGrid(mapped.slice(0, u.limit))) : `<div class="empty"><span class="ic">🔍</span>${t('nothing')}</div>`}</div>
       ${mapped.length > u.limit ? `<div style="text-align:center;margin:16px"><button class="btn" data-act="more">${t('more', { n: mapped.length - u.limit })}</button></div>` : ''}`;
     if (kind === 'live' && u.guide && d.epg && mapped.length) fillGuide(mapped.slice(0, Math.min(u.limit, 40)));
@@ -1506,7 +1515,7 @@ async function renderUserTab() {
 const httpOK = () => location.protocol === 'http:';
 const canSwitchHttp = () => location.protocol === 'https:' && !/github\.io$|localhost|127\.0\.0\.1/.test(location.hostname) && !localStorage.getItem('tvp_nohttp');
 function goHttp(tab) {
-  const el = $('#ubody'); if (el) el.innerHTML = `<div class="block-screen"><div class="spinner"></div><p class="muted">${t('openingPlayer')}</p></div>`;
+  const el = $('#main'); if (el) el.innerHTML = `<div class="block-screen"><div class="spinner"></div><p class="muted">${t('openingPlayer')}</p></div>`;
   location.href = `http://${location.host}${location.pathname}#s=${encodeURIComponent(state.token)}&tab=${tab || state.user.tab}&lang=${getLang()}`;
 }
 // Direct mode: the device itself talks to the IPTV server (Android app bridge).
@@ -1965,7 +1974,7 @@ const actions = {
   },
   'order-send': async (el) => {
     el.disabled = true;
-    try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, link: $('#op-link').value.trim(), appUrl: location.origin }); toast('Package email sent ✓'); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); } closeModal(); }
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/order`, { pkg: $('#op-pick').value, to: $('#mail-to').value, link: $('#op-link').value.trim(), appUrl: location.origin }); toast(t('packageEmailSent')); const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) { c.orderSentAt = Date.now(); c.orderSentPkg = $('#op-pick')?.value; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); } closeModal(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
 
@@ -1991,14 +2000,14 @@ const actions = {
     show(); waLoad();
   },
   'wa-refresh': () => waLoad(),
-  'wa-copy': async () => { try { await navigator.clipboard.writeText($('#wa-text').value); toast('Copied ✓'); } catch { $('#wa-text').select(); document.execCommand('copy'); toast('Copied ✓'); } },
-  'wa-tpl': () => { const b = $('#wa-tpl-box'); b.style.display = b.style.display === 'none' ? '' : 'none'; },
-  'wa-tpl-reset': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: '' } } }); toast('Back to default ✓'); waLoad(); },
-  'wa-tpl-save': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: $('#wa-tpl-text').value } } }); toast('Template saved ✓'); waLoad(); },
+'wa-copy': async () => { try { await navigator.clipboard.writeText($('#wa-text').value); toast(t('copied')); } catch { $('#wa-text').select(); document.execCommand('copy'); toast(t('copied')); } },
+'wa-tpl': () => { const b = $('#wa-tpl-box'); b.style.display = b.style.display === 'none' ? '' : 'none'; },
+'wa-tpl-reset': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: '' } } }); toast(t('backToDefault')); waLoad(); },
+'wa-tpl-save': async () => { const f = $('[data-form=wa]'); await saveSettings({ waTemplates: { [f.type.value]: { [f.lang.value]: $('#wa-tpl-text').value } } }); toast(t('templateSaved')); waLoad(); },
   'wa-open': async (el) => {
     const f = $('[data-form=wa]'); const phone = f.phone.value.replace(/\D/g, ''); const text = $('#wa-text').value;
-    if (!phone) return toast('Enter the WhatsApp number with country code.', true);
-    if (phone.startsWith('0')) return toast('Add the country code instead of the first 0 (Thailand 66…, Morocco 212…).', true);
+    if (!phone) return toast(t('waEnterNumber'), true);
+    if (phone.startsWith('0')) return toast(t('waNoLeadingZero'), true);
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
     api('POST', `/api/admin/customers/${el.dataset.id}/wamsg`, { ...waForm(), log: true }).then(async () => { const sent = state.admin.customers.find((x) => x.id === el.dataset.id); if (sent) sent.waSentAt = Date.now(); document.querySelectorAll(`[data-act="wa-one"][data-id="${el.dataset.id}"]`).forEach((b) => { b.classList.remove('wa-todo'); b.classList.add('wa-sent'); b.title = 'WhatsApp message sent ' + fmtDate(Date.now()) + ' — tap to send another'; }); if (phone !== String(state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp || '').replace(/\D/g, '') && !state.admin.customers.find((x) => x.id === el.dataset.id)?.whatsapp) await api('PUT', `/api/admin/customers/${el.dataset.id}`, { whatsapp: phone }).catch(() => {}); }).catch(() => {});
   },
@@ -2029,11 +2038,11 @@ const actions = {
   'nl-preview': async () => {
     const camp = nlRead(); const lang = $('#nl-pvlang').value;
     const pv = await api('POST', '/api/admin/newsletter/preview', { camp, lang, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') });
-    const fr = $('#nl-pv'); fr.style.display = ''; fr.srcdoc = pv.html; fr.scrollIntoView({ behavior: 'smooth' }); toast('Subject: ' + pv.subject);
+    const fr = $('#nl-pv'); fr.style.display = ''; fr.srcdoc = pv.html; fr.scrollIntoView({ behavior: 'smooth' }); toast(t('nlSubject', { subject: pv.subject }));
   },
   'nl-test': async (el) => {
     el.disabled = true;
-    try { await api('POST', '/api/admin/newsletter/send', { camp: nlRead(), test: $('#nl-test').value, lang: $('#nl-pvlang').value, appUrl: location.origin }); toast('Test sent ✓'); } catch (e) { toast(e.message, true); }
+    try { await api('POST', '/api/admin/newsletter/send', { camp: nlRead(), test: $('#nl-test').value, lang: $('#nl-pvlang').value, appUrl: location.origin }); toast(t('testSent')); } catch (e) { toast(e.message, true); }
     el.disabled = false;
   },
   'nl-send': async (el) => {
@@ -2118,7 +2127,7 @@ const actions = {
   },
   'renewal-send': async (el) => {
     el.disabled = true;
-    try { await api('POST', `/api/admin/customers/${el.dataset.id}/renewal`, { to: $('#mail-to').value, appUrl: location.origin }); toast('Renewal email sent ✓'); closeModal(); if (state.admin.tab === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); $('#cust-list').innerHTML = customerListHtml(); } }
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/renewal`, { to: $('#mail-to').value, appUrl: location.origin }); toast(t('renewalEmailSent')); closeModal(); if (state.admin.tab === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); $('#cust-list').innerHTML = customerListHtml(); } }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'renewal-bulk': async () => {
@@ -2156,29 +2165,29 @@ const actions = {
   },
   'email-send': async (el) => {
     el.disabled = true;
-    try { await api('POST', `/api/admin/customers/${el.dataset.id}/email`, { to: $('#mail-to').value, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast('Email sent ✓'); closeModal(); }
+    try { await api('POST', `/api/admin/customers/${el.dataset.id}/email`, { to: $('#mail-to').value, appUrl: location.origin + location.pathname.replace(/index\.html$/, '') }); toast(t('emailSent')); closeModal(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'close-modal': () => closeModal(),
   'new-member': () => modal('Add team member', memberForm(null), { wide: true }),
-  'promote-member': async (el) => { try { await api('PUT', '/api/admin/team/' + el.dataset.id, { promote: true }); toast('Promoted to active ✓'); $('#admin-body').innerHTML = await adminTeam(); } catch (e) { toast(e.message, true); } },
-  'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
-  'toggle-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); await api('PUT', '/api/admin/team/' + m.id, { status: m.status === 'disabled' ? 'active' : 'disabled' }); toast('Updated ✓'); renderAdmin(); },
-  'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast('Removed'); renderAdmin(); },
-  preset: (el) => { const roles = state.admin.me.allRoles || PRESETS; const p = roles[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },
-  'trial-login': async (el) => { closeModal(); try { const r = await api('POST', '/api/login', { username: el.dataset.u, password: el.dataset.p }); setSession(r.token, r.role); route(); } catch (e) { renderLogin(e.message); } },
-  theme: () => {
+'promote-member': async (el) => { try { await api('PUT', '/api/admin/team/' + el.dataset.id, { promote: true }); toast(t('promotedToActive')); $('#admin-body').innerHTML = await adminTeam(); } catch (e) { toast(e.message, true); } },
+'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
+'toggle-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); await api('PUT', '/api/admin/team/' + m.id, { status: m.status === 'disabled' ? 'active' : 'disabled' }); toast(t('updated')); renderAdmin(); },
+'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast(t('deleted')); renderAdmin(); },
+preset: (el) => { const roles = state.admin.me.allRoles || PRESETS; const p = roles[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },
+'trial-login': async (el) => { closeModal(); try { const r = await api('POST', '/api/login', { username: el.dataset.u, password: el.dataset.p }); setSession(r.token, r.role); route(); } catch (e) { renderLogin(e.message); } },
+theme: () => {
     const order = ['auto', 'light', 'dark']; const next = order[(order.indexOf(themeMode()) + 1) % 3];
-    localStorage.setItem('tvp_theme', next); applyTheme(); toast('Theme: ' + themeLabel());
+    localStorage.setItem('tvp_theme', next); applyTheme(); toast(t('themeLabel', { label: themeLabel() }));
   },
-  lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else route(); },
-  trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
-  'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
-  'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast('Deleted'); renderAdmin(); },
-  'clear-tx': async (el) => { if (!confirm('⚠️ This will permanently delete ALL transaction history. This cannot be undone. Are you sure?')) return; el.disabled = true; el.textContent = 'Clearing…'; try { const r = await api('DELETE', '/api/admin/tx'); toast(`Cleared ${r.cleared} transactions ✓`); renderAdmin(); } catch (e) { toast(e.message, true); } finally { el.disabled = false; el.textContent = '🗑 Clear all history'; } },
-  'tx-filter': (el) => { state.admin.txAccount = el.dataset.acc; renderAdmin(); },
-  'stripe-match': async (el) => { if (!confirm('Add one adjustment so the Stripe bank in the app equals your real Stripe balance?')) return; const r = await api('POST', '/api/admin/stripe/match', { target: Number(el.dataset.target) }); toast(`Stripe synced (${r.diff > 0 ? '+' : ''}${r.diff}) ✓`); renderAdmin(); },
-  'refresh-rates': async () => { await api('POST', '/api/admin/rates/refresh'); toast('Rates updated ✓'); renderAdmin(); },
+lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else route(); },
+trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
+'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
+'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast(t('deleted')); renderAdmin(); },
+'clear-tx': async (el) => { if (!confirm('⚠️ This will permanently delete ALL transaction history. This cannot be undone. Are you sure?')) return; el.disabled = true; el.textContent = 'Clearing…'; try { const r = await api('DELETE', '/api/admin/tx'); toast(t('clearedTransactions', { count: r.cleared })); renderAdmin(); } catch (e) { toast(e.message, true); } finally { el.disabled = false; el.textContent = '🗑 Clear all history'; } },
+'tx-filter': (el) => { state.admin.txAccount = el.dataset.acc; renderAdmin(); },
+'stripe-match': async (el) => { if (!confirm('Add one adjustment so the Stripe bank in the app equals your real Stripe balance?')) return; const r = await api('POST', '/api/admin/stripe/match', { target: Number(el.dataset.target) }); const diff = r.diff > 0 ? '+' + r.diff : r.diff; toast(t('stripeSynced', { diff })); renderAdmin(); },
+'refresh-rates': async () => { await api('POST', '/api/admin/rates/refresh'); toast(t('ratesUpdated')); renderAdmin(); },
   'add-acc': () => $('#acc-rows').insertAdjacentHTML('beforeend', accRow({ name: '', currency: 'USD', opening: 0, color: '#FF6B42' })),
   'del-acc': (el) => { if (confirm('Remove this bank? Its transactions stay but will not count in balances.')) el.closest('.acc-row').remove(); },
   'save-accounts': async () => {
@@ -2236,42 +2245,43 @@ const actions = {
     f.username.value = 'u' + rnd(6, '0123456789');
     f.password.value = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
   },
-  'contact-toggle': async (el) => {
+'contact-toggle': async (el) => {
     el.disabled = true;
     try { await api('PUT', '/api/admin/customers/' + el.dataset.id, { contact: { [el.dataset.k]: 'toggle' } }); state.admin.customers = await api('GET', '/api/admin/customers'); $('#cust-list').innerHTML = customerListHtml(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
-  renew: async (el) => {
+renew: async (el) => {
     if (!state.admin.customers.length || !state.admin.customers.find((x) => x.id === el.dataset.id)) state.admin.customers = await api('GET', '/api/admin/customers');
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     modal('Renew subscription', renewForm(c)); updateRenewPreview();
   },
-  'toggle-customer': async (el) => {
+'toggle-customer': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
-    try { await api('POST', `/api/admin/customers/${c.id}/toggle`, {}); toast(c.status === 'disabled' ? 'Customer enabled' : 'Customer disabled'); }
+    const msg = c.status === 'disabled' ? t('customerEnabled') : t('customerDisabled');
+    try { await api('POST', `/api/admin/customers/${c.id}/toggle`, {}); toast(msg); }
     catch (e) {
       if (!confirm(`${e.message}\n\nChange it in the app anyway?`)) return;
       await api('POST', `/api/admin/customers/${c.id}/toggle`, { force: true });
     }
     renderAdmin();
   },
-  'del-customer': async (el) => {
+'del-customer': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     if (!confirm(`Delete ${c.name} (${c.username})? This cannot be undone.`)) return;
     const s = state.admin.settings;
     const panel = s.reseller.enabled && c.lineId && confirm('Also delete the line on the TVplus panel?');
     try { await api('DELETE', `/api/admin/customers/${c.id}?panel=${panel ? 1 : 0}`); }
     catch (e) { if (!confirm(`${e.message}\n\nDelete from the app anyway?`)) return; await api('DELETE', `/api/admin/customers/${c.id}?panel=1&force=1`); }
-    toast('Customer deleted'); renderAdmin();
+    toast(t('customerDeleted')); renderAdmin();
   },
-  'copy-login': async (el) => {
+'copy-login': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const b = state.config.branding;
     const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${c.username}\n📅 Expires: ${fmtDate(c.expiresAt)}\n(Password as given when the account was created)`;
-    try { await navigator.clipboard.writeText(text); toast('Login details copied'); } catch { prompt('Copy:', text); }
+    try { await navigator.clipboard.writeText(text); toast(t('loginDetailsCopied')); } catch { prompt('Copy:', text); }
   },
-  'export-xlsx': async () => {
-    toast('Preparing Excel…');
+'export-xlsx': async () => {
+    toast(t('preparingExcel'));
     if (!window.XLSX) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
     const list = await api('GET', '/api/admin/customers');
     const d = (x) => (x ? isoDay(x) : '');
@@ -2294,45 +2304,45 @@ const actions = {
     const csv = rows.map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     download('subscriptions.csv', '﻿' + csv, 'text/csv');
   },
-  'reseller-add': async (el) => {
+'reseller-add': async (el) => {
     const pick = $('#rsl-pick');
     const id = pick && pick.value;
-    if (!id) { toast('Pick a customer first to add them as a reseller', true); return; }
-    try { const r = await api('POST', '/api/admin/reseller/toggle', { id }); toast(r.isReseller ? `Reseller flagged · ${r.rslId}` : 'Reseller flag removed ✓'); renderAdmin(); }
+    if (!id) { toast(t('pickCustomerForReseller'), true); return; }
+    try { const r = await api('POST', '/api/admin/reseller/toggle', { id }); toast(r.isReseller ? t('resellerFlagged', { id: r.rslId }) : t('resellerFlagRemoved')); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
-  'reseller-toggle': async (el) => {
-    try { const r = await api('POST', '/api/admin/reseller/toggle', { id: el.dataset.id }); toast(r.isReseller ? `Reseller flagged · ${r.rslId}` : 'Reseller flag removed ✓'); renderAdmin(); }
+'reseller-toggle': async (el) => {
+    try { const r = await api('POST', '/api/admin/reseller/toggle', { id: el.dataset.id }); toast(r.isReseller ? t('resellerFlagged', { id: r.rslId }) : t('resellerFlagRemoved')); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
-  'sheets-save': async (el) => {
+'sheets-save': async (el) => {
     const url = String(($('#sheets-url') || {}).value || '').trim();
     const token = String(($('#sheets-token') || {}).value || '').trim();
-    if (!/^https?:\/\//.test(url)) { toast('Paste your Google Sheets webhook URL first', true); return; }
+    if (!/^https?:\/\//.test(url)) { toast(t('pasteSheetsUrl'), true); return; }
     await saveSettings({ sheets: { url, token, enabled: true } });
     renderAdmin();
   },
-  'sheets-sync': async (el) => {
+'sheets-sync': async (el) => {
     const url = String(($('#sheets-url') || {}).value || '').trim();
     const r = await api('POST', '/api/admin/reseller/sync', url ? { url } : {});
-    toast('Reseller Google Sheets sync: ' + (r.sent ?? 0) + ' rows ✓');
+    toast(t('sheetsSync', { count: r.sent ?? 0 }));
     renderAdmin();
   },
   'sell-rp': () => modal('🤝 Sell a reseller package', resellerSaleForm(state.admin.settings)),
-  'add-rp': () => $('#rps').insertAdjacentHTML('beforeend', `<div class="rp-row" data-rp=""><input data-k="name" placeholder="Name"><input data-k="credits" type="number" value="10"><input data-k="price" type="number" step="any" value="0"><button class="btn sm danger" data-act="del-rp">✕</button></div>`),
+  'add-rp': () => $('#rps').insertAdjacentHTML('beforeend', `<div class="rp-row" data-rp=""><input data-k="name" placeholder="Name"><input data-k="credits" type="number" value="10"><input data-k="price" type="number" step="any" value="0"><button class="btn sm danger" data-act="del-rp" title="Remove reseller plan" aria-label="Remove reseller plan">✕</button></div>`),
   'del-rp': (el) => el.closest('.rp-row').remove(),
   'save-rp': async () => {
     const resellerPackages = [...document.querySelectorAll('#rps .rp-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.rp || undefined, name: g('name'), credits: Number(g('credits')), price: Number(g('price')) }; }).filter((p) => p.name);
     await saveSettings({ resellerPackages, resellerCurrency: $('#rp-cur').value }); renderAdmin();
   },
-  'add-plan': () => { $('#plans').insertAdjacentHTML('beforeend', `<div class="plan-row" data-plan=""><input data-k="name" placeholder="Name"><input data-k="days" type="number" value="30"><input data-k="price" type="number" value="0"><input data-k="credits" type="number" value="1"><input data-k="connections" type="number" value="1"><input data-k="package" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan">✕</button></div>`); },
+  'add-plan': () => { $('#plans').insertAdjacentHTML('beforeend', `<div class="plan-row" data-plan=""><input data-k="name" placeholder="Name"><input data-k="days" type="number" value="30"><input data-k="price" type="number" value="0"><input data-k="credits" type="number" value="1"><input data-k="connections" type="number" value="1"><input data-k="package" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan" title="Remove plan" aria-label="Remove plan">✕</button></div>`); },
   'del-plan': (el) => el.closest('.plan-row').remove(),
   'save-plans': async () => {
     const plans = [...document.querySelectorAll('#plans .plan-row')].map((r) => {
       const g = (k) => r.querySelector(`[data-k=${k}]`).value;
       return { id: r.dataset.plan || undefined, name: g('name'), days: Number(g('days')), price: Number(g('price')), credits: g('credits'), connections: Number(g('connections')), package: g('package') };
     }).filter((p) => p.name);
-    if (!plans.length) return toast('Add at least one plan', true);
+    if (!plans.length) return toast(t('addAtLeastOnePlan'), true);
     await saveSettings({ plans, currency: $('#currency').value });
     renderAdmin();
   },
@@ -2371,15 +2381,15 @@ async function saveSettings(partial, quiet) {
   try {
     state.admin.settings = await api('PUT', '/api/admin/settings', partial);
     await refreshConfig();
-    if (!quiet) toast('Saved ✓');
+    if (!quiet) toast(t('saved'));
   } catch (e) { toast(e.message, true); throw e; }
 }
 
 const forms = {
   async 'rp-sale'(f) {
     const o = formToObj(f); delete o.phone_cc;
-    if (String(f.phone?.value || '').trim()) { const full = fullPhone(f, 'phone'); if (!full) return toast('Phone / WhatsApp: choose the country code and enter the full number.', true); o.phone = full; }
-    try { await api('POST', '/api/admin/reseller-sale', o); toast('Reseller sale recorded ✓'); closeModal(); renderAdmin(); }
+    if (String(f.phone?.value || '').trim()) { const full = fullPhone(f, 'phone'); if (!full) return toast(t('phoneInvalid'), true); o.phone = full; }
+    try { await api('POST', '/api/admin/reseller-sale', o); toast(t('resellerSaleRecorded')); closeModal(); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
   async 'browser-search'(f) {
@@ -2387,16 +2397,16 @@ const forms = {
     const frame = $('#browser-frame iframe');
     if (frame) frame.src = 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q);
   },
-  async member(f) {
+async member(f) {
     const o = formToObj(f); o.perms = [...f.querySelectorAll('[data-perm-cb]:checked')].map((x) => x.value);
     if (!o.password) delete o.password;
-    try { if (f.dataset.id) await api('PUT', '/api/admin/team/' + f.dataset.id, o); else await api('POST', '/api/admin/team', o); toast('Saved ✓'); closeModal(); renderAdmin(); }
+    try { if (f.dataset.id) await api('PUT', '/api/admin/team/' + f.dataset.id, o); else await api('POST', '/api/admin/team', o); toast(t('saved')); closeModal(); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
-  async 'staff-password'(f) {
-    try { await api('POST', '/api/admin/me/password', formToObj(f)); toast('Password changed ✓'); f.reset(); } catch (e) { toast(e.message, true); }
+async 'staff-password'(f) {
+    try { await api('POST', '/api/admin/me/password', formToObj(f)); toast(t('passwordChanged')); f.reset(); } catch (e) { toast(e.message, true); }
   },
-  async trial(f) {
+async trial(f) {
     const o = formToObj(f);
     const phone = fullPhone(f, 'phone'); const wa2 = o.same ? phone : fullPhone(f, 'whatsapp');
     if (!phone || (!o.same && !wa2)) { $('#trial-err').innerHTML = `<div class="err-box">${t('trial_phone')}</div>`; return; }
@@ -2417,12 +2427,12 @@ const forms = {
         <button class="btn primary block" data-act="trial-login" data-u="${esc(r.username)}" data-p="${esc(r.password)}" style="margin-top:12px">${t('signIn')}</button>${closeBtn}`;
     } catch (e) { $('#trial-err').innerHTML = e.data?.suggest ? `<div class="err-box">${t('trial_typo', { s: esc(e.data.suggest) })} <button type="button" class="btn sm" data-act="trial-fix" data-email="${esc(e.data.suggest)}">${t('useIt')}</button></div>` : `<div class="err-box">${esc(t(e.message))}</div>`; btn.disabled = false; }
   },
-  async tx(f) {
-    try { await api('POST', '/api/admin/tx', formToObj(f)); toast('Saved ✓'); closeModal(); renderAdmin(); }
+async tx(f) {
+    try { await api('POST', '/api/admin/tx', formToObj(f)); toast(t('saved')); closeModal(); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
   async stock(f) {
-    try { await api('POST', '/api/admin/stock', formToObj(f)); toast('Credits added to stock ✓'); renderAdmin(); }
+    try { await api('POST', '/api/admin/stock', formToObj(f)); toast(t('creditsAddedToStock')); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
   async login(f) {
@@ -2433,7 +2443,7 @@ const forms = {
       const r = await api('POST', '/api/login', body);
       localStorage.setItem('tvp_known', '1'); setSession(r.token, r.role); route();
     } catch (e) {
-      if (e.data?.need2fa) { btn.disabled = false; state.pendingLogin = { username: f.username.value, password: f.password.value }; const b = modal('🔐 ' + t('code2faTitle'), `<p class="muted" style="margin-top:0">${t('code2faText')}</p><form data-form="login-code">${field(t('code2fa'), 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" dir="ltr"' })}<div id="code-err"></div><button class="btn primary block">${t('verify')}</button></form>`); b.querySelector('input').focus(); return; }
+      if (e.data?.need2fa) { btn.disabled = false; state.pendingLogin = { username: f.username.value, password: f.password.value }; const b = modal('🔐 ' + t('code2faTitle'), `<p class="muted" style="margin-top:0">${t('code2faText')}</p><form data-form="login-code">${field(t('code2fa'), 'code', '', { attrs: 'required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" dir="ltr"' })}<div id="code-err" aria-live="polite"></div><button class="btn primary block">${t('verify')}</button></form>`); b.querySelector('input').focus(); return; }
       renderLogin(e.message);
     }
   },
@@ -2522,7 +2532,21 @@ document.addEventListener('input', (e) => {
   put('username', ln.u); put('password', ln.p); put('dns', ln.dns);
 });
 let searchT;
-document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset?.input === 'nav-search') { const first = document.querySelector('#nav a:not([hidden])'); if (first) first.click(); } if (e.key === 'Escape') actions['menu-close']?.(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.dataset?.input === 'nav-search') { const first = document.querySelector('#nav a:not([hidden])'); if (first) first.click(); }
+  const modalEl = $('#modal-root .modal');
+  if (e.key === 'Escape' && modalEl) { e.preventDefault(); closeModal(); return; }
+  if (e.key === 'Escape') { actions['menu-close']?.(); return; }
+  if (e.key === 'Tab' && modalEl) {
+    const q = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const els = [...modalEl.querySelectorAll(q)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+    if (els.length) {
+      const first = els[0], last = els[els.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !modalEl.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || !modalEl.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+    }
+  }
+});
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
@@ -2675,7 +2699,7 @@ function openReceipt(id) {
     <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn primary" data-act="print">🖨 ${t('print')}</button></div>`);
 }
 function showReset() {
-  modal('🔑 ' + t('resetTitle'), `<form data-form="reset">${field(t('newPw'), 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<div id="reset-err"></div><button class="btn primary block">${t('updatePw')}</button></form>`);
+  modal('🔑 ' + t('resetTitle'), `<form data-form="reset">${field(t('newPw'), 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<div id="reset-err" aria-live="polite"></div><button class="btn primary block">${t('updatePw')}</button></form>`);
 }
 
 // ---------------- admin: support desk ----------------
@@ -2888,8 +2912,8 @@ async function loadDashCounts() {
   if (b) b.textContent = u.counts.answered ? `${u.counts.open} · ${t('st_answered')}` : String(u.counts.open);
 }
 const srcForm = (type) => type === 'xtream'
-  ? `<form data-form="src-xtream">${field(t('srcName'), 'name', '', { attrs: 'required maxlength="40"' })}${field(t('srcServer'), 'server', '', { ph: 'http://example.com:8080', attrs: 'required inputmode="url" autocapitalize="none" dir="ltr"' })}${field(t('username'), 'u', '', { attrs: 'required autocapitalize="none" autocomplete="off" dir="ltr"' })}${field(t('password'), 'p', '', { type: 'password', attrs: 'required autocomplete="off" dir="ltr"' })}<div id="src-err"></div><p class="small muted">${t('srcOnlyYours')}</p><button class="btn primary block">${t('srcCheckAdd')}</button></form>`
-  : `<form data-form="src-m3u">${field(t('srcName'), 'name', '', { attrs: 'required maxlength="40"' })}${field(t('srcUrl'), 'url', '', { ph: 'https://example.com/playlist.m3u', attrs: 'inputmode="url" autocapitalize="none" dir="ltr"' })}<label class="field"><span>${t('srcFile')}</span><input type="file" name="file" accept=".m3u,.m3u8,.txt,audio/x-mpegurl"></label><div id="src-err"></div><p class="small muted">${t('srcOnlyYours')}</p><button class="btn primary block">${t('srcCheckAdd')}</button></form>`;
+  ? `<form data-form="src-xtream">${field(t('srcName'), 'name', '', { attrs: 'required maxlength="40"' })}${field(t('srcServer'), 'server', '', { ph: 'http://example.com:8080', attrs: 'required inputmode="url" autocapitalize="none" dir="ltr"' })}${field(t('username'), 'u', '', { attrs: 'required autocapitalize="none" autocomplete="off" dir="ltr"' })}${field(t('password'), 'p', '', { type: 'password', attrs: 'required autocomplete="off" dir="ltr"' })}<div id="src-err" aria-live="polite"></div><p class="small muted">${t('srcOnlyYours')}</p><button class="btn primary block">${t('srcCheckAdd')}</button></form>`
+  : `<form data-form="src-m3u">${field(t('srcName'), 'name', '', { attrs: 'required maxlength="40"' })}${field(t('srcUrl'), 'url', '', { ph: 'https://example.com/playlist.m3u', attrs: 'inputmode="url" autocapitalize="none" dir="ltr"' })}<label class="field"><span>${t('srcFile')}</span><input type="file" name="file" accept=".m3u,.m3u8,.txt,audio/x-mpegurl"></label><div id="src-err" aria-live="polite"></div><p class="small muted">${t('srcOnlyYours')}</p><button class="btn primary block">${t('srcCheckAdd')}</button></form>`;
 const srcFail = (f, msg) => { const b = f.querySelector('button'); b.disabled = false; b.textContent = t('srcCheckAdd'); $('#src-err').innerHTML = `<div class="err-box">${esc(msg)}</div>`; };
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.role === 'user' && state.user.me && state.user.tab === 'home' && bridge()?.lastPos) { pullNativePos(); renderUserTab(); } });
@@ -3398,19 +3422,19 @@ const saLinkRow = (l = {}) => {
     <input data-k="url" value="${esc(l.url || '')}" placeholder="https://buy.stripe.com/…" dir="ltr" autocomplete="off" class="sa-link-url" style="flex:1;min-width:120px">
     <select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${l.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
     <select data-k="tier" style="width:auto">${['Normal', 'Resellers', 'IBO'].map((t2) => `<option ${l.tier === t2 ? 'selected' : ''}>${t2}</option>`).join('')}</select>
-    <button class="btn sm danger" data-act="sa-del-link" title="Remove link">🗑</button>
+    <button class="btn sm danger" data-act="sa-del-link" title="Remove link" aria-label="Remove link">🗑</button>
   </div>`;
 };
-const saRow = (a, finAccounts) => `<div class="op-row card" data-sa="${esc(a.id || '')}" style="padding:12px;margin-bottom:12px">
+const saRow = (a, finAccounts, rec) => `<div class="op-row card" data-sa="${esc(a.id || '')}" style="padding:12px;margin-bottom:12px">
   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><input data-k="name" value="${esc(a.name || '')}" placeholder="Account name" style="flex:2;min-width:160px">
     <select data-k="currency" style="width:auto">${['USD', 'EUR'].map((c) => `<option ${a.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
     <select data-k="status" style="width:auto">${[['active', 'Active'], ['verification', 'Verification'], ['closed', 'Closed']].map(([k, n]) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
     <select data-k="payoutDays" style="width:auto">${[2, 7].map((n) => `<option value="${n}" ${Number(a.payoutDays) === n ? 'selected' : ''}>${n}-day payout</option>`).join('')}</select>
     <select data-k="bankId" class="sa-bank" style="width:auto" title="Payments are booked to this bank FIRST; your Stripe payout then lands in it">${(finAccounts || []).map((acc) => `<option value="${esc(acc.id)}" ${a.bankId === acc.id ? 'selected' : ''}>Settles to → ${esc(acc.name)}</option>`).join('')}</select>
-    <span class="sa-balance-display" style="flex:1;text-align:right;min-width:140px"><b>${a.balance != null ? (a.currency === 'EUR' ? '€' : '$') + Number(a.balance).toFixed(2) : '—'}</b> <span class="small muted">(${a.balanceAt ? fmtDT(a.balanceAt) : 'never'})</span></span>
+    <span class="sa-balance-display" style="flex:1;text-align:right;min-width:170px"><b>Recorded ${rec ? '$' + Number(rec.usd || 0).toFixed(2) : '$0.00'}</b><div class="small muted">${rec ? rec.n + ' sale(s)' + (rec.usd30d ? ' · $' + Number(rec.usd30d).toFixed(2) + ' in 30 days' : '') : 'no sales yet'}</div></span>
     <button class="btn sm" data-act="sa-balance" data-id="${esc(a.id)}" title="Fetch live balance from Stripe">💰</button>
-    <button class="btn sm" data-act="sa-edit-balance" data-id="${esc(a.id)}" title="Edit balance manually">✏️</button>
-    <button class="btn sm danger" data-act="sa-del" title="Remove account">🗑</button></div>
+    <button class="btn sm" data-act="sa-edit-balance" data-id="${esc(a.id)}" title="Edit balance manually" aria-label="Edit balance manually">✏️</button>
+    <button class="btn sm danger" data-act="sa-del" title="Remove account" aria-label="Remove account">🗑</button></div>
   <input data-k="note" value="${esc(a.note || '')}" placeholder="Note (payout schedule, bank transfer, …)" style="margin-top:8px">
   <div class="grid2" style="margin-top:8px">
     <label class="field" style="margin:0"><span class="small">Stored balance</span><input data-k="balance" type="number" step="any" value="${a.balance == null ? '' : String(a.balance)}" placeholder="e.g. 28.82" dir="ltr" min="0"></label>
@@ -3419,23 +3443,26 @@ const saRow = (a, finAccounts) => `<div class="op-row card" data-sa="${esc(a.id 
   <div style="margin-top:12px"><p class="small muted" style="margin:0 0 6px">Payment links — normal / resellers / IBO</p><div class="sa-links">${(a.links || []).map(saLinkRow).join('')}</div>
     <button class="btn sm" data-act="sa-add-link">＋ Add link</button></div>
   <div class="sa-bal small muted" style="margin-top:6px"></div></div>`;
-function adminStripePage(s) {
+async function adminStripePage(s) {
   const finAcc = (s.finance && s.finance.accounts) || [];
   const list = s.stripeAccounts || []; const links = list.flatMap((a) => a.links || []);
   const byTier = (t) => links.filter((l) => l.tier === t).length;
   const active = list.filter((a) => a.status === 'active').length;
   const two = list.filter((a) => Number(a.payoutDays) === 2).length;
-  let totUsd=0, totEur=0, n=0;
-  (list||[]).forEach((a)=>{ const b=Number(a.balance||0); if(!b) return; if(a.currency==='EUR')totEur+=b; else totUsd+=b; n++; });
+  // Balances are taken from sales recorded in the app, not from the stored/legacy values
+  const rev = await api('GET', '/api/admin/stripe/revenue').catch(() => null);
+  const bySa = Object.fromEntries((rev?.stripeAccounts || []).map((x) => [x.accountId, x]));
+  let totUsd = 0, nSa = 0, nSales = 0;
+  (list || []).forEach((a) => { const r = bySa[a.id]; if (r) { totUsd += Number(r.usd || 0); nSales += Number(r.n || 0); } if (Number(a.balance)) nSa++; });
   return `<p class="small muted">All your Stripe accounts in one place. Track <b>status</b> (Active / Verification / Closed), the <b>payout schedule</b> and your <b>package payment links</b> in USD and EUR. Links you add here are what you can put in package emails and IBO activations — deleting a link here does not remove it from Stripe.</p>
     <div class="chips" style="margin-bottom:12px"><a class="on">${list.length} account${list.length === 1 ? '' : 's'} · ${active} active</a><a class="on">${two} with 2-day payout · ${list.length - two} with 7-day payout</a><a class="on">${links.length} link${links.length === 1 ? '' : 's'} — Normal ${byTier('Normal')} · Resellers ${byTier('Resellers')} · IBO ${byTier('IBO')}</a></div>
     <div class="card" id="sa-compare"><div class="row"><h3 style="margin:0">⚔ Account performance</h3><span class="spacer"></span><button class="btn sm" data-act="sa-compare">↻ Refresh</button></div><div id="sa-compare-body" class="small muted" style="margin-top:10px">Loading comparison…</div></div>
-    <div id="sa-all-bal" class="small muted" style="margin-bottom:10px">${n ? `Stored balance across ${n} account${n===1?'':'s'}: $${totUsd.toFixed(2)} · €${totEur.toFixed(2)}` : `No stored balances yet — tap 💰 per account or press “💰 All balances (total)” to fetch live.`}</div>
-    <div id="sa-list">${list.map((a) => saRow(a, finAcc)).join('')}</div>
+    <div id="sa-all-bal" class="small muted" style="margin-bottom:10px">Sales recorded in app across your Stripe accounts: <b>$${totUsd.toFixed(2)}</b> · ${nSales} sale(s).${rev && rev.unattributedN ? ` ${rev.unattributedN} legacy sale(s) have no Stripe account — they settle through banks and cannot be split between accounts.` : ''}</div>
+    <div id="sa-list">${list.map((a) => saRow(a, finAcc, bySa[a.id])).join('')}</div>
     <div class="row" style="margin-top:6px"><button class="btn" data-act="sa-add">＋ Add account</button><button class="btn" data-act="sa-balance-all">💰 All balances (total)</button><span class="spacer"></span><button class="btn primary" data-act="sa-save">💾 Save accounts</button></div>`;
 }
 Object.assign(actions, {
-  'sa-add': () => $('#sa-list').insertAdjacentHTML('beforeend', saRow({ id: '', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] })),
+  'sa-add': () => $('#sa-list').insertAdjacentHTML('beforeend', saRow({ id: '', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [] }, (state.admin.settings && state.admin.settings.finance && state.admin.settings.finance.accounts) || [])),
   'sa-del': (el) => el.closest('.op-row').remove(),
   'sa-add-link': (el) => el.closest('.op-row').querySelector('.sa-links').insertAdjacentHTML('beforeend', saLinkRow()),
   'sa-del-link': (el) => el.closest('.sa-link').remove(),
@@ -3513,7 +3540,7 @@ async function adminCcPage() {
   const r = await api('GET', '/api/admin/cc'); const list = r.list || [];
   const last4 = (n) => { const s = String(n || ''); return s.length >= 4 ? '•••• ' + s.slice(-4) : '••••'; };
   const exp = (e) => { const s = String(e || '').replace(/\D/g, ''); if (s.length >= 4) return s.slice(0, 2) + '/' + s.slice(-2); return s; };
-  const rows = list.map((x) => { const id = esc(x.id); return `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.fullName)}</b><div class="small muted">${esc(x.email || '')}${x.phone ? ' · ' + esc(x.phone) : ''}${x.address ? ' · ' + esc(x.address) : ''}</div>${x.notes ? '<div class="small muted" style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(x.notes || '') + '">📝 ' + esc(x.notes) + '</div>' : ''}</td><td class="small">${last4(x.cardNumber)}</td><td class="small">${esc(exp(x.exp))}</td><td class="small">•••</td><td><span class="pill ${x.status === 'live' ? 'st-active' : 'st-expired'}">${esc((x.status || 'dead').toUpperCase())}</span></td><td><button class="btn sm" data-act="cc-edit" data-id="${id}">✏️</button> <button class="btn sm danger" data-act="cc-del" data-id="${id}">🗑</button></td></tr>` }).join('');
+  const rows = list.map((x) => { const id = esc(x.id); return `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.fullName)}</b><div class="small muted">${esc(x.email || '')}${x.phone ? ' · ' + esc(x.phone) : ''}${x.address ? ' · ' + esc(x.address) : ''}</div>${x.notes ? '<div class="small muted" style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(x.notes || '') + '">📝 ' + esc(x.notes) + '</div>' : ''}</td><td class="small">${last4(x.cardNumber)}</td><td class="small">${esc(exp(x.exp))}</td><td class="small">•••</td><td><span class="pill ${x.status === 'live' ? 'st-active' : 'st-expired'}">${esc((x.status || 'dead').toUpperCase())}</span></td><td><button class="btn sm" data-act="cc-edit" data-id="${id}" title="Edit card" aria-label="Edit card">✏️</button> <button class="btn sm danger" data-act="cc-del" data-id="${id}" title="Delete card" aria-label="Delete card">🗑</button></td></tr>` }).join('');
   return `<p class="small muted">Owner-only. Every CC collection with full card details and card status.</p>
   <div class="chips" style="margin-bottom:14px"><a class="on">Live ${r.liveCount || 0}</a><a class="on">Declined ${r.declinedCount || 0}</a><a class="on">Dead ${r.deadCount || 0}</a></div>
   <form data-form="cc-add" class="card"><h3>＋ Log a collection</h3>
@@ -3718,7 +3745,7 @@ async function loadShiftsAndLeaves() {
   let team = []; try { team = await api('GET', '/api/admin/team'); } catch { box.innerHTML = '<p class="small muted">Only the owner can edit shift plans. The attendance summary above is still yours.</p>'; }
   let shifts = []; try { shifts = await api('GET', '/api/admin/shifts'); } catch {}
   if (box && team.length) box.innerHTML = team.filter((m) => m.status !== 'disabled').map((m) => shiftEditorHtml(m, shifts.find((s) => s.memberId === m.id))).join('');
-  if (lbox) { try { const r = await api('GET', '/api/admin/leaves'); const list = r.list || []; lbox.innerHTML = list.length ? `<div style="max-height:260px;overflow:auto">${list.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b> · ${esc(l.kind)}<div class="small muted">${fmtDate(l.from)} → ${fmtDate(l.to)}${l.reason ? ' · ' + esc(l.reason) : ''}</div></span>${l.status === 'pending' ? `<span class="row" style="gap:6px"><button class="btn sm primary" data-act="leave-approve" data-id="${esc(l.id)}">✓</button><button class="btn sm danger" data-act="leave-reject" data-id="${esc(l.id)}">✕</button></span>` : `<span class="pill ${l.status === 'approved' ? 'st-active' : 'st-expired'}">${l.status}</span>`}</div>`).join('')}</div>` : '<p class="muted small">No leave requests.</p>'; } catch (e) { lbox.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; } }
+  if (lbox) { try { const r = await api('GET', '/api/admin/leaves'); const list = r.list || []; lbox.innerHTML = list.length ? `<div style="max-height:260px;overflow:auto">${list.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b> · ${esc(l.kind)}<div class="small muted">${fmtDate(l.from)} → ${fmtDate(l.to)}${l.reason ? ' · ' + esc(l.reason) : ''}</div></span>${l.status === 'pending' ? `<span class="row" style="gap:6px"><button class="btn sm primary" data-act="leave-approve" data-id="${esc(l.id)}" title="Approve leave" aria-label="Approve leave">✓</button><button class="btn sm danger" data-act="leave-reject" data-id="${esc(l.id)}" title="Reject leave" aria-label="Reject leave">✕</button></span>` : `<span class="pill ${l.status === 'approved' ? 'st-active' : 'st-expired'}">${l.status}</span>`}</div>`).join('')}</div>` : '<p class="muted small">No leave requests.</p>'; } catch (e) { lbox.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; } }
   const rbox = $('#reports-box'); if (rbox) { try { const r = await api('GET', '/api/admin/reports?days=30'); rbox.innerHTML = (r.list || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Score</th><th>Worked</th><th>Breaks</th><th>Logins</th><th>Tasks done</th><th>Adherence</th></tr></thead><tbody>${r.list.map((m) => `<tr><td>${esc(m.name)}</td><td><b>${m.score === null ? '—' : m.score}</b></td><td>${Math.round((m.workedMs || 0) / 360000) / 10}h</td><td>${Math.round((m.breaksMs || 0) / 60000)}min</td><td>${m.logins}</td><td>${m.completed}/${m.tasksTotal}${m.delayed ? ` · ${m.delayed} delayed` : ''}${m.blocked ? ` · ${m.blocked} blocked` : ''}</td><td>${m.adherence === null ? '—' : m.adherence + '%'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No data yet this month.</p>'; } catch (e) { rbox.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; } }
 }
 const startTzClock = () => { if (window.__tzIv) return; const tick = () => { const now = new Date(); const o = { hour: '2-digit', minute: '2-digit', second: '2-digit' }; const e = now.toLocaleTimeString('en-GB', { ...o, timeZone: 'Europe/Paris' }); const us = now.toLocaleTimeString('en-US', { ...o, timeZone: 'America/New_York' }); const l = now.toLocaleTimeString('en-GB', o); document.querySelectorAll('[data-tz=e]').forEach((x) => { x.textContent = e; }); document.querySelectorAll('[data-tz=u]').forEach((x) => { x.textContent = us; }); document.querySelectorAll('[data-tz=l]').forEach((x) => { x.textContent = l; }); }; window.__tzIv = setInterval(tick, 1000); tick(); };
@@ -3730,7 +3757,7 @@ async function adminTasksPage() {
   const opts = assigneeOpts.map(([v, n]) => `<option value="${esc(v)}">${esc(n)}</option>`).join('');
   const sts = ['not_started', 'in_progress', 'completed', 'delayed', 'blocked'];
   const pill = { not_started: 'st-open', in_progress: 'st-expiring', completed: 'st-active', delayed: 'st-expired', blocked: 'st-expired' };
-  const row = (t, own) => `<tr><td><b>${esc(t.name)}</b> <span class="tagp" title="Task ID">${esc(t.id)}</span>${t.desc ? `<div class="small muted">${esc(t.desc)}</div>` : ''}<div class="small muted">${t.deadline ? 'Deadline ' + fmtDate(t.deadline) : ''}${t.doneAt ? ' · done ' + fmtDT(t.doneAt) : ''}${t.priority === 'high' ? ' · <b style="color:var(--bad)">high</b>' : ''}</div></td><td class="small">${esc(t.assigneeName)}</td><td><select data-task="${esc(t.id)}" style="width:auto">${sts.map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}</select></td><td>${r.scopeAll ? `<button class="btn sm danger" data-act="task-del" data-id="${esc(t.id)}">🗑</button>` : ''}</td></tr>`;
+  const row = (t, own) => `<tr><td><b>${esc(t.name)}</b> <span class="tagp" title="Task ID">${esc(t.id)}</span>${t.desc ? `<div class="small muted">${esc(t.desc)}</div>` : ''}<div class="small muted">${t.deadline ? 'Deadline ' + fmtDate(t.deadline) : ''}${t.doneAt ? ' · done ' + fmtDT(t.doneAt) : ''}${t.priority === 'high' ? ' · <b style="color:var(--bad)">high</b>' : ''}</div></td><td class="small">${esc(t.assigneeName)}</td><td><select data-task="${esc(t.id)}" style="width:auto">${sts.map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}</select></td><td>${r.scopeAll ? `<button class="btn sm danger" data-act="task-del" data-id="${esc(t.id)}" title="Delete task" aria-label="Delete task">🗑</button>` : ''}</td></tr>`;
   const byMember = {}; if (r.scopeAll) for (const t of list) (byMember[t.assignee] ||= []).push(t);
   const plan = r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>📅 Weekly plan</h3>${Object.entries(byMember).map(([id, ts]) => `<div style="margin-bottom:10px"><b>${esc(assigneeOpts.find(([v]) => v === id)?.[1] || id)}</b><ul style="margin:4px 0 0 16px">${ts.filter((t) => t.status !== 'completed').slice(0, 10).map((t) => `<li class="small">${esc(t.name)}${t.deadline ? ' — ' + fmtDate(t.deadline) : ''}</li>`).join('') || '<li class="small muted">All done 🎉</li>'}</ul></div>`).join('')}</div>` : '';
   return `${canAssign ? `<form data-form="task-add" class="card"><h3>＋ Assign a task</h3><div class="grid2">${field('Task', 'name', '', { attrs: 'required maxlength="160"', ph: 'What needs to be done' })}${field('Assign to', 'assignee', 'owner', { type: 'select', options: assigneeOpts.map(([v, n]) => [v, n]) })}</div>${field('Details', 'desc', '', { type: 'textarea', rows: 2 })}<div class="grid3">${field('Start', 'start', new Date().toISOString().slice(0, 10), { type: 'date' })}${field('Deadline', 'deadline', '', { type: 'date' })}${field('Priority', 'priority', 'normal', { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div><button type="submit" class="btn primary">Assign task</button></form>` : ''}
@@ -3847,13 +3874,13 @@ async function adminMktPage() {
         <div style="margin:12px 0 10px">${field('Cost per email (USD)', 'costPerEmail', m.costPerEmail, { type: 'number', attrs: 'step="0.0001" min="0"', help: '$0.0004 = $0.40 per 1,000 emails' })}</div>
         <button type="submit" class="btn primary">💾 Save marketing settings</button></form></div>
     <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (one per line)</span><textarea name="text" rows="5" required placeholder="one email per line"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>
-      ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}">🗑</button></div>`).join('')}</div>
+      ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}" title="Delete mailing list" aria-label="Delete mailing list">🗑</button></div>`).join('')}</div>
       <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select><textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message."></textarea><p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
   </div>`;
 }
 async function adminSeoPage() {
   const r = await api('GET', '/api/admin/seo');
-  const rows = r.list.map((e) => `<tr><td class="small">${fmtDT(e.at)}</td><td><span class="tagp">${esc(e.platform)}</span></td><td>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</td><td class="small">${esc(e.result || '')}</td><td class="small">${esc(e.agent)}</td><td><button class="btn sm danger" data-act="seo-del" data-id="${esc(e.id)}">🗑</button></td></tr>`).join('');
+  const rows = r.list.map((e) => `<tr><td class="small">${fmtDT(e.at)}</td><td><span class="tagp">${esc(e.platform)}</span></td><td>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</td><td class="small">${esc(e.result || '')}</td><td class="small">${esc(e.agent)}</td><td><button class="btn sm danger" data-act="seo-del" data-id="${esc(e.id)}" title="Delete post" aria-label="Delete post">🗑</button></td></tr>`).join('');
   return `<p class="small muted">Team tasks for SEO and promo posts on Reddit, Quora and Facebook — one log, daily / weekly / monthly counts, per-agent results.</p>
     <div class="chips" style="margin-bottom:12px"><a class="on">Today: ${r.today}</a><a class="on">Last 7 days: ${r.weekCount}</a><a class="on">Last 30 days: ${r.monthCount}</a>${Object.entries(r.byAgent || {}).map(([a, n]) => `<a class="on">${esc(a)}: ${n}</a>`).join('')}</div>
     <div class="grid2" style="gap:16px;align-items:start"><form data-form="seo-add" class="card"><h3>＋ Log a post</h3>${field('Platform', 'platform', 'Reddit', { type: 'select', options: [['Reddit', 'Reddit'], ['Quora', 'Quora'], ['Facebook', 'Facebook']] })}${field('Title / what you did', 'title', '', { attrs: 'required maxlength="200"' })}${field('Link (optional)', 'url', '', { attrs: 'autocapitalize="none"' })}${field('Result (optional)', 'result', '', { ph: 'views, upvotes, signups…' })}<button type="submit" class="btn primary">Log it</button></form>
@@ -3939,7 +3966,7 @@ async function adminIboPage() {
   const st = r.stats || {}; const now = Date.now();
   const pillFor = (x) => (x.expiresAt && x.expiresAt <= now) || x.status !== 'active' ? '<span class="pill st-expired">expired</span>' : x.isTrial ? '<span class="pill st-expiring">trial</span>' : '<span class="pill st-active">active</span>';
   const row = (x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.contact || '')}</div></td><td class="small">${esc(x.username)} / ${esc(x.password)}<div class="muted">${esc(x.dns || '')}</div></td><td class="small">${esc(x.deviceApp || '')}<div class="muted">${esc(x.macAddress || '')}</div></td><td class="small">${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${pillFor(x)}</td>
-    <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove">🗑</button></div></td></tr>`;
+    <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)" aria-label="Activate or renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp" aria-label="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email" aria-label="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove" aria-label="Remove IBO device">🗑</button></div></td></tr>`;
   return `<div class="grid2" style="gap:16px;align-items:start">
     <div class="card"><h3>💳 IBO credit balance</h3><div class="row" style="gap:16px;align-items:baseline"><div class="stat"><span class="dp-l">Credits</span><div class="big">${r.credits}</div></div><div class="stat"><span class="dp-l">Cost per credit</span><div class="big">$${Number(r.costUsd || 3.5).toFixed(2)}</div></div><div class="stat"><span class="dp-l">Active / trial / expired</span><div class="big">${st.active || 0} / ${st.trial || 0} / ${st.expired || 0}</div></div></div>
       <form data-form="ibo-buy" class="row" style="margin-top:10px;gap:8px;align-items:flex-end"><div style="flex:1">${field('Credits to buy', 'credits', 10, { type: 'number', attrs: 'min="1" required' })}</div><div style="flex:1">${field('Total paid (USD)', 'price', 35, { type: 'number', attrs: 'min="0" step="any"' })}</div><button type="submit" class="btn primary">Buy</button></form>

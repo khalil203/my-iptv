@@ -781,13 +781,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return credits > 0 ? cost / credits : (Number(s.stock.packPrice) || 0) / (Number(s.stock.packCredits) || 1);
   }
   // Records one sale (and the money received) — used for new customers, renewals and trials.
-  async function recordSale(s, c, { type, plan, days, credits, amount, accountId, at, by }) {
+  async function recordSale(s, c, { type, plan, days, credits, amount, accountId, sa, at, by }) {
     if (Number(amount) > 0) s = await refreshRates(s, false);
     const acc = s.finance.accounts.find((a) => a.id === accountId);
     const currency = acc ? acc.currency : s.currency;
     const amountUsd = toUsd(amount, currency, s.finance.rates);
     const costUsd = credits * (await creditCostUsd(s));
-    const sale = { by: by || '', id: uid(6), at: at || Date.now(), customerId: c.id, username: c.username, name: c.name, type, planId: plan ? plan.id : (type === 'trial' ? 'trial' : 'custom'), planName: type === 'trial' ? 'Trial' : plan ? plan.name : 'Custom', days, credits, amount: Number(amount) || 0, currency, amountUsd, costUsd, accountId: acc ? acc.id : '' };
+    const sale = { by: by || '', id: uid(6), at: at || Date.now(), customerId: c.id, username: c.username, name: c.name, type, planId: plan ? plan.id : (type === 'trial' ? 'trial' : 'custom'), planName: type === 'trial' ? 'Trial' : plan ? plan.name : 'Custom', days, credits, amount: Number(amount) || 0, currency, amountUsd, costUsd, accountId: acc ? acc.id : '', stripeAccountId: sa || '' };
     const sales = await getSales();
     for (let i = sales.length - 1; i >= 0; i--) {
       const m = sales[i];
@@ -1206,7 +1206,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const inMain = acc ? amount : fromUsd(toUsd(amount, currency, s.finance.rates), s.currency, s.finance.rates);
     c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Math.round(inMain * 100) / 100, credits, stripe: ses.id });
     await saveCustomers(list);
-    await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: acc ? amount : Math.round(inMain * 100) / 100, accountId: acc ? acc.id : '', by: 'Stripe (automatic)' });
+    await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: acc ? amount : Math.round(inMain * 100) / 100, accountId: acc ? acc.id : '', sa: tag ? tag.id : '', by: 'Stripe (automatic)' });
     return done('activated', `${c.username} +${days} days (${pk.title})`);
   }
   async function getSession(token) {
@@ -1875,7 +1875,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const credits = plan ? planCredits(plan) : Math.max(1, Math.round(days / 30));
           (c.renewals ||= []).push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(rc.amount) || 0, credits, receipt: rc.id });
           await saveCustomers(list);
-          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.amount) || 0, accountId: String(body.accountId || ''), by: actorName });
+          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.amount) || 0, accountId: String(body.accountId || ''), sa: String(body.stripeAccountId || ''), by: actorName });
           rc.status = 'approved'; rc.daysAdded = days;
           const T = { fr: ['Paiement confirmé ✅', `Merci ! Votre abonnement est prolongé de ${days} jours.`] }[lang] || ['Payment confirmed ✅', `Thank you! Your subscription has been extended by ${days} days.`];
           if (cleanEmail(c.email)) await sendEmail(s, c.email, `${s.branding.appName || 'IPTV'} — ${T[0]}`, mailHtml(s, ['en', 'fr'].includes(lang) ? lang : 'en', [[mt(lang, 'user'), c.username], [mt(lang, 'expires'), new Date(c.expiresAt).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long' })]], T[1], c.name));
@@ -2644,7 +2644,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (dup.length) await logAttempt({ kind: 'new customer', name: c.name, email: c.email, phone: c.phone, whatsapp: c.whatsapp, by: actorName, newUsername: c.username, matches: dup.slice(0, 5).map((m) => ({ id: m.c.id, username: m.c.username, name: m.c.name, why: m.why })) });
         list.push(c);
         await saveCustomers(list);
-        await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
+        await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
         let mail = null;
         if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
@@ -2787,7 +2787,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           c.renewals = c.renewals || [];
           c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(body.price) || 0, credits });
           await saveCustomers(list);
-          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, by: actorName });
+          await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${s.currency})`);
           return ok({ customer: viewP(c, s), panel });
         }
@@ -2905,7 +2905,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ connected: true, accountId: acct.id, currency: cur.toUpperCase(), available: sum(d.available), pending: sum(d.pending), payoutDays: nDays, projected: addBizProjection(Date.now(), nDays) });
       }
       if (R('GET', '/api/admin/stripe/revenue')) {
-        const tx = await getTx(); const cutoff = Date.now() - 30 * DAYMS;
+        const tx = await getTx(); const salesAll = (await getSales()) || []; const cutoff = Date.now() - 30 * DAYMS;
         const byAcc = {};
         for (const x of tx) {
           if (x.type !== 'income') continue;
@@ -2916,7 +2916,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if ((Number(x.at) || 0) >= cutoff) { e.usd30d = Math.round((e.usd30d + usd) * 100) / 100; e.n30d++; }
           e.lastAt = Math.max(e.lastAt || 0, Number(x.at) || 0);
         }
-        return ok({ revenue: Object.values(byAcc), total: Object.values(byAcc).reduce((a, x) => ({ usd: Math.round((a.usd + x.usd) * 100) / 100, n: a.n + x.n, usd30d: Math.round((a.usd30d + x.usd30d) * 100) / 100, n30d: a.n30d + x.n30d }), { usd: 0, n: 0, usd30d: 0, n30d: 0 }) });
+        const saList = Array.isArray(s.stripeAccounts) ? s.stripeAccounts : [];
+        const bankToSa = {}; for (const sa of saList) { const b = String(sa.bankId || ''); if (b) (bankToSa[b] ||= []).push(String(sa.id)); }
+        const bySa = {}; const unassigned = [];
+        for (const x of salesAll) {
+          if (x.type === 'trial') continue;
+          let sid = String(x.stripeAccountId || '');
+          if (!sid && x.accountId && (bankToSa[x.accountId] || []).length === 1) sid = bankToSa[x.accountId][0];
+          if (!sid) { if (x.accountId && bankToSa[x.accountId]) unassigned.push(x); continue; }
+          const e = (bySa[sid] ||= { accountId: sid, usd: 0, n: 0, usd30d: 0, n30d: 0, lastAt: 0 });
+          e.usd = Math.round((e.usd + (Number(x.amountUsd) || 0)) * 100) / 100; e.n++;
+          if ((Number(x.at) || 0) >= cutoff) { e.usd30d = Math.round((e.usd30d + (Number(x.amountUsd) || 0)) * 100) / 100; e.n30d++; }
+          e.lastAt = Math.max(e.lastAt || 0, Number(x.at) || 0);
+        }
+        return ok({ revenue: Object.values(byAcc), total: Object.values(byAcc).reduce((a, x) => ({ usd: Math.round((a.usd + x.usd) * 100) / 100, n: a.n + x.n, usd30d: Math.round((a.usd30d + x.usd30d) * 100) / 100, n30d: a.n30d + x.n30d }), { usd: 0, n: 0, usd30d: 0, n30d: 0 }), stripeAccounts: Object.values(bySa), unattributedN: unassigned.length });
       }
       if (R('GET', '/api/admin/stripe/balance')) { // live balance from Stripe, compared with the app
         const key = s.finance.stripeKey;
@@ -3228,7 +3241,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const name = String(body.name || '').trim();
         if (!name) return err(400, 'Enter the reseller name.');
         const buyer = { id: 'r-' + uid(5), name, username: String(body.email || body.phone || name) };
-        const sale = await recordSale(s, buyer, { type: 'reseller', plan: { id: pk.id, name: `Reseller ${pk.name} (${pk.credits} credits)` }, days: 0, credits: pk.credits, amount: body.amount === '' || body.amount == null ? pk.price : Number(body.amount), accountId: body.accountId, by: actorName });
+        const sale = await recordSale(s, buyer, { type: 'reseller', plan: { id: pk.id, name: `Reseller ${pk.name} (${pk.credits} credits)` }, days: 0, credits: pk.credits, amount: body.amount === '' || body.amount == null ? pk.price : Number(body.amount), accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
         const sales = await getSales(); const x = sales.find((y) => y.id === sale.id);
         Object.assign(x, { planName: `Reseller ${pk.name} (${pk.credits} credits)`, email: String(body.email || ''), phone: String(body.phone || ''), note: String(body.note || '') });
         await store.put('sales', sales);

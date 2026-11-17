@@ -2,7 +2,7 @@
 // Pages: home (features, devices, pricing, setup, FAQ, contact), about, privacy, terms.
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
-import { ic } from './icons.js?v=69';
+import { ic } from './icons.js?v=70';
 
 const T = {
   en: {
@@ -59,6 +59,7 @@ export function siteHtml({ config, lang, langs, page }) {
   const logo = `<img src="${esc(b.logoUrl || 'logo.png')}" alt="" width="40" height="40">`;
   const head = `<header class="s-nav"><a class="s-brand" data-act="site-page" data-page="home" href="#">${logo}<b>${app}</b></a>
     <nav class="s-links" aria-label="Sections">${page === 'home' ? L.nav.map((n, i) => `<a href="#${IDS[i]}" data-act="site-jump" data-to="${IDS[i]}">${n}</a>`).join('') : ''}</nav>
+    ${page === 'home' ? `<details class="s-menu"><summary aria-label="${L.menu || 'Sections'}">☰ ${L.menu || 'Menu'}</summary><nav aria-label="${L.menu || 'Sections'}">${L.nav.map((n, i) => `<a href="#${IDS[i]}" data-act="site-jump" data-to="${IDS[i]}">${n}</a>`).join('')}</nav></details>` : ''}
     <div class="s-navbtns"><button class="btn" data-act="site-login">${L.signIn}</button>${trialOn ? `<button class="btn primary s-hide-sm" data-act="trial">${L.start}</button>` : ''}</div></header>`;
   const foot = `<footer class="s-foot"><div class="s-footrow">${['about', 'privacy', 'terms'].map((p, i) => `<a href="#" data-act="site-page" data-page="${p}">${L.foot[i]}</a>`).join('')}<a href="download.html">${L.getApp}</a></div>
     <div class="s-footrow lang-sw">${langs.map(([k, n]) => `<a href="#" data-act="lang" data-lang="${k}" class="${lang === k ? 'on' : ''}">${n}</a>`).join('')}</div>
