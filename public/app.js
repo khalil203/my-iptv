@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=79';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=79';
-import { siteHtml } from './site.js?v=79';
-import { ic } from './icons.js?v=79';
-import { parseM3U, m3uAnswer } from './m3u.js?v=79';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=79';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=80';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=80';
+import { siteHtml } from './site.js?v=80';
+import { ic } from './icons.js?v=80';
+import { parseM3U, m3uAnswer } from './m3u.js?v=80';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=80';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -176,6 +176,7 @@ async function boot() {
   try { localStorage.removeItem('tvp_paying_at'); sessionStorage.removeItem('tvp_paying'); } catch {}
   if (hp.get('reset')) { state.resetToken = hp.get('reset'); state.showLogin = true; history.replaceState(null, '', location.pathname); }
   if (location.hash === '#login') state.showLogin = true;
+  if (/^\/intprototv\/?$/i.test(location.pathname)) { state.showLogin = true; state.forceSite = false; } // admin sign-in address
   if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
   if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
   setLang(detectLang());
@@ -2300,7 +2301,7 @@ trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }
   },
   'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
-  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); state.showLogin = false; document.body.className = ''; await refreshConfig(); route(); },
+  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); state.showLogin = /^\/intprototv/i.test(location.pathname); document.body.className = ''; await refreshConfig(); route(); },
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
   'menu-open': () => { $('#side')?.classList.add('open'); document.querySelector('.side-bg')?.classList.add('open'); setTimeout(() => $('.nav-search')?.focus(), 50); },
   'menu-close': () => { $('#side')?.classList.remove('open'); document.querySelector('.side-bg')?.classList.remove('open'); },
