@@ -1505,3 +1505,19 @@ test('Black Friday: newsletter preset and Telegram channel post', async () => {
   const r = await x.call('POST', '/api/admin/promo/telegram', {}, tok); assert.equal(r.status, 200, JSON.stringify(r.json));
   const sent = x.tg.at(-1); assert.equal(sent.chat_id, '@intprototv'); assert.match(sent.text, /Black Friday is here!/); assert.match(sent.text, /BLACKFRIDAY/);
 });
+
+test('new customers of a month: sign-ups, packages, reseller credits, IBO and delivery', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const a = await addCustomer(x, tok, { username: 'nm1', phone: '+212600000002' });
+  await addCustomer(x, tok, { username: 'nm2', email: 'nm2@example.com' });
+  const cs = JSON.parse(x.db.get('customers').v); const TZ = 7 * 3600000; const n = new Date(Date.now() + TZ);
+  const mid = Date.UTC(n.getUTCFullYear(), n.getUTCMonth() - 1, 15) - TZ; for (const c of cs) c.createdAt = mid; cs[0].contact = { whatsapp: mid, noTelegram: mid };
+  x.db.set('customers', { v: JSON.stringify(cs), e: 0 });
+  const r = await x.call('GET', '/api/admin/customers/newstats', {}, tok); assert.equal(r.status, 200, JSON.stringify(r.json));
+  const d = r.json; assert.equal(d.total, 2); assert.equal(d.paid, 2); assert.equal(d.sent.whatsapp, 1); assert.equal(d.notSent, 1);
+  assert.equal(d.standard.plans['1 Month'], 2); assert.equal(d.customers.find((c) => c.username === cs[0].username).noTelegram, true);
+  const now = await x.call('GET', '/api/admin/customers/newstats', {}, tok, { month: new Date(Date.now() + TZ).toISOString().slice(0, 7) }); assert.equal(now.json.total, 0, 'this month is empty');
+  // editing a customer stamps the update date
+  assert.equal((await x.call('PUT', `/api/admin/customers/${a.id}`, { note: 'checked' }, tok)).status, 200);
+  assert.ok(JSON.parse(x.db.get('customers').v).find((c) => c.id === a.id).updatedAt > 0);
+});

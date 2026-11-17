@@ -3006,6 +3006,33 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(next);
       }
 
+      if (R('GET', '/api/admin/customers/newstats')) { // new customers of one month (default: last month), Bangkok time
+        const TZ = 7 * 3600000; const now = new Date(Date.now() + TZ);
+        let [y, mo] = /^\d{4}-\d{2}$/.test(String(query.month || '')) ? String(query.month).split('-').map(Number) : [now.getUTCFullYear(), now.getUTCMonth()];
+        if (!/^\d{4}-\d{2}$/.test(String(query.month || '')) && mo === 0) { y -= 1; mo = 12; }
+        const from = Date.UTC(y, mo - 1, 1) - TZ, to = Date.UTC(y, mo, 1) - TZ; const inM = (t) => Number(t) >= from && Number(t) < to;
+        const month = `${y}-${String(mo).padStart(2, '0')}`;
+        const all = (await getCustomers()).filter((c) => !c.rsOrder); const list = all.filter((c) => inM(c.createdAt));
+        const t = Date.now(); const warn = (Number(s.userDashboard.expiryWarningDays) || 7) * DAY;
+        const state = (c) => c.status === 'disabled' ? 'disabled' : c.expiresAt < t ? 'expired' : c.expiresAt - t <= warn ? 'expiring' : 'active';
+        const count = (arr, f) => arr.reduce((o, x) => { const k = f(x); o[k] = (o[k] || 0) + 1; return o; }, {});
+        const plan = (c) => (s.plans.find((p) => p.id === c.planId) || {}).name || (c.isTrial ? 'Free trial' : 'Custom');
+        const ct = (c, k) => !!((c.contact || {})[k]);
+        const sent = { email: list.filter((c) => ct(c, 'email') || c.loginMailAt || c.profileMailAt).length, whatsapp: list.filter((c) => ct(c, 'whatsapp') || c.waSentAt).length, telegram: list.filter((c) => ct(c, 'telegram')).length };
+        const none = list.filter((c) => !(ct(c, 'email') || c.loginMailAt || c.profileMailAt || ct(c, 'whatsapp') || c.waSentAt || ct(c, 'telegram')));
+        const rs = await getResellers(); const rOrders = rs.flatMap((r) => (r.orders || []).filter((o) => inM(o.at)).map((o) => ({ ...o, rsl: r.rslId, name: r.name })));
+        const ibo = ((await store.get('ibo')) || []).filter((x) => inM(x.createdAt || x.startAt));
+        const iboCust = list.filter((c) => c.ibo && (c.ibo.mac || c.ibo.key)).length;
+        return ok({ month, from, to,
+          total: list.length, paid: list.filter((c) => !c.isTrial).length, trials: list.filter((c) => c.isTrial).length,
+          standard: { count: list.filter((c) => !c.isTrial).length, plans: count(list.filter((c) => !c.isTrial), plan) },
+          reseller: { newResellers: rs.filter((r) => inM(r.joinedAt)).length, orders: rOrders.length, credits: rOrders.reduce((a, o) => a + (Number(o.credits) || 0), 0), amount: Math.round(rOrders.reduce((a, o) => a + (Number(o.amount) || 0), 0) * 100) / 100, list: rOrders.slice(0, 50).map((o) => ({ at: o.at, rsl: o.rsl, name: o.name, pkg: o.pkg || '', credits: o.credits || 0, amount: o.amount || 0, currency: o.currency || '' })) },
+          ibo: { activations: ibo.length + iboCust, panel: ibo.length, onCustomers: iboCust, trials: ibo.filter((x) => x.isTrial).length },
+          balance: count(list, state), devices: list.reduce((a, c) => a + connDevices(c), 0), multi: list.filter((c) => (c.lines || []).length).length,
+          sent, notSent: none.length,
+          customers: list.sort((a, b) => b.createdAt - a.createdAt).map((c) => ({ id: c.id, name: c.name, username: c.username, createdAt: c.createdAt, plan: plan(c), isTrial: !!c.isTrial, state: state(c), expiresAt: c.expiresAt, ibo: !!(c.ibo && (c.ibo.mac || c.ibo.key)),
+            email: ct(c, 'email') || !!c.loginMailAt || !!c.profileMailAt, whatsapp: ct(c, 'whatsapp') || !!c.waSentAt, telegram: ct(c, 'telegram'), noWhatsapp: ct(c, 'noWhatsapp'), noTelegram: ct(c, 'noTelegram') })) });
+      }
       if (R('GET', '/api/admin/customers')) {
         const bad = await getBad(); const sales = await getSales(); const paid = {};
         for (const sa of sales) if (Number(sa.amount) > 0) paid[sa.customerId] = (paid[sa.customerId] || 0) + (Number(sa.amountUsd) || 0);
@@ -3058,7 +3085,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await saveCustomers(list);
         await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
         let mail = null;
-        if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); }
+        if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); if (mail.ok) { c.loginMailAt = Date.now(); markSent(c, 'email'); await saveCustomers(list); } }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
         return ok({ customer: viewP(c, s), panel, mail, duplicates: dup.map((m) => ({ username: m.c.username, name: m.c.name, why: m.why })) });
       }
@@ -3137,6 +3164,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           }
           if (c.lineUsername + '\n' + c.linePassword !== lineWas && !body.password) await adoptLine(list, c);
           if (body.connections !== undefined) c.connections = Number(body.connections) || 1;
+          c.updatedAt = Date.now();
           if (body.lineType !== undefined) c.lineType = CONN_TYPES[body.lineType] ? body.lineType : 'xtream1';
           if (body.lines !== undefined) { c.lines = cleanConns(body.lines); if (!c.lines.length) delete c.lines; }
           if (body.username && body.username !== c.username) {

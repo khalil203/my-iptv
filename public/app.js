@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=84';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=85';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=83';
 import { ic } from './icons.js?v=83';
@@ -740,14 +740,21 @@ function adminCustomerProfile(c) {
   </div>`;
 }
 
+// Last calendar month in Bangkok time (UTC+7): [from, to)
+function lastMonthRange(back = 1) { const TZ = 7 * 3600000; const n = new Date(Date.now() + TZ); const from = Date.UTC(n.getUTCFullYear(), n.getUTCMonth() - back, 1) - TZ; const to = Date.UTC(n.getUTCFullYear(), n.getUTCMonth() - back + 1, 1) - TZ; const d = new Date(from + TZ); return { from, to, key: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }) }; }
+const custUpdated = (c) => Number(c.updatedAt) || 0;
+const custFilterOk = (c, f) => f === 'all' || c.state === f || (f === 'trial' && c.isTrial) || (f === 'request' && c.buyRequest && !c.buyRequest.answeredAt) || (f === 'lastmonth' && (() => { const r = lastMonthRange(state.admin.nmBack || 1); return c.createdAt >= r.from && c.createdAt < r.to; })());
+const CUST_SORTS = [['updated', 'Updated first, old records last'], ['expiry', 'Ending soonest'], ['new', 'Newest customers first']];
 function filteredCustomers() {
-  const { filter, q } = state.admin;
+  const { filter, q } = state.admin; if (!state.admin.custSort) { try { state.admin.custSort = localStorage.getItem('tvp_cust_sort') || ''; } catch {} } const sort = state.admin.custSort || 'updated';
   const qq = q.trim().toLowerCase();
   return state.admin.customers
-    .filter((c) => filter === 'all' || c.state === filter || (filter === 'trial' && c.isTrial) || (filter === 'request' && c.buyRequest && !c.buyRequest.answeredAt))
+    .filter((c) => custFilterOk(c, filter))
     .filter((c) => !qq || [c.name, c.username, c.phone, c.lineUsername, c.note, c.email, c.email2, c.whatsapp, c.telegram, c.macAddress, c.orderNo, c.country].some((x) => String(x || '').toLowerCase().includes(qq)))
-    .sort((a, b) => a.expiresAt - b.expiresAt);
+    .sort((a, b) => sort === 'expiry' ? a.expiresAt - b.expiresAt : sort === 'new' ? (b.createdAt || 0) - (a.createdAt || 0) : (custUpdated(b) - custUpdated(a)) || ((b.createdAt || 0) - (a.createdAt || 0)));
 }
+// "Updated 17 Nov 2026" for records edited in the new system; old records show when they were added.
+const updTag = (c) => custUpdated(c) ? `<span class="small" style="color:#16a34a" title="Last change saved in the dashboard">✓ Updated ${fmtDate(c.updatedAt)}</span>` : `<span class="small muted" title="Not updated since the migration">Old record · added ${fmtDate(c.createdAt)}</span>`;
 // 24-hour auto-reset contact checkboxes (spec §4): a mark expires 24h after it was made, for the daily follow-up routine.
 const contactedRecently = (ts) => ts && Date.now() - ts < 24 * 3600000;
 // Brand marks for the WhatsApp and Telegram buttons come from the Simple Icons library (falls back to text if it cannot load).
@@ -781,18 +788,37 @@ function customerListHtml() {
   const more = all.length > lim ? `<div style="text-align:center;margin:14px"><button class="btn" data-act="cust-more">Show more (${all.length - lim} left)</button></div>` : '';
   const narrow = matchMedia('(max-width: 760px)').matches;
   if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${connChip(c)}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
-      <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
+      <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div><div style="margin:-2px 0 6px">${updTag(c)}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
     ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${connChip(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
-      <td>${fmtDate(c.expiresAt)}<div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
+      <td>${fmtDate(c.expiresAt)}<div>${updTag(c)}</div><div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function adminCustomers() {
   const a = state.admin;
-  const counts = (st) => a.customers.filter((c) => st === 'all' || c.state === st || (st === 'trial' && c.isTrial) || (st === 'request' && c.buyRequest && !c.buyRequest.answeredAt)).length;
+  const counts = (st) => a.customers.filter((c) => custFilterOk(c, st)).length;
   return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone…" value="${esc(a.q)}" data-input="cust-search"><button class="btn" data-act="sync-panel" data-perm="customers_edit" title="Checks every line on your panel and updates end dates, devices and broken lines">🔄 Sync with panel</button><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx" data-perm="exports">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="customers_edit">📣 Newsletter</button></div>
-    <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial', 'request'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f === 'request' ? '🛒 requests' : f} (${counts(f)})</a>`).join('')}</div>
+    <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial', 'request', 'lastmonth'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f === 'request' ? '🛒 requests' : f === 'lastmonth' ? '📅 ' + ((a.nmBack ?? 1) === 1 ? 'Last month' : lastMonthRange(a.nmBack).label) : f} (${counts(f)})</a>`).join('')}</div>
+    <div class="row" style="margin:-4px 0 12px;gap:8px"><span class="small muted">Order:</span><select data-input="cust-sort" style="width:auto">${CUST_SORTS.map(([k, l]) => `<option value="${k}" ${(a.custSort || 'updated') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${a.filter === 'lastmonth' ? `<div id="nm-stats" class="card" style="margin-bottom:14px"><p class="muted" style="margin:0">Loading new customers…</p></div>` : ''}
     <div id="cust-list">${customerListHtml()}</div>`;
+}
+
+// New customers of the chosen month: sign-ups, what they bought, balance status and whether their details were sent.
+async function nmStats() {
+  const box = $('#nm-stats'); if (!box) return; const r0 = lastMonthRange(state.admin.nmBack || 1);
+  let d; try { d = await api('GET', `/api/admin/customers/newstats?month=${r0.key}`); } catch (e) { box.innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; return; }
+  const stat = (n, l, sub = '') => `<div style="flex:1;min-width:120px;background:var(--soft,rgba(148,163,184,.12));border-radius:12px;padding:10px 12px"><div class="small muted">${l}</div><b style="font-size:1.6rem">${n}</b>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
+  const bar = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="tagp">${esc(k)} · <b>${v}</b></span>`).join(' ') || '<span class="small muted">—</span>';
+  const mark = (on, no, l) => no ? `<span title="No ${l}" style="opacity:.5">🚫</span>` : on ? `<span title="${l} sent" style="color:#16a34a">✓</span>` : `<span title="${l} not sent" class="muted">·</span>`;
+  const pct = (n) => d.total ? Math.round(n / d.total * 100) + '%' : '0%';
+  box.innerHTML = `<div class="row" style="gap:6px;margin-bottom:10px"><button class="btn sm" data-act="nm-month" data-d="1" title="Month before">‹</button><h3 style="margin:0;flex:1;text-align:center">🆕 New customers · ${esc(r0.label)}</h3><button class="btn sm" data-act="nm-month" data-d="-1" ${(state.admin.nmBack || 1) <= 0 ? 'disabled' : ''} title="Next month">›</button></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">${stat(d.total, 'New sign-ups', `${d.paid} paid · ${d.trials} trials`)}${stat(d.standard.count, 'Standard packages', `${d.devices} devices · ${d.multi} with several lines`)}${stat(d.reseller.credits, 'Reseller credits', `${d.reseller.orders} orders · ${d.reseller.newResellers} new resellers${d.reseller.amount ? ' · ' + d.reseller.amount : ''}`)}${stat(d.ibo.activations, 'IBO Player activations', `${d.ibo.panel} on IBO panel · ${d.ibo.onCustomers} on customers`)}</div>
+    <div style="margin-top:12px"><div class="small muted" style="margin-bottom:4px">Packages bought</div>${bar(d.standard.plans)}</div>
+    <div style="margin-top:10px"><div class="small muted" style="margin-bottom:4px">Balance status today</div>${bar(d.balance)}</div>
+    <div style="margin-top:10px"><div class="small muted" style="margin-bottom:4px">Login details delivered</div><span class="tagp">✉️ Email · <b>${d.sent.email}</b> (${pct(d.sent.email)})</span> <span class="tagp">WhatsApp · <b>${d.sent.whatsapp}</b> (${pct(d.sent.whatsapp)})</span> <span class="tagp">Telegram · <b>${d.sent.telegram}</b> (${pct(d.sent.telegram)})</span> ${d.notSent ? `<span class="pill st-expired">${d.notSent} not contacted yet</span>` : '<span class="pill st-active">everyone contacted</span>'}</div>
+    ${d.customers.length ? `<details style="margin-top:12px"><summary class="small">Delivery log per customer (${d.customers.length})</summary><div class="table-wrap" style="margin-top:6px"><table><thead><tr><th>Customer</th><th>Joined</th><th>Package</th><th>Status</th><th title="Email">✉️</th><th title="WhatsApp">WA</th><th title="Telegram">TG</th><th>IBO</th></tr></thead><tbody>${d.customers.map((c) => `<tr><td><button class="name-link" data-act="view-customer" data-id="${c.id}">${esc(c.name || c.username)}</button><div class="small muted">${esc(c.username)}</div></td><td>${fmtDate(c.createdAt)}</td><td>${esc(c.plan)}</td><td>${pill(c.state)}</td><td>${mark(c.email, false, 'Email')}</td><td>${mark(c.whatsapp, c.noWhatsapp, 'WhatsApp')}</td><td>${mark(c.telegram, c.noTelegram, 'Telegram')}</td><td>${c.ibo ? '📺' : ''}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+    ${d.reseller.list.length ? `<details style="margin-top:8px"><summary class="small">Reseller orders (${d.reseller.list.length})</summary><ul class="small" style="margin:6px 0 0;padding-left:18px">${d.reseller.list.map((o) => `<li>${fmtDate(o.at)} · ${esc(o.rsl)} ${esc(o.name)} · ${esc(o.pkg)} · ${o.credits} credits${o.amount ? ' · ' + esc(o.amount) + ' ' + esc(o.currency) : ''}</li>`).join('')}</ul></details>` : ''}`;
 }
 
 const CONN_UI = [['xtream1', 'Xtream Codes 1 + M3U'], ['xtream2', 'Xtream Codes 2 + M3U'], ['unlimited', 'Unlimited M3U']];
@@ -2449,7 +2475,8 @@ trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
   'menu-open': () => { $('#side')?.classList.add('open'); document.querySelector('.side-bg')?.classList.add('open'); setTimeout(() => $('.nav-search')?.focus(), 50); },
   'menu-close': () => { $('#side')?.classList.remove('open'); document.querySelector('.side-bg')?.classList.remove('open'); },
-  'cust-filter': (el) => { state.admin.filter = el.dataset.f; state.admin.custLimit = 60; $('#admin-body').innerHTML = adminCustomers(); },
+  'cust-filter': (el) => { state.admin.filter = el.dataset.f; state.admin.custLimit = 60; $('#admin-body').innerHTML = adminCustomers(); if (el.dataset.f === 'lastmonth') nmStats(); },
+  'nm-month': (el) => { state.admin.nmBack = Math.max(0, (state.admin.nmBack || 1) + Number(el.dataset.d)); $('#admin-body').innerHTML = adminCustomers(); nmStats(); },
   'cust-more': () => { state.admin.custLimit = (state.admin.custLimit || 60) + 100; $('#cust-list').innerHTML = customerListHtml(); },
   'new-customer': () => { modal('Add customer', customerForm(null), { wide: true }); },
   'edit-customer': async (el) => { if (!(state.admin.customers || []).some((x) => x.id === el.dataset.id)) state.admin.customers = await api('GET', '/api/admin/customers'); const c = state.admin.customers.find((x) => x.id === el.dataset.id); modal('Edit customer', customerForm(c), { wide: true }); },
@@ -2839,6 +2866,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
+  if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
   if (t.dataset.input === 'nav-search') { // menu search: hides pages that do not match, by name, group or keywords
     const q = t.value.trim().toLowerCase(); let shown = 0;
