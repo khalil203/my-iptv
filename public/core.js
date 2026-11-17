@@ -3561,7 +3561,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (dirty) { await saveResellers(rs); await saveCustomers(customers); if (s.resellerSeq !== seq0) await saveSettings(s); }
         // reseller orders that sit in the customer list and are not in any profile yet
         const first = rsFirstSales(sales);
-        const found = rsGroupCustomers(customers.filter((c) => !linked.has(c.id) && rsLooksReseller(c, first[c.id]))).map((g) => {
+        const found = rsGroupCustomers(customers.filter((c) => !linked.has(c.id) && !c.rsSkip && rsLooksReseller(c, first[c.id]))).map((g) => {
           const into = rsFind(rs, { emails: g.flatMap((c) => [c.email, c.email2]), phone: g.map((c) => c.phone || c.whatsapp).find(Boolean), name: '' });
           const os = g.map((c) => rsOrderFromCustomer(c, first[c.id], s));
           return { ids: g.map((c) => c.id), name: g[0].name, email: cleanEmail(g.map((c) => c.email).find((e) => cleanEmail(e)) || ''), phone: g.map((c) => c.phone || c.whatsapp).find(Boolean) || '', n: g.length, credits: os.reduce((a, o) => a + o.credits, 0), totalUsd: rsRound(os.reduce((a, o) => a + toUsd(o.amount, o.currency, s.finance.rates), 0)), refs: os.map((o) => o.ref).slice(0, 30), firstAt: Math.min(...os.map((o) => o.at).filter(Boolean), Date.now()), into: into ? { id: into.id, rslId: into.rslId, name: into.name } : null };
@@ -3597,6 +3597,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if ((p.customerIds || []).length) { const list = await getCustomers(); let ch = false; for (const c of list) if (p.customerIds.includes(c.id) && c.rslId !== p.rslId) { c.rslId = p.rslId; c.isReseller = true; ch = true; } if (ch) await saveCustomers(list); }
         await log('customer', `${body.id ? 'Changed' : 'Added'} reseller ${p.name} (${p.rslId})`);
         return ok({ ok: true, reseller: rsOut({ id: p.id, rslId: p.rslId, name: p.name, phone: p.phone }) });
+      }
+      if (R('POST', '/api/admin/reseller/dismiss')) { // "this row is not a reseller": it stops being offered
+        const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(String)); const list = await getCustomers(); let n = 0;
+        for (const c of list) if (ids.has(c.id)) { c.rsSkip = true; n++; }
+        if (!n) return err(404, 'Not found.');
+        await saveCustomers(list); return ok({ ok: true, n });
       }
       if (R('POST', '/api/admin/reseller/delete')) {
         const rs = await getResellers(); const i = rs.findIndex((x) => x.id === String(body.id || '')); if (i < 0) return err(404, 'Reseller not found.');

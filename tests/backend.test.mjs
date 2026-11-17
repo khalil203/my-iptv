@@ -1301,6 +1301,9 @@ test('resellers: found in the customer list, grouped by person, added with their
   // deleting the reseller clears the marks
   await x.call('POST', '/api/admin/reseller/delete', { id: p.id }, tok);
   assert.ok((await x.call('GET', '/api/admin/customers', {}, tok, { rs: 1 })).json.filter((c) => c.name.toLowerCase() === 'jamie demo').every((c) => !c.isReseller));
+  const fnd = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.found; assert.ok(fnd.length > 0);
+  await x.call('POST', '/api/admin/reseller/dismiss', { ids: fnd.flatMap((f) => f.ids) }, tok);
+  assert.equal((await x.call('GET', '/api/admin/reseller', {}, tok)).json.found.length, 0, 'dismissed rows are not offered again');
   assert.equal((await x.call('POST', '/api/admin/reseller/from-customers', { ids: [] }, tok)).status, 400);
   assert.equal((await x.call('POST', '/api/admin/reseller/from-customers', { ids: ['ghost'] }, tok)).status, 404);
 });
