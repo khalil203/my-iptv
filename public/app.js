@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText } from './core.js?v=77';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=77';
-import { siteHtml } from './site.js?v=77';
-import { ic } from './icons.js?v=77';
-import { parseM3U, m3uAnswer } from './m3u.js?v=77';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=77';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=78';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=78';
+import { siteHtml } from './site.js?v=78';
+import { ic } from './icons.js?v=78';
+import { parseM3U, m3uAnswer } from './m3u.js?v=78';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=78';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -392,14 +392,14 @@ const ADMIN_TABS = [
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
   ['stripe', '💳', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
   ['ibo', '📺', 'IBO Player', 'ibo', 'Money', 'ibo player credits activation mac lifetime 1 year trial smart iptv'],
-  ['mkt', '📧', 'Email marketing', 'marketing', 'Marketing', 'resend keys rotation bounce lists campaign send marketing newsletter'],
-  ['seo', '🧵', 'SEO & social', 'seo', 'Marketing', 'reddit quora facebook posts agents results seo social'],
-  ['gads', '🎯', 'Google Ads', 'ads', 'Marketing', 'google ads campaigns budget spend domain'],
-  ['fb', '👍', 'Facebook Ads', 'ads', 'Marketing', 'facebook ads creatives description performance photo history'],
   ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['sales', '📈', 'Sales tracker', 'sales', 'Money', 'sales daily monthly revenue transactions tracker today month'],
   ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
+  ['mkt', '📧', 'Email marketing', 'marketing', 'Marketing', 'resend keys rotation bounce lists campaign send marketing newsletter'],
+  ['seo', '🧵', 'SEO & social', 'seo', 'Marketing', 'reddit quora facebook posts agents results seo social'],
+  ['gads', '🎯', 'Google Ads', 'ads', 'Marketing', 'google ads campaigns budget spend domain'],
+  ['fb', '👍', 'Facebook Ads', 'ads', 'Marketing', 'facebook ads creatives description performance photo history'],
   ['templates', '✍️', 'Message templates', 'settings', 'Messages', 'email whatsapp trial reminder renewal order wording text'],
   ['emails', '📬', 'Emails & bounces', 'customers_view', 'Messages', 'bounced spam delivered sent resend invalid'],
   ['trial', '🎁', 'Trial & email setup', 'settings', 'Messages', 'resend key sender free trial renewal offer'],
