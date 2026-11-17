@@ -278,7 +278,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/reseller/delete') return 'customers_delete';
   if (path.startsWith('/api/admin/reseller/')) return 'customers_edit';
   if (path === '/api/admin/log') return 'activity';
-  if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
+  if (path === '/api/admin/panel/test' || path === '/api/admin/email/test' || path === '/api/admin/email/test-key') return 'settings';
   if (path.startsWith('/api/admin/email/bounces')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/email/recent') return 'customers_view';
   if (path.startsWith('/api/admin/trialpool')) return 'settings';
@@ -1102,11 +1102,21 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const name = (m ? raw.slice(0, m.index) : '').replace(/["']/g, '').trim();
     return { addr: /^\S+@\S+\.\S+$/.test(addr) ? addr : '', name, domain: addr.includes('@') ? addr.split('@')[1].trim() : '' };
   }
-  function transPairs(s) { // pairs keep their original index: a blank key never shifts another key's domain
-    const ks = s.email.transKeys || [], ds = s.email.transDomains || [], ns = s.email.transSenders || [];
-    const out = [];
-    for (let i = 0; i < ks.length; i++) { const key = String(ks[i] || '').trim(); if (!key) continue; out.push({ key, domain: String(ds[i] || '').trim(), fromName: String(ns[i] || '').trim() }); }
-    return out;
+  // ----- Resend sending rows: { id, key, domain, name, on } — as many as you like, each one can be paused or tested -----
+  const cleanDomain = (d) => { const v = String(d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^[^@]*@/, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v.slice(0, 100) : ''; };
+  const rowsFromLegacy = (keys = [], domains = [], names = []) => keys.map((k, i) => ({ id: 'k' + (i + 1), key: String(k || '').trim(), domain: cleanDomain(domains[i]), name: String(names[i] || '').trim().slice(0, 80), on: true })).filter((r) => r.key && !r.key.startsWith('••••'));
+  const transRowsOf = (s) => (Array.isArray(s.email.transRows) ? s.email.transRows : rowsFromLegacy(s.email.transKeys, s.email.transDomains, s.email.transSenders));
+  const maskRows = (rows) => (rows || []).map((r) => ({ ...r, key: r.key ? '••••' + String(r.key).slice(-4) : '' }));
+  function normRows(input, old) { // a key shown as ••••abcd keeps the saved key of the same row
+    const byId = new Map((old || []).map((r) => [r.id, r]));
+    return (Array.isArray(input) ? input : []).slice(0, 200).map((r) => {
+      const id = /^[\w-]{1,20}$/.test(String(r?.id || '')) ? String(r.id) : 'k' + uid(4); const prev = byId.get(id);
+      const k = String(r?.key || '').trim(); const key = k.startsWith('••••') ? (prev ? prev.key : '') : k.replace(/\s/g, '').slice(0, 200);
+      return { id, key, domain: cleanDomain(r?.domain), name: String(r?.name || '').replace(/[<>"]/g, '').trim().slice(0, 80), on: r?.on !== false, testAt: prev?.testAt || 0, testOk: prev?.testOk ?? null, testMsg: prev?.testMsg || '' };
+    }).filter((r) => r.key || r.domain);
+  }
+  function transPairs(s) {
+    return transRowsOf(s).filter((r) => r.on !== false && r.key).map((r) => ({ key: r.key, domain: r.domain, fromName: r.name }));
   }
   function transPair(s) {
     const list = transPairs(s);
@@ -1122,7 +1132,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const addr = p.address || (domain ? `noreply@${domain}` : f.addr);
     return `${name} <${addr || 'noreply@intproto-tv.store'}>`;
   }
-  const mailKeys = (s) => { const out = []; for (const k of [s.email.resendKey, ...(s.email.transKeys || [])]) { const v = String(k || '').trim(); if (v && !out.includes(v)) out.push(v); } return out; };
+  const mailKeys = (s) => { const out = []; for (const k of [s.email.resendKey, ...transRowsOf(s).map((r) => r.key)]) { const v = String(k || '').trim(); if (v && !out.includes(v)) out.push(v); } return out; };
   async function sendEmail(s, to, subject, html) {
     const e = s.email;
     to = cleanEmail(to);
@@ -2459,23 +2469,39 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       // ---------- Email marketing dashboard (spec §8.1) ----------
       const getMkt = async () => (await store.get('mkt')) || { keys: Array(10).fill(''), domains: Array(10).fill(''), senders: ['', '', '', '', ''], subjects: ['', '', '', '', ''], costPerEmail: 0.0004, stats: {}, perKey: {}, perDomain: {}, totalSent: 0, totalSpendUsd: 0, lastSendAt: 0 };
       const saveMkt = (m) => store.put('mkt', m);
+      const mktRowsOf = (m) => (Array.isArray(m.rows) ? m.rows : rowsFromLegacy(m.keys, m.domains, []));
       const getMktLists = async () => (await store.get('mktlists')) || [];
       const getMktList = async (id) => { if (!/^[\w-]{1,20}$/.test(String(id))) return null; return store.get('mktlist:' + id); };
       const mktStats = (m) => { const cut = Date.now() - 30 * DAY; const rows = Object.entries(m.stats || {}).filter(([d]) => new Date(d).getTime() >= cut); const day = Object.entries(m.stats || {}).find(([d]) => d === new Date().toISOString().slice(0, 10))?.[1] || { sent: 0 }; return { last30: rows.reduce((a, [, v]) => a + (Number(v.sent) || 0), 0), today: Number(day.sent) || 0, byDay: Object.fromEntries(rows.slice(-14)), totalSent: Number(m.totalSent) || 0, totalSpendUsd: Math.round((Number(m.totalSpendUsd) || 0) * 100) / 100, perKey: m.perKey || {}, perDomain: m.perDomain || {} } };
       if (R('GET', '/api/admin/emailmkt')) {
         const m = await getMkt(); const lists = (await getMktLists()).map(({ id, name, count, createdAt, by }) => ({ id, name, count, createdAt, by }));
-        return ok({ keysSet: (m.keys || []).filter(Boolean).length, senders: (m.senders || []).filter(Boolean).length, subjects: (m.subjects || []).filter(Boolean).length, costPerEmail: Number(m.costPerEmail) || 0.0004, lists, ...mktStats(m) });
+        return ok({ keysSet: mktRowsOf(m).filter((r) => r.key && r.on !== false).length, rowsTotal: mktRowsOf(m).length, senders: (m.senders || []).filter(Boolean).length, subjects: (m.subjects || []).filter(Boolean).length, costPerEmail: Number(m.costPerEmail) || 0.0004, lists, ...mktStats(m) });
       }
-      if (R('GET', '/api/admin/emailmkt/settings')) { const m = await getMkt(); return ok({ keys: (m.keys || []).map((k) => (k ? '••••' : '')), senders: m.senders || [], subjects: m.subjects || [], costPerEmail: m.costPerEmail, ...mktStats(m) }); }
+      if (R('GET', '/api/admin/emailmkt/settings')) { const m = await getMkt(); return ok({ rows: maskRows(mktRowsOf(m)), keys: (m.keys || []).map((k) => (k ? '••••' : '')), senders: m.senders || [], subjects: m.subjects || [], costPerEmail: m.costPerEmail, ...mktStats(m) }); }
       if (R('PUT', '/api/admin/emailmkt/settings')) {
         const m = await getMkt();
-        if (Array.isArray(body.keys)) m.keys = body.keys.slice(0, 10).map((k, i) => String(k || '').startsWith('••••') ? m.keys[i] || '' : String(k || ''));
+        if (Array.isArray(body.rows)) { m.rows = normRows(body.rows, mktRowsOf(m)); m.keys = []; m.domains = []; }
+        if (Array.isArray(body.keys) && !Array.isArray(body.rows)) m.keys = body.keys.slice(0, 10).map((k, i) => String(k || '').startsWith('••••') ? m.keys[i] || '' : String(k || ''));
         if (Array.isArray(body.domains)) m.domains = body.domains.slice(0, 10).map((d) => { const v = String(d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '').replace(/^\.+|\.+$/g, ''); return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v) ? v.slice(0, 100) : ''; });
         if (Array.isArray(body.senders)) m.senders = body.senders.slice(0, 5).map((x) => cleanText(x, 80));
         if (Array.isArray(body.subjects)) m.subjects = body.subjects.slice(0, 5).map((x) => cleanText(x, 150));
         if (body.costPerEmail !== undefined) m.costPerEmail = Math.max(0, Number(body.costPerEmail) || 0.0004);
         await saveMkt(m); await log('marketing', 'Marketing settings updated');
         return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/email/test-key')) { // checks one sending row: sends a test email through that key and domain
+        if (!(isOwner || /technical|panel manager/i.test((member && member.role) || ''))) return err(403, 'Only the owner and the Technical Manager can test API keys.');
+        const scope = body.scope === 'mkt' ? 'mkt' : 'trans'; const m = scope === 'mkt' ? await getMkt() : null;
+        const rows = scope === 'mkt' ? mktRowsOf(m) : transRowsOf(s); const saved = rows.find((r) => r.id === String(body.id || ''));
+        const typed = String(body.key || '').trim(); const key = typed && !typed.startsWith('••••') ? typed : saved?.key || '';
+        const domain = cleanDomain(body.domain) || saved?.domain || ''; const name = String(body.name || saved?.name || s.branding.appName || 'INTPROTO-TV').replace(/[<>"]/g, '').slice(0, 80);
+        if (!key) return err(400, 'Paste the Resend API key first.'); if (!domain) return err(400, 'Type the domain that is verified in Resend.');
+        const to = cleanEmail(body.to || s.email.adminEmail || s.email.supportEmail || ''); if (!to) return err(400, 'Add your admin email in Trial & email setup, so the test has somewhere to go.');
+        let okSend = false, msg = '';
+        try { const r = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: `${name} <noreply@${domain}>`, to: [to], subject: `Test from ${domain}`, html: `<p>This test was sent through your Resend key ••••${escHtml(key.slice(-4))} and the domain <b>${escHtml(domain)}</b>. It works.</p>` }) }); const d = await r.json().catch(() => ({})); okSend = r.ok; msg = r.ok ? 'Sent to ' + to : (d.message || 'Resend error ' + r.status); }
+        catch (e) { msg = e.message; }
+        if (saved) { saved.testAt = Date.now(); saved.testOk = okSend; saved.testMsg = msg.slice(0, 200); if (scope === 'mkt') { m.rows = rows; await saveMkt(m); } else { s.email.transRows = rows; await saveSettings(s); } }
+        return okSend ? ok({ ok: true, msg }) : err(502, msg);
       }
       if (R('POST', '/api/admin/emailmkt/list')) {
         const name = cleanText(body.name, 80); if (name.length < 2) return err(400, 'List name is required.');
@@ -2495,13 +2521,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('POST', '/api/admin/emailmkt/send')) {
         const m = await getMkt();
-        const keys = (m.keys || []).filter(Boolean);
-        if (!keys.length) return err(400, 'Add at least one Resend API key first.');
+        const mrows = mktRowsOf(m).filter((r) => r.key && r.on !== false); const keys = mrows.map((r) => r.key);
+        if (!keys.length) return err(400, 'Add at least one Resend API key (switched on) first.');
         const lists = await getMktLists(); const listRef = lists.find((l) => l.id === String(body.listId || '')); if (!listRef) return err(404, 'List not found.');
         const doc = await getMktList(listRef.id); if (!doc) return err(404, 'List not found.');
         const bad = await getBad(); const recipients = (doc.emails || []).filter((e) => !bad[e]);
         if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
-        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const domains = (m.domains || []).map((d) => String(d || '').trim().toLowerCase());
+        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const domains = mrows.map((r) => r.domain);
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
         const html = String(body.html || '').slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
@@ -2510,7 +2536,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const keyIndex = bi % keys.length;
           const key = keys[keyIndex];
           const dom = domains[keyIndex] || (String(s.branding.supportUrl || '') ? '' : '');
-          const from = `${senders.length ? senders[bi % senders.length] : app} <noreply@${dom || 'intproto-tv.store'}>`;
+          const from = `${mrows[keyIndex].name || (senders.length ? senders[bi % senders.length] : app)} <noreply@${dom || 'intproto-tv.store'}>`;
           const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
           try {
             const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(batch.map((to) => ({ from, to: [to], subject, html }))) });
@@ -2815,13 +2841,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const maskKeys = (src) => ({
           ...src,
           reseller: { ...src.reseller, baseUrl: src.reseller.baseUrl ? '••••' : '', apiKey: src.reseller.apiKey ? '••••' : '', username: src.reseller.username ? '••••' : '', password: src.reseller.password ? '••••' : '', actions: Object.fromEntries(Object.entries(src.reseller.actions || {}).map(([k, v]) => [k, { ...v, url: v.url && /api_key=|\{key\}/.test(v.url) ? '••••' : '••••', headers: '••••' }])) },
-          email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '', transKeys: (src.email.transKeys || []).map((k) => (k ? '••••' : '')), transSenders: src.email.transSenders || [], transSubjects: src.email.transSubjects || [] },
+          email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '', transKeys: (src.email.transKeys || []).map((k) => (k ? '••••' : '')), transRows: maskRows(transRowsOf(src)), transSenders: src.email.transSenders || [], transSubjects: src.email.transSubjects || [] },
           finance: { ...src.finance, stripeKey: src.finance.stripeKey ? '••••' : '', stripeWebhookSecrets: src.finance.stripeWebhookSecrets ? '••••' : '' },
           telegram: { ...src.telegram, botToken: src.telegram?.botToken ? '••••' : '', webhookSecret: src.telegram?.webhookSecret ? '••••' : '' },
         });
         if (can('settings')) {
           const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
-          if (isTm) return ok(maskStripe(s));          // Nizar & Khalil: full access
+          if (isTm) return ok({ ...maskStripe(s), email: { ...s.email, transRows: maskRows(transRowsOf(s)) } }); // Nizar & Khalil: full access (sending keys shown as ••••last 4)
           return ok(maskPanel(maskKeys(maskStripe(s)))); // Other staff: everything masked (panel creds too)
         }
         return ok(maskPanel(maskStripe({ ...s, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } })));
@@ -2844,7 +2870,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body?.reseller?.baseUrl === '••••') delete body.reseller.baseUrl;
         if (body?.panel) for (const k of Object.keys(body.panel)) { const v = body.panel[k]; if (v && typeof v === 'object' && (v.apiKey === '••••' || v.password === '••••' || v.baseUrl === '••••')) { if (v.apiKey === '••••') delete v.apiKey; if (v.password === '••••') delete v.password; if (v.baseUrl === '••••') delete v.baseUrl; } }
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
+        let newRows = null;
+        if (body?.email && Array.isArray(body.email.transRows)) { if (!isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.'); newRows = normRows(body.email.transRows, transRowsOf(s)); delete body.email.transRows; }
         const next = deepMerge(s, body || {});
+        if (newRows) { next.email.transRows = newRows; next.email.transKeys = []; next.email.transDomains = []; }
         next.security.proxySecret = s.security.proxySecret;
         next.branding.whatsapp = String(next.branding.whatsapp || '').replace(/\D/g, '');
         if (next.branding.whatsapp && (!next.branding.supportUrl || /wa\.me\//.test(next.branding.supportUrl))) { next.branding.supportUrl = 'https://wa.me/' + next.branding.whatsapp; if (!next.branding.supportLabel || next.branding.supportLabel === 'Contact support') next.branding.supportLabel = 'WhatsApp'; }

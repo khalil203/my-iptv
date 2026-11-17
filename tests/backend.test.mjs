@@ -1417,3 +1417,32 @@ test('resellers: panel URL / username / password fill the email, ✓ marks and n
   assert.equal(row.telegram, 'robin_t'); assert.ok(row.contact.email > 0 && row.contact.noTelegram > 0);
   assert.deepEqual((await x.call('POST', '/api/admin/reseller/tgsend', { id, text: 'hi' }, tok)).json, { sent: false });
 });
+
+test('Resend keys: unlimited rows for customer and marketing emails, masked, kept on save, paused rows skipped, test button', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { adminEmail: 'boss@example.com' } }, tok);
+  const rows = Array.from({ length: 15 }, (_, i) => ({ key: 're_key' + i, domain: `https://d${i}.example.com/`, name: 'Sender ' + i, on: i !== 3 }));
+  assert.equal((await x.call('PUT', '/api/admin/settings', { email: { transRows: rows } }, tok)).status, 200);
+  let st = (await x.call('GET', '/api/admin/settings', {}, tok)).json.email.transRows;
+  assert.equal(st.length, 15, 'more than 10 keys'); assert.equal(st[0].key, '••••key0'); assert.equal(st[0].domain, 'd0.example.com');
+  // saving the masked list back keeps the real keys
+  st[1].name = 'Renamed'; await x.call('PUT', '/api/admin/settings', { email: { transRows: st } }, tok);
+  const saved = JSON.parse(x.db.get('settings').v).email.transRows;
+  assert.equal(saved[1].key, 're_key1'); assert.equal(saved[1].name, 'Renamed');
+  // a paused key is never used
+  await addCustomer(x, tok); x.mails.length = 0;
+  const c = (await x.call('GET', '/api/admin/customers', {}, tok)).json[0];
+  for (let i = 0; i < 25; i++) await x.call('POST', `/api/admin/customers/${c.id}/profilemail`, {}, tok);
+  assert.ok(x.mails.length >= 25 && !x.mails.some((m) => /d3\.example\.com/.test(m.from)), 'the paused domain is skipped');
+  assert.ok(x.mails.some((m) => /^Sender \d+ <noreply@d\d+\.example\.com>$/.test(m.from)));
+  // marketing has its own list
+  await x.call('PUT', '/api/admin/emailmkt/settings', { rows: [{ key: 're_m1', domain: 'news.example.com', name: 'News' }, { key: 're_m2', domain: 'promo.example.com', on: false }] }, tok);
+  const ms = (await x.call('GET', '/api/admin/emailmkt/settings', {}, tok)).json.rows;
+  assert.deepEqual(ms.map((r) => [r.key, r.domain, r.on]), [['••••e_m1', 'news.example.com', true], ['••••e_m2', 'promo.example.com', false]]);
+  assert.equal((await x.call('GET', '/api/admin/emailmkt', {}, tok)).json.keysSet, 1);
+  // test one row
+  const t = await x.call('POST', '/api/admin/email/test-key', { scope: 'mkt', id: ms[0].id }, tok);
+  assert.equal(t.status, 200, JSON.stringify(t.json)); assert.equal(x.mails.at(-1).from, 'News <noreply@news.example.com>'); assert.deepEqual(x.mails.at(-1).to, ['boss@example.com']);
+  assert.equal((await x.call('POST', '/api/admin/email/test-key', { scope: 'trans', key: 're_new', domain: '' }, tok)).status, 400);
+  assert.equal(JSON.parse(x.db.get('mkt').v).rows[0].testOk, true);
+});
