@@ -274,6 +274,8 @@ function permFor(method, path, body) {
   if (path === '/api/admin/profits') return 'profits';
   if (path === '/api/admin/sales-by-day') return 'profits';
   if (path === '/api/admin/stripe/revenue') return 'profits';
+  if (path === '/api/admin/reseller/email') return 'owner';
+  if (path === '/api/admin/reseller/delete') return 'customers_delete';
   if (path.startsWith('/api/admin/reseller/')) return 'customers_edit';
   if (path === '/api/admin/log') return 'activity';
   if (path === '/api/admin/panel/test' || path === '/api/admin/email/test') return 'settings';
@@ -282,6 +284,210 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/trialpool')) return 'settings';
   if (path.startsWith('/api/admin/templates')) return method === 'GET' ? null : 'templates_edit'; // everyone views & inputs, only TM/owner/full-access edits (spec §1)
   return 'owner';
+}
+
+// ================= Resellers: reading reseller details out of pasted text =================
+// Understands contact cards ("Email · Work: …"), "Label: value" lists, order lines
+// ("REF-08 (Row 311 - Feb 22, 2024): 10 Credit — $280.99"), simple "Name, email, phone" lines and rows copied
+// from a spreadsheet (tab-separated, with or without a header row). Card numbers are never kept.
+const RS_MON = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+export function parseLooseDate(x) {
+  const t = String(x ?? '').trim(); let m;
+  const mk = (y, mo, d) => (y > 1990 && y < 2100 && mo >= 0 && mo < 12 && d >= 1 && d <= 31 ? Date.UTC(y, mo, d, 12) : 0);
+  if ((m = t.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/))) return mk(+m[1], +m[2] - 1, +m[3]);
+  if ((m = t.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})\b/))) { let d = +m[1], mo = +m[2], y = +m[3]; if (y < 100) y += 2000; if (mo > 12 && d <= 12) [d, mo] = [mo, d]; return mk(y, mo - 1, d); }
+  for (const a of t.matchAll(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/g)) { const mo = RS_MON[a[1].slice(0, 3).toLowerCase()]; if (mo != null) return mk(+a[3], mo, +a[2]); }
+  for (const a of t.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b/g)) { const mo = RS_MON[a[2].slice(0, 3).toLowerCase()]; if (mo != null) return mk(+a[3], mo, +a[1]); }
+  return 0;
+}
+// "$280,99" -> 280.99 USD · "1.280,50 €" -> 1280.5 EUR · "460.99" -> 460.99 (no currency)
+export function parseMoney(x) {
+  const t = String(x ?? '');
+  const currency = /€|\beur\b|euro/i.test(t) ? 'EUR' : /usdt|₮/i.test(t) ? 'USDT' : /\$|\busd\b|dollar/i.test(t) ? 'USD' : /\bmad\b|\bdhs?\b|dirham/i.test(t) ? 'MAD' : /\bthb\b|฿|baht/i.test(t) ? 'THB' : /£|\bgbp\b/i.test(t) ? 'GBP' : '';
+  const m = t.match(/\d[\d.,]*\d|\d/); if (!m) return { amount: 0, currency };
+  let n = m[0]; const last = Math.max(n.lastIndexOf('.'), n.lastIndexOf(','));
+  n = last >= 0 && n.length - last - 1 <= 2 ? n.slice(0, last).replace(/[.,]/g, '') + '.' + n.slice(last + 1) : n.replace(/[.,]/g, '');
+  const v = Math.round(parseFloat(n) * 100) / 100;
+  return { amount: isFinite(v) && v >= 0 && v < 1e9 ? v : 0, currency };
+}
+// The price inside a longer text ("10 Credit — $280.99"): a number next to a currency, else a number with two decimals.
+function rsFindPrice(x) {
+  const t = String(x ?? '');
+  let m = t.match(/[$€£₮฿]\s*\d[\d.,]*/) || t.match(/\d[\d.,]*\s*(?:usdt|usd|eur|euros?|mad|dhs?|thb|gbp|€|\$)(?![a-z])/i);
+  if (m) return parseMoney(m[0]);
+  m = t.match(/(?:^|[^\d.,])(\d{1,7}[.,]\d{2})(?![\d.,])/);
+  return m ? parseMoney(m[1]) : { amount: 0, currency: '' };
+}
+const rsLuhn = (d) => { let s = 0, alt = false; for (let i = d.length - 1; i >= 0; i--) { let n = d.charCodeAt(i) - 48; if (alt) { n *= 2; if (n > 9) n -= 9; } s += n; alt = !alt; } return s % 10 === 0; };
+// Removes anything that looks like a payment card number from a text. Card details are never stored.
+export const scrubCards = (t) => String(t ?? '').replace(/\d(?:[ -]?\d){12,18}/g, (m) => { const d = m.replace(/\D/g, ''); return d.length >= 13 && d.length <= 19 && rsLuhn(d) ? '' : m; });
+const RS_INVIS = /[​-‏‪-‮⁦-⁩﻿]/g;
+const rsClean = (x, n = 120) => scrubCards(String(x ?? '').replace(RS_INVIS, '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()).trim().slice(0, n);
+const rsDashes = (x) => /^[-–—_.=*\s]*$/.test(String(x ?? ''));
+export function cleanPhoneText(x) {
+  const t = String(x ?? '').replace(RS_INVIS, ''); const m = t.match(/(?:\+|00)?\d[\d\s().-]{5,}\d/); if (!m) return '';
+  const raw = m[0].trim(); const d = raw.replace(/\D/g, '');
+  if (d.length < 7 || d.length > 15 || (d.length >= 13 && rsLuhn(d))) return '';
+  return raw.startsWith('+') ? '+' + d : raw.startsWith('00') ? '+' + d.slice(2) : d;
+}
+const rsEmails = (x) => [...new Set(String(x ?? '').toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/g) || [])];
+const rsCredits = (x) => { const m = String(x ?? '').match(/(\d{1,5})\s*(?:x\s*)?credits?\b/i); return m ? Number(m[1]) : 0; };
+export const cleanRslId = (x) => { const m = String(x ?? '').match(/\b(?:RSL|RLS)\s*[-_#:]?\s*(\d{1,6})\b/i) || String(x ?? '').trim().match(/^#?(\d{1,6})$/); return m ? 'RSL-' + (m[1].length < 2 ? '0' + m[1] : m[1]) : ''; };
+const rsServer = (x) => [...new Set(String(x ?? '').split(/[/,;|]+/).map((v) => rsClean(v, 30).replace(/^[✓✔\s]+/, '')).filter((v) => v && !rsDashes(v) && !/^(yes|no|n\/a|none|ok)$/i.test(v)))].join(' / ').slice(0, 40);
+const rsNormName = (x) => String(x ?? '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9؀-ۿ]/g, '');
+const RS_REF = /^([A-Za-z]{2,12}\s?[-_#]\s?\d{1,6}(?:-\d{1,3})?)(?![\w])/; // an order number such as ABC-12 or Order_7-02
+const RS_STOP = /^(yes|no|new|renew|normal|live|paid|usd|eur|mad|usdt|thb|n\/a|none|ok|✓.*|not .*)$/i;
+// What a label means ("Email · Work", "Period / Credits", "Notice / Panel Tag", vCard "TEL;TYPE=CELL" …)
+function rsLabel(l) {
+  const k = String(l || '').toLowerCase().replace(RS_INVIS, '').trim();
+  if (!k || k.length > 42) return '';
+  if (/card|cvv|cvc|\bexp|iban|account n|password|\bpass\b/.test(k)) return 'skip';
+  if (/^(end|version|n|prodid|rev|uid|photo|adr|url|x-[\w-]+)(;|$)/.test(k)) return 'other';
+  if (/e-?mails?\b|\bmail\b/.test(k)) return 'emails';
+  if (/order|reference|\bref\b|invoice/.test(k)) return 'ref';
+  if (/phone|mobile|whats\s?app|\btel\b|\bgsm\b/.test(k)) return 'phone';
+  if (/organi[sz]ation|company|\borg\b|business/.test(k)) return 'org';
+  if (/\brsl\b|reseller (?:id|no|number|code)/.test(k)) return 'rsl';
+  if (/price|amount|total|cost|\bpaid\b|payment/.test(k)) return 'price';
+  if (/\bdate\b|purchased|bought/.test(k)) return 'date';
+  if (/period|package|credits?|\bplan\b|product|quantity|\bqty\b/.test(k)) return 'pkg';
+  if (/server|\bhost\b/.test(k)) return 'server';
+  if (/notice|\bnotes?\b|\btag\b|panel|comment|remark/.test(k)) return 'tag';
+  if (/\bname\b|^fn$|reseller|customer|client|contact/.test(k)) return 'name';
+  if (/country|address|city|username|\buser\b|statu|telegram|promotion|\bcode\b/.test(k)) return 'other';
+  return '';
+}
+const rsHeadingName = (line) => rsClean(String(line).replace(/\s*\([^)]*\)?\s*$/, '').replace(/[:：]\s*$/, ''), 80);
+const rsNewBlock = (name, explicit) => ({ name: name || '', explicit: !!explicit, emails: [], phone: '', org: '', rslId: '', server: '', tag: '', cur: {}, orders: [] });
+function rsCloseOrder(b) { // the one order described by the block's own fields (reference, date, package, price)
+  const o = b.cur; b.cur = {};
+  if (!o.ref && !o.amount && !o.pkg && !o.at) return;
+  b.orders.push({ ref: o.ref || '', at: o.at || 0, pkg: o.pkg || '', credits: o.credits || 0, amount: o.amount || 0, currency: o.currency || '', server: '', note: [o.row, o.note].filter(Boolean).join(' · ') });
+}
+function rsOrderLine(line) { // "REF-08 (Row 311 - Feb 22, 2024): 10 Credit — $280.99"
+  const m = line.match(RS_REF); if (!m) return null;
+  let rest = line.slice(m[0].length).trim(); let paren = '';
+  const pm = rest.match(/^\(([^)]*)\)?/); if (pm) { paren = pm[1]; rest = rest.slice(pm[0].length).trim(); }
+  rest = rest.replace(/^[:：\-–—]+\s*/, '');
+  const price = rsFindPrice(rest); const row = (paren.match(/\brow\s*(\d+)/i) || [])[1];
+  const pkg = rest.split(/\s+[—–-]\s+|\s*[|;]\s*/).map((x) => rsClean(x, 60)).find((x) => x && !rsDashes(x) && !/^[$€£₮฿]?\s*\d[\d.,]*\s*(usdt|usd|eur|mad|dhs?|thb|gbp|€|\$)?$/i.test(x) && !parseLooseDate(x)) || '';
+  return { ref: rsClean(m[1], 40).replace(/\s/g, ''), at: parseLooseDate(paren) || parseLooseDate(rest), pkg, credits: rsCredits(rest), amount: price.amount, currency: price.currency, server: '', note: row ? 'row ' + row : '' };
+}
+// A row copied from a spreadsheet. `map` is what each column means, from a header row, when there is one.
+function rsSheetRow(cells, map) {
+  const b = rsNewBlock('', true); const o = {}; const left = [];
+  cells.forEach((raw, i) => {
+    const v = String(raw ?? '').replace(RS_INVIS, '').trim(); if (!v || rsDashes(v)) return;
+    const kind = (map && map[i]) || '';
+    if (kind === 'skip' || kind === 'other') return;
+    const em = rsEmails(v); if (em.length) { b.emails.push(...em); return; }
+    const isDate = /^\d{4}-\d{1,2}-\d{1,2}(?:[ T][\d:.]+)?$|^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}$/.test(v) && parseLooseDate(v);
+    if (isDate && kind !== 'ref' && kind !== 'phone') { o.at = o.at || isDate; return; }
+    if (kind === 'name') { b.name = b.name || rsClean(v, 80); return; }
+    if (kind === 'ref') { o.ref = o.ref || rsClean(v, 40).replace(/\s/g, ''); return; }
+    if (kind === 'date') { o.at = o.at || parseLooseDate(v); return; }
+    if (kind === 'price') { const p = rsFindPrice(v).amount ? rsFindPrice(v) : parseMoney(v); if (p.amount && !o.amount) o.amount = p.amount; if (p.currency) o.currency = o.currency || p.currency; return; }
+    if (kind === 'pkg') { o.pkg = o.pkg || rsClean(v, 60); o.credits = o.credits || rsCredits(v); return; }
+    if (kind === 'server') { b.server = b.server || rsServer(v); return; }
+    if (kind === 'tag') { b.tag = b.tag || rsClean(v, 80); o.note = o.note || rsClean(v, 120); return; }
+    if (kind === 'org') { b.org = b.org || rsClean(v.replace(/\(?\s*(RSL|RLS)\s*[-_#:]?\s*\d+\s*\)?/i, ''), 80); b.rslId = b.rslId || cleanRslId(v); return; }
+    if (kind === 'rsl') { b.rslId = b.rslId || cleanRslId(v); return; }
+    if (kind === 'phone') { b.phone = b.phone || cleanPhoneText(v); return; }
+    // no header for this column: work it out from what the cell looks like
+    if (!o.ref && RS_REF.test(v) && v.length <= 24) { o.ref = rsClean(v, 40).replace(/\s/g, ''); return; }
+    if (/^[+\d\s().-]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && cleanPhoneText(v)) { b.phone = b.phone || cleanPhoneText(v); return; }
+    if (/credit|\bmonths?\b|\byears?\b|\d\s*lines?\b/i.test(v) && v.length <= 40) { o.pkg = o.pkg || rsClean(v, 60); o.credits = o.credits || rsCredits(v); return; }
+    if (/^[$€£₮฿]?\s*\d{1,7}[.,]\d{2}\s*(?:usd|eur|mad|usdt|thb|[$€])?$/i.test(v) || /^[$€£₮฿]\s*\d{1,7}$|^\d{1,7}\s*(?:usd|eur|mad|usdt|thb|[$€])$/i.test(v)) { const p = parseMoney(v); if (!o.amount) { o.amount = p.amount; o.currency = p.currency || o.currency || ''; } return; }
+    if (/^[$€£]?\s*(usd|eur|gbp|mad|usdt|thb)$/i.test(v)) { o.currency = o.currency || parseMoney(v).currency; return; }
+    if (/^[\d\s.,-]+$/.test(v)) return; // a bare number we cannot place
+    left.push(v);
+  });
+  if (!b.name) { const nm = left.find((v) => /[A-Za-z؀-ۿ]{2,}/.test(v) && !/\d{3,}/.test(v) && v.length <= 60 && !RS_STOP.test(v)); if (nm) b.name = rsClean(nm, 80); }
+  if (!b.server) { const sv = left.map((v) => v.replace(/^[✓✔\s]+/, '')).find((v) => /^[A-Z][A-Z0-9]{2,11}$/.test(v) && !RS_STOP.test(v)); if (sv) b.server = sv; }
+  b.cur = o; rsCloseOrder(b);
+  return b;
+}
+export function parseResellerText(text) {
+  const lines = String(text ?? '').slice(0, 200000).split(/\r?\n/);
+  const blocks = []; let b = null; let inHistory = false; let header = null;
+  const start = (name, explicit) => { if (b) rsCloseOrder(b); b = rsNewBlock(name, explicit); blocks.push(b); inHistory = false; return b; };
+  for (const rawLine of lines) {
+    // rows copied from a spreadsheet keep their tabs
+    const cells = rawLine.replace(/^\s*(?:[○●•◦▪■□*·>]+|bullet\b)\s*/i, '').split('\t');
+    if (cells.filter((c) => c.trim() && !rsDashes(c)).length >= 3) {
+      const kinds = cells.map((c) => (c.trim().length <= 30 && !/@|\d{3,}/.test(c) ? rsLabel(c) : ''));
+      if (kinds.filter(Boolean).length >= 3) { header = kinds; continue; }
+      if (b) rsCloseOrder(b); b = null; inHistory = false;
+      const row = rsSheetRow(cells, header); if (row.name || row.emails.length || row.phone) blocks.push(row);
+      continue;
+    }
+    const line = rawLine.replace(RS_INVIS, '').replace(/^\s*(?:[○●•◦▪■□*·>\-–—]+|bullet\b|\d{1,3}[.)](?=\s))\s*/i, '').trim();
+    if (!line || rsDashes(line)) continue;
+    if (/^(order|purchase)s?\s*(history|list)?\s*[:：]?$|^history\s*[:：]?$/i.test(line)) { if (b) rsCloseOrder(b); inHistory = true; continue; }
+    if (/^(?:RSL|RLS)\s*[-_#]?\s*\d{1,6}$/i.test(line) && b && !b.rslId) { b.rslId = cleanRslId(line); continue; }
+    const ol = rsOrderLine(line);
+    if (ol) { if (!b) start('', false); else rsCloseOrder(b); b.orders.push(ol); continue; }
+    const fm = line.match(/^([^:：]{1,42}?)\s*[:：]\s*(.*)$/);
+    if (fm && /^begin$/i.test(fm[1].trim())) { start('', false); continue; }
+    const kind = fm && !/^https?$/i.test(fm[1].trim()) ? rsLabel(fm[1]) : '';
+    if (kind) {
+      const v = fm[2].trim();
+      if (kind === 'name') {
+        const nm = rsHeadingName(v); if (!nm) continue;
+        if (!b) start(nm, true);
+        else if (rsNormName(b.name) === rsNormName(nm)) b.explicit = true;
+        else if (b.explicit || b.emails.length || b.phone) start(nm, true);
+        else { b.name = nm; b.explicit = true; }
+        continue;
+      }
+      if (kind === 'skip' || kind === 'other') continue;
+      if (!b) start('', false);
+      if (kind === 'emails') b.emails.push(...rsEmails(v));
+      else if (kind === 'phone') b.phone = b.phone || cleanPhoneText(v);
+      else if (kind === 'org') { b.org = b.org || rsClean(v.replace(/\(?\s*(RSL|RLS)\s*[-_#:]?\s*\d+\s*\)?/i, ''), 80); b.rslId = b.rslId || cleanRslId(v); }
+      else if (kind === 'rsl') b.rslId = b.rslId || cleanRslId(v);
+      else if (kind === 'server') b.server = b.server || rsServer(v);
+      else if (kind === 'tag') { if (!rsDashes(v)) { b.tag = b.tag || rsClean(v, 80); b.cur.note = b.cur.note || rsClean(v, 120); } }
+      else if (kind === 'ref') { if (b.cur.ref) rsCloseOrder(b); const rm = v.match(RS_REF); b.cur.ref = rsClean(rm ? rm[1] : v.replace(/\(.*$/, ''), 40).replace(/\s/g, ''); const row = (v.match(/\brow\s*(\d+)/i) || [])[1]; if (row) b.cur.row = 'row ' + row; }
+      else if (kind === 'date') b.cur.at = parseLooseDate(v) || b.cur.at || 0;
+      else if (kind === 'pkg') { if (!rsDashes(v)) { b.cur.pkg = rsClean(v, 60); b.cur.credits = rsCredits(v); } }
+      else if (kind === 'price') { const p = rsFindPrice(v).amount ? rsFindPrice(v) : parseMoney(v); b.cur.amount = p.amount; if (p.currency) b.cur.currency = p.currency; }
+      continue;
+    }
+    // a free line: contact details ("Name, email, phone") or the next reseller's name
+    const em = rsEmails(line); const ph = /(?:\+|00)\d[\d\s().-]{6,}\d|\b\d[\d\s().-]{8,}\d\b/.test(line) ? cleanPhoneText(line.replace(/[a-z0-9._%+-]+@\S+/gi, ' ')) : '';
+    if (em.length || ph) {
+      const nm = rsHeadingName(line.split(/[,;|]| [-–—] |\s(?=\S+@)|\s(?=\+?\d[\d\s().-]{6,})/)[0]);
+      if (nm && /[A-Za-z؀-ۿ]{2,}/.test(nm) && !/@|\d{3,}/.test(nm) && nm.length <= 60) start(nm, true); else if (!b) start('', false);
+      b.emails.push(...em); b.phone = b.phone || ph;
+      continue;
+    }
+    const nm = rsHeadingName(line);
+    if (!nm || nm.length < 2 || nm.length > 70 || !/[A-Za-z؀-ۿ]{2,}/.test(nm) || /https?:/i.test(nm)) continue;
+    start(nm, false);
+  }
+  if (b) rsCloseOrder(b);
+  // one profile per person: blocks that share a phone or an email are joined (or a name, when one of them has no contact details)
+  const out = [];
+  for (const k of blocks) {
+    k.emails = [...new Set(k.emails)].slice(0, 6);
+    if (!k.name && !k.emails.length && !k.phone) continue;
+    if (!(k.emails.length || k.phone || k.orders.length || k.rslId)) continue;
+    const ph = k.phone.replace(/\D/g, '').slice(-9); const nm = rsNormName(k.name); const bare = !(k.emails.length || k.phone);
+    let p = out.find((x) => (ph.length >= 7 && x.phone.replace(/\D/g, '').slice(-9) === ph) || x.emails.some((e) => k.emails.includes(e)));
+    if (!p && nm.length >= 4) p = out.find((x) => rsNormName(x.name) === nm && (bare || !(x.emails.length || x.phone)));
+    if (!p) { p = { name: k.name, emails: [], phone: '', org: '', rslId: '', server: '', tag: '', note: '', orders: [] }; out.push(p); }
+    p.name = p.name || k.name; p.phone = p.phone || k.phone; p.org = p.org || k.org; p.rslId = p.rslId || k.rslId; p.tag = p.tag || k.tag;
+    p.server = [...new Set([p.server, k.server].filter(Boolean).join(' / ').split(' / ').filter(Boolean))].join(' / ').slice(0, 40);
+    p.emails = [...new Set([...p.emails, ...k.emails])].slice(0, 6);
+    for (const o of k.orders) {
+      o.server = o.server || k.server || '';
+      const dup = p.orders.find((x) => (o.ref && x.ref && x.ref.toLowerCase() === o.ref.toLowerCase()) || (!o.ref && !x.ref && x.at === o.at && x.amount === o.amount && x.pkg === o.pkg));
+      if (dup) { for (const f of ['at', 'pkg', 'credits', 'amount', 'currency', 'server', 'note']) if (!dup[f] && o[f]) dup[f] = o[f]; } else p.orders.push(o);
+    }
+  }
+  for (const p of out) { if (!p.name) p.name = (p.emails[0] || '').split('@')[0] || p.phone; p.orders.sort((a, c) => (a.at || 0) - (c.at || 0)); }
+  return { profiles: out.slice(0, 200) };
 }
 
 // Returns a clean, valid email address, or '' if the text isn't one ("name@site.com," -> "name@site.com")
@@ -744,7 +950,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   function nlGroup(list, grp, warnDays) {
     const now = Date.now();
     return list.filter((c) => {
-      if (!cleanEmail(c.email) || c.unsub) return false;
+      if (!cleanEmail(c.email) || c.unsub || c.rsOrder) return false;
       const exp = c.expiresAt < now; const disabled = c.status === 'disabled';
       if (grp === 'all') return true;
       if (grp === 'paying') return !c.isTrial && !disabled;
@@ -758,6 +964,83 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   async function saveSettings(s) { await store.put('settings', s); applyMailTexts(s.mailTexts); setMailLang(s.email.lang); sCache = s; sAt = Date.now(); }
   const getCustomers = async () => (await store.get('customers')) || [];
   const saveCustomers = (c) => store.put('customers', c);
+  // ---------- resellers: dedicated profiles (RSL ids) with their own order history ----------
+  // A profile can be typed in by hand, made from customer rows (one person can have many order rows) or read from pasted text.
+  const getResellers = async () => (await store.get('resellers')) || [];
+  const saveResellers = (l) => store.put('resellers', l);
+  const RS_CUR = ['USD', 'EUR', 'MAD', 'USDT', 'THB', 'GBP'];
+  const RS_ROW = /^\s*(?:res+el+ers?|rsl|rls)\s*[-_#]?\s*\d/i; // order numbers such as Reseller-04 or RLS-056
+  const rsText = (x, n) => scrubCards(String(x ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()).trim().slice(0, n);
+  const rsRound = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  function rsCleanOrder(o, defCur) {
+    const cur = String(o.currency || '').toUpperCase(); const pkg = rsText(o.pkg, 60);
+    const at = typeof o.at === 'string' && !/^\d+$/.test(o.at) ? parseLooseDate(o.at) : Number(o.at);
+    return { id: /^[0-9a-f]{6,16}$/.test(String(o.id || '')) ? String(o.id) : uid(4), ref: rsText(o.ref, 40), at: at > 0 && at < 4102444800000 ? at : 0, pkg, credits: Math.max(0, Math.min(100000, Math.round(Number(o.credits) || 0))) || rsCredits(pkg), amount: Math.max(0, Math.min(1e7, rsRound(o.amount))), currency: RS_CUR.includes(cur) ? cur : (defCur || 'USD'), server: rsText(o.server, 40), note: rsText(o.note, 200), ...(o.customerId ? { customerId: String(o.customerId) } : {}), ...(o.saleId ? { saleId: String(o.saleId) } : {}) };
+  }
+  // A new profile. It takes the RSL id that was asked for when that id is free, else the next number.
+  function rsNew(s, rs, f) {
+    const taken = new Set(rs.map((x) => String(x.rslId || '').toUpperCase()));
+    let rslId = cleanRslId(f.rslId); let auto = false;
+    if (!rslId || taken.has(rslId)) { let n = Number(s.resellerSeq) || 0; do { n++; rslId = 'RSL-' + String(n).padStart(2, '0'); } while (taken.has(rslId)); s.resellerSeq = n; auto = true; }
+    const emails = [...new Set([f.email, ...(f.emails || [])].map((e) => cleanEmail(e)).filter(Boolean))].slice(0, 6);
+    return { id: 'rs' + uid(5), rslId, rslAuto: auto, name: rsText(f.name, 80) || emails[0] || 'Reseller', email: emails[0] || '', emails, phone: cleanPhoneText(f.phone), org: rsText(f.org, 80), server: rsText(f.server, 40), tag: rsText(f.tag, 80), note: rsText(f.note, 500), status: 'active', customerIds: [], orders: [], createdAt: Date.now(), updatedAt: Date.now() };
+  }
+  // The profile of the same person: same phone or email, else the same RSL id, else (when no contact details were given) the same name.
+  function rsFind(rs, inc) {
+    const em = new Set((inc.emails || []).map((e) => cleanEmail(e)).filter(Boolean)); const ph = normPhone(inc.phone);
+    let p = rs.find((x) => (ph && normPhone(x.phone) === ph) || (x.emails || [x.email]).some((e) => e && em.has(e)));
+    if (!p && inc.rslId) p = rs.find((x) => String(x.rslId || '').toUpperCase() === String(inc.rslId).toUpperCase());
+    if (!p && !em.size && !ph) { const nm = normName(inc.name); if (nm.length >= 5) p = rs.find((x) => normName(x.name) === nm); }
+    return p || null;
+  }
+  // Customer rows that belong to one person (they share a phone number or an email address) are put together.
+  function rsGroupCustomers(rows) {
+    const groups = []; const byKey = new Map();
+    for (const c of rows) {
+      const keys = [...new Set([normPhone(c.phone), normPhone(c.whatsapp)].filter(Boolean).map((k) => 'p:' + k).concat([cleanEmail(c.email), cleanEmail(c.email2)].filter(Boolean).map((k) => 'e:' + k)))];
+      if (!keys.length) { const nm = normName(c.name); if (nm.length >= 5) keys.push('n:' + nm); }
+      let g = null;
+      for (const k of keys) { const x = byKey.get(k); if (!x || x === g) continue; if (!g) g = x; else { g.push(...x); for (const [kk, vv] of byKey) if (vv === x) byKey.set(kk, g); groups.splice(groups.indexOf(x), 1); } }
+      if (!g) { g = []; groups.push(g); }
+      g.push(c); for (const k of keys) byKey.set(k, g);
+    }
+    return groups;
+  }
+  const rsFirstSales = (sales) => { const m = {}; for (const sa of sales) { if (sa.type === 'trial' || sa.type === 'reseller') continue; const e = m[sa.customerId]; if (!e || (sa.at || 0) < (e.at || 0)) m[sa.customerId] = sa; } return m; };
+  // A customer row that is really a reseller order: its order number says so, or what was bought was credits or a pack of lines.
+  const rsLooksReseller = (c, sale) => RS_ROW.test(String(c.orderNo || '')) || RS_ROW.test(String(c.username || '')) || /res+el+ers?\b|\b(?:rsl|rls)\b/i.test([c.orderNo, c.note, c.panel, c.device, c.promotion, c.planName, c.org].filter(Boolean).join(' | ')) || !!(sale && /credit|res+el+er|\b(?:[5-9]|\d{2,})\s*lines?\b/i.test(String(sale.planName || '')));
+  function rsOrderFromCustomer(c, sale, s) {
+    const pn = sale ? String(sale.planName || '') : '';
+    const pkg = pn && !rsDashes(pn) && !/^(custom|trial)$/i.test(pn.trim()) && !parseLooseDate(pn) ? rsText(pn, 60) : '';
+    const amount = Number(c.price) > 0 ? Number(c.price) : sale ? Number(sale.amount) || 0 : 0;
+    return rsCleanOrder({ ref: c.orderNo || c.username, at: Number(c.startAt) || (sale && sale.at) || Number(c.createdAt) || 0, pkg, credits: rsCredits(pkg), amount, currency: c.currency || (sale && sale.currency) || s.currency, server: rsServer(c.server), note: c.panel || c.note || '', customerId: c.id }, 'USD');
+  }
+  const rsLink = (p, c) => { if (!p.customerIds.includes(c.id)) p.customerIds.push(c.id); c.isReseller = true; c.rslId = p.rslId; };
+  const rsUnlink = (c) => { if (c) { delete c.isReseller; delete c.rslId; delete c.rsOrder; } };
+  function rsMergeContact(p, f) { // adds contact details the profile does not have yet
+    const emails = [...new Set([...(p.emails || [p.email]), ...(f.emails || [])].map((e) => cleanEmail(e)).filter(Boolean))].slice(0, 6);
+    p.emails = emails; p.email = p.email || emails[0] || ''; if (!p.phone && f.phone) p.phone = cleanPhoneText(f.phone);
+  }
+  const rsFillOrder = (dst, src) => { for (const f of ['at', 'pkg', 'credits', 'amount', 'server', 'note', 'customerId']) if (!dst[f] && src[f]) { dst[f] = src[f]; if (f === 'amount') dst.currency = src.currency; } };
+  const rsSameOrder = (x, o) => (!!o.ref && !!x.ref && x.ref.toLowerCase() === o.ref.toLowerCase()) || (!!o.customerId && x.customerId === o.customerId) || (!o.ref && !x.ref && x.at === o.at && x.amount === o.amount && x.pkg === o.pkg);
+  function rsTotals(p, s, salesBy) {
+    const rates = s.finance.rates; let n = 0, usdT = 0, usdC = 0, credits = 0, last = 0, first = 0; const seen = new Set();
+    const at = (t) => { if (t > 0) { last = Math.max(last, t); first = first ? Math.min(first, t) : t; } };
+    for (const o of p.orders || []) { const u = toUsd(o.amount, o.currency, rates); n++; usdT += u; if (o.credits > 0) { credits += o.credits; usdC += u; } at(o.at); if (o.saleId) seen.add(o.saleId); }
+    for (const id of p.customerIds || []) for (const sa of salesBy[id] || []) { if (seen.has(sa.id)) continue; seen.add(sa.id); const u = Number(sa.amountUsd) || 0; n++; usdT += u; if (Number(sa.credits) > 0) { credits += Number(sa.credits); usdC += u; } at(sa.at || 0); }
+    return { purchases: n, spentUsd: rsRound(usdT), credits, rate: credits > 0 ? rsRound(usdC / credits) : 0, lastAt: last, firstAt: first };
+  }
+  // The reseller table: every profile with its totals, ranked by credits bought.
+  function rsRows(rs, s, sales, customers) {
+    const salesBy = {}; for (const sa of sales) if (sa.type === 'reseller') (salesBy[sa.customerId] ||= []).push(sa);
+    const byId = new Map(customers.map((c) => [c.id, c]));
+    const rows = rs.map((p) => {
+      const t = rsTotals(p, s, salesBy); const c0 = (p.customerIds || []).map((i) => byId.get(i)).find(Boolean);
+      return { id: p.id, rslId: p.rslId || '—', name: p.name, username: c0 ? c0.username : '', email: p.email || '', emails: p.emails || [], phone: p.phone || '', org: p.org || '', server: p.server || '', tag: p.tag || '', note: p.note || '', status: p.status || 'active', ...t, spentMad: rsRound(t.spentUsd * (Number(s.finance?.rates?.MAD) || 10)), customerIds: (p.customerIds || []).filter((i) => byId.has(i)), orders: [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), createdAt: p.createdAt || 0, joinedAt: p.joinedAt || t.firstAt || p.createdAt || 0, emailedAt: p.emailedAt || 0, emailedSubject: p.emailedSubject || '' };
+    }).sort((a, b) => b.credits - a.credits || b.spentUsd - a.spentUsd || a.name.localeCompare(b.name));
+    rows.forEach((r, i) => { r.rank = i + 1; });
+    return rows;
+  }
   const getTx = async () => (await store.get('tx')) || [];
   const getStock = async () => (await store.get('stock')) || [];
   async function getSales() {
@@ -867,7 +1150,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // Who can get a renewal email right now
   function renewalTargets(list, onlyRecentDays) {
     const now = Date.now();
-    return list.filter((c) => (cleanEmail(c.email) || cleanEmail(c.email2)) && !c.emailBad && !c.unsub && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
+    return list.filter((c) => (cleanEmail(c.email) || cleanEmail(c.email2)) && !c.emailBad && !c.unsub && !c.rsOrder && c.status !== 'disabled' && c.expiresAt < now && c.renewalSentFor !== c.expiresAt && (!onlyRecentDays || now - c.expiresAt <= onlyRecentDays * DAYMS));
   }
   async function sentToday() { const k = 'renewsent:' + new Date().toISOString().slice(0, 10); return { k, n: (await store.get(k)) || 0 }; }
   function loginMail(s, c, password, kind) {
@@ -2599,7 +2882,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/admin/customers')) {
         const bad = await getBad(); const sales = await getSales(); const paid = {};
         for (const sa of sales) if (Number(sa.amount) > 0) paid[sa.customerId] = (paid[sa.customerId] || 0) + (Number(sa.amountUsd) || 0);
-        return ok((await getCustomers()).map((c) => { const v = viewP(c, s); v.totalPaidUsd = Math.round((paid[c.id] || 0) * 100) / 100; const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; }));
+        return ok((await getCustomers()).filter((c) => !c.rsOrder || query.rs).map((c) => { const v = viewP(c, s); v.totalPaidUsd = Math.round((paid[c.id] || 0) * 100) / 100; const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; }));
       }
 
       if (R('POST', '/api/admin/customers')) {
@@ -3238,42 +3521,195 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/reseller-sale')) {
         const pk = s.resellerPackages.find((p) => p.id === body.packageId);
         if (!pk) return err(400, 'Choose a package.');
-        const name = String(body.name || '').trim();
+        const rs = body.resellerId ? await getResellers() : null; const rp = rs ? rs.find((x) => x.id === String(body.resellerId)) : null;
+        if (body.resellerId && !rp) return err(404, 'Reseller not found.');
+        const name = String(body.name || (rp ? rp.name : '') || '').trim();
         if (!name) return err(400, 'Enter the reseller name.');
-        const buyer = { id: 'r-' + uid(5), name, username: String(body.email || body.phone || name) };
+        const buyer = rp ? { id: rp.id, name: rp.name, username: rp.rslId } : { id: 'r-' + uid(5), name, username: String(body.email || body.phone || name) };
         const sale = await recordSale(s, buyer, { type: 'reseller', plan: { id: pk.id, name: `Reseller ${pk.name} (${pk.credits} credits)` }, days: 0, credits: pk.credits, amount: body.amount === '' || body.amount == null ? pk.price : Number(body.amount), accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
         const sales = await getSales(); const x = sales.find((y) => y.id === sale.id);
-        Object.assign(x, { planName: `Reseller ${pk.name} (${pk.credits} credits)`, email: String(body.email || ''), phone: String(body.phone || ''), note: String(body.note || '') });
+        Object.assign(x, { planName: `Reseller ${pk.name} (${pk.credits} credits)`, email: String(body.email || (rp ? rp.email : '') || ''), phone: String(body.phone || (rp ? rp.phone : '') || ''), note: String(body.note || '') });
         await store.put('sales', sales);
+        // the sale also shows in the reseller's own order history
+        if (rp) { rp.orders.push(rsCleanOrder({ at: x.at, pkg: `${pk.name} (${pk.credits} credits)`, credits: pk.credits, amount: x.amount, currency: x.currency, note: body.note, saleId: x.id }, x.currency)); rp.updatedAt = Date.now(); await saveResellers(rs); }
         await log('renewal', `Sold reseller package ${pk.name} (${pk.credits} credits) to ${name}`);
         return ok(x);
       }
       if (R('GET', '/api/admin/reseller-sales')) return ok((await getSales()).filter((x) => x.type === 'reseller').sort((a, b) => b.at - a.at));
-      if (R('POST', '/api/admin/reseller/toggle')) {
+
+      // ----- reseller profiles (RSL ids) -----
+      const rsOut = (row) => (hidePhone && row && row.phone ? { ...row, phone: maskNum(row.phone) } : row);
+      if (R('POST', '/api/admin/reseller/toggle')) { // flags one customer as a reseller, or takes the flag away
         const list = await getCustomers(); const c = list.find((x) => x.id === String(body.id || '')); if (!c) return err(404, 'Not found.');
-        c.isReseller = !c.isReseller;
-        if (c.isReseller && !c.rslId) { s.resellerSeq = (Number(s.resellerSeq) || 0) + 1; await saveSettings(s); c.rslId = 'RSL-' + String(s.resellerSeq).padStart(2, '0'); }
-        await saveCustomers(list);
+        const rs = await getResellers(); const seq0 = s.resellerSeq;
+        let p = rs.find((x) => (x.customerIds || []).includes(c.id));
+        if (!c.isReseller && !p) { p = rsNew(s, rs, { name: c.name, email: c.email, phone: c.phone || c.whatsapp, rslId: c.rslId }); rs.push(p); }
+        if (!c.isReseller) rsLink(p, c);
+        else {
+          delete c.isReseller; delete c.rsOrder;
+          if (p) { p.customerIds = p.customerIds.filter((i) => i !== c.id); p.orders = (p.orders || []).filter((o) => o.customerId !== c.id); if (!p.customerIds.length && !p.orders.length) rs.splice(rs.indexOf(p), 1); }
+        }
+        await saveResellers(rs); await saveCustomers(list); if (s.resellerSeq !== seq0) await saveSettings(s);
         await log('customer', `${c.isReseller ? 'Flagged reseller' : 'Unflagged reseller'} ${c.username}${c.rslId ? ' (' + c.rslId + ')' : ''}`);
         return ok({ id: c.id, isReseller: !!c.isReseller, rslId: c.rslId || '' });
       }
       if (R('GET', '/api/admin/reseller')) {
-        const sales = await getSales();
-        const list = (await getCustomers()).filter((c) => c.isReseller);
-        const byC = {};
-        for (const sa of sales) if (sa.type === 'reseller') { const e = (byC[sa.customerId] ||= { n: 0, usd: 0, credits: 0 }); e.n++; e.usd += Number(sa.amountUsd) || 0; e.credits += Number(sa.credits) || 0; }
-        const rows = list.map((c) => { const a = byC[c.id] || { n: 0, usd: 0, credits: 0 }; return { id: c.id, rslId: c.rslId || '—', name: c.name, username: c.username, email: c.email || '', phone: c.phone || '', status: c.status || 'active', purchases: a.n, spentUsd: Math.round(a.usd * 100) / 100, credits: a.credits, spentMad: Math.round(a.usd * (Number(s.finance?.rates?.MAD) || 10) * 100) / 100 }; }).sort((a, b) => b.credits - a.credits);
-        rows.forEach((r, i) => { r.rank = i + 1; r.rate = r.credits > 0 ? Math.round((r.spentUsd / r.credits) * 100) / 100 : 0; });
-        return ok({ list: rows, sheets: s.sheets || { url: '', enabled: false } });
+        const customers = await getCustomers(); const sales = await getSales(); const rs = await getResellers(); const seq0 = s.resellerSeq;
+        // customers that were flagged before profiles existed get a profile of their own
+        const linked = new Set(rs.flatMap((p) => p.customerIds || [])); let dirty = false;
+        for (const c of customers) if (c.isReseller && !linked.has(c.id)) { const p = rsNew(s, rs, { name: c.name, email: c.email, phone: c.phone || c.whatsapp, rslId: c.rslId }); rs.push(p); rsLink(p, c); linked.add(c.id); dirty = true; }
+        if (dirty) { await saveResellers(rs); await saveCustomers(customers); if (s.resellerSeq !== seq0) await saveSettings(s); }
+        // reseller orders that sit in the customer list and are not in any profile yet
+        const first = rsFirstSales(sales);
+        const found = rsGroupCustomers(customers.filter((c) => !linked.has(c.id) && rsLooksReseller(c, first[c.id]))).map((g) => {
+          const into = rsFind(rs, { emails: g.flatMap((c) => [c.email, c.email2]), phone: g.map((c) => c.phone || c.whatsapp).find(Boolean), name: '' });
+          const os = g.map((c) => rsOrderFromCustomer(c, first[c.id], s));
+          return { ids: g.map((c) => c.id), name: g[0].name, email: cleanEmail(g.map((c) => c.email).find((e) => cleanEmail(e)) || ''), phone: g.map((c) => c.phone || c.whatsapp).find(Boolean) || '', n: g.length, credits: os.reduce((a, o) => a + o.credits, 0), totalUsd: rsRound(os.reduce((a, o) => a + toUsd(o.amount, o.currency, s.finance.rates), 0)), refs: os.map((o) => o.ref).slice(0, 30), firstAt: Math.min(...os.map((o) => o.at).filter(Boolean), Date.now()), into: into ? { id: into.id, rslId: into.rslId, name: into.name } : null };
+        }).sort((a, b) => b.n - a.n).slice(0, 60);
+        return ok({ list: rsRows(rs, s, sales, customers).map(rsOut), found: found.map(rsOut), currencies: RS_CUR, emailTpl: s.resellerEmail || { subject: '', title: '', body: '', button: '', link: '' } });
       }
-      if (R('POST', '/api/admin/reseller/sync')) {
-        const url = String(body.url || s.sheets?.url || '').trim(); if (!/^https?:\/\//.test(url)) return err(400, 'Add your Google Sheets webhook URL first.');
-        const sales = await getSales();
-        const list = (await getCustomers()).filter((c) => c.isReseller);
-        const byC = {};
-        for (const sa of sales) if (sa.type === 'reseller') { const e = (byC[sa.customerId] ||= { n: 0, usd: 0, credits: 0 }); e.n++; e.usd += Number(sa.amountUsd) || 0; e.credits += Number(sa.credits) || 0; }
-        const rows = list.map((c) => { const a = byC[c.id] || { n: 0, usd: 0, credits: 0 }; return [c.rslId || '', c.name, c.username, c.email || '', c.phone || '', a.n, Math.round(a.usd * 100) / 100, a.credits, c.status || 'active']; });
-        try { const r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'resellers', token: s.sheets?.token || '', rows, syncedAt: Date.now() }) }); const d = await r.json().catch(() => ({})); if (!r.ok) return err(502, 'Sheets webhook: ' + (d.error || 'HTTP ' + r.status)); await saveSettings({ ...s, sheets: { ...(s.sheets || {}), url, enabled: true } }); await log('settings', 'Reseller Google Sheets sync: ' + rows.length + ' rows'); return ok({ ok: true, sent: rows.length }); } catch (e) { return err(502, 'Sheets webhook unreachable: ' + e.message); }
+      if (R('POST', '/api/admin/reseller/save')) { // add a reseller by hand, or change one
+        const rs = await getResellers(); const seq0 = s.resellerSeq;
+        const name = rsText(body.name, 80); if (!name) return err(400, 'Enter the reseller name.');
+        let p = body.id ? rs.find((x) => x.id === String(body.id)) : null;
+        if (body.id && !p) return err(404, 'Reseller not found.');
+        const wantId = String(body.rslId || '').trim() ? cleanRslId(body.rslId) : '';
+        if (String(body.rslId || '').trim() && !wantId) return err(400, 'A reseller ID looks like RSL-12.');
+        if (wantId && rs.some((x) => x !== p && String(x.rslId || '').toUpperCase() === wantId)) return err(409, `${wantId} is already used by another reseller.`);
+        const emails = [...new Set([body.email, ...String(body.emails || '').split(/[\s,;/]+/)].map((e) => cleanEmail(e)).filter(Boolean))].slice(0, 6);
+        const badMail = [body.email, ...String(body.emails || '').split(/[\s,;/]+/)].map((e) => String(e || '').trim()).find((e) => e && !cleanEmail(e));
+        if (badMail) return err(400, `"${badMail.slice(0, 60)}" is not a valid email address.`);
+        const typedPhone = String(body.phone || '').trim(); const keepPhone = !!p && hidePhone; // a masked number must never overwrite the real one
+        if (typedPhone && !keepPhone && !cleanPhoneText(typedPhone)) return err(400, 'This phone number is not valid. Write it with the country code, for example +66812345678.');
+        if (!p) {
+          const twin = rsFind(rs, { emails, phone: typedPhone, name: '' });
+          if (twin && !body.force) return err(409, `${twin.name} (${twin.rslId}) already has this email or phone. Open that reseller instead.`);
+          p = rsNew(s, rs, { name, emails, phone: typedPhone, rslId: wantId }); rs.push(p);
+        } else {
+          p.name = name; p.emails = emails; p.email = emails[0] || '';
+          if (!keepPhone) p.phone = cleanPhoneText(typedPhone);
+          if (wantId && wantId !== p.rslId) { p.rslId = wantId; p.rslAuto = false; }
+        }
+        p.org = rsText(body.org, 80); p.server = rsText(body.server, 40); p.tag = rsText(body.tag, 80); p.note = rsText(body.note, 500);
+        p.status = body.status === 'paused' ? 'paused' : 'active'; p.updatedAt = Date.now();
+        if (body.joined !== undefined) { const j = String(body.joined || '').trim() ? parseLooseDate(body.joined) : 0; if (String(body.joined || '').trim() && !j) return err(400, 'The date is not valid.'); if (j) p.joinedAt = j; else delete p.joinedAt; }
+        await saveResellers(rs); if (s.resellerSeq !== seq0) await saveSettings(s);
+        if ((p.customerIds || []).length) { const list = await getCustomers(); let ch = false; for (const c of list) if (p.customerIds.includes(c.id) && c.rslId !== p.rslId) { c.rslId = p.rslId; c.isReseller = true; ch = true; } if (ch) await saveCustomers(list); }
+        await log('customer', `${body.id ? 'Changed' : 'Added'} reseller ${p.name} (${p.rslId})`);
+        return ok({ ok: true, reseller: rsOut({ id: p.id, rslId: p.rslId, name: p.name, phone: p.phone }) });
+      }
+      if (R('POST', '/api/admin/reseller/delete')) {
+        const rs = await getResellers(); const i = rs.findIndex((x) => x.id === String(body.id || '')); if (i < 0) return err(404, 'Reseller not found.');
+        const [p] = rs.splice(i, 1); await saveResellers(rs);
+        if ((p.customerIds || []).length) { const list = await getCustomers(); for (const c of list) if (p.customerIds.includes(c.id)) rsUnlink(c); await saveCustomers(list); }
+        await log('customer', `Removed reseller ${p.name} (${p.rslId})`);
+        return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/reseller/from-customers')) { // customer rows become a reseller: one profile per person, each row an order
+        const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(String))].slice(0, 400);
+        if (!ids.length) return err(400, 'Choose at least one customer.');
+        const list = await getCustomers(); const picked = list.filter((c) => ids.includes(c.id));
+        if (!picked.length) return err(404, 'Customer not found.');
+        const rs = await getResellers(); const seq0 = s.resellerSeq; const first = rsFirstSales(await getSales());
+        const target = body.into ? rs.find((x) => x.id === String(body.into)) : null; if (body.into && !target) return err(404, 'Reseller not found.');
+        const withOrders = body.orders !== false; let made = 0, rows = 0, orders = 0; const touched = [];
+        for (const g of target ? [picked] : rsGroupCustomers(picked)) {
+          const contact = { emails: g.flatMap((c) => [c.email, c.email2]), phone: g.map((c) => c.phone || c.whatsapp).find(Boolean) };
+          let p = target || rs.find((x) => g.some((c) => (x.customerIds || []).includes(c.id))) || rsFind(rs, { ...contact, name: '' });
+          if (!p) { p = rsNew(s, rs, { name: g[0].name, ...contact, rslId: g.map((c) => c.rslId).find(Boolean) }); rs.push(p); made++; } else rsMergeContact(p, contact);
+          for (const c of g) {
+            for (const other of rs) if (other !== p && (other.customerIds || []).includes(c.id)) { other.customerIds = other.customerIds.filter((i) => i !== c.id); other.orders = (other.orders || []).filter((o) => o.customerId !== c.id); }
+            if (!p.customerIds.includes(c.id)) rows++;
+            rsLink(p, c);
+            if (!withOrders) continue;
+            c.rsOrder = true; // this row is a reseller order, not a viewer: it leaves the customer list and customer emails
+            const o = rsOrderFromCustomer(c, first[c.id], s); const same = p.orders.find((x) => rsSameOrder(x, o));
+            if (same) rsFillOrder(same, o); else { p.orders.push(o); orders++; }
+          }
+          if (!p.server) p.server = rsServer(g.map((c) => c.server).filter(Boolean).join('/'));
+          p.updatedAt = Date.now(); touched.push({ id: p.id, rslId: p.rslId, name: p.name });
+        }
+        await saveResellers(rs); await saveCustomers(list); if (s.resellerSeq !== seq0) await saveSettings(s);
+        await log('customer', `Resellers from customers: ${made} new, ${rows} rows linked, ${orders} orders (${touched.map((t) => t.rslId).join(', ').slice(0, 120)})`);
+        return ok({ made, rows, orders, resellers: touched });
+      }
+      if (R('POST', '/api/admin/reseller/import')) { // resellers read from pasted text: new people are added, known people get the missing details and orders
+        const incs = (Array.isArray(body.profiles) ? body.profiles : []).slice(0, 200); if (!incs.length) return err(400, 'Nothing to add.');
+        const defCur = RS_CUR.includes(String(body.currency || '').toUpperCase()) ? String(body.currency).toUpperCase() : 'USD';
+        const rs = await getResellers(); const seq0 = s.resellerSeq; const list = await getCustomers(); const first = rsFirstSales(await getSales());
+        const byRef = new Map(); for (const c of list) { const k = String(c.orderNo || '').trim().toLowerCase(); if (k) byRef.set(k, byRef.has(k) ? null : c); }
+        let made = 0, updated = 0, orders = 0, rows = 0; const touched = [];
+        for (const raw of incs) {
+          if (!raw || typeof raw !== 'object') continue;
+          const emails = [...new Set([raw.email, ...(Array.isArray(raw.emails) ? raw.emails : [])].map((e) => cleanEmail(e)).filter(Boolean))].slice(0, 6);
+          const phone = cleanPhoneText(raw.phone); const name = rsText(raw.name, 80); const rslId = cleanRslId(raw.rslId);
+          if (!name && !emails.length && !phone) continue;
+          let p = rsFind(rs, { emails, phone, name, rslId });
+          const free = rslId && !rs.some((x) => x !== p && String(x.rslId || '').toUpperCase() === rslId);
+          if (!p) { p = rsNew(s, rs, { name: name || emails[0] || phone, emails, phone, rslId: free ? rslId : '' }); rs.push(p); made++; }
+          else { updated++; rsMergeContact(p, { emails, phone }); if (free && rslId !== p.rslId && p.rslAuto !== false) { p.rslId = rslId; p.rslAuto = false; for (const c of list) if ((p.customerIds || []).includes(c.id)) c.rslId = rslId; } }
+          if (!p.org && raw.org) p.org = rsText(raw.org, 80);
+          if (!p.server && raw.server) p.server = rsText(raw.server, 40);
+          if (!p.tag && raw.tag) p.tag = rsText(raw.tag, 80);
+          if (!p.note && raw.note) p.note = rsText(raw.note, 500);
+          for (const ro of (Array.isArray(raw.orders) ? raw.orders : []).slice(0, 300)) {
+            if (!ro || typeof ro !== 'object') continue;
+            const o = rsCleanOrder({ ref: ro.ref, at: ro.at, pkg: ro.pkg, credits: ro.credits, amount: ro.amount, currency: ro.currency, server: ro.server, note: ro.note }, defCur);
+            // the same order as a row in the customer list (same order number, same person): take what the text left out from that row
+            const hit = o.ref ? byRef.get(o.ref.toLowerCase()) : null;
+            const c = hit && ((normPhone(hit.phone || hit.whatsapp) && normPhone(hit.phone || hit.whatsapp) === normPhone(p.phone)) || (p.emails || []).includes(cleanEmail(hit.email)) || (normName(hit.name).length >= 4 && normName(hit.name) === normName(p.name))) ? hit : null;
+            if (c) { const co = rsOrderFromCustomer(c, first[c.id], s); rsFillOrder(o, co); o.customerId = c.id; if (!(p.customerIds || []).includes(c.id)) rows++; for (const other of rs) if (other !== p && (other.customerIds || []).includes(c.id)) { other.customerIds = other.customerIds.filter((i) => i !== c.id); other.orders = (other.orders || []).filter((y) => y.customerId !== c.id); } rsLink(p, c); c.rsOrder = true; }
+            if (!o.ref && !o.at && !o.amount && !o.pkg) continue;
+            const same = p.orders.find((x) => rsSameOrder(x, o));
+            if (same) rsFillOrder(same, o); else { p.orders.push(o); orders++; }
+          }
+          p.updatedAt = Date.now(); touched.push({ id: p.id, rslId: p.rslId, name: p.name });
+        }
+        if (!touched.length) return err(400, 'No reseller with a name, email or phone was found in this text.');
+        await saveResellers(rs); if (rows || touched.length) await saveCustomers(list); if (s.resellerSeq !== seq0) await saveSettings(s);
+        await log('customer', `Resellers from text: ${made} new, ${updated} updated, ${orders} orders`);
+        return ok({ made, updated, orders, rows, resellers: touched });
+      }
+      if (R('POST', '/api/admin/reseller/order')) { // add a past order to a reseller's history by hand, or change one
+        const rs = await getResellers(); const p = rs.find((x) => x.id === String(body.id || '')); if (!p) return err(404, 'Reseller not found.');
+        const b = body.order && typeof body.order === 'object' ? body.order : {};
+        const o = rsCleanOrder({ ...b, at: b.date || b.at, customerId: undefined, saleId: undefined }, 'USD');
+        if (!o.amount && !o.pkg && !o.credits && !o.ref) return err(400, 'Fill in the package, the credits or the price.');
+        const old = b.id ? (p.orders || []).find((x) => x.id === String(b.id)) : null;
+        if (b.id && !old) return err(404, 'Order not found.');
+        if (old) Object.assign(old, { ref: o.ref, at: o.at, pkg: o.pkg, credits: o.credits, amount: o.amount, currency: o.currency, server: o.server, note: o.note });
+        else { p.orders = p.orders || []; if (p.orders.length >= 2000) return err(400, 'This reseller has too many orders.'); p.orders.push(o); }
+        p.updatedAt = Date.now(); await saveResellers(rs);
+        await log('customer', `${old ? 'Changed' : 'Added'} an order for reseller ${p.name} (${p.rslId})`);
+        return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/reseller/order-delete')) {
+        const rs = await getResellers(); const p = rs.find((x) => x.id === String(body.id || '')); if (!p) return err(404, 'Reseller not found.');
+        const o = (p.orders || []).find((x) => x.id === String(body.orderId || '')); if (!o) return err(404, 'Order not found.');
+        p.orders = p.orders.filter((x) => x !== o); p.updatedAt = Date.now();
+        if (o.customerId) { p.customerIds = (p.customerIds || []).filter((i) => i !== o.customerId); const list = await getCustomers(); rsUnlink(list.find((c) => c.id === o.customerId)); await saveCustomers(list); }
+        await saveResellers(rs);
+        await log('customer', `Removed an order from reseller ${p.name} (${p.rslId})`);
+        return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/reseller/email')) { // an email you write yourself, to one, several or all resellers; the text can be kept as your template
+        const tpl = { subject: rsText(body.subject, 160), title: rsText(body.title, 120), body: String(body.body || '').replace(/[<>]/g, '').slice(0, 6000).trim(), button: rsText(body.button, 60), link: /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? String(body.link).trim() : (['site', 'contact', 'app'].includes(body.link) ? body.link : '') };
+        if (body.save) { await saveSettings({ ...s, resellerEmail: tpl }); if (body.saveOnly) return ok({ ok: true, saved: true }); }
+        if (!tpl.subject || !tpl.body) return err(400, 'Write a subject and a message first.');
+        const rows = rsRows(await getResellers(), s, await getSales(), await getCustomers());
+        const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(String));
+        const to = rows.filter((r) => (body.all ? r.status !== 'paused' : ids.has(r.id)) && cleanEmail(r.email)).slice(0, 100);
+        const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '');
+        const fill = (x, r) => String(x || '').replace(/\{(rsl|credits|orders|spent|last|fullname|org|server)\}/g, (_, k) => ({ rsl: r.rslId, credits: r.credits, orders: r.purchases, spent: '$' + r.spentUsd.toFixed(2), last: day(r.lastAt), fullname: r.name, org: r.org, server: r.server })[k] ?? '');
+        const make = (r) => newsletterEmail(s, { name: r.name, lang: 'en' }, { split: false, lang: ['en', 'fr'].includes(body.lang) ? body.lang : 'en', content: { all: { subject: fill(tpl.subject, r), title: fill(tpl.title, r), body: fill(tpl.body, r), button: tpl.button } }, link: tpl.link }, body.appUrl, '');
+        if (body.preview) { const r = to[0] || rows.find((x) => ids.has(x.id)) || rows[0] || { rslId: 'RSL-01', name: 'Reseller Name', credits: 0, purchases: 0, spentUsd: 0, lastAt: 0, org: '', server: '' }; return ok(make(r)); }
+        if (!to.length) return err(400, 'None of the chosen resellers has a valid email address.');
+        const msgs = to.map((r) => { const m = make(r); return { to: r.email, subject: m.subject, html: m.html }; });
+        const res = msgs.length === 1 ? await sendEmail(s, msgs[0].to, msgs[0].subject, msgs[0].html) : await sendBatch(s, msgs);
+        if (!res.ok) return err(502, res.error || 'Email failed');
+        const rs = await getResellers(); const now = Date.now(); for (const p of rs) if (to.some((r) => r.id === p.id)) { p.emailedAt = now; p.emailedSubject = tpl.subject; } await saveResellers(rs);
+        await log('customer', `Reseller email "${tpl.subject}" sent to ${to.length}`);
+        return ok({ sent: to.length });
       }
 
       if (R('GET', '/api/admin/stats')) {
@@ -3382,7 +3818,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('customer', `Imported ${added} clients${skipped ? ` (${skipped} skipped: already exist)` : ''}`);
         return ok({ added, skipped, total: list.length });
       }
-      if (R('GET', '/api/admin/backup')) return ok({ version: 2, exportedAt: Date.now(), settings: s, customers: await getCustomers(), sales: await getSales(), tx: await getTx(), stock: await getStock() });
+      if (R('GET', '/api/admin/backup')) return ok({ version: 2, exportedAt: Date.now(), settings: s, customers: await getCustomers(), sales: await getSales(), tx: await getTx(), stock: await getStock(), resellers: await getResellers() });
       if (R('POST', '/api/admin/restore')) {
         if (!isObj(body.settings) || !Array.isArray(body.customers)) return err(400, 'This is not a valid backup file.');
         const next = deepMerge(DEFAULT_SETTINGS(), body.settings);
@@ -3392,6 +3828,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (Array.isArray(body.sales)) await store.put('sales', body.sales); else await store.del('sales');
         if (Array.isArray(body.tx)) await store.put('tx', body.tx);
         if (Array.isArray(body.stock)) await store.put('stock', body.stock);
+        if (Array.isArray(body.resellers)) await store.put('resellers', body.resellers);
         await log('admin', `Backup restored (${body.customers.length} customers)`);
         return ok({ ok: true });
       }

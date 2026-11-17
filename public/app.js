@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink } from './core.js?v=72';
-import { loadLogos, logosReady, findLogo } from './logos.js?v=72';
-import { siteHtml } from './site.js?v=72';
-import { ic } from './icons.js?v=72';
-import { parseM3U, m3uAnswer } from './m3u.js?v=72';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=72';
+import { createBackend, parseLineLink, parseResellerText } from './core.js?v=73';
+import { loadLogos, logosReady, findLogo } from './logos.js?v=73';
+import { siteHtml } from './site.js?v=73';
+import { ic } from './icons.js?v=73';
+import { parseM3U, m3uAnswer } from './m3u.js?v=73';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=73';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -591,23 +591,92 @@ async function adminSalesPage() {
   <div class="card"><h3>Transactions <span class="small muted">(${d.recent.length})</span></h3>${d.recent.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Credits</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No sales recorded yet.</p>'}</div>`;
 }
 
-async function adminResellerPage() {
-  const [r, cs] = await Promise.all([api('GET', '/api/admin/reseller'), api('GET', '/api/admin/customers')]);
-  const sheets = r.sheets || {};
-  const rows = r.list.map((x) => `<tr><td><b>${esc(x.rslId)}</b></td><td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc(x.username)}</div></td><td class="small">${esc(x.email)}${x.phone ? '<br>' + esc(x.phone) : ''}</td><td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b><div class="small muted">${mad(x.spentMad)}</div></td><td>${usd(x.rate)} <span class="small muted">/c</span></td><td>#${x.rank}</td><td><button class="btn sm danger" data-act="reseller-toggle" data-id="${x.id}" title="Remove reseller flag" aria-label="Remove reseller flag">✕</button></td></tr>`).join('');
-  const notYet = (cs || []).filter((c) => !c.isReseller).slice(0, 500).map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.username)})</option>`).join('');
-  const maxC = Math.max(1, ...r.list.map((x) => x.credits));
-  const bars = r.list.slice(0, 10).map((x) => `<div><span>${esc(x.rslId)}</span><div class="hbar2" title="${esc(x.rslId)} · ${x.credits} credits"><i style="width:${Math.round((x.credits / maxC) * 100)}%"></i></div><span class="small muted">${x.credits}</span></div>`).join('');
-  return `<p class="small muted">Dedicated reseller profiles — <b>RSL-01</b>, <b>RSL-02</b>… Rank is by credits purchased; rate is average USD per credit. Reseller lines are created on the reseller's own panel; this app tracks purchases, credit flow and rank.</p>
-  ${r.list.length ? `<div class="card"><h3>Credits purchased · top ${Math.min(10, r.list.length)} resellers</h3><div class="hbars2">${bars}</div></div>` : ''}
-  <div class="card"><h3>Add a reseller</h3>
-    <div class="row"><select id="rsl-pick" style="flex:1;min-width:220px"><option value="">Pick a customer…</option>${notYet}</select><button class="btn primary" data-act="reseller-add">＋ Add as reseller</button></div>
-  </div>
-  <div class="card"><h3>Resellers <span class="small muted">${r.list.length}</span></h3>${r.list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>RSL</th><th>Name</th><th>Contact</th><th>Purchases</th><th>Credits</th><th>Spent</th><th>Rate</th><th>Rank</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No resellers yet. Flag a customer above.</p>'}</div>
-  <div class="card"><h3>Google Sheets sync</h3><p class="small muted">Paste your Apps Script webhook URL. Each sync posts the reseller table (RSL id, name, username, email, phone, purchases, spent USD, credits, status) to your Sheet. Leave the token blank if your script doesn't check one.</p>
-    <div class="row"><input id="sheets-url" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(sheets.url || '')}" autocomplete="off" spellcheck="false" style="flex:1;min-width:260px"><input id="sheets-token" dir="ltr" placeholder="Optional token" autocomplete="off" style="width:170px"></div>
-    <div class="row" style="margin-top:10px"><button class="btn" data-act="sheets-save">💾 Save</button><button class="btn primary" data-act="sheets-sync">↻ Sync now</button></div></div>`;
+// ---------- Resellers (admin): profiles with their own orders. Add by hand, from the customer list, or from pasted text ----------
+const RS = { data: null, q: '', customers: null, pick: new Set(), pq: '', parsed: null };
+const rsDay = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '');
+const rsMoney = (o) => `${({ USD: '$', EUR: '€', USDT: '₮', GBP: '£' })[o.currency] || ''}${Number(o.amount || 0).toFixed(2)}${({ USD: 1, EUR: 1, USDT: 1, GBP: 1 })[o.currency] ? '' : ' ' + o.currency}`;
+const rsGet = (id) => (RS.data?.list || []).find((x) => x.id === id);
+function rsRowsHtml() {
+  const q = RS.q.trim().toLowerCase();
+  const list = (RS.data?.list || []).filter((x) => !q || q.split(/\s+/).every((w) => [x.rslId, x.name, x.email, (x.emails || []).join(' '), x.phone, x.org, x.server, x.tag, x.note, x.username, (x.orders || []).map((o) => o.ref + ' ' + o.pkg).join(' ')].join(' ').toLowerCase().includes(w)));
+  if (!list.length) return `<p class="muted" style="padding:14px 4px">${q ? 'No reseller matches this search.' : 'No resellers yet. Add one with the buttons above.'}</p>`;
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Reseller</th><th>Contact</th><th>Orders</th><th>Credits</th><th>Paid</th><th>Since</th><th>Last order</th><th></th></tr></thead><tbody>${list.map((x) => `<tr data-act="rs-open" data-id="${x.id}" style="cursor:pointer">
+    <td><b>${esc(x.rslId)}</b>${x.status === 'paused' ? '<div><span class="pill st-expired">paused</span></div>' : ''}</td>
+    <td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc([x.org, x.server, x.tag].filter(Boolean).join(' · '))}</div></td>
+    <td class="small">${esc(x.email || '—')}${x.phone ? '<br>' + esc(x.phone) : ''}</td>
+    <td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b>${x.rate ? `<div class="small muted">${usd(x.rate)}/credit</div>` : ''}</td>
+    <td class="small">${fmtDate(x.joinedAt)}</td><td class="small">${fmtDate(x.lastAt)}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-act="rs-email" data-id="${x.id}" title="Send an email">✉️</button> <button class="btn sm" data-act="rs-open" data-id="${x.id}">Open</button></td></tr>`).join('')}</tbody></table></div>`;
 }
+async function adminResellerPage() {
+  const r = await api('GET', '/api/admin/reseller'); RS.data = r;
+  const tot = r.list.reduce((a, x) => ({ c: a.c + x.credits, u: a.u + x.spentUsd, n: a.n + x.purchases }), { c: 0, u: 0, n: 0 });
+  const found = r.found || [];
+  return `<div class="stats">
+    <div class="stat c-acc"><i class="st-ic">${ic('user', 20)}</i><span>Resellers</span><b>${r.list.length}</b></div>
+    <div class="stat"><i class="st-ic">${ic('list', 20)}</i><span>Orders</span><b>${tot.n}</b></div>
+    <div class="stat c-ok"><i class="st-ic">${ic('star', 20)}</i><span>Credits sold</span><b>${tot.c}</b></div>
+    <div class="stat c-ok"><i class="st-ic">${ic('card', 20)}</i><span>Total paid</span><b>${usd(tot.u)}</b></div></div>
+  ${found.length ? `<div class="card"><div class="row"><h3 style="margin:0">🔎 Found in your data: ${found.length} reseller${found.length > 1 ? 's' : ''}</h3><span class="spacer"></span><button class="btn primary" data-act="rs-found-all">＋ Add all</button></div>
+    <p class="small muted">These rows have “Reseller”, “RSL” or credits in them. Adding them moves them out of the customer list and into a reseller profile, each row as one order.</p>
+    ${found.map((f, i) => `<div class="list-item"><div class="avatar">${esc(initials(f.name))}</div><div style="flex:1;min-width:0"><b>${esc(f.name)}</b>${f.into ? ` <span class="tagp">goes to ${esc(f.into.rslId)}</span>` : ''}<div class="small muted">${f.n} order${f.n > 1 ? 's' : ''} · ${usd(f.totalUsd)}${f.credits ? ' · ' + f.credits + ' credits' : ''} · ${esc(f.refs.slice(0, 4).join(', '))}${f.refs.length > 4 ? '…' : ''}</div><div class="small muted">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</div></div><button class="btn sm" data-act="rs-found-add" data-i="${i}">＋ Add</button></div>`).join('')}</div>` : ''}
+  <div class="card"><div class="row" style="gap:8px"><input data-input="rs-q" value="${esc(RS.q)}" placeholder="🔍 Search name, RSL id, email, phone, server, order…" style="flex:1;min-width:200px" autocomplete="off">
+    <button class="btn primary" data-act="rs-new">＋ Add manually</button><button class="btn" data-act="rs-pick">👥 From my data</button><button class="btn" data-act="rs-text">📋 From text</button><button class="btn" data-act="rs-email" data-id="">✉️ Email resellers</button></div>
+    <div id="rs-list" style="margin-top:12px">${rsRowsHtml()}</div></div>`;
+}
+const rsProfileForm = (x = {}) => `<form data-form="rs-profile" onsubmit="return false" data-id="${esc(x.id || '')}">
+  <div class="grid2">${field('Name', 'name', x.name || '', { attrs: 'required' })}${field('Reseller ID', 'rslId', x.id ? x.rslId : '', { ph: 'Empty = next number (RSL-01…)' })}</div>
+  <div class="grid2">${field('Email', 'email', x.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}${field('More emails', 'emails', (x.emails || []).slice(1).join(', '), { ph: 'separate with a comma', attrs: 'autocapitalize="none"' })}</div>
+  <div class="grid2">${field('Phone / WhatsApp', 'phone', x.phone || '', { type: 'tel', ph: '+66812345678' })}${field('Reseller since (date)', 'joined', rsDay(x.joinedAt), { type: 'date' })}</div>
+  <div class="grid3">${field('Organization', 'org', x.org || '')}${field('Server', 'server', x.server || '', { ph: 'MEGA, DINO…' })}${field('Panel tag', 'tag', x.tag || '')}</div>
+  <div class="grid2">${field('Status', 'status', x.status || 'active', { type: 'select', options: [['active', 'Active'], ['paused', 'Paused']] })}${field('Note', 'note', x.note || '')}</div>
+  <div class="row"><button type="button" class="btn primary" data-act="rs-save">💾 Save</button>${x.id ? `<span class="spacer"></span><button type="button" class="btn danger" data-act="rs-del" data-id="${x.id}">Delete reseller</button>` : ''}</div></form>`;
+function rsOpen(id) {
+  const x = rsGet(id); if (!x) return;
+  const wa = String(x.phone || '').replace(/\D/g, '');
+  modal(`🤝 ${esc(x.rslId)} · ${esc(x.name)}`, `<div class="row" style="gap:6px;margin-bottom:10px"><span class="tagp">${x.purchases} orders</span><span class="tagp">${x.credits} credits</span><span class="tagp">${usd(x.spentUsd)}</span>${x.emailedAt ? `<span class="small muted">last email ${fmtDate(x.emailedAt)}</span>` : ''}<span class="spacer"></span>
+    ${x.email ? `<button class="btn sm" data-act="rs-email" data-id="${x.id}">✉️ Email</button>` : ''}${wa && !/•/.test(x.phone) ? `<a class="btn sm wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 WhatsApp</a>` : ''}</div>
+    ${rsProfileForm(x)}
+    <div class="row" style="margin-top:16px"><h3 style="margin:0">Orders</h3><span class="spacer"></span><button class="btn sm" data-act="rs-order" data-id="${x.id}">＋ Add order</button></div>
+    ${x.orders.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Order</th><th>Package</th><th>Credits</th><th>Price</th><th>Server</th><th></th></tr></thead><tbody>${x.orders.map((o) => `<tr><td class="small">${fmtDate(o.at)}</td><td class="small">${esc(o.ref || '—')}</td><td class="small">${esc(o.pkg || '—')}${o.note ? `<div class="muted">${esc(o.note)}</div>` : ''}</td><td>${o.credits || '—'}</td><td><b>${rsMoney(o)}</b></td><td class="small">${esc(o.server || '')}</td><td style="white-space:nowrap"><button class="btn sm" data-act="rs-order" data-id="${x.id}" data-oid="${o.id}">✎</button> <button class="btn sm danger" data-act="rs-order-del" data-id="${x.id}" data-oid="${o.id}">✕</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No orders yet.</p>'}`, { wide: true });
+}
+async function rsReload(openId) { closeModal(); await renderAdmin(); if (openId) rsOpen(openId); }
+function rsPickHtml() {
+  const q = RS.pq.trim().toLowerCase(); const foundIds = new Set((RS.data?.found || []).flatMap((f) => f.ids));
+  let list = (RS.customers || []).filter((c) => !c.rsOrder);
+  list = q ? list.filter((c) => q.split(/\s+/).every((w) => [c.name, c.email, c.phone, c.whatsapp, c.orderNo, c.username, c.note].join(' ').toLowerCase().includes(w))) : list.filter((c) => foundIds.has(c.id) || RS.pick.has(c.id));
+  if (!list.length) return `<p class="muted small" style="padding:10px 2px">${q ? 'Nothing matches.' : 'Type a name, email, phone or order number to search all your data.'}</p>`;
+  return list.slice(0, 80).map((c) => `<label class="list-item" style="cursor:pointer"><input type="checkbox" data-rs-pick="${c.id}" ${RS.pick.has(c.id) ? 'checked' : ''} style="width:auto"><div style="flex:1;min-width:0"><b>${esc(c.name)}</b> <span class="tagp">${esc(c.orderNo || c.username)}</span>${foundIds.has(c.id) ? ' <span class="pill st-expiring">reseller</span>' : ''}<div class="small muted">${esc([c.email, c.phone, c.price ? '$' + c.price : '', fmtDate(c.startAt || c.createdAt)].filter(Boolean).join(' · '))}</div></div></label>`).join('') + (list.length > 80 ? `<p class="small muted">${list.length - 80} more — type more letters.</p>` : '');
+}
+function rsParsedHtml() {
+  const ps = RS.parsed || [];
+  if (!ps.length) return '<div class="notice warning">No reseller found in this text. Each reseller needs a name with an email or a phone number.</div>';
+  return `<p class="small muted">${ps.length} reseller${ps.length > 1 ? 's' : ''} found. Untick the ones you do not want, fix a name if needed, then add.</p>${ps.map((p, i) => `<div class="list-item" style="align-items:flex-start"><input type="checkbox" data-rs-p="${i}" checked style="width:auto;margin-top:8px"><div style="flex:1;min-width:0"><input data-rs-name="${i}" value="${esc(p.name)}" style="font-weight:700"><div class="small muted" style="margin-top:4px">${esc([p.rslId, p.emails.join(', '), p.phone, p.org, p.server, p.tag].filter(Boolean).join(' · ') || 'no contact details')}</div>${p.orders.map((o) => `<div class="small">• ${esc([o.ref, rsDay(o.at), o.pkg, o.amount ? rsMoney({ ...o, currency: o.currency || 'USD' }) : ''].filter(Boolean).join(' · '))}</div>`).join('')}</div></div>`).join('')}
+  <div class="row" style="margin-top:10px"><button class="btn primary" data-act="rs-text-add">＋ Add these resellers</button></div>`;
+}
+function rsEmailForm(id) {
+  const x = id ? rsGet(id) : null; const tp = RS.data?.emailTpl || {}; const n = (RS.data?.list || []).filter((r) => r.email && r.status !== 'paused').length;
+  const link = tp.link || ''; const sel = ['', 'site', 'contact', 'app'].includes(link) ? link : 'url';
+  return `<form data-form="rs-mail" onsubmit="return false" data-id="${esc(id || '')}">
+    <p class="small">${x ? `To: <b>${esc(x.name)}</b> &lt;${esc(x.email || 'no email')}&gt;` : `To: <b>all active resellers with an email</b> (${n})`}</p>
+    ${field('Subject', 'subject', tp.subject || '', { ph: 'e.g. New credit prices for {rsl}' })}${field('Title in the email (optional)', 'title', tp.title || '')}
+    ${field('Message', 'body', tp.body || '', { type: 'textarea', rows: 8, ph: 'Hello {name}, …' })}
+    <p class="small muted" style="margin-top:-6px">You can use: {name} {fullname} {rsl} {credits} {orders} {spent} {last} {org} {server}. *text* = bold. Empty line = new paragraph.</p>
+    <div class="grid3">${field('Button text (optional)', 'button', tp.button || '')}${field('Button opens', 'linkSel', sel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['contact', 'Contact / WhatsApp'], ['app', 'The app'], ['url', 'A link…']] })}${field('Link', 'linkUrl', sel === 'url' ? link : '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}</div>
+    <div class="row"><button type="button" class="btn" data-act="rs-mail-pv">👁 Preview</button><button type="button" class="btn" data-act="rs-mail-save">💾 Save as my template</button><span class="spacer"></span><button type="button" class="btn primary" data-act="rs-mail-send">📨 Send</button></div>
+    <iframe id="rs-mail-frame" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe></form>`;
+}
+const rsMailBody = () => { const f = $('[data-form=rs-mail]'); const d = Object.fromEntries(new FormData(f)); return { subject: d.subject, title: d.title, body: d.body, button: d.button, link: d.linkSel === 'url' ? d.linkUrl : d.linkSel, ...(f.dataset.id ? { ids: [f.dataset.id] } : { all: true }), appUrl: location.origin }; };
+document.addEventListener('input', (e) => {
+  const t = e.target; if (!t.dataset) return;
+  if (t.dataset.input === 'rs-q') { RS.q = t.value; const el = $('#rs-list'); if (el) el.innerHTML = rsRowsHtml(); }
+  if (t.dataset.input === 'rs-pq') { RS.pq = t.value; const el = $('#rs-pick-list'); if (el) el.innerHTML = rsPickHtml(); }
+});
+document.addEventListener('change', (e) => {
+  const t = e.target; if (!t.dataset || !t.dataset.rsPick) return;
+  if (t.checked) RS.pick.add(t.dataset.rsPick); else RS.pick.delete(t.dataset.rsPick);
+  const b = $('#rs-pick-go'); if (b) b.textContent = `＋ Add ${RS.pick.size} row${RS.pick.size === 1 ? '' : 's'} as reseller`;
+});
 
 function adminCustomerProfile(c) {
   if (!c) return null;
@@ -2304,29 +2373,65 @@ renew: async (el) => {
     const csv = rows.map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     download('subscriptions.csv', '﻿' + csv, 'text/csv');
   },
-'reseller-add': async (el) => {
-    const pick = $('#rsl-pick');
-    const id = pick && pick.value;
-    if (!id) { toast(t('pickCustomerForReseller'), true); return; }
-    try { const r = await api('POST', '/api/admin/reseller/toggle', { id }); toast(r.isReseller ? t('resellerFlagged', { id: r.rslId }) : t('resellerFlagRemoved')); renderAdmin(); }
-    catch (e) { toast(e.message, true); }
+'rs-open': (el) => rsOpen(el.dataset.id),
+  'rs-new': () => modal('＋ Add a reseller', rsProfileForm()),
+  'rs-save': async (el) => {
+    const f = el.closest('form'); if (!f.name.reportValidity()) return; const d = Object.fromEntries(new FormData(f));
+    el.disabled = true;
+    try { const r = await api('POST', '/api/admin/reseller/save', { ...d, id: f.dataset.id || undefined }); toast(`Saved ${r.reseller.rslId} ✓`); await rsReload(f.dataset.id ? r.reseller.id : ''); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
   },
-'reseller-toggle': async (el) => {
-    try { const r = await api('POST', '/api/admin/reseller/toggle', { id: el.dataset.id }); toast(r.isReseller ? t('resellerFlagged', { id: r.rslId }) : t('resellerFlagRemoved')); renderAdmin(); }
-    catch (e) { toast(e.message, true); }
+  'rs-del': async (el) => { if (!confirm('Delete this reseller and their order history? Rows that came from your customer list go back there.')) return; try { await api('POST', '/api/admin/reseller/delete', { id: el.dataset.id }); toast('Reseller deleted'); await rsReload(); } catch (e) { toast(e.message, true); } },
+  'rs-order': (el) => {
+    const x = rsGet(el.dataset.id); const o = (x.orders || []).find((y) => y.id === el.dataset.oid) || {};
+    modal(o.id ? 'Edit order' : `＋ Order for ${esc(x.name)}`, `<form data-form="rs-order" onsubmit="return false" data-id="${x.id}" data-oid="${esc(o.id || '')}">
+      <div class="grid3">${field('Date', 'date', rsDay(o.at) || (o.id ? '' : rsDay(Date.now())), { type: 'date' })}${field('Order number', 'ref', o.ref || '')}${field('Server', 'server', o.server || x.server || '')}</div>
+      <div class="grid2">${field('Package', 'pkg', o.pkg || '', { ph: 'e.g. 10 Credit' })}${field('Credits', 'credits', o.credits || '', { type: 'number', attrs: 'min="0"' })}</div>
+      <div class="grid2">${field('Price paid', 'amount', o.amount || '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', o.currency || 'USD', { type: 'select', options: (RS.data.currencies || ['USD']).map((c) => [c, c]) })}</div>
+      ${field('Note', 'note', o.note || '')}
+      <p class="small muted">This is history only. It does not change your bank balances.</p>
+      <div class="row"><button type="button" class="btn" data-act="rs-open" data-id="${x.id}">← Back</button><span class="spacer"></span><button type="button" class="btn primary" data-act="rs-order-save">💾 Save order</button></div></form>`);
   },
-'sheets-save': async (el) => {
-    const url = String(($('#sheets-url') || {}).value || '').trim();
-    const token = String(($('#sheets-token') || {}).value || '').trim();
-    if (!/^https?:\/\//.test(url)) { toast(t('pasteSheetsUrl'), true); return; }
-    await saveSettings({ sheets: { url, token, enabled: true } });
-    renderAdmin();
+  'rs-order-save': async (el) => {
+    const f = el.closest('form'); const d = Object.fromEntries(new FormData(f)); el.disabled = true;
+    try { await api('POST', '/api/admin/reseller/order', { id: f.dataset.id, order: { ...d, id: f.dataset.oid || undefined } }); toast('Order saved ✓'); await rsReload(f.dataset.id); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
   },
-'sheets-sync': async (el) => {
-    const url = String(($('#sheets-url') || {}).value || '').trim();
-    const r = await api('POST', '/api/admin/reseller/sync', url ? { url } : {});
-    toast(t('sheetsSync', { count: r.sent ?? 0 }));
-    renderAdmin();
+  'rs-order-del': async (el) => { if (!confirm('Remove this order from the history?')) return; try { await api('POST', '/api/admin/reseller/order-delete', { id: el.dataset.id, orderId: el.dataset.oid }); await rsReload(el.dataset.id); } catch (e) { toast(e.message, true); } },
+  'rs-found-add': async (el) => { const f = RS.data.found[Number(el.dataset.i)]; el.disabled = true; try { const r = await api('POST', '/api/admin/reseller/from-customers', { ids: f.ids }); toast(`${f.name}: ${r.orders} order${r.orders === 1 ? '' : 's'} added ✓`); await rsReload(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'rs-found-all': async (el) => { el.disabled = true; try { const r = await api('POST', '/api/admin/reseller/from-customers', { ids: RS.data.found.flatMap((f) => f.ids) }); toast(`${r.made} reseller${r.made === 1 ? '' : 's'} added with ${r.orders} orders ✓`); await rsReload(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'rs-pick': async () => {
+    RS.pick = new Set(); RS.pq = '';
+    modal('👥 Choose from my data', `<div class="spinner"></div>`, { wide: true });
+    try { RS.customers = await api('GET', '/api/admin/customers'); } catch (e) { closeModal(); return toast(e.message, true); }
+    closeModal();
+    modal('👥 Choose from my data', `<input data-input="rs-pq" placeholder="🔍 Search name, email, phone or order number…" autocomplete="off">
+      <div id="rs-pick-list" style="max-height:52vh;overflow:auto;margin:10px 0">${rsPickHtml()}</div>
+      <label class="row small" style="gap:8px"><input type="checkbox" id="rs-pick-orders" checked style="width:auto"> Each chosen row is one order of the reseller (it leaves the customer list)</label>
+      <p class="small muted">Rows of the same person (same phone or email) become one reseller.</p>
+      <div class="row"><span class="spacer"></span><button class="btn primary" id="rs-pick-go" data-act="rs-pick-go">＋ Add 0 rows as reseller</button></div>`, { wide: true });
+  },
+  'rs-pick-go': async (el) => {
+    if (!RS.pick.size) return toast('Tick at least one row.', true); el.disabled = true;
+    try { const r = await api('POST', '/api/admin/reseller/from-customers', { ids: [...RS.pick], orders: $('#rs-pick-orders').checked }); toast(`${r.resellers.map((x) => x.rslId).join(', ')}: ${r.rows} row${r.rows === 1 ? '' : 's'} added ✓`); await rsReload(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'rs-text': () => { RS.parsed = null; modal('📋 Add resellers from text', `<p class="small muted">Paste contact details, a list with “Name: … Email: … Phone: …”, order lines, or rows copied from your Google Sheet. Card numbers are ignored.</p>
+    <textarea id="rs-text-in" rows="9" placeholder="Paste here…" dir="auto"></textarea>
+    <div class="row" style="margin:10px 0"><button class="btn primary" data-act="rs-text-read">🔎 Read the text</button></div><div id="rs-text-out"></div>`, { wide: true }); },
+  'rs-text-read': () => { RS.parsed = parseResellerText($('#rs-text-in').value).profiles; $('#rs-text-out').innerHTML = rsParsedHtml(); },
+  'rs-text-add': async (el) => {
+    const profiles = (RS.parsed || []).filter((p, i) => $(`[data-rs-p="${i}"]`)?.checked).map((p) => ({ ...p, name: $(`[data-rs-name="${(RS.parsed || []).indexOf(p)}"]`)?.value || p.name }));
+    if (!profiles.length) return toast('Tick at least one reseller.', true); el.disabled = true;
+    try { const r = await api('POST', '/api/admin/reseller/import', { profiles }); toast(`${r.made} added, ${r.updated} updated, ${r.orders} orders ✓`); await rsReload(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'rs-email': (el) => { const x = el.dataset.id ? rsGet(el.dataset.id) : null; modal(x ? `✉️ Email ${esc(x.name)}` : '✉️ Email resellers', rsEmailForm(el.dataset.id), { wide: true }); },
+  'rs-mail-pv': async () => { try { const pv = await api('POST', '/api/admin/reseller/email', { ...rsMailBody(), preview: true }); const fr = $('#rs-mail-frame'); fr.style.display = ''; fr.srcdoc = pv.html; toast('Subject: ' + pv.subject); } catch (e) { toast(e.message, true); } },
+  'rs-mail-save': async () => { try { await api('POST', '/api/admin/reseller/email', { ...rsMailBody(), save: true, saveOnly: true }); RS.data.emailTpl = rsMailBody(); toast('Template saved ✓'); } catch (e) { toast(e.message, true); } },
+  'rs-mail-send': async (el) => {
+    const b = rsMailBody(); if (!confirm(b.all ? 'Send this email to all active resellers?' : 'Send this email?')) return; el.disabled = true;
+    try { const r = await api('POST', '/api/admin/reseller/email', b); toast(`Sent to ${r.sent} ✓`); await rsReload(); } catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'sell-rp': () => modal('🤝 Sell a reseller package', resellerSaleForm(state.admin.settings)),
   'add-rp': () => $('#rps').insertAdjacentHTML('beforeend', `<div class="rp-row" data-rp=""><input data-k="name" placeholder="Name"><input data-k="credits" type="number" value="10"><input data-k="price" type="number" step="any" value="0"><button class="btn sm danger" data-act="del-rp" title="Remove reseller plan" aria-label="Remove reseller plan">✕</button></div>`),

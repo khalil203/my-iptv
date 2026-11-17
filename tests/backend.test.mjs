@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail } from '../public/core.js';
+import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail, parseResellerText, parseLooseDate, parseMoney, cleanPhoneText, scrubCards, cleanRslId } from '../public/core.js';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 function setup() {
@@ -937,7 +937,7 @@ test('sales tracker: today/yesterday/month aggregation, 30-day series and resell
   const list2 = await x.call('GET', '/api/admin/reseller', {}, tok);
   assert.equal(list2.json.list.length, 1);
   const bad = await x.call('POST', '/api/admin/reseller/sync', {}, tok);
-  assert.equal(bad.status, 400, 'sync without a webhook url is refused');
+  assert.equal(bad.status, 404, 'the Google Sheets sync was removed');
 });
 
 test('stripe revenue: income is attributed per bank account and shows 30d + all-time totals', async () => {
@@ -1119,3 +1119,263 @@ test('sending: a stored Arabic mail language no longer breaks a real customer em
   assert.equal(x.mails.length, 1); assert.equal(x.mails[0].to[0], 'lang@example.com');
   assert.match(x.mails[0].subject, /Subscription Is Active/, 'falls back to English instead of crashing');
 });
+
+// ---- Resellers: profiles added by hand, from customer rows, or read from pasted text (made-up people only) ----
+const RS_TEXT = `Robin Tester
+○	Email · Work: robin.tester@example.com
+○	Phone · Mobile: +15550100001
+○	Organization: Reseller (RSL-122)
+Bullet Name: PAT PLACEHOLDER
+Bullet Phone: +4915550100002
+Bullet Email: PP@example.org
+Bullet Period / Package: 1 Year 10Line
+Bullet Price Paid: $290.99
+Bullet Server: MEGA
+Bullet Notice / Panel Tag: Panel north
+3. Morgan Sample
+Bullet Order Reference: Resseler-04 (Excel Row 85)
+Bullet Name: Morgan Sample
+Bullet Phone: +525550100003
+Bullet Email: morgan@example.net
+Bullet Date: 23/12/2023
+Bullet Period / Credits: 20 Credit
+Bullet Price Paid: $460,99
+Bullet Server: MEGA
+Jamie Demo (Multiple Orders / Reseller Entries)
+Bullet Phone: +15550100004
+Bullet Emails: jamie.one@example.com / jamie.two@example.com
+Bullet Server: MEGA / YES
+Order History:
+Bullet Resseler-08 (Row 311 - Feb 22, 2024): 10 Credit — $280.99
+Bullet Resseler-05 (Row 1`;
+
+test('reseller text reader: contact cards, label lists, order history, cut-off lines', () => {
+  const r = parseResellerText(RS_TEXT).profiles;
+  assert.deepEqual(r.map((p) => p.name), ['Robin Tester', 'PAT PLACEHOLDER', 'Morgan Sample', 'Jamie Demo']);
+  const [robin, pat, morgan, jamie] = r;
+  assert.deepEqual(robin.emails, ['robin.tester@example.com']); assert.equal(robin.phone, '+15550100001'); assert.equal(robin.rslId, 'RSL-122'); assert.equal(robin.org, 'Reseller'); assert.equal(robin.orders.length, 0);
+  assert.deepEqual(pat.emails, ['pp@example.org']); assert.equal(pat.tag, 'Panel north'); assert.equal(pat.server, 'MEGA');
+  assert.equal(pat.orders.length, 1); assert.equal(pat.orders[0].pkg, '1 Year 10Line'); assert.equal(pat.orders[0].amount, 290.99); assert.equal(pat.orders[0].currency, 'USD'); assert.equal(pat.orders[0].credits, 0);
+  assert.equal(morgan.orders.length, 1);
+  assert.deepEqual({ ref: morgan.orders[0].ref, credits: morgan.orders[0].credits, amount: morgan.orders[0].amount, day: new Date(morgan.orders[0].at).toISOString().slice(0, 10) }, { ref: 'Resseler-04', credits: 20, amount: 460.99, day: '2023-12-23' });
+  assert.deepEqual(jamie.emails, ['jamie.one@example.com', 'jamie.two@example.com']); assert.equal(jamie.server, 'MEGA', 'a "YES" in the server column is not a server');
+  assert.equal(jamie.orders.length, 2);
+  const o8 = jamie.orders.find((o) => o.ref === 'Resseler-08'); assert.equal(o8.credits, 10); assert.equal(o8.amount, 280.99); assert.equal(new Date(o8.at).toISOString().slice(0, 10), '2024-02-22');
+  const o5 = jamie.orders.find((o) => o.ref === 'Resseler-05'); assert.equal(o5.amount, 0, 'a cut-off line keeps its order number only');
+});
+
+test('reseller text reader: rows copied from a sheet, simple lists, dates, money, and card numbers are never kept', () => {
+  const T = '\t';
+  const rows = [
+    ['Order', 'phone-number', 'Name', 'Email', 'Subscription - AT', 'Subscription - T', 'Period', 'Price', 'Expiry in', 'Paid Credit', 'REFUND', 'NOTICE', 'SERVER'].join(T),
+    ['Resseler-31', '‪+15550100011', 'Alex Example', 'alex@example.com', '2024-03-15 00:00:00', '----------', '05 credit', '     170.99', '----------', 'YES', '', '', 'MEGA'].join(T),
+    ['Resseler-32', '‪‪+15550100011', 'Alex Example', 'alex.second@example.com', '2024-05-07 00:00:00', '-----', '10 Credit', '     280.99', '-----', 'YES', '', 'Panel 700', 'YES'].join(T),
+  ].join('\n');
+  const a = parseResellerText(rows).profiles;
+  assert.equal(a.length, 1, 'two rows with the same phone are one reseller');
+  assert.deepEqual(a[0].emails, ['alex@example.com', 'alex.second@example.com']); assert.equal(a[0].phone, '+15550100011');
+  assert.deepEqual(a[0].orders.map((o) => [o.ref, o.credits, o.amount]), [['Resseler-31', 5, 170.99], ['Resseler-32', 10, 280.99]]);
+  // no header row, with card columns in the middle (4242… is the public test card number)
+  const b = parseResellerText(['RLS-077', 'NEW', 'Normal', 'Sam Sample', 'Sam.Sample@Example.com', '92.0', '3335550123', '12 Test Road', '4242424242424242', '123', '1.0', '2029.0', '✓ LIVE', '30/11/2025', 'Resseler ', '✓ DINO', '$ USD', '500.99', 'Paid by transfer'].join(T)).profiles;
+  assert.equal(b.length, 1); assert.equal(b[0].name, 'Sam Sample'); assert.equal(b[0].server, 'DINO');
+  assert.deepEqual([b[0].orders[0].ref, b[0].orders[0].amount, b[0].orders[0].currency, new Date(b[0].orders[0].at).toISOString().slice(0, 10)], ['RLS-077', 500.99, 'USD', '2025-11-30']);
+  assert.ok(!/4242/.test(JSON.stringify(b)), 'the card number is dropped');
+  const c = parseResellerText('Name: Lee One\nPhone: +212600000001\nCredit Card: 4242 4242 4242 4242\nCVV: 123\nNote: paid with 4242-4242-4242-4242\nName: Mo Two\nWhatsApp: 00212600000002\nAmount: 1.299,00 €\nPackage: 50 Credits').profiles;
+  assert.equal(c.length, 2); assert.ok(!/4242/.test(JSON.stringify(c)));
+  assert.deepEqual([c[1].phone, c[1].orders[0].amount, c[1].orders[0].currency, c[1].orders[0].credits], ['+212600000002', 1299, 'EUR', 50]);
+  const d = parseResellerText('My resellers:\nRobin Tester, robin@example.com, +44 7700 900123\nKim Demo - kim@example.net - 0044 7700 900456\nJust a sentence.').profiles;
+  assert.deepEqual(d.map((p) => [p.name, p.emails[0], p.phone]), [['Robin Tester', 'robin@example.com', '+447700900123'], ['Kim Demo', 'kim@example.net', '+447700900456']]);
+  assert.equal(parseResellerText('nothing useful here\n\n---').profiles.length, 0);
+  const day = (x) => (parseLooseDate(x) ? new Date(parseLooseDate(x)).toISOString().slice(0, 10) : '');
+  assert.deepEqual(['23/12/2023', 'Feb 22, 2024', '2024-02-22 00:00:00', '4 December 2025', 'hello'].map(day), ['2023-12-23', '2024-02-22', '2024-02-22', '2025-12-04', '']);
+  assert.deepEqual([parseMoney('$280,99'), parseMoney('$1,280.99'), parseMoney('1.280,50 €')], [{ amount: 280.99, currency: 'USD' }, { amount: 1280.99, currency: 'USD' }, { amount: 1280.5, currency: 'EUR' }]);
+  assert.deepEqual([cleanPhoneText('‪+15550100011'), cleanPhoneText('4242424242424242'), cleanPhoneText('12')], ['+15550100011', '', '']);
+  assert.equal(scrubCards('card 4242 4242 4242 4242, phone +15550100011'), 'card , phone +15550100011');
+  assert.deepEqual(['RSL-122', 'rls 5', '7', 'abc'].map(cleanRslId), ['RSL-122', 'RSL-05', 'RSL-07', '']);
+});
+
+// rows as the spreadsheet import leaves them: one customer per order, with the period text kept on the sale
+async function importResellerRows(x, tok) {
+  const day = (d) => Date.UTC(2024, 0, d, 12);
+  const row = (n, name, email, phone, price, period, d, extra = {}) => ({ id: 'rsrow' + n, username: 'Resseler-0' + n, orderNo: 'Resseler-0' + n, name, email, phone, price, currency: 'USD', server: n === 3 ? 'YES' : 'MEGA', startAt: day(d), expiresAt: day(d) + 30 * 86400000, salt: 'aa', passwordHash: 'bb', ...extra });
+  const customers = [
+    row(1, 'Jamie Demo', 'jamie.one@example.com', '+15550100004', 280.99, '10 credit', 5),
+    row(2, 'Jamie Demo', 'jamie.two@example.com', '+1 555 010 0004', 280.99, '10 Credit', 9),
+    row(3, 'jamie demo', 'jamie.one@example.com', '+15550100004', 231.99, '----------', 12),
+    row(4, 'Morgan Sample', 'morgan@example.net', '+525550100003', 460.99, '20 Credit', 15),
+    { id: 'rsrow9', username: 'Order-74', orderNo: 'Order-74', name: 'PAT PLACEHOLDER', email: 'pp@example.org', phone: '+4915550100002', price: 290.99, currency: 'USD', server: 'MEGA', panel: 'Panel north cash', startAt: day(20), expiresAt: day(20) + 365 * 86400000, salt: 'aa', passwordHash: 'bb' },
+    { id: 'rsrow8', username: 'Order-75', orderNo: 'Order-75', name: 'Normal Viewer', email: 'viewer@example.com', phone: '+15550100099', price: 59.99, currency: 'USD', server: 'MEGA', startAt: day(21), expiresAt: day(21) + 365 * 86400000, salt: 'aa', passwordHash: 'bb' },
+  ];
+  const periods = { rsrow1: '10 credit', rsrow2: '10 Credit', rsrow3: '----------', rsrow4: '20 Credit', rsrow9: '1 Year 10Line', rsrow8: '1 Year' };
+  const sales = customers.map((c) => ({ id: 's' + c.id, by: 'import', at: c.startAt, customerId: c.id, username: c.username, name: c.name, type: 'new', planId: 'p1', planName: periods[c.id], days: 30, credits: 0, amount: c.price, currency: 'USD', amountUsd: c.price, costUsd: 0, accountId: '' }));
+  const r = await x.call('POST', '/api/admin/import', { customers, sales }, tok);
+  assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.added, customers.length);
+}
+
+test('resellers: add by hand, change, custom RSL id, duplicates and bad input are refused', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  assert.equal((await x.call('POST', '/api/admin/reseller/save', { name: '' }, tok)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/reseller/save', { name: 'Robin Tester', email: 'not-an-email' }, tok)).status, 400);
+  const a = await x.call('POST', '/api/admin/reseller/save', { name: 'Robin Tester', email: 'Robin.Tester@Example.com', phone: '+1 (555) 010-0001', org: 'North Media', server: 'MEGA', tag: 'Panel north', note: 'pays by transfer 4242 4242 4242 4242' }, tok);
+  assert.equal(a.status, 200, JSON.stringify(a.json)); assert.equal(a.json.reseller.rslId, 'RSL-01');
+  const twin = await x.call('POST', '/api/admin/reseller/save', { name: 'Someone Else', phone: '0015550100001' }, tok);
+  assert.equal(twin.status, 409, 'the same phone number is the same reseller');
+  const b = await x.call('POST', '/api/admin/reseller/save', { name: 'Pat Placeholder', rslId: 'rsl 122' }, tok);
+  assert.equal(b.json.reseller.rslId, 'RSL-122');
+  assert.equal((await x.call('POST', '/api/admin/reseller/save', { name: 'Third One', rslId: 'RSL-122' }, tok)).status, 409, 'an RSL id is used once');
+  assert.equal((await x.call('POST', '/api/admin/reseller/save', { name: 'Third One', rslId: 'banana' }, tok)).status, 400);
+  const c = await x.call('POST', '/api/admin/reseller/save', { name: 'Third One' }, tok);
+  assert.equal(c.json.reseller.rslId, 'RSL-02', 'automatic ids carry on from the counter, not from a typed id');
+  let list = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list;
+  assert.equal(list.length, 3);
+  const robin = list.find((r) => r.rslId === 'RSL-01');
+  assert.deepEqual([robin.email, robin.phone, robin.org, robin.server, robin.tag, robin.purchases], ['robin.tester@example.com', '+15550100001', 'North Media', 'MEGA', 'Panel north', 0]);
+  assert.ok(!/4242/.test(robin.note), 'card numbers are taken out of notes');
+  const ed = await x.call('POST', '/api/admin/reseller/save', { id: robin.id, name: 'Robin T. Tester', email: 'robin.tester@example.com', emails: 'second@example.com, third@example.com', phone: '+15550100001', rslId: 'RSL-07', status: 'paused' }, tok);
+  assert.equal(ed.status, 200, JSON.stringify(ed.json));
+  list = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list;
+  const r2 = list.find((r) => r.id === robin.id);
+  assert.deepEqual([r2.name, r2.rslId, r2.status, r2.emails.length], ['Robin T. Tester', 'RSL-07', 'paused', 3]);
+  assert.equal((await x.call('POST', '/api/admin/reseller/save', { id: 'nope', name: 'X' }, tok)).status, 404);
+  // orders typed in by hand
+  const o1 = await x.call('POST', '/api/admin/reseller/order', { id: robin.id, order: { date: '2024-02-22', pkg: '10 Credit', amount: 280.99, currency: 'USD', ref: 'R-1', server: 'MEGA' } }, tok);
+  assert.equal(o1.status, 200, JSON.stringify(o1.json));
+  await x.call('POST', '/api/admin/reseller/order', { id: robin.id, order: { date: '2024-03-01', credits: 20, amount: 4600, currency: 'MAD' } }, tok);
+  assert.equal((await x.call('POST', '/api/admin/reseller/order', { id: robin.id, order: {} }, tok)).status, 400);
+  let rr = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list.find((r) => r.id === robin.id);
+  assert.equal(rr.purchases, 2); assert.equal(rr.credits, 30, 'credits are read from "10 Credit" when the number is left empty');
+  assert.ok(rr.spentUsd > 280.99 && rr.spentUsd < 4600, 'MAD is converted to USD: ' + rr.spentUsd);
+  assert.equal(rr.rank, 1); assert.ok(rr.rate > 0);
+  const first = rr.orders.find((o) => o.ref === 'R-1');
+  await x.call('POST', '/api/admin/reseller/order', { id: robin.id, order: { id: first.id, date: '2024-02-23', pkg: '10 Credit', credits: 10, amount: 300, currency: 'USD', ref: 'R-1' } }, tok);
+  rr = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list.find((r) => r.id === robin.id);
+  assert.equal(rr.orders.find((o) => o.ref === 'R-1').amount, 300); assert.equal(rr.purchases, 2);
+  assert.equal((await x.call('POST', '/api/admin/reseller/order-delete', { id: robin.id, orderId: first.id }, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/reseller', {}, tok)).json.list.find((r) => r.id === robin.id).purchases, 1);
+  // delete
+  assert.equal((await x.call('POST', '/api/admin/reseller/delete', { id: robin.id }, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/reseller', {}, tok)).json.list.length, 2);
+  // the backup carries the profiles
+  assert.equal((await x.call('GET', '/api/admin/backup', {}, tok)).json.resellers.length, 2);
+});
+
+test('resellers: found in the customer list, grouped by person, added with their orders, and removable', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await importResellerRows(x, tok);
+  let r = (await x.call('GET', '/api/admin/reseller', {}, tok)).json;
+  assert.equal(r.list.length, 0);
+  assert.deepEqual(r.found.map((f) => [f.name, f.n]).sort(), [['Jamie Demo', 3], ['Morgan Sample', 1], ['PAT PLACEHOLDER', 1]], 'credit orders and line packs are found, a normal viewer is not: ' + JSON.stringify(r.found.map((f) => f.name)));
+  const jamie = r.found.find((f) => f.n === 3);
+  assert.equal(jamie.credits, 20); assert.equal(jamie.totalUsd, 793.97); assert.equal(jamie.into, null);
+  const add = await x.call('POST', '/api/admin/reseller/from-customers', { ids: jamie.ids }, tok);
+  assert.equal(add.status, 200, JSON.stringify(add.json));
+  assert.deepEqual([add.json.made, add.json.rows, add.json.orders], [1, 3, 3]);
+  r = (await x.call('GET', '/api/admin/reseller', {}, tok)).json;
+  assert.equal(r.list.length, 1); assert.equal(r.found.length, 2);
+  const p = r.list[0];
+  assert.deepEqual([p.rslId, p.name, p.purchases, p.credits, p.spentUsd, p.emails.length, p.server], ['RSL-01', 'Jamie Demo', 3, 20, 793.97, 2, 'MEGA']);
+  assert.equal(p.rate, 28.1, 'the rate only counts orders whose credits are known');
+  assert.deepEqual(p.orders.map((o) => o.ref).sort(), ['Resseler-01', 'Resseler-02', 'Resseler-03']);
+  assert.equal(p.orders.find((o) => o.ref === 'Resseler-03').pkg, '', 'a dashed period is left empty');
+  const cs = (await x.call('GET', '/api/admin/customers', {}, tok, { rs: 1 })).json;
+  assert.ok(cs.filter((c) => c.name.toLowerCase() === 'jamie demo').every((c) => c.isReseller && c.rslId === 'RSL-01'), 'the rows are marked');
+  assert.ok(!(await x.call('GET', '/api/admin/customers', {}, tok)).json.some((c) => c.name.toLowerCase() === 'jamie demo'), 'reseller order rows are not shown as customers');
+  // doing it again changes nothing
+  const again = await x.call('POST', '/api/admin/reseller/from-customers', { ids: jamie.ids }, tok);
+  assert.deepEqual([again.json.made, again.json.rows, again.json.orders], [0, 0, 0]);
+  // two different people picked together become two resellers; a row without the order tick only links the person
+  const both = await x.call('POST', '/api/admin/reseller/from-customers', { ids: ['rsrow4', 'rsrow8'], orders: false }, tok);
+  assert.deepEqual([both.json.made, both.json.orders], [2, 0]);
+  // "into" puts a row into a chosen reseller, moving it out of the old one
+  const moved = await x.call('POST', '/api/admin/reseller/from-customers', { ids: ['rsrow9'], into: p.id }, tok);
+  assert.equal(moved.status, 200); assert.equal(moved.json.orders, 1);
+  r = (await x.call('GET', '/api/admin/reseller', {}, tok)).json;
+  const p2 = r.list.find((z) => z.id === p.id);
+  assert.equal(p2.purchases, 4); assert.equal(p2.orders.find((o) => o.ref === 'Order-74').pkg, '1 Year 10Line'); assert.equal(p2.orders.find((o) => o.ref === 'Order-74').note, 'Panel north cash');
+  assert.equal(r.found.length, 0);
+  // taking an order out puts its row back in the customer list as a normal row
+  const o74 = p2.orders.find((o) => o.ref === 'Order-74');
+  await x.call('POST', '/api/admin/reseller/order-delete', { id: p.id, orderId: o74.id }, tok);
+  assert.ok(!(await x.call('GET', '/api/admin/customers', {}, tok, { rs: 1 })).json.find((c) => c.id === 'rsrow9').isReseller);
+  assert.equal((await x.call('GET', '/api/admin/reseller', {}, tok)).json.found.length, 1, 'it is offered again');
+  // deleting the reseller clears the marks
+  await x.call('POST', '/api/admin/reseller/delete', { id: p.id }, tok);
+  assert.ok((await x.call('GET', '/api/admin/customers', {}, tok, { rs: 1 })).json.filter((c) => c.name.toLowerCase() === 'jamie demo').every((c) => !c.isReseller));
+  assert.equal((await x.call('POST', '/api/admin/reseller/from-customers', { ids: [] }, tok)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/reseller/from-customers', { ids: ['ghost'] }, tok)).status, 404);
+});
+
+test('resellers: pasted text adds new people, completes known ones and links their rows without duplicates', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await importResellerRows(x, tok);
+  const parsed = parseResellerText(RS_TEXT.replace('Resseler-08 (Row 311 - Feb 22, 2024): 10 Credit — $280.99', 'Resseler-02 (Row 311 - Feb 22, 2024): 10 Credit — $280.99').replace('Resseler-05 (Row 1', 'Resseler-03 (Row 1')).profiles;
+  const imp = await x.call('POST', '/api/admin/reseller/import', { profiles: parsed }, tok);
+  assert.equal(imp.status, 200, JSON.stringify(imp.json));
+  assert.deepEqual([imp.json.made, imp.json.updated], [4, 0]);
+  let r = (await x.call('GET', '/api/admin/reseller', {}, tok)).json;
+  const by = (n) => r.list.find((p) => p.name.toLowerCase() === n.toLowerCase());
+  assert.equal(by('Robin Tester').rslId, 'RSL-122', 'the id written in the text is kept');
+  assert.equal(by('PAT PLACEHOLDER').orders[0].amount, 290.99);
+  const morgan = by('Morgan Sample');
+  assert.equal(morgan.orders.length, 1); assert.equal(morgan.orders[0].ref, 'Resseler-04'); assert.equal(morgan.orders[0].customerId, 'rsrow4', 'the order is tied to the matching customer row');
+  const jamie = by('Jamie Demo');
+  assert.deepEqual(jamie.orders.map((o) => [o.ref, o.amount, o.credits]).sort(), [['Resseler-02', 280.99, 10], ['Resseler-03', 231.99, 0]], 'the cut-off line is completed from the customer row');
+  assert.equal(jamie.customerIds.length, 2);
+  // the one row of this person that the text did not mention is still offered, pointing at the existing reseller
+  assert.deepEqual(r.found.map((f) => [f.name, f.n, f.into && f.into.rslId]), [['Jamie Demo', 1, jamie.rslId], ['PAT PLACEHOLDER', 1, by('PAT PLACEHOLDER').rslId]]);
+  const rest = await x.call('POST', '/api/admin/reseller/from-customers', { ids: r.found[0].ids }, tok);
+  assert.deepEqual([rest.json.made, rest.json.orders], [0, 1]);
+  // pasting the same text again adds nothing
+  const again = await x.call('POST', '/api/admin/reseller/import', { profiles: parsed }, tok);
+  assert.deepEqual([again.json.made, again.json.updated, again.json.orders], [0, 4, 0]);
+  r = (await x.call('GET', '/api/admin/reseller', {}, tok)).json;
+  assert.equal(r.list.length, 4); assert.equal(r.list.find((p) => p.name === 'Jamie Demo').purchases, 3);
+  // an order number that belongs to another person's row is not linked
+  const odd = await x.call('POST', '/api/admin/reseller/import', { profiles: [{ name: 'Casey Other', emails: ['casey@example.com'], orders: [{ ref: 'Order-75', amount: 10 }] }] }, tok);
+  assert.equal(odd.json.rows, 0);
+  assert.ok(!(await x.call('GET', '/api/admin/customers', {}, tok, { rs: 1 })).json.find((c) => c.id === 'rsrow8').isReseller);
+  assert.equal((await x.call('POST', '/api/admin/reseller/import', { profiles: [] }, tok)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/reseller/import', { profiles: [{ orders: [{ ref: 'X-1' }] }] }, tok)).status, 400);
+  // card numbers never reach storage, whatever is sent
+  await x.call('POST', '/api/admin/reseller/import', { profiles: [{ name: 'Card Carrier', phone: '+15550100777', note: 'card 4242424242424242', tag: '4242 4242 4242 4242', orders: [{ ref: 'Z-1', amount: 5, note: '4242-4242-4242-4242' }] }] }, tok);
+  assert.ok(!/4242/.test(JSON.stringify(await x.store.get('resellers'))));
+});
+
+test('resellers: a recorded reseller sale lands in the profile once; staff limits and phone privacy hold', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const made = await x.call('POST', '/api/admin/reseller/save', { name: 'Robin Tester', phone: '+15550100001', email: 'robin@example.com' }, tok);
+  const id = made.json.reseller.id;
+  const st = (await x.call('GET', '/api/admin/settings', {}, tok)).json; const pk = st.resellerPackages[0];
+  assert.ok(pk && pk.credits > 0, 'a reseller package exists');
+  const sale = await x.call('POST', '/api/admin/reseller-sale', { packageId: pk.id, resellerId: id, amount: 250 }, tok);
+  assert.equal(sale.status, 200, JSON.stringify(sale.json)); assert.equal(sale.json.customerId, id);
+  assert.equal((await x.call('POST', '/api/admin/reseller-sale', { packageId: pk.id, resellerId: 'nope' }, tok)).status, 404);
+  let row = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list[0];
+  assert.deepEqual([row.purchases, row.credits], [1, pk.credits]); assert.equal(row.orders[0].saleId, sale.json.id);
+  // a sale without a profile still works as before
+  assert.equal((await x.call('POST', '/api/admin/reseller-sale', { packageId: pk.id, name: 'Walk In' }, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/reseller', {}, tok)).json.list[0].purchases, 1);
+  // staff with customers_edit but no phone permission
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit'] }, tok);
+  const li = await x.call('POST', '/api/login', { username: 'said', password: 'secret12' }); await signBylaws(x, li.json.token);
+  assert.equal((await x.call('GET', '/api/admin/reseller', {}, li.json.token)).status, 403, 'the reseller list is for the owner');
+  assert.equal((await x.call('POST', '/api/admin/reseller/delete', { id }, li.json.token)).status, 403);
+  const edit = await x.call('POST', '/api/admin/reseller/save', { id, name: 'Robin Tester', email: 'robin@example.com', phone: '•••••••••01' }, li.json.token);
+  assert.equal(edit.status, 200, JSON.stringify(edit.json)); assert.match(edit.json.reseller.phone, /•/);
+  assert.equal((await x.store.get('resellers'))[0].phone, '+15550100001', 'a masked number never replaces the real one');
+  // an email written by hand, with the text kept as the template
+  assert.equal((await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Hi' }, li.json.token)).status, 403);
+  assert.equal((await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: '', body: '' }, tok)).status, 400);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'a@example.com' } }, tok);
+  const pv = await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Offer for {rsl}', body: 'Hello {name}, you bought {credits} credits in {orders} order.', preview: true }, tok);
+  assert.equal(pv.json.subject, 'Offer for RSL-01'); assert.match(pv.json.html, new RegExp('you bought ' + pk.credits + ' credits in 1 order'));
+  const sent = await x.call('POST', '/api/admin/reseller/email', { ids: [id], subject: 'Offer for {rsl}', body: 'Hello {name}', save: true }, tok);
+  assert.equal(sent.status, 200, JSON.stringify(sent.json)); assert.equal(sent.json.sent, 1);
+  const after = (await x.call('GET', '/api/admin/reseller', {}, tok)).json;
+  assert.equal(after.emailTpl.subject, 'Offer for {rsl}'); assert.ok(after.list[0].emailedAt > 0);
+  assert.equal((await x.call('POST', '/api/admin/reseller/sync', {}, tok)).status, 404, 'the Google Sheets sync is gone');
+  // the start date can be typed
+  await x.call('POST', '/api/admin/reseller/save', { id, name: 'Robin Tester', email: 'robin@example.com', phone: '+15550100001', joined: '2023-10-30' }, tok);
+  assert.equal(new Date((await x.call('GET', '/api/admin/reseller', {}, tok)).json.list[0].joinedAt).toISOString().slice(0, 10), '2023-10-30');
+});
+
