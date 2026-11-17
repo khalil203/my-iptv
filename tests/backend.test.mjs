@@ -1535,3 +1535,39 @@ test('last month retention: renewed, lost and still running', async () => {
   assert.equal(d.retention.renewed, 1); assert.equal(d.retention.lost, 1); assert.equal(d.retention.waiting, 1); assert.equal(d.retention.rate, 50);
   assert.equal(d.customers.find((c) => c.id === cs[1].id).renew, 'lost');
 });
+
+test('order numbers: parse, devices, original sequence, next number, duplicates, backup before organizing', async () => {
+  const { parseOrderNo, orderDevices, orderRanks, nextOrderNo } = await import('../public/core.js');
+  assert.deepEqual([parseOrderNo('WLF-045-04').main, parseOrderNo('WLF-045-04').dev], ['WLF-045', 4]);
+  assert.deepEqual([parseOrderNo('Owl-404-01 to 04').dev, parseOrderNo('Owl-404-01 to 04').devTo], [1, 4]);
+  assert.equal(parseOrderNo('Order-62-SC58').sub, 'SC58'); assert.equal(parseOrderNo('OWL -231').num, 231); assert.equal(parseOrderNo('A-0001-2222‬').raw, 'A-0001-2222');
+  assert.deepEqual(orderDevices({ orderNo: 'WLF-045', connections: 4 }), ['WLF-045-01', 'WLF-045-02', 'WLF-045-03', 'WLF-045-04']);
+  assert.deepEqual(orderDevices({ orderNo: 'WLF-013-04', connections: 4 }), ['WLF-013-01', 'WLF-013-02', 'WLF-013-03', 'WLF-013-04']);
+  const D = 864e5, t0 = Date.parse('2023-09-01');
+  const L = [
+    { id: 'w2', orderNo: 'WLF-002', startAt: t0 + 700 * D }, { id: 'o2', orderNo: 'Order-002', startAt: t0 + 900 * D /* renewed later */ },
+    { id: 'o1', orderNo: 'Order-001', startAt: t0 }, { id: 'o3', orderNo: 'OWL-003', startAt: t0 + 2 * D }, { id: 'w1', orderNo: 'WLF-001', startAt: t0 + 690 * D },
+    { id: 'i3', orderNo: 'IBO-003', startAt: t0 + 710 * D }, { id: 'x', orderNo: '', startAt: t0 + 1000 * D },
+  ];
+  const rk = orderRanks(L, { orders: { series: 'WLF,IBO,RLS' } });
+  assert.deepEqual([...L].sort((a, b) => rk.get(a.id) - rk.get(b.id)).map((c) => c.id), ['o1', 'o2', 'o3', 'w1', 'w2', 'i3', 'x']);
+  assert.equal(nextOrderNo(L, { orders: { prefix: 'WLF', iboPrefix: 'IBO', rslPrefix: 'RLS', series: 'WLF,IBO,RLS', pad: 3 } }), 'WLF-004');
+  assert.equal(nextOrderNo(L, { orders: { prefix: 'WLF', iboPrefix: 'IBO', rslPrefix: 'RLS', series: 'WLF,IBO,RLS', pad: 3 } }, 'ibo'), 'IBO-004');
+
+  const x = setup(); const tok = await adminToken(x);
+  const a = await addCustomer(x, tok, { username: 'ord1' });
+  const c1 = JSON.parse(x.db.get('customers').v).find((c) => c.id === a.id); assert.equal(c1.orderNo, 'WLF-001', 'first order gets the first number'); assert.ok(c1.orderAt > 0);
+  const b = await addCustomer(x, tok, { username: 'ord2', orderNo: 'Order-777' }); assert.ok(b.id);
+  assert.equal((await x.call('POST', '/api/admin/customers', { name: 'Z', username: 'ord3', password: 'secret12', planId: 'p1', orderNo: 'order-777' }, tok)).status, 409, 'same number refused');
+  assert.equal((await x.call('PUT', `/api/admin/customers/${b.id}`, { orderNo: 'wlf-001' }, tok)).status, 409, 'edit to a used number refused');
+  assert.equal((await x.call('PUT', `/api/admin/customers/${b.id}`, { orderNo: 'WLF-001-02', name: 'second device' }, tok)).status, 200, 'another device of the same order is fine');
+  // organize: backup first, only adds orderAt, numbers untouched
+  const before = JSON.parse(x.db.get('customers').v).map((c) => ({ ...c })); for (const c of before) delete c.orderAt;
+  const cs = JSON.parse(x.db.get('customers').v); for (const c of cs) delete c.orderAt; x.db.set('customers', { v: JSON.stringify(cs), e: 0 });
+  const r = await x.call('POST', '/api/admin/orders/organize', {}, tok); assert.equal(r.status, 200, JSON.stringify(r.json));
+  const bkp = JSON.parse(x.db.get(r.json.backup).v); assert.equal(bkp.customers.length, 2); assert.equal(bkp.customers[0].orderAt, undefined, 'backup is the state before');
+  const after = JSON.parse(x.db.get('customers').v); assert.ok(after.every((c) => c.orderAt > 0));
+  assert.deepEqual(after.map((c) => { const y = { ...c }; delete y.orderAt; return y; }), before);
+  const sum = (await x.call('GET', '/api/admin/orders', {}, tok)).json; assert.equal(sum.backups.length, 1); assert.equal(sum.next.standard, 'WLF-002');
+  assert.equal((await x.call('GET', '/api/admin/orders/backup', {}, tok, { key: r.json.backup })).json.customers.length, 2);
+});

@@ -115,6 +115,8 @@ export const DEFAULT_SETTINGS = () => ({
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
   // Seasonal promotion (Black Friday). When it is on and today is between the dates, the code is added to renewal emails,
   // WhatsApp / Telegram messages for renewals, trials and orders, and it is ready as a newsletter and a Telegram channel post.
+  // Order numbers: next number = highest number used in the series + 1 (one shared counter, like the Google Sheet: WLF-139, IBO-142 → next 143).
+  orders: { prefix: 'WLF', iboPrefix: 'IBO', rslPrefix: 'RLS', series: 'WLF,IBO,RLS', pad: 3, devPad: 2 },
   promo: { on: false, name: 'Black Friday', code: 'BLACKFRIDAY', offer: '', from: '2026-11-17', to: '2026-12-01', email: true, whatsapp: true, telegram: true },
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false, mode: 'auto', notifyAdmin: true },
@@ -253,6 +255,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/order/send') return 'customers_edit';
   if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
+  if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
@@ -512,6 +515,70 @@ export function parseLineLink(link) {
   if (!user || !pass || /\.(php|m3u8?|ts)$/i.test(user)) return null;
   return { dns: u.origin, u: user, p: pass };
 }
+// ---- Order numbers (kept exactly as typed; these helpers only read them) ----
+// "WLF-045-04" → main WLF-045, device 04 · "Owl-404-01 to 04" → devices 1..4 · "Order-62-SC58" → sub SC58
+const INVIS = /[​-‏‪-‮⁠﻿]/g;
+export function parseOrderNo(o) {
+  const raw = String(o || '').replace(INVIS, '').trim();
+  const m = raw.match(/^([A-Za-z]+)\s*-\s*(\d+)(.*)$/);
+  if (!m) return { raw, prefix: '', num: null, main: raw, dev: null, devTo: null, sub: '' };
+  const rest = m[3].trim(); let dev = null, devTo = null, sub = '', r;
+  if ((r = rest.match(/^-\s*0*(\d{1,2})\s*(?:to|-|–)\s*0*(\d{1,2})$/i))) { dev = +r[1]; devTo = +r[2]; }
+  else if ((r = rest.match(/^-\s*0*(\d{1,2})$/))) dev = +r[1];
+  else if (rest) sub = rest.replace(/^-\s*/, '');
+  return { raw, prefix: m[1], num: Number(m[2]), main: `${m[1]}-${m[2]}`, dev, devTo, sub };
+}
+export const orderKey = (o) => String(o || '').replace(INVIS, '').replace(/\s+/g, '').toLowerCase();
+// When the order was placed: the date it was imported with (kept in orderAt), else creation / start date.
+export const orderAt = (c) => Number(c.orderAt) || Number(c.createdAt) || Number(c.startAt) || 0;
+// Oldest → newest: order date, then order number (Order-001 before Order-002), then device.
+export function orderCompare(a, b) {
+  const d = orderAt(a) - orderAt(b); if (Math.abs(d) >= 60000) return d;
+  const x = parseOrderNo(a.orderNo), y = parseOrderNo(b.orderNo);
+  if (x.num !== null && y.num !== null && x.num !== y.num) return x.num - y.num;
+  return (x.dev || 0) - (y.dev || 0) || String(x.raw).localeCompare(String(y.raw), undefined, { numeric: true }) || d;
+}
+// Original sequence of the whole list. Inside one counter the NUMBER decides (Order-001, Order-002, … even if a row's date
+// moved because of a renewal); the counters are then merged by date. Counters: your series (WLF/IBO/RLS share one), the old
+// sheet (Order, OWL, CAR, XTR… shared one), resellers (Resseler-01…) and trials (T-…). Records without a number go by date.
+export function orderRanks(list, s) {
+  const series = s ? orderSeries(s) : ['WLF', 'IBO', 'RLS'];
+  const grp = (p) => { const P = p.toUpperCase(); return series.includes(P) ? 'S' : P === 'T' ? 'T' : /^(RES+EL+ERS?|RESELLER|RSL|RLS)$/.test(P) ? 'R' + P : 'L'; };
+  const groups = new Map(); const eff = new Map(); const pos = new Map();
+  for (const c of list) { const o = parseOrderNo(c.orderNo); if (o.num === null) { eff.set(c, orderAt(c) || Infinity); continue; } const g = grp(o.prefix); (groups.get(g) || groups.set(g, []).get(g)).push([c, o]); }
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => a[1].num - b[1].num || (a[1].dev || 0) - (b[1].dev || 0) || String(a[1].sub).localeCompare(String(b[1].sub), undefined, { numeric: true }) || orderAt(a[0]) - orderAt(b[0]));
+    let m = Infinity; for (let i = arr.length - 1; i >= 0; i--) { const t = orderAt(arr[i][0]); if (t) m = Math.min(m, t); eff.set(arr[i][0], m); pos.set(arr[i][0], i); }
+  }
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0); // safe with Infinity (records without any date go last)
+  const out = [...list].sort((a, b) => cmp(eff.get(a), eff.get(b)) || cmp(pos.get(a) ?? 1e9, pos.get(b) ?? 1e9) || cmp(orderAt(a) || Infinity, orderAt(b) || Infinity));
+  const rank = new Map(); out.forEach((c, i) => rank.set(c.id, i)); return rank;
+}
+// Device references of one order: WLF-045-01 … WLF-045-04
+export function orderDevices(c) {
+  const o = parseOrderNo(c.orderNo); if (!o.raw) return [];
+  const n = Math.max(1, connDevicesSafe(c), o.devTo || 0); const w = 2;
+  if (o.num === null || o.sub) return n > 1 ? Array.from({ length: n }, (_, i) => `${o.raw}-${String(i + 1).padStart(w, '0')}`) : [o.raw];
+  if (n <= 1 && !o.dev) return [o.raw];
+  return Array.from({ length: Math.max(n, o.dev || 0) }, (_, i) => `${o.main}-${String(i + 1).padStart(w, '0')}`);
+}
+const connDevicesSafe = (c) => { try { return connDevices(c); } catch { return Number(c.connections) || 1; } };
+export function orderSeries(s) { const o = (s && s.orders) || {}; const l = String(o.series || [o.prefix, o.iboPrefix, o.rslPrefix].filter(Boolean).join(',')).split(/[,\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean); return l.length ? l : ['WLF', 'IBO', 'RLS']; }
+// Next number for a new order: one counter shared by the series prefixes (WLF / IBO / RLS).
+export function nextOrderNo(list, s, kind = 'standard') {
+  const o = s.orders || {}; const series = orderSeries(s); let max = 0;
+  for (const c of list) { const p = parseOrderNo(c.orderNo); if (p.num !== null && series.includes(p.prefix.toUpperCase())) max = Math.max(max, p.num); }
+  const prefix = String((kind === 'ibo' ? o.iboPrefix : kind === 'reseller' ? o.rslPrefix : o.prefix) || o.prefix || 'WLF').trim();
+  let n = max + 1, ref;
+  do { ref = `${prefix}-${String(n).padStart(Math.max(1, Math.min(6, Number(o.pad) || 3)), '0')}`; n++; } while (orderTaken(list, ref));
+  return ref;
+}
+export const orderTaken = (list, ref, self) => {
+  const k = orderKey(ref); if (!k) return null; const exact = list.find((c) => c !== self && orderKey(c.orderNo) === k); if (exact) return exact;
+  const o = parseOrderNo(ref); if (o.num === null || o.dev || o.sub) return null; // WLF-045-02 may join order WLF-045 (another device)
+  return list.find((c) => c !== self && parseOrderNo(c.orderNo).main.toLowerCase() === o.main.toLowerCase() && parseOrderNo(c.orderNo).num === o.num) || null;
+};
+
 // ---- Connections: one customer can have several lines (devices), each with its own type and M3U ----
 export const CONN_TYPES = { xtream1: 'Xtream Codes 1 + M3U', xtream2: 'Xtream Codes 2 + M3U', unlimited: 'Unlimited M3U' };
 export function connM3u(x) {
@@ -2958,6 +3025,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let newRows = null;
         if (body?.email && Array.isArray(body.email.transRows)) { if (!isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.'); newRows = normRows(body.email.transRows, transRowsOf(s)); delete body.email.transRows; }
         const next = deepMerge(s, body || {});
+        if (isObj(body.orders)) { const q = { ...(s.orders || {}), ...body.orders }; const pf = (x, d) => (/^[A-Za-z]{1,10}$/.test(String(x || '').trim()) ? String(x).trim() : d);
+          next.orders = { prefix: pf(q.prefix, 'WLF'), iboPrefix: pf(q.iboPrefix, 'IBO'), rslPrefix: pf(q.rslPrefix, 'RLS'), pad: Math.max(1, Math.min(6, Number(q.pad) || 3)), devPad: 2 }; next.orders.series = [next.orders.prefix, next.orders.iboPrefix, next.orders.rslPrefix].join(','); }
         if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
           next.promo = { on: !!q.on, name: String(q.name || 'Black Friday').trim().slice(0, 40) || 'Black Friday', code: String(q.code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 30), offer: String(q.offer || '').trim().slice(0, 60), from: day(q.from), to: day(q.to), email: q.email !== false, whatsapp: q.whatsapp !== false, telegram: q.telegram !== false }; }
         if (newRows) { next.email.transRows = newRows; next.email.transKeys = []; next.email.transDomains = []; }
@@ -3006,6 +3075,39 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(next);
       }
 
+      if (R('GET', '/api/admin/orders')) { // numbering summary: next number, duplicates, multi-device orders, backups
+        const list = (await getCustomers()).filter((c) => !c.rsOrder);
+        const by = new Map(); for (const c of list) { const k = orderKey(c.orderNo); if (!k) continue; (by.get(k) || by.set(k, []).get(k)).push(c); }
+        const dups = [...by.values()].filter((v) => v.length > 1).map((v) => v.sort(orderCompare).map((c) => ({ id: c.id, name: c.name, username: c.username, orderNo: c.orderNo, at: orderAt(c) })));
+        const mains = new Map(); for (const c of list) { const p = parseOrderNo(c.orderNo); if (p.num === null) continue; const k = p.main.toLowerCase(); (mains.get(k) || mains.set(k, []).get(k)).push(c); }
+        const multi = list.filter((c) => orderDevices(c).length > 1).length;
+        const missing = list.filter((c) => !String(c.orderNo || '').trim()).map((c) => ({ id: c.id, name: c.name, username: c.username }));
+        const series = orderSeries(s); const sMax = {}; for (const c of list) { const p = parseOrderNo(c.orderNo); if (p.num !== null) { const k = p.prefix.toUpperCase(); sMax[k] = Math.max(sMax[k] || 0, p.num); } }
+        return ok({ settings: s.orders, series, next: { standard: nextOrderNo(list, s), ibo: nextOrderNo(list, s, 'ibo'), reseller: nextOrderNo(list, s, 'reseller') }, prefixes: sMax,
+          total: list.length, withNumber: list.length - missing.length, missing: missing.slice(0, 50), missingCount: missing.length, duplicates: dups, multiDevice: multi,
+          sharedMain: [...mains.values()].filter((v) => v.length > 1).length, dated: list.filter((c) => Number(c.orderAt)).length,
+          backups: ((await store.get('backups')) || []).map((b) => ({ key: b.key, at: b.at, customers: b.customers, why: b.why })) });
+      }
+      if (R('POST', '/api/admin/orders/organize')) { // owner: full backup first, then only ADDS the original order date (orderAt). Order numbers are never changed.
+        const list = await getCustomers(); const sales = await getSales();
+        const at = Date.now(); const key = 'backup:' + at;
+        await store.put(key, { version: 2, exportedAt: at, settings: s, customers: list, sales, tx: await getTx(), stock: await getStock(), resellers: await getResellers(), ibo: (await store.get('ibo')) || [] });
+        const bl = ((await store.get('backups')) || []); bl.unshift({ key, at, customers: list.length, why: 'Before organizing order numbers' });
+        for (const old of bl.slice(5)) await store.del(old.key); await store.put('backups', bl.slice(0, 5));
+        const first = new Map(); for (const x of sales) if (x.customerId && Number(x.at) && (!first.has(x.customerId) || x.at < first.get(x.customerId))) first.set(x.customerId, Number(x.at));
+        let dated = 0;
+        for (const c of list) {
+          if (Number(c.orderAt)) continue;
+          const cands = [first.get(c.id), Number(c.startAt), Number(c.createdAt), Number((c.renewals || [])[0]?.at)].filter((x) => x > 0);
+          if (cands.length) { c.orderAt = Math.min(...cands); dated++; }
+        }
+        await saveCustomers(list); await log('admin', `Orders organized: backup ${key}, original order date kept for ${dated} customers (order numbers unchanged)`);
+        return ok({ ok: true, backup: key, dated, total: list.length });
+      }
+      if (R('GET', '/api/admin/orders/backup')) { // download one of the saved backups
+        const k = String(query.key || ''); if (!/^backup:\d+$/.test(k)) return err(400, 'Unknown backup.');
+        const b = await store.get(k); return b ? ok(b) : err(404, 'This backup is gone.');
+      }
       if (R('GET', '/api/admin/customers/newstats')) { // new customers of one month (default: last month), Bangkok time
         const TZ = 7 * 3600000; const now = new Date(Date.now() + TZ);
         let [y, mo] = /^\d{4}-\d{2}$/.test(String(query.month || '')) ? String(query.month).split('-').map(Number) : [now.getUTCFullYear(), now.getUTCMonth()];
@@ -3080,6 +3182,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           renewals: [{ at: Date.now(), type: 'new', planId: plan ? plan.id : 'custom', days: Math.round((expiresAt - startAt) / DAY), price: Number(body.price) || 0, credits: plan ? planCredits(plan) : Number(body.credits) || 0 }],
         };
         if (ln0) { c.lineUsername = ln0.u; c.linePassword = ln0.p; c.dns = ln0.dns; }
+        // Order number: the one typed (must not be used yet) or the next one of the series
+        { const typed = String(body.orderNo || '').trim();
+          if (typed) { const t2 = orderTaken(list, typed); if (t2) return err(409, `Order number ${typed} is already used by ${t2.name || t2.username}.`); c.orderNo = typed; }
+          else if (body.autoOrderNo !== false) c.orderNo = nextOrderNo(list, s, body.orderKind === 'ibo' ? 'ibo' : body.orderKind === 'reseller' ? 'reseller' : 'standard');
+          c.orderAt = c.createdAt; }
         if (CONN_TYPES[body.lineType]) c.lineType = body.lineType;
         if (Array.isArray(body.lines)) { const ls = cleanConns(body.lines); if (ls.length) c.lines = ls; }
         let panel = null;
@@ -3184,6 +3291,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             c.username = u;
           }
           if (body.password) { c.salt = uid(8); c.passwordHash = await hashPassword(body.password, c.salt); c.loginPassword = String(body.password); }
+          if (body.orderNo !== undefined && orderKey(body.orderNo) !== orderKey(c.orderNo)) { const t2 = orderTaken(list, body.orderNo, c); if (t2) return err(409, `Order number ${String(body.orderNo).trim()} is already used by ${t2.name || t2.username}.`); body.orderNo = String(body.orderNo).trim(); }
           for (const k of ['orderNo', 'country', 'address', 'server', 'panel', 'device', 'paymentMethod', 'telegram', 'macAddress', 'deviceApp', 'callNotes']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.statusFlag !== undefined && ['normal', 'excellent', 'dispute'].includes(body.statusFlag)) {
             const was = c.statusFlag; c.statusFlag = body.statusFlag;
