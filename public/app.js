@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=94';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=95';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -18,6 +18,9 @@ const fmtDT = (x) => (x ? new Date(x).toLocaleString(undefined, { day: 'numeric'
 const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const mad = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 const num = (n, cur) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur || ''}`;
+// Time left, never rounded up: "23 h left", "2 days 8 h left", "29 days left", "3 days ago"
+const leftTxt = (c) => { const ms = c.expiresAt - Date.now(); if (ms <= 0) { const d = Math.floor(-ms / 86400000); return d ? d + (d === 1 ? ' day ago' : ' days ago') : 'ended today'; }
+  const h = Math.floor(ms / 3600000); if (h < 48) return (h || '<1') + ' h left'; const d = Math.floor((ms + 3600000) / 86400000), r = Math.max(0, h - d * 24); return d + ' days' + (d < 7 && r ? ' ' + r + ' h' : '') + ' left'; };
 const isoDay = (t) => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const money = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${state.config?.currency || ''}`;
 const initials = (n) => String(n || '?').trim().split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
@@ -1039,7 +1042,7 @@ function customerListHtml() {
       <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div><div style="margin:-2px 0 6px">${updTag(c)}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
     ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${orderChip(c)}${connChip(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
-      <td>${fmtDate(c.expiresAt)}<div>${updTag(c)}</div><div class="small muted">${c.isTrial && c.state !== 'expired' ? c.hoursLeft + ' hours left' : c.daysLeft >= 0 ? c.daysLeft + ' days left' : -c.daysLeft + ' days ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
+      <td>${fmtDate(c.expiresAt)}<div>${updTag(c)}</div><div class="small muted">${leftTxt(c)}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function adminCustomers() {
@@ -1123,7 +1126,7 @@ function customerForm(c) {
     <button type="button" class="btn sm" data-act="conn-add" style="margin:2px 0 12px">＋ Add a connection</button>
     <h3 style="margin-top:6px">Subscription</h3>
     <div class="grid2">${field('Plan', 'planId', c.planId, { type: 'select', options: planOpts })}<div class="field"><span>Devices in total</span><b id="conn-total" style="display:block;padding:10px 0">${connTotal(c)}</b></div></div>
-    <div class="grid2">${field('Start date', 'startAt', isoDay(c.startAt || Date.now()), { type: 'date' })}${field('Expiry date', 'expiresAt', c.expiresAt ? isoDay(c.expiresAt) : '', { type: 'date', help: isNew ? 'Leave empty to calculate from the plan.' : '' })}</div>
+    <div class="grid2">${field('Start date', 'startAt', isoDay(c.startAt || Date.now()), { type: 'date' })}${field('Expiry date', 'expiresAt', c.expiresAt ? isoDay(c.expiresAt) : '', { type: 'date', attrs: c.expiresAt ? `data-ms="${c.expiresAt}"` : '', help: isNew ? 'Leave empty to calculate from the plan.' : c.isTrial && c.state !== 'expired' ? `Trial ends ${fmtDT(c.expiresAt)} (${c.hoursLeft} h left). Change the date only to give more days.` : `Ends ${fmtDT(c.expiresAt)}` })}</div>
     ${isNew ? `<div class="grid2">${accountSelect(s, 'accountId', '')}${stripeSelect(s, 'stripeAccountId', '')}${field('Amount received', 'price', s.plans[0]?.price || 0, { type: 'number', attrs: 'min="0" step="any"', help: 'In the currency of the chosen account.' })}</div>
       ${toggle('Email the login details to the customer', 'sendEmail', !!s.email.resendKey, s.email.resendKey ? 'Sent with Resend in the language above.' : 'Set up Resend in "Trial & email" first.')}
       ${s.reseller.enabled ? toggle('Create the line on the TVplus panel now', 'createOnPanel', true, 'Uses the "create" action from API settings.') : '<p class="small muted">Reseller API is off — the line will only be saved in this app.</p>'}` : ''}
@@ -3186,9 +3189,16 @@ async tx(f) {
     }
     if (!o.whatsapp) o.whatsapp = o.phone;
     o.lines = connRead(f);
+    // Dates: a field that was not changed is not sent, so the exact start / end time (e.g. a 24-hour trial) is kept.
+    // A changed date is sent as an exact time: start = now if it is today, else the start of that day; end = same time of day as before, else the end of that day.
+    for (const k of ['startAt', 'expiresAt']) { const el = f.elements[k]; const v = String(o[k] || ''); delete o[k]; if (!el || !v || (id && v === el.defaultValue)) continue;
+      const [y, m, d] = v.split('-').map(Number); const day = new Date(y, m - 1, d);
+      if (k === 'startAt') o.startAtMs = v === isoDay(Date.now()) ? Date.now() : day.getTime();
+      else { const prev = Number(el.dataset.ms) || 0; if (prev) { const p = new Date(prev); day.setHours(p.getHours(), p.getMinutes(), p.getSeconds(), 0); o.expiresAtMs = day.getTime(); } else o.expiresAtMs = new Date(y, m - 1, d, 23, 59, 59).getTime(); } }
+    if (o.planId === 'custom' && !id && !o.expiresAtMs) { return toast('Pick an expiry date for custom plans', true); }
     const btn = f.querySelector('button.primary'); btn.disabled = true; let panelNote = '';
     try {
-      if (id) { if (!o.password) delete o.password; if (!o.expiresAt) delete o.expiresAt; await api('PUT', `/api/admin/customers/${id}`, o); toast('Customer updated'); }
+      if (id) { if (!o.password) delete o.password; await api('PUT', `/api/admin/customers/${id}`, o); toast('Customer updated'); }
       else {
         o.appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
         const r = await api('POST', '/api/admin/customers', o);
@@ -3858,7 +3868,7 @@ async function adminAlerts(s) {
     <div class="chips"><a class="${ui.f ? '' : 'on'}" data-act="al-f" data-f="">All · ${total}</a>${groups.map((g) => `<a class="${ui.f === g.k ? 'on' : ''}" data-act="al-f" data-f="${g.k}">${g.icn} ${g.name} · ${g.list.length}</a>`).join('')}</div>
     ${shown.length ? shown.map((g) => { const all = ui.open[g.k] || ui.f === g.k; const rows = all ? g.list : g.list.slice(0, 5);
       return `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${g.icn} ${g.name} <span class="pill ${g.list.length ? 'st-expiring' : 'st-active'}">${g.list.length}</span></h3>${g.list.length ? `<button class="btn sm" data-act="al-csv" data-perm="exports" data-k="${g.k}">⬇ CSV</button>` : ''}</div><p class="small muted" style="margin:4px 0 10px">${esc(g.why)}</p>
-        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + fmtDate(c.expiresAt) : c.isTrial ? c.hoursLeft + ' h left' : c.daysLeft + ' days left'}${c.email ? ' · ' + esc(c.email) : ''}${c.playErr && Date.now() - c.playErr.at < 3 * 86400000 ? `<br>⚠️ ${fmtDT(c.playErr.at)} · ${esc(c.playErr.action)} · code ${esc(c.playErr.status || '—')} · via ${esc(c.playErr.route)}` : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
+        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + fmtDate(c.expiresAt) : leftTxt(c)}${c.email ? ' · ' + esc(c.email) : ''}${c.playErr && Date.now() - c.playErr.at < 3 * 86400000 ? `<br>⚠️ ${fmtDT(c.playErr.at)} · ${esc(c.playErr.action)} · code ${esc(c.playErr.status || '—')} · via ${esc(c.playErr.route)}` : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
         ${g.list.length > 5 && !all ? `<div style="text-align:center;margin-top:10px"><button class="btn sm" data-act="al-more" data-k="${g.k}">Show all ${g.list.length}</button></div>` : ''}</div>`; }).join('') : `<div class="empty"><span class="ic">✅</span>${q ? 'No alert matches your search.' : 'Nothing needs your attention right now.'}</div>`}`;
 }
 

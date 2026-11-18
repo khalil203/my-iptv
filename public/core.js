@@ -1770,6 +1770,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     else delete c.lineBad;
     if (auth && exp) {
       if (c.renewPending) { if (exp >= c.expiresAt - DAY) { c.expiresAt = exp; delete c.renewPending; } } // you renewed it on the panel: done
+      else if (c.isTrial && exp > c.expiresAt) { /* a free trial keeps its own trial hours even if the line runs longer on the panel */ }
       else if (Math.abs(c.expiresAt - exp) > 60000) c.expiresAt = exp; // the panel's end date wins
     }
     if (auth && c.panel.max) c.connections = c.panel.max;
@@ -2093,12 +2094,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
   function view(c, s) {
     const now = Date.now();
-    const daysLeft = Math.ceil((c.expiresAt - now) / DAY);
+    const daysLeft = c.expiresAt >= now ? Math.floor((c.expiresAt - now + 3600000) / DAY) : -Math.ceil((now - c.expiresAt) / DAY); // whole days left, never rounded up
     const warn = Number(s.userDashboard.expiryWarningDays) || 7;
     const state = c.status === 'disabled' ? 'disabled' : c.expiresAt < now ? 'expired' : daysLeft <= warn ? 'expiring' : 'active';
     const plan = s.plans.find((p) => p.id === c.planId);
     const { passwordHash, salt, totp, emailCode, ...rest } = c; // secrets never leave the server
-    return { ...rest, cur: custCurrency(s, c), twoFactor: !!(totp && totp.on), emailVerified: !!c.emailVerified && c.emailVerified === cleanEmail(c.email), daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
+    return { ...rest, cur: custCurrency(s, c), twoFactor: !!(totp && totp.on), emailVerified: !!c.emailVerified && c.emailVerified === cleanEmail(c.email), daysLeft, hoursLeft: Math.max(0, Math.floor((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
   }
 
   // Use the username / password / DNS the panel gives back (if it returns them).
@@ -3830,8 +3831,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (list.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (admin && admin.username.toLowerCase() === username.toLowerCase()) || (await getTeam()).some((x) => x.username.toLowerCase() === username.toLowerCase()))
           return err(400, 'This username is already used.');
         const plan = s.plans.find((p) => p.id === body.planId);
-        const startAt = body.startAt ? new Date(body.startAt).getTime() : Date.now();
-        const expiresAt = body.expiresAt ? new Date(body.expiresAt).getTime() + DAY - 1000 : startAt + (plan ? plan.days : 30) * DAY;
+        // Exact start: now (or the time given). A date string for today means "now", not midnight. Trials last the trial hours, plans their days.
+        const msOk = (v) => Number.isFinite(Number(v)) && Number(v) > 1e12 && Number(v) < 4102444800000;
+        const sDay = body.startAt ? dayStart(String(body.startAt).slice(0, 10)) : null;
+        const startAt = msOk(body.startAtMs) ? Math.round(Number(body.startAtMs)) : sDay && Math.abs(sDay - dayStart(new Date().toISOString().slice(0, 10))) > DAY ? sDay : Date.now();
+        const trialNew = body.isTrial === true || body.isTrial === 'true' || body.isTrial === 'on';
+        const expiresAt = msOk(body.expiresAtMs) ? Math.round(Number(body.expiresAtMs)) : body.expiresAt ? dayStart(String(body.expiresAt).slice(0, 10)) + DAY - 1000 : startAt + (trialNew ? (Number(s.trial.hours) || 24) * 3600000 : (plan ? plan.days : 30) * DAY);
         const salt = uid(8);
         const c = {
           id: uid(8), name: String(body.name || username), phone: String(body.phone || ''), note: String(body.note || ''),
@@ -3974,8 +3979,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               } catch {}
             }
           }
-          if (body.expiresAt) c.expiresAt = new Date(body.expiresAt).getTime() + DAY - 1000;
-          if (body.startAt) c.startAt = new Date(body.startAt).getTime();
+          // Exact times from the app. A trial that was just started keeps its 24 hours. An old-style date string that is the same day as now saved is ignored (it used to reset the time to 23:59 and add days).
+          const msOk = (v) => Number.isFinite(Number(v)) && Number(v) > 1e12 && Number(v) < 4102444800000;
+          if (!activated) {
+            if (msOk(body.expiresAtMs)) c.expiresAt = Math.round(Number(body.expiresAtMs));
+            else if (body.expiresAt && Math.abs(dayStart(String(body.expiresAt).slice(0, 10)) - dayStart(new Date(c.expiresAt).toISOString().slice(0, 10))) > DAY) c.expiresAt = dayStart(String(body.expiresAt).slice(0, 10)) + DAY - 1000;
+            if (msOk(body.startAtMs)) c.startAt = Math.round(Number(body.startAtMs));
+            else if (body.startAt && Math.abs(dayStart(String(body.startAt).slice(0, 10)) - dayStart(new Date(c.startAt || 0).toISOString().slice(0, 10))) > DAY) c.startAt = dayStart(String(body.startAt).slice(0, 10));
+          }
           await saveCustomers(list);
           await log('customer', `Updated ${c.username}${activated ? ' · line added, trial started' : ''}`);
           if (activated && cleanEmail(c.email)) { const m = accessEmail(s, c, c.loginPassword, c.isTrial ? 'trial' : 'sub', s.email.appUrl || body.appUrl); const r = await sendEmail(s, c.email, m.subject, m.html); await log('customer', `Login email to ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`);           return ok({ ...viewP(c, s), activated: true, emailed: !!r.ok });

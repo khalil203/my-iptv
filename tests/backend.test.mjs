@@ -1891,3 +1891,34 @@ test('notifications: devices subscribe, instant alerts to agents, shift start, o
   assert.ok(!(await x.store.get('pushsubs')).some((s) => s.endpoint.endsWith('fred-pc')));
   const devs = (await x.call('GET', '/api/admin/push/devices', {}, tok)).json; assert.equal(devs.customers, 1); assert.equal(devs.resellers, 1);
 });
+
+test('time left: a trial keeps exactly its hours when its line is added; unchanged form dates never stretch an end time; no rounding up', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { trial: { enabled: true, hours: 24 } }, tok);
+  const r = await x.call('POST', '/api/trial', { name: 'Trial Person', email: 'trial.person@example.com', phone: '+12025550143', ip: '7.7.7.7' });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const list = (await x.call('GET', '/api/admin/customers', {}, tok)).json; const c = (list.customers || list).find((y) => y.isTrial);
+  assert.ok((await x.store.get('customers')).find((y) => y.id === c.id).pendingLine, 'trial waits for a line');
+  // the agent adds the line; the old form still sends the date fields (as before the fix)
+  const d = (t) => new Date(t).toISOString().slice(0, 10);
+  const up = await x.call('PUT', `/api/admin/customers/${c.id}`, { name: c.name, email: c.email, m3u: 'http://line.example.com/get.php?username=line1&password=pass1&type=m3u_plus&output=ts', startAt: d(Date.now() + 86400000), expiresAt: d(Date.now() + 3 * 86400000) }, tok);
+  assert.equal(up.status, 200, JSON.stringify(up.json));
+  const after = (await x.store.get('customers')).find((y) => y.id === c.id);
+  const hours = (after.expiresAt - Date.now()) / 3600000; assert.ok(hours > 23.9 && hours <= 24.01, 'trial is exactly 24 h, got ' + hours);
+  // saving again with the same day in the form keeps the exact time
+  const before = after.expiresAt;
+  await x.call('PUT', `/api/admin/customers/${c.id}`, { name: c.name, expiresAt: d(before), startAt: d(after.startAt) }, tok);
+  assert.equal((await x.store.get('customers')).find((y) => y.id === c.id).expiresAt, before);
+  // new app: exact times
+  const exact = Date.now() + 5 * 86400000 + 3600000;
+  await x.call('PUT', `/api/admin/customers/${c.id}`, { name: c.name, expiresAtMs: exact }, tok);
+  assert.equal((await x.store.get('customers')).find((y) => y.id === c.id).expiresAt, exact);
+  // a new 1-month customer starts now and gets exactly 30 days; today's date in the form means now, not midnight
+  const nc = await x.call('POST', '/api/admin/customers', { name: 'New Person', username: 'newone', password: 'secret12', email: 'new.person@example.com', planId: 'p1', startAt: d(Date.now()) }, tok);
+  const n = (await x.store.get('customers')).find((y) => y.username === 'newone');
+  assert.ok(Math.abs(n.startAt - Date.now()) < 5000); const plan = (await x.call('GET', '/api/admin/settings', {}, tok)).json.plans.find((p) => p.id === 'p1');
+  assert.equal(Math.round((n.expiresAt - n.startAt) / 3600000), plan.days * 24);
+  const v = (await x.call('GET', '/api/admin/customers', {}, tok)).json; const vv = (v.customers || v).find((y) => y.username === 'newone');
+  assert.equal(vv.daysLeft, plan.days, 'a fresh plan shows its full days');
+  const tv = (v.customers || v).find((y) => y.id === c.id); assert.equal(tv.daysLeft, 5); assert.ok([120, 121].includes(tv.hoursLeft));
+});
