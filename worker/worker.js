@@ -65,7 +65,7 @@ export default {
     if (/^\/intprototv\/+$/i.test(url.pathname)) return Response.redirect(url.origin + '/intprototv', 301); // admin sign-in, without the trailing slash
     if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
     // Public landing pages served by the single-page app (clean URLs, no .html)
-    if (url.pathname === '/freetrial' || url.pathname === '/resellers' || url.pathname === '/profile' || /^\/intprototv$/i.test(url.pathname)) {
+    if (url.pathname === '/freetrial' || url.pathname === '/resellers' || url.pathname === '/profile' || /^\/rsl\/?$/i.test(url.pathname) || /^\/intprototv$/i.test(url.pathname)) {
       const r = await env.ASSETS.fetch(new Request(url.origin + '/index.html', { method: 'GET', headers: request.headers }));
       return serveAsset(request, r);
     }

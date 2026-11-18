@@ -92,12 +92,15 @@ export const DEFAULT_SETTINGS = () => ({
   ],
   currency: 'USD',
   resellerPackages: [
+    { id: 'r5', name: 'Starter', credits: 5, price: 149.99 },
     { id: 'r10', name: 'Basic', credits: 10, price: 280.99 },
     { id: 'r20', name: 'Standard', credits: 20, price: 499.99 },
     { id: 'r30', name: 'Premium', credits: 30, price: 630.99 },
     { id: 'r50', name: 'VIP', credits: 50, price: 999.99 },
   ],
   resellerCurrency: 'EUR',
+  // How resellers can pay (shown on intproto-tv.store/rsl when they order credits). The payment link / details are sent after the order.
+  resellerPayMethods: ['PayPal', 'Card (payment link)', 'USDT (crypto)', 'Bank transfer'],
   // Storefront packages (spec §3): IBO Player activations + multi-device yearly plans.
   orderPackages: [
     { id: 's1m', title: '1 Month', days: 30, devices: 1, price: 29.99, badge: '', link: '' },
@@ -646,6 +649,24 @@ export function promoCampaign(s) {
 }
 const promoBanner = (lang, p) => { const offer = String(p.offer || '').trim(); const code = String(p.code || '').trim();
   return lang === 'fr' ? `${offer ? offer + ' sur toutes les formules' : 'Notre plus grosse réduction de l’année'} avec le code ${code}` : `${offer ? offer + ' on every plan' : 'Our biggest discount of the year'} with code ${code}`; };
+// Email to a reseller after an order (or when the login is sent): confirmation, order details, dashboard login (/rsl) and IPTV panel.
+export function resellerOrderEmail(s, p, order, login, appUrl, opts = {}) {
+  const base = String(s.email.appUrl || appUrl || 'https://intproto-tv.store').replace(/\/+$/, ''); const app = s.branding.appName || 'IPTV';
+  const dash = base + '/rsl'; const first = String(p.name || '').trim().split(/\s+/)[0] || 'there';
+  const day = (t) => new Date(t || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const lines = [];
+  if (order) {
+    lines.push(opts.isNew ? `Welcome to the ${app} reseller program, and thank you for your first order! Your reseller account is ready and your purchase is confirmed.` : `Thank you for your order! Your purchase of *${order.credits} credits* is confirmed and complete.`);
+    lines.push(`*Order:* ${order.ref || '—'}\n*Package:* ${order.pkg || 'Credits'}${order.credits && !/credit/i.test(order.pkg || '') ? ` · ${order.credits} credits` : ''}\n*Amount:* ${order.amount ? `${Number(order.amount).toFixed(2)} ${order.currency || ''}` : '—'}\n*Date:* ${day(order.at)}\n*Reseller ID:* ${p.rslId}`);
+  } else lines.push(`Here are your login details for your ${app} reseller dashboard.`);
+  lines.push(`*Your reseller dashboard*\n*Link:* ${dash}\n*Username:* ${login.username}\n*Password:* ${login.pass || '(the one you chose)'}`);
+  if (p.panelUrl || p.panelUser) lines.push(`*Your IPTV panel*\n${p.panelUrl ? `*Link:* ${p.panelUrl}\n` : ''}${p.panelUser ? `*Username:* ${p.panelUser}\n` : ''}${p.panelPass ? `*Password:* ${p.panelPass}` : ''}`.trim());
+  lines.push(`On your dashboard you can see your credits, your orders, your lines and your panel details, and order more credits any time.`);
+  lines.push(`Need help? Just reply to this email${s.branding.whatsapp ? ' or message us on WhatsApp' : ''}, we are happy to help.`);
+  const subject = order ? (opts.isNew ? `Welcome to ${app} resellers · order ${order.ref || ''} confirmed`.replace(/\s+·\s+order\s+confirmed$/, ' · order confirmed') : `Order confirmed: ${order.credits} credits · ${app}`) : `Your ${app} reseller dashboard login`;
+  const camp = { split: false, lang: 'en', badge: order ? '✅ Order complete' : '🔑 Reseller login', content: { all: { subject, title: order ? (opts.isNew ? `Welcome, ${first}!` : `Thank you, ${first}!`) : `Hello ${first}`, body: lines.join('\n\n'), button: 'Open my dashboard' } }, link: dash };
+  return newsletterEmail(s, { name: p.name, lang: 'en' }, camp, appUrl, '');
+}
 // Post for the public Telegram channel.
 export function promoChannelPost(s) {
   const p = s.promo || {}; const app = s.branding?.appName || 'IPTV'; const site = String(s.renewalOffer?.url || s.email?.website || '').replace(/\/+$/, '');
@@ -1130,6 +1151,18 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // A profile can be typed in by hand, made from customer rows (one person can have many order rows) or read from pasted text.
   const getResellers = async () => (await store.get('resellers')) || [];
   const saveResellers = (l) => store.put('resellers', l);
+  // Reseller dashboard login (intproto-tv.store/rsl). The password is kept so it can be sent again in emails, like the customers' one.
+  const rsGenPass = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let o = ''; const r = crypto.getRandomValues(new Uint8Array(10)); for (const b of r) o += a[b % a.length]; return o; };
+  async function rsSetPass(p, pass) { const salt = uid(8); p.login = { ...(p.login || {}), username: p.login?.username || p.rslId, pass, salt, hash: await hashPassword(pass, salt), at: Date.now() }; return p.login; }
+  async function rsEnsureLogin(p) { if (!p.login || !p.login.hash) await rsSetPass(p, rsGenPass()); if (!p.login.username) p.login.username = p.rslId; return p.login; }
+  // The next order number for a reseller order (shared counter with WLF / IBO, like the sheet: RLS-143)
+  const rsNextRef = (s, list, rs) => nextOrderNo([...list, ...rs.flatMap((x) => (x.orders || []).map((o) => ({ orderNo: o.ref })))], s, 'reseller');
+  async function rsSendOrderMail(s, p, order, appUrl, opts) {
+    const to = cleanEmail(p.email); if (!to) return { ok: false, error: 'This reseller has no email address.' };
+    const login = await rsEnsureLogin(p); const m = resellerOrderEmail(s, p, order, login, appUrl, opts);
+    const r = await sendEmail(s, to, m.subject, m.html); if (r.ok) { p.emailedAt = Date.now(); p.emailedSubject = m.subject; markSent(p, 'email'); }
+    return r;
+  }
   const RS_CUR = ['USD', 'EUR', 'MAD', 'USDT', 'THB', 'GBP'];
   const RS_ROW = /^\s*(?:res+el+ers?|rsl|rls)\s*[-_#]?\s*\d/i; // order numbers such as Reseller-04 or RLS-056
   const rsText = (x, n) => scrubCards(String(x ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()).trim().slice(0, n);
@@ -1198,7 +1231,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const byId = new Map(customers.map((c) => [c.id, c]));
     const rows = rs.map((p) => {
       const t = rsTotals(p, s, salesBy); const c0 = (p.customerIds || []).map((i) => byId.get(i)).find(Boolean);
-      return { id: p.id, rslId: p.rslId || '—', name: p.name, username: c0 ? c0.username : '', email: p.email || '', emails: p.emails || [], phone: p.phone || '', org: p.org || '', server: p.server || '', tag: p.tag || '', note: p.note || '', status: p.status || 'active', ...t, spentMad: rsRound(t.spentUsd * (Number(s.finance?.rates?.MAD) || 10)), customerIds: (p.customerIds || []).filter((i) => byId.has(i)), orders: [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), createdAt: p.createdAt || 0, joinedAt: p.joinedAt || t.firstAt || p.createdAt || 0, emailedAt: p.emailedAt || 0, emailedSubject: p.emailedSubject || '', telegram: p.telegram || '', panelUrl: p.panelUrl || '', panelUser: p.panelUser || '', panelPass: p.panelPass || '', contact: p.contact || {} };
+      return { login: p.login ? { username: p.login.username, pass: p.login.pass, at: p.login.at } : null, lastLogin: p.lastLogin || 0, creditsLeft: p.creditsLeft ?? null, requests: (p.requests || []).filter((q) => q.status === 'pending'), id: p.id, rslId: p.rslId || '—', name: p.name, username: c0 ? c0.username : '', email: p.email || '', emails: p.emails || [], phone: p.phone || '', org: p.org || '', server: p.server || '', tag: p.tag || '', note: p.note || '', status: p.status || 'active', ...t, spentMad: rsRound(t.spentUsd * (Number(s.finance?.rates?.MAD) || 10)), customerIds: (p.customerIds || []).filter((i) => byId.has(i)), orders: [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), createdAt: p.createdAt || 0, joinedAt: p.joinedAt || t.firstAt || p.createdAt || 0, emailedAt: p.emailedAt || 0, emailedSubject: p.emailedSubject || '', telegram: p.telegram || '', panelUrl: p.panelUrl || '', panelUser: p.panelUser || '', panelPass: p.panelPass || '', contact: p.contact || {} };
     }).sort((a, b) => b.credits - a.credits || b.spentUsd - a.spentUsd || a.name.localeCompare(b.name));
     rows.forEach((r, i) => { r.rank = i + 1; });
     return rows;
@@ -2003,7 +2036,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         for (const cand of [list.find((x) => x.username.toLowerCase() === username), ...list.filter((x) => String(x.lineUsername || '').toLowerCase() === username)]) {
           if (cand && ((await hashPassword(password, cand.salt)) === cand.passwordHash || (!cand.ownPassword && cand.linePassword && sameText(password, cand.linePassword)))) { c = cand; break; }
         }
-        if (!c) return wrong();
+        if (!c) { // resellers sign in to intproto-tv.store/rsl with their RSL id (or email) and the password from their email
+          const rs = await getResellers();
+          const p = rs.find((x) => x.login && x.login.hash && [x.login.username, x.rslId, x.email].some((v) => v && String(v).toLowerCase() === username));
+          if (!p || (await hashPassword(password, p.login.salt)) !== p.login.hash) return wrong();
+          if (p.status === 'paused') return err(403, 'This reseller account is paused. Please contact support.');
+          p.lastLogin = Date.now(); await saveResellers(rs);
+          return ok({ token: await newSession('reseller', p.id, s, meta), role: 'reseller' });
+        }
         if (c.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
         { const st = await second(c); if (st) return st; }
         c.lastLogin = Date.now();
@@ -2021,6 +2061,50 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       const ses = await getSession(token);
       if (!ses) return err(401, 'Please sign in again.');
+
+      // ---------- reseller dashboard (intproto-tv.store/rsl) ----------
+      if (ses.role === 'reseller') {
+        const rs = await getResellers(); const p = rs.find((x) => x.id === ses.id);
+        if (!p) return err(401, 'Account not found.'); if (p.status === 'paused') return err(401, 'This reseller account is paused.');
+        const cur = s.resellerCurrency || 'EUR';
+        if (R('GET', '/api/rsl/me')) {
+          const sales = await getSales(); const list = await getCustomers(); const now = Date.now(); const warn = 7 * DAY;
+          const row = rsRows([p], s, sales, list)[0] || {};
+          const lines = (p.customerIds || []).map((id) => list.find((c) => c.id === id)).filter(Boolean).map((c) => { const v = view(c, s); return { name: c.name, username: c.username, orderNo: c.orderNo || '', plan: v.planName, startAt: c.startAt, expiresAt: c.expiresAt, state: v.state, devices: connDevices(c) }; }).sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+          const orders = [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0)).map((o) => ({ ref: o.ref, at: o.at, pkg: o.pkg, credits: o.credits, amount: o.amount, currency: o.currency, note: o.note }));
+          const mStart = new Date(new Date(now + 7 * 3600000).toISOString().slice(0, 7) + '-01T00:00:00Z').getTime() - 7 * 3600000;
+          const b = s.branding;
+          return ok({
+            profile: { name: p.name, rslId: p.rslId, email: p.email, phone: p.phone, org: p.org, server: p.server, joinedAt: p.joinedAt || row.firstAt || 0, username: p.login?.username || p.rslId, lastLogin: p.lastLogin || 0 },
+            panel: { url: p.panelUrl || '', user: p.panelUser || '', pass: p.panelPass || '', server: p.server || '' },
+            credits: { bought: row.credits || 0, left: p.creditsLeft ?? null, thisMonth: (p.orders || []).filter((o) => o.at >= mStart).reduce((a, o) => a + (o.credits || 0), 0) },
+            totals: { orders: row.purchases || 0, spentUsd: row.spentUsd || 0, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0, rate: row.rate || 0 },
+            lines: { list: lines.slice(0, 300), active: lines.filter((l) => l.expiresAt > now + warn).length, expiring: lines.filter((l) => l.expiresAt > now && l.expiresAt <= now + warn).length, expired: lines.filter((l) => l.expiresAt <= now).length },
+            orders, requests: (p.requests || []).filter((q) => q.status === 'pending').map((q) => ({ id: q.id, at: q.at, pkg: q.pkg, credits: q.credits, price: q.price, cur: q.cur, method: q.method })),
+            packages: (s.resellerPackages || []).filter((x) => Number(x.price) > 0).map((x) => ({ id: x.id, name: x.name, credits: Number(x.credits) || 0, price: Number(x.price) || 0, per: Number(x.credits) ? Math.round(Number(x.price) / Number(x.credits) * 100) / 100 : 0 })).sort((a, b) => a.credits - b.credits),
+            currency: cur, payMethods: s.resellerPayMethods || [],
+            support: { whatsapp: String(b.whatsapp || '').replace(/\D/g, ''), telegram: String(b.telegram || '').replace(/^@/, ''), email: s.email.replyTo || s.email.fromEmail || '', app: b.appName || 'IPTV', logo: b.logoUrl || '' },
+          });
+        }
+        if (R('POST', '/api/rsl/order')) { // the reseller asks for credits: you get a message and send the payment link
+          const pk = (s.resellerPackages || []).find((x) => x.id === String(body.pkg || '')); if (!pk || !(Number(pk.price) > 0)) return err(400, 'Choose a package.');
+          const methods = s.resellerPayMethods || []; const method = String(body.method || '').trim();
+          if (methods.length && !methods.includes(method)) return err(400, 'Choose how you want to pay.');
+          const k = 'rslreq:' + p.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
+          if (n >= 5) return err(429, 'Too many requests today. Please contact us on WhatsApp.'); await store.put(k, n + 1, 2 * 86400);
+          const q = { id: uid(5), at: Date.now(), pkgId: pk.id, pkg: pk.name, credits: Number(pk.credits) || 0, price: Number(pk.price) || 0, cur, method, note: rsText(body.note, 300), status: 'pending' };
+          p.requests = [q, ...(p.requests || [])].slice(0, 50); await saveResellers(rs);
+          await log('customer', `🛒 Reseller ${p.name} (${p.rslId}) ordered ${pk.name} · ${pk.credits} credits (${method || 'no method'})`);
+          await notifyAdmin(s, `🛒 Reseller order: ${p.name} (${p.rslId}) wants ${pk.credits} credits`, `${p.name} · ${p.rslId}\n${p.email || ''}\n${p.phone || ''}\n\nPackage: ${pk.name} · ${pk.credits} credits · ${pk.price} ${cur}\nPayment: ${method || '—'}${q.note ? '\nNote: ' + q.note : ''}\n\nSend the payment link, then open the app → Customers → Resellers → this reseller → ✓ Complete. The reseller gets the confirmation email.`);
+          return ok({ ok: true, request: q });
+        }
+        if (R('POST', '/api/rsl/password')) {
+          if ((await hashPassword(String(body.current || ''), p.login.salt)) !== p.login.hash) return err(400, 'Your current password is not right.');
+          const np = String(body.password || ''); if (np.length < 6) return err(400, 'The new password needs 6 characters or more.');
+          await rsSetPass(p, np); await saveResellers(rs); return ok({ ok: true });
+        }
+        return err(403, 'Not available in the reseller dashboard.');
+      }
 
       // ---------- customer ----------
       if (ses.role === 'user') {
@@ -3068,6 +3152,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (isObj(body.mailTexts)) next.mailTexts = cleanMailTexts(body.mailTexts);
         if (isObj(body.waTemplates)) { next.waTemplates = {}; for (const ty of Object.keys(WA_TPL)) for (const lg of ['en', 'fr']) { const v = body.waTemplates?.[ty]?.[lg]; if (typeof v === 'string' && v.trim() && v !== WA_TPL[ty][lg]) (next.waTemplates[ty] ||= {})[lg] = v.slice(0, 3000); } }
         if (Array.isArray(body.waCustom)) next.waCustom = body.waCustom.slice(0, 30).map((x) => ({ id: String(x.id || uid(4)).replace(/[^\w]/g, '').slice(0, 12) || uid(4), name: String(x.name || 'Message').slice(0, 40), text: { en: String(x.text?.en || '').slice(0, 3000), fr: String(x.text?.fr || '').slice(0, 3000), ar: String(x.text?.ar || '').slice(0, 3000) } })).filter((x) => x.text.en || x.text.fr || x.text.ar);
+        if (Array.isArray(body.resellerPayMethods)) next.resellerPayMethods = body.resellerPayMethods.map((x) => String(x || '').replace(/[<>]/g, '').trim().slice(0, 60)).filter(Boolean).slice(0, 12);
         if (Array.isArray(body.resellerPackages)) next.resellerPackages = body.resellerPackages.map((p) => ({ id: p.id || 'r' + uid(3), name: String(p.name || 'Package'), credits: Math.max(1, Number(p.credits) || 1), price: Number(p.price) || 0 }));
         if (Array.isArray(body.finance?.accounts)) next.finance.accounts = body.finance.accounts.map((a) => ({ id: a.id || 'a' + uid(3), name: String(a.name || 'Account'), currency: String(a.currency || 'USD').toUpperCase(), opening: Number(a.opening) || 0, color: a.color || '#7c5cff' }));
         await saveSettings(next);
@@ -3831,8 +3916,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/reseller-sale')) {
         const pk = s.resellerPackages.find((p) => p.id === body.packageId);
         if (!pk) return err(400, 'Choose a package.');
-        const rs = body.resellerId ? await getResellers() : null; const rp = rs ? rs.find((x) => x.id === String(body.resellerId)) : null;
+        const rs = await getResellers(); let rp = body.resellerId ? rs.find((x) => x.id === String(body.resellerId)) : null; let isNew = false; const seq0 = s.resellerSeq;
         if (body.resellerId && !rp) return err(404, 'Reseller not found.');
+        if (!rp && body.register !== false && String(body.name || '').trim()) { // a new reseller: registered here, or found again by email / phone
+          rp = rsFind(rs, { emails: [body.email], phone: body.phone, name: body.name });
+          if (!rp) { rp = rsNew(s, rs, { name: body.name, email: body.email, phone: body.phone, org: body.org, rslId: body.rslId }); rp.joinedAt = Date.now(); rs.push(rp); isNew = true; }
+        }
         const name = String(body.name || (rp ? rp.name : '') || '').trim();
         if (!name) return err(400, 'Enter the reseller name.');
         const buyer = rp ? { id: rp.id, name: rp.name, username: rp.rslId } : { id: 'r-' + uid(5), name, username: String(body.email || body.phone || name) };
@@ -3841,9 +3930,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         Object.assign(x, { planName: `Reseller ${pk.name} (${pk.credits} credits)`, email: String(body.email || (rp ? rp.email : '') || ''), phone: String(body.phone || (rp ? rp.phone : '') || ''), note: String(body.note || '') });
         await store.put('sales', sales);
         // the sale also shows in the reseller's own order history
-        if (rp) { rp.orders.push(rsCleanOrder({ at: x.at, pkg: `${pk.name} (${pk.credits} credits)`, credits: pk.credits, amount: x.amount, currency: x.currency, note: body.note, saleId: x.id }, x.currency)); rp.updatedAt = Date.now(); await saveResellers(rs); }
-        await log('renewal', `Sold reseller package ${pk.name} (${pk.credits} credits) to ${name}`);
-        return ok(x);
+        let order = null, mail = null;
+        if (rp) { const ref = String(body.ref || '').trim() || rsNextRef(s, await getCustomers(), rs); order = rsCleanOrder({ ref, at: x.at, pkg: `${pk.name} (${pk.credits} credits)`, credits: pk.credits, amount: x.amount, currency: x.currency, note: body.note, saleId: x.id }, x.currency); rp.orders = rp.orders || []; rp.orders.push(order); rp.updatedAt = Date.now();
+          if (body.requestId) { const rq = (rp.requests || []).find((q) => q.id === String(body.requestId)); if (rq) { rq.status = 'done'; rq.doneAt = Date.now(); rq.orderRef = ref; } }
+          if (Number(body.creditsLeft) >= 0 && body.creditsLeft !== '' && body.creditsLeft != null) rp.creditsLeft = Math.round(Number(body.creditsLeft)); else if (rp.creditsLeft != null) rp.creditsLeft += pk.credits;
+          if (body.sendEmail !== false) mail = await rsSendOrderMail(s, rp, order, body.appUrl, { isNew }); else await rsEnsureLogin(rp);
+          await saveResellers(rs); if (s.resellerSeq !== seq0) await saveSettings(s);
+          x.username = rp.rslId; x.customerId = rp.id; await store.put('sales', sales);
+          await log('customer', `Reseller order ${ref} for ${rp.name} (${rp.rslId})${isNew ? ' — new reseller registered' : ''}${mail ? (mail.ok ? ' — confirmation email sent' : ' — email not sent: ' + mail.error) : ''}`); }
+        await log('renewal', `Sold reseller package ${pk.name} (${pk.credits} credits) to ${rp ? rp.name : name}`);
+        return ok({ ...x, reseller: rp ? { id: rp.id, rslId: rp.rslId, name: rp.name, isNew, login: rp.login ? { username: rp.login.username, pass: rp.login.pass } : null } : null, order, emailed: mail ? !!mail.ok : false, emailError: mail && !mail.ok ? mail.error : '' });
       }
       if (R('GET', '/api/admin/reseller-sales')) return ok((await getSales()).filter((x) => x.type === 'reseller').sort((a, b) => b.at - a.at));
 
@@ -3911,6 +4007,25 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if ((p.customerIds || []).length) { const list = await getCustomers(); let ch = false; for (const c of list) if (p.customerIds.includes(c.id) && c.rslId !== p.rslId) { c.rslId = p.rslId; c.isReseller = true; ch = true; } if (ch) await saveCustomers(list); }
         await log('customer', `${body.id ? 'Changed' : 'Added'} reseller ${p.name} (${p.rslId})`);
         return ok({ ok: true, reseller: rsOut({ id: p.id, rslId: p.rslId, name: p.name, phone: p.phone }) });
+      }
+      if (R('POST', '/api/admin/reseller/login')) { // dashboard login: new password, own username / password, or send the login email
+        const rs = await getResellers(); const p = rs.find((x) => x.id === String(body.id || '')); if (!p) return err(404, 'Reseller not found.');
+        if (body.username !== undefined) { const u = String(body.username || '').trim().slice(0, 40); if (u.length < 3 || /\s/.test(u)) return err(400, 'Username: 3 characters or more, no spaces.');
+          const k = u.toLowerCase(); if (rs.some((x) => x !== p && [x.login?.username, x.rslId].some((v) => v && String(v).toLowerCase() === k)) || (await getCustomers()).some((c) => c.username.toLowerCase() === k) || (await getAdmin())?.username.toLowerCase() === k) return err(409, 'This username is already used.');
+          await rsEnsureLogin(p); p.login.username = u; }
+        if (body.password) { if (String(body.password).length < 6) return err(400, 'Password: 6 characters or more.'); await rsSetPass(p, String(body.password)); }
+        else if (body.reset) await rsSetPass(p, rsGenPass());
+        else await rsEnsureLogin(p);
+        if (body.creditsLeft !== undefined) { if (body.creditsLeft === '' || body.creditsLeft === null) delete p.creditsLeft; else p.creditsLeft = Math.max(0, Math.round(Number(body.creditsLeft) || 0)); }
+        let mail = null; if (body.send) { const last = body.withOrder ? [...(p.orders || [])].sort((a, b) => (b.at || 0) - (a.at || 0))[0] || null : null; mail = await rsSendOrderMail(s, p, last, body.appUrl, {}); }
+        p.updatedAt = Date.now(); await saveResellers(rs);
+        if (mail && !mail.ok) return err(502, mail.error || 'Email failed.');
+        await log('customer', `Reseller dashboard login ${body.reset || body.password ? 'changed' : 'checked'} for ${p.name} (${p.rslId})${mail ? ' — login email sent' : ''}`);
+        return ok({ username: p.login.username, pass: p.login.pass, emailed: !!mail, creditsLeft: p.creditsLeft ?? null });
+      }
+      if (R('POST', '/api/admin/reseller/request')) { // close a request without an order (refused / cancelled)
+        const rs = await getResellers(); const p = rs.find((x) => x.id === String(body.id || '')); const q = p && (p.requests || []).find((x) => x.id === String(body.requestId || ''));
+        if (!q) return err(404, 'Request not found.'); q.status = 'cancelled'; q.doneAt = Date.now(); await saveResellers(rs); return ok({ ok: true });
       }
       if (R('POST', '/api/admin/reseller/dismiss')) { // "this row is not a reseller": it stops being offered
         const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(String)); const list = await getCustomers(); let n = 0;

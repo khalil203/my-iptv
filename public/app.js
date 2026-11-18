@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=88';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=89';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=83';
 import { ic } from './icons.js?v=83';
@@ -204,6 +204,9 @@ function route() {
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
   const path = location.pathname.replace(/\/+$/, '') || '/';
+  // Reseller dashboard: intproto-tv.store/rsl
+  if (state.token && state.role === 'reseller') { if (path !== '/rsl') history.replaceState(null, '', '/rsl'); return renderRsl(); }
+  if (/^\/rsl$/i.test(path) && !isAdminUI()) { if (!state.token) { state.showLogin = true; return renderLogin(); } return renderRsl(); }
   // Public landing pages live on clean URLs; keep them out of the way of the
   // sign-in flow and of signed-in users (otherwise route() would redraw them forever).
   if (!state.showLogin) {
@@ -255,7 +258,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       ${state.mode === 'demo' && !preview ? `<div class="login-foot"><span class="badge-demo">${t('demo')}</span></div>` : ''}
     </div></div>`;
 }
-function renderLogin(error = '') { $('#app').innerHTML = loginCard(state.config.branding, { error: error ? tErr(error) : '' }); setWaFab(state.config.branding, t('waMsg', { app: state.config.branding.appName, u: '' })); }
+function renderLogin(error = '') { const rsl = /^\/rsl\/?$/i.test(location.pathname); $('#app').innerHTML = loginCard(rsl ? { ...state.config.branding, loginTitle: '🤝 Reseller dashboard', loginSubtitle: 'Sign in with your reseller ID (like RSL-12) or email, and the password from your email.' } : state.config.branding, { error: error ? tErr(error) : '' }); setWaFab(state.config.branding, t('waMsg', { app: state.config.branding.appName, u: '' })); }
 function trialForm() {
   const h = state.config.trial.hours;
   return `<p class="muted" style="margin-top:0">${t('trialIntro')}</p><form data-form="trial">
@@ -338,6 +341,60 @@ function renderResellers() {
   else if (state.token) $('#rs-body').innerHTML = `<div class="card" style="padding:18px"><p style="margin-top:0">${esc(t('resellerIntro'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a></div>`;
   else $('#rs-body').innerHTML = `<div class="card" style="padding:18px"><p style="margin-top:0">${esc(t('resellerSignIn'))}</p><button class="btn primary block" data-act="site-login">${esc(t('signIn'))}</button></div>`;
   window.scrollTo(0, 0);
+}
+
+// ---------------- reseller dashboard (/rsl) ----------------
+const RSL = { d: null, tab: 'home', q: '' };
+async function renderRsl() {
+  document.documentElement.dir = 'ltr';
+  if (state.role !== 'reseller') {
+    $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>🤝 Reseller dashboard</h2><p class="muted">You are signed in with a customer account. Sign out, then sign in with your reseller ID and password.</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a><div class="login-foot"><a href="/">← ${esc(state.config.branding.appName || 'Home')}</a></div></div></div>`; return;
+  }
+  $('#app').innerHTML = `<div class="rsl"><p class="muted" style="padding:40px;text-align:center">Loading…</p></div>`;
+  try { RSL.d = await api('GET', '/api/rsl/me'); } catch (e) { if (e.status === 401) { setSession(null); state.showLogin = true; return renderLogin(e.message); } $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><div class="err-box">${esc(e.message)}</div><button class="btn primary block" data-act="rsl-reload">Try again</button><a class="btn block" data-act="logout" style="margin-top:8px">${esc(t('logout'))}</a></div></div>`; return; }
+  rslDraw();
+}
+function rslDraw() {
+  const d = RSL.d; const P = d.profile; const cur = d.currency; const sym = ORDER_CUR[cur] || '';
+  const money = (n, c = cur) => (ORDER_CUR[c] || '') + Number(n || 0).toFixed(2) + (ORDER_CUR[c] ? '' : ' ' + (c || ''));
+  const stat = (ic, l, n, sub = '') => `<div class="stat"><i class="st-ic">${ic}</i><span>${l}</span><b>${n}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
+  const copyRow = (l, v, id, secret) => v ? `<div class="list-item"><span class="muted small" style="width:90px">${l}</span><code id="${id}" style="flex:1;word-break:break-all" ${secret ? `data-secret="${esc(v)}"` : ''}>${secret ? '••••••••' : esc(v)}</code>${secret ? `<button class="btn sm ghost" data-act="rsl-show" data-id="${id}" title="Show">👁</button>` : ''}<button class="btn sm" data-act="rsl-copy" data-v="${esc(v)}" title="Copy">📋</button></div>` : '';
+  const tabs = [['home', '🏠 Dashboard'], ['buy', '🛒 Buy credits'], ['orders', '🧾 Orders'], ['lines', '📺 Lines'], ['account', '👤 Account']];
+  const st = { active: '<span class="pill st-active">active</span>', expiring: '<span class="pill st-expiring">expiring</span>', expired: '<span class="pill st-expired">expired</span>', disabled: '<span class="pill st-disabled">disabled</span>' };
+  const sup = d.support;
+  let body = '';
+  if (RSL.tab === 'home') body = `
+    <div class="stats">
+      ${stat('🪙', 'Credits bought', d.credits.bought, `${d.credits.thisMonth} this month`)}
+      ${d.credits.left !== null ? stat('💳', 'Credits left', d.credits.left, 'on your panel') : stat('🧾', 'Orders', d.totals.orders, d.totals.lastAt ? 'last ' + fmtDate(d.totals.lastAt) : '')}
+      ${stat('📺', 'Active lines', d.lines.active, `${d.lines.expiring} expiring · ${d.lines.expired} expired`)}
+      ${stat('💵', 'Spent', '$' + Number(d.totals.spentUsd).toFixed(2), d.totals.rate ? '$' + Number(d.totals.rate).toFixed(2) + ' per credit' : '')}
+    </div>
+    ${d.requests.length ? `<div class="notice" style="margin:14px 0">⏳ ${d.requests.map((q) => `Your order of <b>${q.credits} credits</b> (${esc(q.method || '')}) from ${fmtDate(q.at)} is waiting for payment. We will send you the payment details.`).join('<br>')}</div>` : ''}
+    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">🖥️ Your IPTV panel</h3>${d.panel.url ? `<a class="btn primary sm" href="${esc(d.panel.url)}" target="_blank" rel="noopener">Open panel ↗</a>` : ''}</div>
+      ${d.panel.url || d.panel.user ? `<div style="margin-top:8px">${copyRow('Link', d.panel.url, 'pu')}${copyRow('Username', d.panel.user, 'pn')}${copyRow('Password', d.panel.pass, 'pp', true)}${d.panel.server ? `<div class="list-item"><span class="muted small" style="width:90px">Server</span><b>${esc(d.panel.server)}</b></div>` : ''}</div>` : `<p class="muted small">Your panel details are not added yet. Contact us and we will set them up.</p>`}</div>
+    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">🧾 Last orders</h3><a class="btn sm ghost" data-act="rsl-tab" data-t="orders">See all</a></div>${rslOrders(d.orders.slice(0, 5), money)}</div>
+    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">🛒 Need more credits?</h3><a class="btn sm primary" data-act="rsl-tab" data-t="buy">Buy credits</a></div><p class="small muted" style="margin:6px 0 0">From ${d.packages[0] ? `${d.packages[0].credits} credits · ${money(d.packages[0].price)}` : '—'}. Choose a package and how you want to pay.</p></div>`;
+  if (RSL.tab === 'buy') body = `<p class="muted">Choose a package. After your order you get the payment details; your credits are added once the payment is received, and you get a confirmation email.</p>
+    <div class="plans-grid">${d.packages.map((x) => `<div class="plan-c" style="text-align:center"><div class="small muted">${esc(x.name)}</div><b style="font-size:2rem;display:block">${x.credits}</b><div class="small muted">credits</div><div class="pp" style="margin:8px 0">${money(x.price)}</div><div class="small muted">${money(x.per)} per credit</div><button class="btn primary block" style="margin-top:10px" data-act="rsl-buy" data-id="${esc(x.id)}">Order</button></div>`).join('') || '<p class="muted">No packages yet.</p>'}</div>`;
+  if (RSL.tab === 'orders') body = `<div class="card">${rslOrders(d.orders, money)}</div>`;
+  if (RSL.tab === 'lines') { const q = RSL.q.toLowerCase(); const l = d.lines.list.filter((x) => !q || [x.name, x.username, x.orderNo].join(' ').toLowerCase().includes(q));
+    body = `<div class="row" style="margin-bottom:10px"><input placeholder="🔎 Search name, username, order…" value="${esc(RSL.q)}" data-input="rsl-q" style="flex:1"></div><div class="card" id="rsl-lines">${l.length ? `<div class="table-wrap"><table><thead><tr><th>Line</th><th>Order</th><th>Package</th><th>Devices</th><th>Ends</th><th>Status</th></tr></thead><tbody>${l.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.username)}</div></td><td>${esc(x.orderNo)}</td><td>${esc(x.plan || '')}</td><td>${x.devices}</td><td>${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${st[x.state] || ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No lines linked to your account yet.</p>'}</div>`; }
+  if (RSL.tab === 'account') body = `<div class="card"><h3 style="margin-top:0">Your details</h3>
+      <div class="list-item"><span class="muted small" style="width:110px">Reseller ID</span><b>${esc(P.rslId)}</b></div><div class="list-item"><span class="muted small" style="width:110px">Name</span><b>${esc(P.name)}</b></div>
+      ${P.org ? `<div class="list-item"><span class="muted small" style="width:110px">Company</span><b>${esc(P.org)}</b></div>` : ''}<div class="list-item"><span class="muted small" style="width:110px">Email</span><b>${esc(P.email || '—')}</b></div><div class="list-item"><span class="muted small" style="width:110px">Phone</span><b>${esc(P.phone || '—')}</b></div>
+      <div class="list-item"><span class="muted small" style="width:110px">Sign-in name</span><b>${esc(P.username)}</b></div>${P.joinedAt ? `<div class="list-item"><span class="muted small" style="width:110px">Reseller since</span><b>${fmtDate(P.joinedAt)}</b></div>` : ''}
+      <p class="small muted">To change your name, email or phone, contact us.</p></div>
+    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Change password</h3><form data-form="rsl-pass">${field('Current password', 'current', '', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field('New password (6+ characters)', 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<button class="btn primary">Save new password</button></form></div>`;
+  $('#app').innerHTML = `<div class="rsl" style="max-width:1000px;margin:0 auto;padding:18px 14px 90px">
+    <div class="row" style="gap:12px;margin-bottom:14px">${sup.logo ? `<img src="${esc(sup.logo)}" alt="" style="height:40px;border-radius:10px">` : ''}<div style="flex:1"><div class="small muted">${esc(sup.app)} · Reseller dashboard</div><h2 style="margin:0">Hello, ${esc(P.name.split(' ')[0])} 👋</h2><div class="small muted">${esc(P.rslId)}${P.server ? ' · ' + esc(P.server) : ''}</div></div><button class="btn sm" data-act="rsl-reload" title="Refresh">↻</button><button class="btn sm ghost" data-act="logout">${esc(t('logout'))}</button></div>
+    <div class="chips" style="margin-bottom:14px">${tabs.map(([k, l]) => `<a class="${RSL.tab === k ? 'on' : ''}" data-act="rsl-tab" data-t="${k}">${l}</a>`).join('')}</div>
+    ${body}
+    <div class="card" style="margin-top:18px"><h3 style="margin-top:0">💬 Need help?</h3><div class="row" style="flex-wrap:wrap;gap:8px">${sup.whatsapp ? `<a class="btn wa-btn" href="https://wa.me/${sup.whatsapp}?text=${encodeURIComponent(`Hello, I am reseller ${P.rslId} (${P.name}).`)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${sup.telegram ? `<a class="btn" href="https://t.me/${esc(sup.telegram)}" target="_blank" rel="noopener">Telegram</a>` : ''}${sup.email ? `<a class="btn" href="mailto:${esc(sup.email)}">✉️ ${esc(sup.email)}</a>` : ''}${!sup.whatsapp && !sup.telegram && !sup.email ? '<span class="small muted">Reply to any of our emails and we will help you.</span>' : ''}</div></div>
+  </div>`;
+}
+function rslOrders(list, money) {
+  return list.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Order</th><th>Package</th><th>Credits</th><th>Amount</th></tr></thead><tbody>${list.map((o) => `<tr><td>${o.at ? fmtDate(o.at) : '—'}</td><td>${esc(o.ref || '—')}</td><td>${esc(o.pkg || '')}</td><td><b>${o.credits || '—'}</b></td><td>${o.amount ? money(o.amount, o.currency) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No orders yet.</p>';
 }
 
 async function loadResellerPanel() {
@@ -602,7 +659,7 @@ function rsRowsHtml() {
   const list = (RS.data?.list || []).filter((x) => !q || q.split(/\s+/).every((w) => [x.rslId, x.name, x.email, (x.emails || []).join(' '), x.phone, x.org, x.server, x.tag, x.note, x.username, (x.orders || []).map((o) => o.ref + ' ' + o.pkg).join(' ')].join(' ').toLowerCase().includes(w)));
   if (!list.length) return `<p class="muted" style="padding:14px 4px">${q ? 'No reseller matches this search.' : 'No resellers yet. Add one with the buttons above.'}</p>`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Reseller</th><th>Contact</th><th>Orders</th><th>Credits</th><th>Paid</th><th>Since</th><th>Last order</th><th></th></tr></thead><tbody>${list.map((x) => `<tr data-act="rs-open" data-id="${x.id}" style="cursor:pointer">
-    <td><b>${esc(x.rslId)}</b>${x.status === 'paused' ? '<div><span class="pill st-expired">paused</span></div>' : ''}</td>
+    <td><b>${esc(x.rslId)}</b>${x.status === 'paused' ? '<div><span class="pill st-expired">paused</span></div>' : ''}${(x.requests || []).length ? `<div><span class="pill st-expiring" title="Ordered on the reseller dashboard">🛒 ${x.requests.length} order${x.requests.length > 1 ? 's' : ''} waiting</span></div>` : ''}${x.login ? `<div class="small muted" title="Has a dashboard login">🔑 /rsl${x.lastLogin ? ' · seen ' + fmtDate(x.lastLogin) : ''}</div>` : ''}</td>
     <td><div class="name-cell">${esc(x.name)}</div><div class="small muted">${esc([x.org, x.server, x.tag].filter(Boolean).join(' · '))}</div></td>
     <td class="small">${esc(x.email || '—')}${x.phone ? '<br>' + esc(x.phone) : ''}<div style="margin-top:4px">${sentChips(x, 'rs-mark')}</div></td>
     <td>${x.purchases}</td><td>${x.credits}</td><td><b>${usd(x.spentUsd)}</b>${x.rate ? `<div class="small muted">${usd(x.rate)}/credit</div>` : ''}</td>
@@ -612,8 +669,8 @@ function rsRowsHtml() {
 async function adminResellerPage() {
   const r = await api('GET', '/api/admin/reseller'); RS.data = r;
   const tot = r.list.reduce((a, x) => ({ c: a.c + x.credits, u: a.u + x.spentUsd, n: a.n + x.purchases }), { c: 0, u: 0, n: 0 });
-  const found = r.found || [];
-  return `<div class="stats">
+  const found = r.found || []; const waiting = r.list.filter((x) => (x.requests || []).length);
+  return `${waiting.length ? `<div class="card" style="border:2px solid #f59e0b;margin-bottom:14px"><h3 style="margin-top:0">🛒 Orders from the reseller dashboard (${waiting.reduce((a, x) => a + x.requests.length, 0)})</h3>${waiting.map((x) => x.requests.map((q) => `<div class="list-item"><span style="flex:1"><b>${esc(x.name)}</b> <span class="muted small">${esc(x.rslId)}</span> · ${q.credits} credits (${esc(q.pkg)}) · ${esc(String(q.price))} ${esc(q.cur)} · ${esc(q.method || '')} · ${fmtDT(q.at)}${q.note ? `<div class="small muted">“${esc(q.note)}”</div>` : ''}</span><button class="btn sm primary" data-act="rs-sell" data-id="${x.id}" data-req="${q.id}" data-pkg="${esc(q.pkgId || '')}">✓ Paid · complete</button><button class="btn sm ghost" data-act="rs-req-x" data-id="${x.id}" data-req="${q.id}" title="Cancel this order">✕</button></div>`).join('')).join('')}</div>` : ''}<div class="stats">
     <div class="stat c-acc"><i class="st-ic">${ic('user', 20)}</i><span>Resellers</span><b>${r.list.length}</b></div>
     <div class="stat"><i class="st-ic">${ic('list', 20)}</i><span>Orders</span><b>${tot.n}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('star', 20)}</i><span>Credits sold</span><b>${tot.c}</b></div>
@@ -622,7 +679,7 @@ async function adminResellerPage() {
     <p class="small muted">These rows have “Reseller”, “RSL” or credits in them. Adding them moves them out of the customer list and into a reseller profile, each row as one order.</p>
     ${found.map((f, i) => `<div class="list-item"><div class="avatar">${esc(initials(f.name))}</div><div style="flex:1;min-width:0"><b>${esc(f.name)}</b>${f.into ? ` <span class="tagp">goes to ${esc(f.into.rslId)}</span>` : ''}<div class="small muted">${f.n} order${f.n > 1 ? 's' : ''} · ${usd(f.totalUsd)}${f.credits ? ' · ' + f.credits + ' credits' : ''} · ${esc(f.refs.slice(0, 4).join(', '))}${f.refs.length > 4 ? '…' : ''}</div><div class="small muted">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</div></div><button class="btn sm" data-act="rs-found-add" data-i="${i}">＋ Add</button> <button class="btn sm danger" data-act="rs-found-skip" data-i="${i}" title="Not a reseller: remove from this box">✕</button></div>`).join('')}</div>` : ''}
   <div class="card"><div class="row" style="gap:8px"><input data-input="rs-q" value="${esc(RS.q)}" placeholder="🔍 Search name, RSL id, email, phone, server, order…" style="flex:1;min-width:200px" autocomplete="off">
-    <button class="btn primary" data-act="rs-new">＋ Add manually</button><button class="btn" data-act="rs-pick">👥 From my data</button><button class="btn" data-act="rs-text">📋 From text</button><button class="btn" data-act="rs-email" data-id="">✉️ Email resellers</button></div>
+    <button class="btn primary" data-act="rs-sell">🪙 New credit order</button><button class="btn" data-act="rs-new">＋ Add manually</button><button class="btn" data-act="rs-pick">👥 From my data</button><button class="btn" data-act="rs-text">📋 From text</button><button class="btn" data-act="rs-email" data-id="">✉️ Email resellers</button></div>
     <div id="rs-list" style="margin-top:12px">${rsRowsHtml()}</div></div>`;
 }
 const rsProfileForm = (x = {}) => `<form data-form="rs-profile" onsubmit="return false" data-id="${esc(x.id || '')}">
@@ -639,8 +696,12 @@ function rsOpen(id) {
   const wa = String(x.phone || '').replace(/\D/g, '');
   modal(`🤝 ${esc(x.rslId)} · ${esc(x.name)}`, `<div class="row" style="gap:6px;margin-bottom:10px"><span class="tagp">${x.purchases} orders</span><span class="tagp">${x.credits} credits</span><span class="tagp">${usd(x.spentUsd)}</span>${x.emailedAt ? `<span class="small muted">last email ${fmtDate(x.emailedAt)}</span>` : ''}<span class="spacer"></span>
     ${x.email ? `<button class="btn sm" data-act="rs-email" data-id="${x.id}">✉️ Email</button>` : ''}${wa && !/•/.test(x.phone) ? `<a class="btn sm wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 WhatsApp</a>` : ''}</div>
+    <div class="card" style="margin-bottom:12px;padding:12px 14px"><div class="row" style="gap:6px;flex-wrap:wrap"><b style="flex:1">🔑 Dashboard login · intproto-tv.store/rsl</b><button class="btn sm primary" data-act="rs-sell" data-id="${x.id}">🪙 New credit order</button></div>
+      ${x.login ? `<div class="small" style="margin-top:6px">Username <code>${esc(x.login.username)}</code> · Password <code>${esc(x.login.pass || '—')}</code>${x.lastLogin ? ` · last sign-in ${fmtDT(x.lastLogin)}` : ' · never signed in'}</div>` : '<div class="small muted" style="margin-top:6px">No login yet. It is made with the first order, or now with the button.</div>'}
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${x.login ? `<button class="btn sm" data-act="rs-login" data-id="${x.id}" data-do="reset">🔑 New password</button>` : `<button class="btn sm" data-act="rs-login" data-id="${x.id}" data-do="make">🔑 Make login</button>`}${x.email ? `<button class="btn sm" data-act="rs-login" data-id="${x.id}" data-do="send">✉️ Send login email</button>` : ''}<label class="small row" style="gap:6px;margin-left:auto">Credits left on panel <input type="number" min="0" id="rs-left" value="${x.creditsLeft ?? ''}" placeholder="—" style="width:90px"><button class="btn sm" data-act="rs-login" data-id="${x.id}" data-do="left">Save</button></label></div>
+      ${(x.requests || []).length ? `<div style="margin-top:8px">${x.requests.map((q) => `<div class="list-item small"><span style="flex:1">🛒 ${q.credits} credits · ${esc(q.method || '')} · ${fmtDT(q.at)}</span><button class="btn sm primary" data-act="rs-sell" data-id="${x.id}" data-req="${q.id}" data-pkg="${esc(q.pkgId || '')}">✓ Paid · complete</button></div>`).join('')}</div>` : ''}</div>
     ${rsProfileForm(x)}
-    <div class="row" style="margin-top:16px"><h3 style="margin:0">Orders</h3><span class="spacer"></span><button class="btn sm" data-act="rs-order" data-id="${x.id}">＋ Add order</button></div>
+    <div class="row" style="margin-top:16px"><h3 style="margin:0">Orders</h3><span class="spacer"></span><button class="btn sm" data-act="rs-order" data-id="${x.id}">＋ Add past order</button></div>
     ${x.orders.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Order</th><th>Package</th><th>Credits</th><th>Price</th><th>Server</th><th></th></tr></thead><tbody>${x.orders.map((o) => `<tr><td class="small">${fmtDate(o.at)}</td><td class="small">${esc(o.ref || '—')}</td><td class="small">${esc(o.pkg || '—')}${o.note ? `<div class="muted">${esc(o.note)}</div>` : ''}</td><td>${o.credits || '—'}</td><td><b>${rsMoney(o)}</b></td><td class="small">${esc(o.server || '')}</td><td style="white-space:nowrap"><button class="btn sm" data-act="rs-order" data-id="${x.id}" data-oid="${o.id}">✎</button> <button class="btn sm danger" data-act="rs-order-del" data-id="${x.id}" data-oid="${o.id}">✕</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No orders yet.</p>'}`, { wide: true });
 }
 async function rsReload(openId) { closeModal(); await renderAdmin(); if (openId) rsOpen(openId); }
@@ -972,7 +1033,7 @@ async function adminResellerSection(s) {
     <details><summary class="small muted" style="cursor:pointer">Edit packages</summary><div style="margin-top:10px">
       <div class="rp-row small muted"><span>Name</span><span>Credits</span><span>Price</span><span></span></div>
       <div id="rps">${rp.map(row).join('')}</div>
-      <div class="row"><button class="btn sm" data-act="add-rp">＋ Add package</button><select id="rp-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD', 'THB'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-rp">Save packages</button></div></div></details>
+      <div class="row"><button class="btn sm" data-act="add-rp">＋ Add package</button><select id="rp-cur" style="width:auto">${['EUR', 'USD', 'USDT', 'MAD', 'THB'].map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn sm primary" data-act="save-rp">Save packages</button></div><div style="margin-top:12px">${field('Payment methods resellers can choose on /rsl (one per line)', 'rp-pay', (s.resellerPayMethods || []).join('\n'), { type: 'textarea', rows: 4, attrs: 'id="rp-pay"', help: 'After an order you send the payment link or details; when paid, press ✓ Complete and the reseller gets the confirmation email.' })}</div></div></details>
     ${sales.length ? `<h3 style="margin-top:16px">Reseller sales</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Reseller</th><th>Package</th><th>Paid</th><th>Profit</th></tr></thead><tbody>${sales.slice(0, 50).map((x) => `<tr><td class="small">${fmtDT(x.at)}</td><td><b>${esc(x.name)}</b><div class="small muted">${esc([x.email, x.phone].filter(Boolean).join(' · '))}</div></td><td>${esc(x.planName)}</td><td>${num(x.amount, x.currency)}</td><td class="${x.amountUsd - x.costUsd < 0 ? 'neg' : 'pos'}">${usd(x.amountUsd - x.costUsd)}</td></tr>`).join('')}</tbody></table></div>` : ''}
   </div>`;
 }
@@ -1029,16 +1090,20 @@ function nlRead() {
   return camp;
 }
 const orderTargets = (grp) => (state.admin.customers || []).filter((c) => c.email && (grp === 'all' || (grp === 'trial' ? c.isTrial : grp === 'notrecent' ? !c.orderSentAt || Date.now() - c.orderSentAt > 7 * 86400000 : c.state === grp)));
-function resellerSaleForm(s) {
-  const rp = s.resellerPackages || []; const cur = s.resellerCurrency || 'EUR';
-  return `<form data-form="rp-sale">
-    ${field('Package', 'packageId', rp[0]?.id, { type: 'select', options: rp.map((p) => [p.id, `${p.name} · ${p.credits} credits · ${priceTxt(p.price, cur)}`]), attrs: 'data-rp-pick' })}
-    <div class="grid2">${field('Reseller name', 'name', '', { attrs: 'required' })}${field('Email', 'email', '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
-    <div class="grid2">${phoneField('Phone / WhatsApp', 'phone', false)}${field('Amount received', 'amount', rp[0]?.price ?? '', { type: 'number', attrs: 'step="any" min="0"', help: 'In the currency of the account below.' })}</div>
+function resellerSaleForm(s, o = {}) {
+  const rp = s.resellerPackages || []; const cur = s.resellerCurrency || 'EUR'; const list = RS.data?.list || [];
+  const pk0 = rp.find((p) => p.id === o.pkg) || rp[0];
+  return `<form data-form="rp-sale">${o.req ? `<input type="hidden" name="requestId" value="${esc(o.req)}">` : ''}
+    ${field('Package', 'packageId', pk0?.id, { type: 'select', options: rp.map((p) => [p.id, `${p.name} · ${p.credits} credits · ${priceTxt(p.price, cur)}`]), attrs: 'data-rp-pick' })}
+    ${field('Reseller', 'resellerId', o.id || '', { type: 'select', options: [['', '＋ New reseller (register now)'], ...list.slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => [r.id, `${r.name} · ${r.rslId}${r.email ? ' · ' + r.email : ''}`])], attrs: 'data-rs-who', help: 'An existing reseller gets the confirmation email with the dashboard login. A new one is registered first (RSL id and login made for him).' })}
+    <div id="rs-newbox" style="${o.id ? 'display:none' : ''}"><div class="grid2">${field('Reseller name', 'name', '', { attrs: o.id ? '' : 'data-req' })}${field('Email', 'email', '', { type: 'email', attrs: 'autocapitalize="none"', help: 'Needed for the confirmation email.' })}</div>
+    <div class="grid2">${phoneField('Phone / WhatsApp', 'phone', false)}${field('Company (optional)', 'org', '')}</div></div>
+    <div class="grid2">${field('Amount received', 'amount', pk0?.price ?? '', { type: 'number', attrs: 'step="any" min="0"', help: 'In the currency of the account below.' })}${field('Order number', 'ref', '', { ph: 'Empty = next number (RLS-…)' })}</div>
+    ${toggle('Send the confirmation email (order details + dashboard login + panel)', 'sendEmail', true)}
     ${accountSelect(s, 'accountId', '')}
     ${field('Note', 'note', '')}
     <p class="small muted">The package credits are taken from your credits stock, and the profit shows in Profits.</p>
-    <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Record sale</button></div></form>`;
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">✓ Complete order</button></div></form>`;
 }
 function adminPlans(s) {
   const row = (p) => `<div class="plan-row" data-plan="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="days" type="number" value="${p.days}" placeholder="Days"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><input data-k="credits" type="number" value="${p.credits ?? ''}" placeholder="Credits"><input data-k="connections" type="number" value="${p.connections}" placeholder="Devices"><input data-k="package" value="${esc(p.package)}" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan" title="Remove plan" aria-label="Remove plan">✕</button></div>`;
@@ -2262,6 +2327,22 @@ const actions = {
     } catch (e) { toast(e.message, true); }
   },
   'promo-tg-go': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/promo/telegram', { channel: $('#promo-ch').value.trim(), text: $('#promo-tg-text').value }); closeModal(); toast('Posted in your Telegram channel ✓'); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'rs-sell': async (el) => { if (!RS.data) { try { RS.data = await api('GET', '/api/admin/reseller'); } catch {} } modal('🪙 Reseller credit order', resellerSaleForm(state.admin.settings, { id: el?.dataset?.id || '', req: el?.dataset?.req || '', pkg: el?.dataset?.pkg || '' }), { wide: true }); },
+  'rs-req-x': async (el) => { if (!confirm('Cancel this order from the reseller dashboard?')) return; try { await api('POST', '/api/admin/reseller/request', { id: el.dataset.id, requestId: el.dataset.req }); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  'rs-login': async (el) => { const k = el.dataset.do; const body = { id: el.dataset.id, appUrl: location.origin };
+    if (k === 'reset') { if (!confirm('Make a new password? The old one stops working.')) return; body.reset = true; }
+    if (k === 'send') { body.send = true; body.withOrder = confirm('Add the last order details to the email?\n\nOK = yes · Cancel = login only'); }
+    if (k === 'left') body.creditsLeft = $('#rs-left').value;
+    try { const r = await api('POST', '/api/admin/reseller/login', body); toast(k === 'send' ? 'Login email sent ✓' : k === 'left' ? 'Saved ✓' : `Login: ${r.username} / ${r.pass}`); rsReload(el.dataset.id); } catch (e) { toast(e.message, true); } },
+  'rsl-tab': (el) => { RSL.tab = el.dataset.t; rslDraw(); window.scrollTo(0, 0); },
+  'rsl-reload': () => renderRsl(),
+  'rsl-copy': (el) => { navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Copied ✓'), () => toast(el.dataset.v)); },
+  'rsl-show': (el) => { const c = document.getElementById(el.dataset.id); if (c) c.textContent = c.textContent.startsWith('•') ? c.dataset.secret : '••••••••'; },
+  'rsl-buy': (el) => { const d = RSL.d; const x = d.packages.find((p) => p.id === el.dataset.id); if (!x) return;
+    modal(`🛒 ${x.credits} credits`, `<p style="margin-top:0"><b>${esc(x.name)}</b> · ${x.credits} credits · <b>${(ORDER_CUR[d.currency] || '') + x.price.toFixed(2)}${ORDER_CUR[d.currency] ? '' : ' ' + d.currency}</b></p>
+      <form data-form="rsl-order" data-id="${esc(x.id)}">${d.payMethods.length ? `<div class="field"><span>How do you want to pay?</span>${d.payMethods.map((m, i) => `<label class="list-item" style="cursor:pointer"><input type="radio" name="method" value="${esc(m)}" ${i ? '' : 'checked'}> ${esc(m)}</label>`).join('')}</div>` : ''}
+      ${field('Note (optional)', 'note', '', { ph: 'Anything we should know?' })}<p class="small muted">We send you the payment details right away. Your credits are added after payment and you get a confirmation email.</p>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Send order</button></div></form>`); },
   'conn-add': () => { const l = $('#conn-list'); if (!l) return; l.insertAdjacentHTML('beforeend', connRow({})); connNumber(); l.lastElementChild.querySelector('[data-cn="m3u"]')?.focus(); },
   'conn-del': (el) => { const r = el.closest('.conn-row'); const f = r?.closest('form'); r?.remove(); connNumber(); const t = $('#conn-total'); if (t && f) t.textContent = (Number(f.connections?.value) || 1) + connRead(f).reduce((a, x) => a + x.devices, 0); },
   'nl-open': async () => {
@@ -2672,7 +2753,7 @@ renew: async (el) => {
   'del-rp': (el) => el.closest('.rp-row').remove(),
   'save-rp': async () => {
     const resellerPackages = [...document.querySelectorAll('#rps .rp-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.rp || undefined, name: g('name'), credits: Number(g('credits')), price: Number(g('price')) }; }).filter((p) => p.name);
-    await saveSettings({ resellerPackages, resellerCurrency: $('#rp-cur').value }); renderAdmin();
+    await saveSettings({ resellerPackages, resellerCurrency: $('#rp-cur').value, ...($('#rp-pay') ? { resellerPayMethods: $('#rp-pay').value.split('\n').map((x) => x.trim()).filter(Boolean) } : {}) }); renderAdmin();
   },
   'add-plan': () => { $('#plans').insertAdjacentHTML('beforeend', `<div class="plan-row" data-plan=""><input data-k="name" placeholder="Name"><input data-k="days" type="number" value="30"><input data-k="price" type="number" value="0"><input data-k="credits" type="number" value="1"><input data-k="connections" type="number" value="1"><input data-k="package" placeholder="Package ID"><button class="btn sm danger" data-act="del-plan" title="Remove plan" aria-label="Remove plan">✕</button></div>`); },
   'del-plan': (el) => el.closest('.plan-row').remove(),
@@ -2725,6 +2806,8 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async 'rsl-order'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { await api('POST', '/api/rsl/order', { pkg: f.dataset.id, method: f.method?.value || (f.querySelector('[name=method]:checked')?.value || ''), note: f.note.value }); closeModal(); toast('Order sent ✓ We will send you the payment details.'); RSL.tab = 'home'; renderRsl(); } catch (e) { toast(e.message, true); b.disabled = false; } },
+  async 'rsl-pass'(f) { try { await api('POST', '/api/rsl/password', { current: f.current.value, password: f.password.value }); toast('Password changed ✓'); f.reset(); } catch (e) { toast(e.message, true); } },
   async 'orders-set'(f) { const o = formToObj(f); for (const k of ['prefix', 'iboPrefix', 'rslPrefix']) { o[k] = String(o[k] || '').trim(); if (!/^[A-Za-z]{1,10}$/.test(o[k])) return toast('Prefixes: letters only, like WLF.', true); } o.series = [o.prefix, o.iboPrefix, o.rslPrefix].join(','); await saveSettings({ orders: o }); actions['orders-open'](); },
   async promo(f) {
     const o = formToObj(f); if (!String(o.code || '').trim()) return toast('Type the promo code first.', true);
@@ -2735,8 +2818,17 @@ const forms = {
   async 'rp-sale'(f) {
     const o = formToObj(f); delete o.phone_cc;
     if (String(f.phone?.value || '').trim()) { const full = fullPhone(f, 'phone'); if (!full) return toast(t('phoneInvalid'), true); o.phone = full; }
-    try { await api('POST', '/api/admin/reseller-sale', o); toast(t('resellerSaleRecorded')); closeModal(); renderAdmin(); }
-    catch (e) { toast(e.message, true); }
+    if (!o.resellerId && !String(o.name || '').trim()) return toast('Choose a reseller or type the new reseller\'s name.', true);
+    if (!o.resellerId) delete o.resellerId; o.appUrl = location.origin;
+    const b = f.querySelector('button.primary'); b.disabled = true;
+    try { const r = await api('POST', '/api/admin/reseller-sale', o); closeModal(); await renderAdmin();
+      const R = r.reseller; if (!R) return toast(t('resellerSaleRecorded'));
+      modal('✅ Order complete', `<p style="margin-top:0"><b>${esc(R.name)}</b> · ${esc(R.rslId)}${R.isNew ? ' <span class="pill st-active">new reseller</span>' : ''}</p>
+        <p>Order <b>${esc(r.order?.ref || '')}</b> · ${esc(r.order?.pkg || '')} · ${esc(String(r.order?.amount ?? ''))} ${esc(r.order?.currency || '')}</p>
+        ${r.emailed ? '<div class="notice success">✉️ Confirmation email sent with the dashboard login.</div>' : `<div class="notice warning">${r.emailError ? '✉️ Email not sent: ' + esc(r.emailError) : 'No email sent.'} You can send the login below.</div>`}
+        ${R.login ? `<div class="list-item"><span style="flex:1">Dashboard: <b>${esc(location.origin)}/rsl</b><br>Username <code>${esc(R.login.username)}</code> · Password <code>${esc(R.login.pass)}</code></span><button class="btn sm" data-act="rsl-copy" data-v="${esc(`${location.origin}/rsl\nUsername: ${R.login.username}\nPassword: ${R.login.pass}`)}">📋 Copy</button></div>` : ''}
+        <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" data-act="rs-open" data-id="${R.id}">Open reseller</button><button class="btn primary" data-act="close-modal">Done</button></div>`);
+    } catch (e) { toast(e.message, true); b.disabled = false; }
   },
   async 'browser-search'(f) {
     const q = (f.q.value || '').trim(); if (!q) return;
@@ -2897,6 +2989,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
+  if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
   if (t.dataset.input === 'nav-search') { // menu search: hides pages that do not match, by name, group or keywords
@@ -2924,10 +3017,11 @@ document.addEventListener('change', async (e) => {
     if (p) { const r = st.finance.rates; const from = st.currency || 'USD'; const to = acc ? acc.currency : from;
       f.price.value = Math.round((p.price / (r[from] || 1)) * (r[to] || 1) * 100) / 100; }
   }
+  if (t.hasAttribute?.('data-rs-who')) { const nb = $('#rs-newbox'); if (nb) nb.style.display = t.value ? 'none' : ''; }
   if (t.form?.dataset.form === 'rp-sale' && (t.name === 'packageId' || t.name === 'accountId')) {
     const st = state.admin.settings; const f = t.form;
     const p = st.resellerPackages.find((x) => x.id === f.packageId.value);
-    const acc = st.finance.accounts.find((a) => a.id === f.accountId.value);
+    const acc = st.finance.accounts.find((a) => a.id === f.accountId?.value);
     if (p) { const r = st.finance.rates; const from = st.resellerCurrency || 'EUR'; const to = acc ? acc.currency : from;
       f.amount.value = Math.round((p.price / (r[from] || 1)) * (r[to] || 1) * 100) / 100; }
   }

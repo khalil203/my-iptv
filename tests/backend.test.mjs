@@ -1571,3 +1571,42 @@ test('order numbers: parse, devices, original sequence, next number, duplicates,
   const sum = (await x.call('GET', '/api/admin/orders', {}, tok)).json; assert.equal(sum.backups.length, 1); assert.equal(sum.next.standard, 'WLF-002');
   assert.equal((await x.call('GET', '/api/admin/orders/backup', {}, tok, { key: r.json.backup })).json.customers.length, 2);
 });
+
+test('reseller credits: new reseller registered with a login, confirmation emails, /rsl dashboard, orders from the dashboard', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>' }, branding: { appName: 'INTPROTO-TV' } }, tok);
+  // new reseller: registered and emailed
+  let r = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Sample Reseller', email: 'sample.rsl@example.com', phone: '+27763456789', appUrl: 'https://intproto-tv.store' }, tok);
+  assert.equal(r.status, 200, JSON.stringify(r.json)); const R = r.json.reseller;
+  assert.ok(R.isNew); assert.match(R.rslId, /^RSL-\d+/); assert.equal(R.login.username, R.rslId); assert.ok(R.login.pass.length >= 8);
+  assert.equal(r.json.order.ref, 'RLS-001'); assert.equal(r.json.emailed, true);
+  let m = x.mails.at(-1); assert.deepEqual(m.to, ['sample.rsl@example.com']); assert.match(m.subject, /Welcome to INTPROTO-TV resellers/);
+  assert.match(m.html, /https:\/\/intproto-tv\.store\/rsl/); assert.match(m.html, new RegExp(R.login.pass)); assert.match(m.html, /RLS-001/); assert.match(m.html, /10 credits/);
+  // the same person again (found by email) = existing reseller: no new profile, "Order confirmed" email with the same login
+  r = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r20', name: 'Sample R.', email: 'SAMPLE.RSL@example.com', appUrl: 'https://intproto-tv.store' }, tok);
+  assert.equal(r.json.reseller.id, R.id); assert.equal(r.json.reseller.isNew, false); assert.equal(r.json.order.ref, 'RLS-002');
+  m = x.mails.at(-1); assert.match(m.subject, /^Order confirmed: 20 credits/); assert.match(m.html, new RegExp(R.login.pass));
+  // the reseller signs in on /rsl
+  assert.equal((await x.call('POST', '/api/login', { username: R.rslId.toLowerCase(), password: 'wrong-pass' })).status, 401);
+  const lg = await x.call('POST', '/api/login', { username: 'sample.rsl@example.com', password: R.login.pass }); assert.equal(lg.json.role, 'reseller'); const rt = lg.json.token;
+  const me = (await x.call('GET', '/api/rsl/me', {}, rt)).json;
+  assert.equal(me.credits.bought, 30); assert.equal(me.orders.length, 2); assert.equal(me.orders[0].ref, 'RLS-002'); assert.deepEqual(me.packages.map((p) => p.credits), [5, 10, 20, 30, 50]);
+  assert.equal((await x.call('GET', '/api/me', {}, rt)).status, 403, 'not a customer account');
+  assert.equal((await x.call('GET', '/api/admin/customers', {}, rt)).status, 403);
+  // orders 50 credits from the dashboard → you complete it → email
+  const q = await x.call('POST', '/api/rsl/order', { pkg: 'r50', method: 'PayPal' }, rt); assert.equal(q.status, 200);
+  assert.equal((await x.call('POST', '/api/rsl/order', { pkg: 'r50', method: 'Gold bars' }, rt)).status, 400);
+  const list = (await x.call('GET', '/api/admin/reseller', {}, tok)).json.list; assert.equal(list[0].requests.length, 1);
+  r = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r50', resellerId: R.id, requestId: q.json.request.id, appUrl: 'https://intproto-tv.store' }, tok);
+  assert.equal(r.json.emailed, true); assert.match(x.mails.at(-1).subject, /50 credits/);
+  assert.equal((await x.call('GET', '/api/rsl/me', {}, rt)).json.requests.length, 0); assert.equal((await x.call('GET', '/api/rsl/me', {}, rt)).json.credits.bought, 80);
+  // password change; admin new password; credits left; paused account
+  assert.equal((await x.call('POST', '/api/rsl/password', { current: 'nope', password: 'newpass1' }, rt)).status, 400);
+  assert.equal((await x.call('POST', '/api/rsl/password', { current: R.login.pass, password: 'newpass1' }, rt)).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: R.rslId, password: 'newpass1' })).json.role, 'reseller');
+  const lr = await x.call('POST', '/api/admin/reseller/login', { id: R.id, reset: true, creditsLeft: 12 }, tok); assert.notEqual(lr.json.pass, 'newpass1'); assert.equal(lr.json.creditsLeft, 12);
+  assert.equal((await x.call('POST', '/api/login', { username: R.rslId, password: 'newpass1' })).status, 401, 'old password stops working');
+  const t2 = (await x.call('POST', '/api/login', { username: R.rslId, password: lr.json.pass })).json.token; assert.equal((await x.call('GET', '/api/rsl/me', {}, t2)).json.credits.left, 12);
+  await x.call('POST', '/api/admin/reseller/save', { id: R.id, name: 'Sample Reseller', status: 'paused' }, tok);
+  assert.equal((await x.call('POST', '/api/login', { username: R.rslId, password: lr.json.pass })).status, 403);
+});
