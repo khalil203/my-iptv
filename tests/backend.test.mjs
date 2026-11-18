@@ -1610,3 +1610,37 @@ test('reseller credits: new reseller registered with a login, confirmation email
   await x.call('POST', '/api/admin/reseller/save', { id: R.id, name: 'Sample Reseller', status: 'paused' }, tok);
   assert.equal((await x.call('POST', '/api/login', { username: R.rslId, password: lr.json.pass })).status, 403);
 });
+
+test('5 languages: WhatsApp, renewal, profile, invoice, reseller emails and seasonal templates', async () => {
+  const { seasonCampaign, LANG_CODES } = await import('../public/core.js');
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', lang: 'customer' }, branding: { appName: 'INTPROTO-TV' } }, tok);
+  const c = await addCustomer(x, tok, { username: 'lang1', lang: 'de', phone: '+49151000000' });
+  let row = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((v) => v.id === c.id); assert.equal(row.lang, 'de');
+  const wa = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew' }, tok)).json; assert.match(wa.text, /^Hallo .*Ihr \*INTPROTO-TV\*-Abonnement (endet am|ist abgelaufen am)/s);
+  assert.match((await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'login', lang: 'it' }, tok)).json.text, /Nome utente:/);
+  assert.match((await x.call('GET', `/api/admin/customers/${c.id}/renewalpreview`, {}, tok)).json.subject, /Verlängern Sie Ihr INTPROTO-TV-Abonnement/);
+  assert.match((await x.call('GET', `/api/admin/customers/${c.id}/profilepreview`, {}, tok)).json.subject, /Ihr INTPROTO-TV-Profil/);
+  // invalid language falls back to English
+  await x.call('PUT', `/api/admin/customers/${c.id}`, { lang: 'xx' }, tok); row = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((v) => v.id === c.id); assert.equal(row.lang, 'en');
+  await x.call('PUT', `/api/admin/customers/${c.id}`, { lang: 'es' }, tok);
+  // invoice: renew with an amount, then the invoice in Spanish
+  await x.call('POST', `/api/admin/customers/${c.id}/renew`, { planId: 'p1', price: 15 }, tok);
+  const inv = (await x.call('GET', `/api/admin/customers/${c.id}/invoice`, {}, tok)).json; assert.ok(inv.sales.length >= 1);
+  const pv = (await x.call('GET', `/api/admin/customers/${c.id}/invoice`, {}, tok, { saleId: inv.sales[0].id })).json;
+  assert.match(pv.subject, /^Factura INV-\d{6}-/); assert.match(pv.html, /Total pagado/); assert.match(pv.html, /Pagada/);
+  const sent = await x.call('POST', `/api/admin/customers/${c.id}/invoice`, { saleId: inv.sales[0].id }, tok); assert.equal(sent.status, 200); assert.match(x.mails.at(-1).subject, /^Factura/);
+  // seasonal templates: every language filled, code / end lines dropped when empty
+  for (const kind of ['blackfriday', 'cybermonday', 'christmas', 'newyear']) {
+    const camp = seasonCampaign({ branding: { appName: 'INTPROTO-TV' } }, kind, { offer: '30% OFF', code: 'XMAS26', end: '2026-12-26' });
+    for (const l of LANG_CODES) { assert.ok(camp.content[l].subject && camp.content[l].body.includes('XMAS26') && camp.content[l].body.includes('30% OFF'), kind + ' ' + l); assert.ok(camp.badges[l]); }
+    const bare = seasonCampaign({ branding: { appName: 'X' } }, kind, {}); for (const l of LANG_CODES) assert.doesNotMatch(bare.content[l].body, /\{|\[code\]|\[end\]|\*\*/);
+  }
+  const ch = (await x.call('GET', '/api/admin/newsletter/season', {}, tok, { kind: 'christmas', code: 'NOEL' })).json.campaign;
+  assert.match(ch.content.fr.title, /Joyeux Noël/); assert.match(ch.content.de.title, /Frohe Weihnachten/); assert.equal(ch.badges.it, '🎄 Natale');
+  // reseller in Italian
+  const r = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Rivenditore Prova', email: 'riv@example.com' }, tok);
+  const sv = await x.call('POST', '/api/admin/reseller/save', { id: r.json.reseller.id, name: 'Rivenditore Prova', email: 'riv@example.com', lang: 'it' }, tok); assert.equal(sv.status, 200, JSON.stringify(sv.json));
+  const s2 = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r20', resellerId: r.json.reseller.id }, tok); assert.equal(s2.status, 200, JSON.stringify(s2.json)); assert.equal(s2.json.emailed, true, JSON.stringify(s2.json));
+  assert.match(x.mails.at(-1).subject, /^Ordine confermato: 20 crediti/); assert.match(x.mails.at(-1).html, /La tua dashboard rivenditore/);
+});

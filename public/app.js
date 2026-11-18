@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=89';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=90';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
-import { siteHtml } from './site.js?v=83';
+import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=83';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=90';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -258,7 +258,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       ${state.mode === 'demo' && !preview ? `<div class="login-foot"><span class="badge-demo">${t('demo')}</span></div>` : ''}
     </div></div>`;
 }
-function renderLogin(error = '') { const rsl = /^\/rsl\/?$/i.test(location.pathname); $('#app').innerHTML = loginCard(rsl ? { ...state.config.branding, loginTitle: '🤝 Reseller dashboard', loginSubtitle: 'Sign in with your reseller ID (like RSL-12) or email, and the password from your email.' } : state.config.branding, { error: error ? tErr(error) : '' }); setWaFab(state.config.branding, t('waMsg', { app: state.config.branding.appName, u: '' })); }
+function renderLogin(error = '') { const rsl = /^\/rsl\/?$/i.test(location.pathname); $('#app').innerHTML = loginCard(rsl ? { ...state.config.branding, loginTitle: '🤝 ' + t('rsl_title'), loginSubtitle: t('rsl_loginSub') } : state.config.branding, { error: error ? tErr(error) : '' }); setWaFab(state.config.branding, t('waMsg', { app: state.config.branding.appName, u: '' })); }
 function trialForm() {
   const h = state.config.trial.hours;
   return `<p class="muted" style="margin-top:0">${t('trialIntro')}</p><form data-form="trial">
@@ -345,56 +345,57 @@ function renderResellers() {
 
 // ---------------- reseller dashboard (/rsl) ----------------
 const RSL = { d: null, tab: 'home', q: '' };
+const rslLangSel = () => `<select data-input="rsl-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
 async function renderRsl() {
   document.documentElement.dir = 'ltr';
   if (state.role !== 'reseller') {
-    $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>🤝 Reseller dashboard</h2><p class="muted">You are signed in with a customer account. Sign out, then sign in with your reseller ID and password.</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a><div class="login-foot"><a href="/">← ${esc(state.config.branding.appName || 'Home')}</a></div></div></div>`; return;
+    $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>🤝 ${esc(t('rsl_title'))}</h2><p class="muted">${esc(t('rsl_custAcc'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a><div class="login-foot"><a href="/">← ${esc(state.config.branding.appName || t('home'))}</a></div></div></div>`; return;
   }
-  $('#app').innerHTML = `<div class="rsl"><p class="muted" style="padding:40px;text-align:center">Loading…</p></div>`;
-  try { RSL.d = await api('GET', '/api/rsl/me'); } catch (e) { if (e.status === 401) { setSession(null); state.showLogin = true; return renderLogin(e.message); } $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><div class="err-box">${esc(e.message)}</div><button class="btn primary block" data-act="rsl-reload">Try again</button><a class="btn block" data-act="logout" style="margin-top:8px">${esc(t('logout'))}</a></div></div>`; return; }
+  $('#app').innerHTML = `<div class="rsl"><p class="muted" style="padding:40px;text-align:center">${esc(t('rsl_loading'))}</p></div>`;
+  try { RSL.d = await api('GET', '/api/rsl/me'); } catch (e) { if (e.status === 401) { setSession(null); state.showLogin = true; return renderLogin(e.message); } $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><div class="err-box">${esc(e.message)}</div><button class="btn primary block" data-act="rsl-reload">${esc(t('retry'))}</button><a class="btn block" data-act="logout" style="margin-top:8px">${esc(t('logout'))}</a></div></div>`; return; }
+  if (RSL.d.profile.lang && !localStorage.getItem('tvp_lang')) setLang(RSL.d.profile.lang);
   rslDraw();
 }
 function rslDraw() {
-  const d = RSL.d; const P = d.profile; const cur = d.currency; const sym = ORDER_CUR[cur] || '';
+  const d = RSL.d; const P = d.profile; const cur = d.currency;
   const money = (n, c = cur) => (ORDER_CUR[c] || '') + Number(n || 0).toFixed(2) + (ORDER_CUR[c] ? '' : ' ' + (c || ''));
   const stat = (ic, l, n, sub = '') => `<div class="stat"><i class="st-ic">${ic}</i><span>${l}</span><b>${n}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
-  const copyRow = (l, v, id, secret) => v ? `<div class="list-item"><span class="muted small" style="width:90px">${l}</span><code id="${id}" style="flex:1;word-break:break-all" ${secret ? `data-secret="${esc(v)}"` : ''}>${secret ? '••••••••' : esc(v)}</code>${secret ? `<button class="btn sm ghost" data-act="rsl-show" data-id="${id}" title="Show">👁</button>` : ''}<button class="btn sm" data-act="rsl-copy" data-v="${esc(v)}" title="Copy">📋</button></div>` : '';
-  const tabs = [['home', '🏠 Dashboard'], ['buy', '🛒 Buy credits'], ['orders', '🧾 Orders'], ['lines', '📺 Lines'], ['account', '👤 Account']];
-  const st = { active: '<span class="pill st-active">active</span>', expiring: '<span class="pill st-expiring">expiring</span>', expired: '<span class="pill st-expired">expired</span>', disabled: '<span class="pill st-disabled">disabled</span>' };
-  const sup = d.support;
+  const copyRow = (l, v, id, secret) => v ? `<div class="list-item"><span class="muted small" style="width:90px">${l}</span><code id="${id}" style="flex:1;word-break:break-all" ${secret ? `data-secret="${esc(v)}"` : ''}>${secret ? '••••••••' : esc(v)}</code>${secret ? `<button class="btn sm ghost" data-act="rsl-show" data-id="${id}" title="👁">👁</button>` : ''}<button class="btn sm" data-act="rsl-copy" data-v="${esc(v)}" title="${esc(t('copy'))}">📋</button></div>` : '';
+  const tabs = [['home', t('rsl_tabHome')], ['buy', t('rsl_tabBuy')], ['orders', t('rsl_tabOrders')], ['lines', t('rsl_tabLines')], ['account', t('rsl_tabAccount')]];
+  const st = { active: `<span class="pill st-active">${esc(t('st_active'))}</span>`, expiring: `<span class="pill st-expiring">${esc(t('st_expiring'))}</span>`, expired: `<span class="pill st-expired">${esc(t('st_expired'))}</span>`, disabled: `<span class="pill st-disabled">${esc(t('st_disabled'))}</span>` };
+  const sup = d.support; const kv = (l, v) => `<div class="list-item"><span class="muted small" style="width:130px">${esc(l)}</span><b>${esc(v)}</b></div>`;
   let body = '';
   if (RSL.tab === 'home') body = `
     <div class="stats">
-      ${stat('🪙', 'Credits bought', d.credits.bought, `${d.credits.thisMonth} this month`)}
-      ${d.credits.left !== null ? stat('💳', 'Credits left', d.credits.left, 'on your panel') : stat('🧾', 'Orders', d.totals.orders, d.totals.lastAt ? 'last ' + fmtDate(d.totals.lastAt) : '')}
-      ${stat('📺', 'Active lines', d.lines.active, `${d.lines.expiring} expiring · ${d.lines.expired} expired`)}
-      ${stat('💵', 'Spent', '$' + Number(d.totals.spentUsd).toFixed(2), d.totals.rate ? '$' + Number(d.totals.rate).toFixed(2) + ' per credit' : '')}
+      ${stat('🪙', esc(t('rsl_creditsBought')), d.credits.bought, esc(t('rsl_thisMonth', { n: d.credits.thisMonth })))}
+      ${d.credits.left !== null ? stat('💳', esc(t('rsl_creditsLeft')), d.credits.left, esc(t('rsl_onPanel'))) : stat('🧾', esc(t('rsl_orders')), d.totals.orders, d.totals.lastAt ? esc(t('rsl_last', { date: fmtDate(d.totals.lastAt) })) : '')}
+      ${stat('📺', esc(t('rsl_activeLines')), d.lines.active, esc(t('rsl_linesSub', { a: d.lines.expiring, b: d.lines.expired })))}
+      ${stat('💵', esc(t('rsl_spent')), '$' + Number(d.totals.spentUsd).toFixed(2), d.totals.rate ? esc(t('rsl_perCredit', { p: '$' + Number(d.totals.rate).toFixed(2) })) : '')}
     </div>
-    ${d.requests.length ? `<div class="notice" style="margin:14px 0">⏳ ${d.requests.map((q) => `Your order of <b>${q.credits} credits</b> (${esc(q.method || '')}) from ${fmtDate(q.at)} is waiting for payment. We will send you the payment details.`).join('<br>')}</div>` : ''}
-    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">🖥️ Your IPTV panel</h3>${d.panel.url ? `<a class="btn primary sm" href="${esc(d.panel.url)}" target="_blank" rel="noopener">Open panel ↗</a>` : ''}</div>
-      ${d.panel.url || d.panel.user ? `<div style="margin-top:8px">${copyRow('Link', d.panel.url, 'pu')}${copyRow('Username', d.panel.user, 'pn')}${copyRow('Password', d.panel.pass, 'pp', true)}${d.panel.server ? `<div class="list-item"><span class="muted small" style="width:90px">Server</span><b>${esc(d.panel.server)}</b></div>` : ''}</div>` : `<p class="muted small">Your panel details are not added yet. Contact us and we will set them up.</p>`}</div>
-    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">🧾 Last orders</h3><a class="btn sm ghost" data-act="rsl-tab" data-t="orders">See all</a></div>${rslOrders(d.orders.slice(0, 5), money)}</div>
-    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">🛒 Need more credits?</h3><a class="btn sm primary" data-act="rsl-tab" data-t="buy">Buy credits</a></div><p class="small muted" style="margin:6px 0 0">From ${d.packages[0] ? `${d.packages[0].credits} credits · ${money(d.packages[0].price)}` : '—'}. Choose a package and how you want to pay.</p></div>`;
-  if (RSL.tab === 'buy') body = `<p class="muted">Choose a package. After your order you get the payment details; your credits are added once the payment is received, and you get a confirmation email.</p>
-    <div class="plans-grid">${d.packages.map((x) => `<div class="plan-c" style="text-align:center"><div class="small muted">${esc(x.name)}</div><b style="font-size:2rem;display:block">${x.credits}</b><div class="small muted">credits</div><div class="pp" style="margin:8px 0">${money(x.price)}</div><div class="small muted">${money(x.per)} per credit</div><button class="btn primary block" style="margin-top:10px" data-act="rsl-buy" data-id="${esc(x.id)}">Order</button></div>`).join('') || '<p class="muted">No packages yet.</p>'}</div>`;
+    ${d.requests.length ? `<div class="notice" style="margin:14px 0">⏳ ${d.requests.map((q) => t('rsl_waiting', { n: q.credits, m: esc(q.method || ''), date: fmtDate(q.at) })).join('<br>')}</div>` : ''}
+    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">${esc(t('rsl_panel'))}</h3>${d.panel.url ? `<a class="btn primary sm" href="${esc(d.panel.url)}" target="_blank" rel="noopener">${esc(t('rsl_openPanel'))}</a>` : ''}</div>
+      ${d.panel.url || d.panel.user ? `<div style="margin-top:8px">${copyRow(esc(t('rsl_link')), d.panel.url, 'pu')}${copyRow(esc(t('username')), d.panel.user, 'pn')}${copyRow(esc(t('password')), d.panel.pass, 'pp', true)}${d.panel.server ? `<div class="list-item"><span class="muted small" style="width:90px">${esc(t('rsl_server'))}</span><b>${esc(d.panel.server)}</b></div>` : ''}</div>` : `<p class="muted small">${esc(t('rsl_noPanel'))}</p>`}</div>
+    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">${esc(t('rsl_lastOrders'))}</h3><a class="btn sm ghost" data-act="rsl-tab" data-t="orders">${esc(t('rsl_seeAll'))}</a></div>${rslOrders(d.orders.slice(0, 5), money)}</div>
+    <div class="card" style="margin-top:14px"><div class="row"><h3 style="margin:0;flex:1">${esc(t('rsl_needMore'))}</h3><a class="btn sm primary" data-act="rsl-tab" data-t="buy">${esc(t('rsl_buy'))}</a></div><p class="small muted" style="margin:6px 0 0">${esc(t('rsl_from', { x: d.packages[0] ? `${d.packages[0].credits} ${t('rsl_credits')} · ${money(d.packages[0].price)}` : '—' }))}</p></div>`;
+  if (RSL.tab === 'buy') body = `<p class="muted">${esc(t('rsl_buyIntro'))}</p>
+    <div class="plans-grid">${d.packages.map((x) => `<div class="plan-c" style="text-align:center"><div class="small muted">${esc(x.name)}</div><b style="font-size:2rem;display:block">${x.credits}</b><div class="small muted">${esc(t('rsl_credits'))}</div><div class="pp" style="margin:8px 0">${money(x.price)}</div><div class="small muted">${esc(t('rsl_perCredit', { p: money(x.per) }))}</div><button class="btn primary block" style="margin-top:10px" data-act="rsl-buy" data-id="${esc(x.id)}">${esc(t('rsl_order'))}</button></div>`).join('') || `<p class="muted">${esc(t('rsl_noPkgs'))}</p>`}</div>`;
   if (RSL.tab === 'orders') body = `<div class="card">${rslOrders(d.orders, money)}</div>`;
   if (RSL.tab === 'lines') { const q = RSL.q.toLowerCase(); const l = d.lines.list.filter((x) => !q || [x.name, x.username, x.orderNo].join(' ').toLowerCase().includes(q));
-    body = `<div class="row" style="margin-bottom:10px"><input placeholder="🔎 Search name, username, order…" value="${esc(RSL.q)}" data-input="rsl-q" style="flex:1"></div><div class="card" id="rsl-lines">${l.length ? `<div class="table-wrap"><table><thead><tr><th>Line</th><th>Order</th><th>Package</th><th>Devices</th><th>Ends</th><th>Status</th></tr></thead><tbody>${l.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.username)}</div></td><td>${esc(x.orderNo)}</td><td>${esc(x.plan || '')}</td><td>${x.devices}</td><td>${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${st[x.state] || ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No lines linked to your account yet.</p>'}</div>`; }
-  if (RSL.tab === 'account') body = `<div class="card"><h3 style="margin-top:0">Your details</h3>
-      <div class="list-item"><span class="muted small" style="width:110px">Reseller ID</span><b>${esc(P.rslId)}</b></div><div class="list-item"><span class="muted small" style="width:110px">Name</span><b>${esc(P.name)}</b></div>
-      ${P.org ? `<div class="list-item"><span class="muted small" style="width:110px">Company</span><b>${esc(P.org)}</b></div>` : ''}<div class="list-item"><span class="muted small" style="width:110px">Email</span><b>${esc(P.email || '—')}</b></div><div class="list-item"><span class="muted small" style="width:110px">Phone</span><b>${esc(P.phone || '—')}</b></div>
-      <div class="list-item"><span class="muted small" style="width:110px">Sign-in name</span><b>${esc(P.username)}</b></div>${P.joinedAt ? `<div class="list-item"><span class="muted small" style="width:110px">Reseller since</span><b>${fmtDate(P.joinedAt)}</b></div>` : ''}
-      <p class="small muted">To change your name, email or phone, contact us.</p></div>
-    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Change password</h3><form data-form="rsl-pass">${field('Current password', 'current', '', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field('New password (6+ characters)', 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<button class="btn primary">Save new password</button></form></div>`;
+    body = `<div class="row" style="margin-bottom:10px"><input placeholder="${esc(t('rsl_searchLines'))}" value="${esc(RSL.q)}" data-input="rsl-q" style="flex:1"></div><div class="card" id="rsl-lines">${l.length ? `<div class="table-wrap"><table><thead><tr><th>${esc(t('rsl_line'))}</th><th>${esc(t('rsl_order'))}</th><th>${esc(t('rsl_pkg'))}</th><th>${esc(t('rsl_devices'))}</th><th>${esc(t('rsl_ends'))}</th><th>${esc(t('rsl_status'))}</th></tr></thead><tbody>${l.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.username)}</div></td><td>${esc(x.orderNo)}</td><td>${esc(x.plan || '')}</td><td>${x.devices}</td><td>${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${st[x.state] || ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="muted small">${esc(t('rsl_noLines'))}</p>`}</div>`; }
+  if (RSL.tab === 'account') body = `<div class="card"><h3 style="margin-top:0">${esc(t('rsl_details'))}</h3>
+      ${kv(t('rsl_id'), P.rslId)}${kv(t('rsl_name'), P.name)}${P.org ? kv(t('rsl_company'), P.org) : ''}${kv(t('email'), P.email || '—')}${kv(t('phone'), P.phone || '—')}${kv(t('rsl_signinName'), P.username)}${P.joinedAt ? kv(t('rsl_since'), fmtDate(P.joinedAt)) : ''}
+      <div class="list-item"><span class="muted small" style="width:130px">${esc(t('language'))}</span>${rslLangSel()}</div>
+      <p class="small muted">${esc(t('rsl_changeInfo'))}</p></div>
+    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">${esc(t('rsl_changePw'))}</h3><form data-form="rsl-pass">${field(t('rsl_curPw'), 'current', '', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field(t('rsl_newPw'), 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<button class="btn primary">${esc(t('rsl_savePw'))}</button></form></div>`;
   $('#app').innerHTML = `<div class="rsl" style="max-width:1000px;margin:0 auto;padding:18px 14px 90px">
-    <div class="row" style="gap:12px;margin-bottom:14px">${sup.logo ? `<img src="${esc(sup.logo)}" alt="" style="height:40px;border-radius:10px">` : ''}<div style="flex:1"><div class="small muted">${esc(sup.app)} · Reseller dashboard</div><h2 style="margin:0">Hello, ${esc(P.name.split(' ')[0])} 👋</h2><div class="small muted">${esc(P.rslId)}${P.server ? ' · ' + esc(P.server) : ''}</div></div><button class="btn sm" data-act="rsl-reload" title="Refresh">↻</button><button class="btn sm ghost" data-act="logout">${esc(t('logout'))}</button></div>
-    <div class="chips" style="margin-bottom:14px">${tabs.map(([k, l]) => `<a class="${RSL.tab === k ? 'on' : ''}" data-act="rsl-tab" data-t="${k}">${l}</a>`).join('')}</div>
+    <div class="row" style="gap:12px;margin-bottom:14px;flex-wrap:wrap">${sup.logo ? `<img src="${esc(sup.logo)}" alt="" style="height:40px;border-radius:10px">` : ''}<div style="flex:1;min-width:180px"><div class="small muted">${esc(sup.app)} · ${esc(t('rsl_title'))}</div><h2 style="margin:0">${esc(t('hello', { name: P.name.split(' ')[0] }))}</h2><div class="small muted">${esc(P.rslId)}${P.server ? ' · ' + esc(P.server) : ''}</div></div>${rslLangSel()}<button class="btn sm" data-act="rsl-reload" title="↻">↻</button><button class="btn sm ghost" data-act="logout">${esc(t('logout'))}</button></div>
+    <div class="chips" style="margin-bottom:14px">${tabs.map(([k, l]) => `<a class="${RSL.tab === k ? 'on' : ''}" data-act="rsl-tab" data-t="${k}">${esc(l)}</a>`).join('')}</div>
     ${body}
-    <div class="card" style="margin-top:18px"><h3 style="margin-top:0">💬 Need help?</h3><div class="row" style="flex-wrap:wrap;gap:8px">${sup.whatsapp ? `<a class="btn wa-btn" href="https://wa.me/${sup.whatsapp}?text=${encodeURIComponent(`Hello, I am reseller ${P.rslId} (${P.name}).`)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${sup.telegram ? `<a class="btn" href="https://t.me/${esc(sup.telegram)}" target="_blank" rel="noopener">Telegram</a>` : ''}${sup.email ? `<a class="btn" href="mailto:${esc(sup.email)}">✉️ ${esc(sup.email)}</a>` : ''}${!sup.whatsapp && !sup.telegram && !sup.email ? '<span class="small muted">Reply to any of our emails and we will help you.</span>' : ''}</div></div>
+    <div class="card" style="margin-top:18px"><h3 style="margin-top:0">${esc(t('rsl_help'))}</h3><div class="row" style="flex-wrap:wrap;gap:8px">${sup.whatsapp ? `<a class="btn wa-btn" href="https://wa.me/${sup.whatsapp}?text=${encodeURIComponent(t('rsl_waMsg', { id: P.rslId, name: P.name }))}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${sup.telegram ? `<a class="btn" href="https://t.me/${esc(sup.telegram)}" target="_blank" rel="noopener">Telegram</a>` : ''}${sup.email ? `<a class="btn" href="mailto:${esc(sup.email)}">✉️ ${esc(sup.email)}</a>` : ''}${!sup.whatsapp && !sup.telegram && !sup.email ? `<span class="small muted">${esc(t('rsl_replyMail'))}</span>` : ''}</div></div>
   </div>`;
 }
 function rslOrders(list, money) {
-  return list.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Order</th><th>Package</th><th>Credits</th><th>Amount</th></tr></thead><tbody>${list.map((o) => `<tr><td>${o.at ? fmtDate(o.at) : '—'}</td><td>${esc(o.ref || '—')}</td><td>${esc(o.pkg || '')}</td><td><b>${o.credits || '—'}</b></td><td>${o.amount ? money(o.amount, o.currency) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No orders yet.</p>';
+  return list.length ? `<div class="table-wrap"><table><thead><tr><th>${esc(t('rsl_date'))}</th><th>${esc(t('rsl_order'))}</th><th>${esc(t('rsl_pkg'))}</th><th>${esc(t('rsl_credits'))}</th><th>${esc(t('rsl_amount'))}</th></tr></thead><tbody>${list.map((o) => `<tr><td>${o.at ? fmtDate(o.at) : '—'}</td><td>${esc(o.ref || '—')}</td><td>${esc(o.pkg || '')}</td><td><b>${o.credits || '—'}</b></td><td>${o.amount ? money(o.amount, o.currency) : '—'}</td></tr>`).join('')}</tbody></table></div>` : `<p class="muted small">${esc(t('rsl_noOrders'))}</p>`;
 }
 
 async function loadResellerPanel() {
@@ -687,7 +688,7 @@ const rsProfileForm = (x = {}) => `<form data-form="rs-profile" onsubmit="return
   <div class="grid2">${field('Email', 'email', x.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}${field('More emails', 'emails', (x.emails || []).slice(1).join(', '), { ph: 'separate with a comma', attrs: 'autocapitalize="none"' })}</div>
   <div class="grid2">${field('Phone / WhatsApp', 'phone', x.phone || '', { type: 'tel', ph: '+66812345678' })}${field('Reseller since (date)', 'joined', rsDay(x.joinedAt), { type: 'date' })}</div>
   <div class="grid3">${field('Organization', 'org', x.org || '')}${field('Server', 'server', x.server || '', { ph: 'MEGA, DINO…' })}${field('Panel tag', 'tag', x.tag || '')}</div>
-  <div class="grid2">${field('Telegram username', 'telegram', x.telegram || '', { ph: 'without @', attrs: 'autocapitalize="none"' })}${field('Panel URL (for the email)', 'panelUrl', x.panelUrl || '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}</div>
+  <div class="grid3">${field('Telegram username', 'telegram', x.telegram || '', { ph: 'without @', attrs: 'autocapitalize="none"' })}${field('Panel URL (for the email)', 'panelUrl', x.panelUrl || '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}${field('Language', 'lang', x.lang || 'en', { type: 'select', options: LANG5, help: 'Emails and the /rsl dashboard.' })}</div>
   <div class="grid2">${field('Panel username', 'panelUser', x.panelUser || '', { attrs: 'autocapitalize="none" autocomplete="off"' })}${field('Panel password', 'panelPass', x.panelPass || '', { attrs: 'autocapitalize="none" autocomplete="off"' })}</div>
   <div class="grid2">${field('Status', 'status', x.status || 'active', { type: 'select', options: [['active', 'Active'], ['paused', 'Paused']] })}${field('Note', 'note', x.note || '')}</div>
   <div class="row"><button type="button" class="btn primary" data-act="rs-save">💾 Save</button>${x.id ? `<span class="spacer"></span><button type="button" class="btn danger" data-act="rs-del" data-id="${x.id}">Delete reseller</button>` : ''}</div></form>`;
@@ -923,7 +924,7 @@ function customerForm(c) {
     <div class="grid2">${field('Secondary email', 'email2', c.email2 || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'Backup/reminder address' })}</div>
     <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
     <div class="grid3">${field('Telegram handle', 'telegram', c.telegram || '', { ph: '@username or id', attrs: 'autocapitalize="none"' })}${field('App / device', 'deviceApp', c.deviceApp || '', { ph: 'IBO Player, Smarters, MAC…' })}${field('MAC address', 'macAddress', c.macAddress || '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false"' })}</div>
-    <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: [['fr', 'Français'], ['en', 'English']] })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
+    <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: LANG5, help: 'Emails, WhatsApp / Telegram messages and the app use this language.' })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '', { ph: isNew ? 'Empty = next number automatically' : '', help: isNew ? 'Leave empty: the next number of your series is given (like WLF-143). Several devices stay on this one number: WLF-143-01, -02…' : 'Must not be used by another customer.' })}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
     <div class="grid3">${field('Address', 'address', c.address || '')}${field('Server', 'server', c.server || '', { ph: 'MEGA, DINO…' })}${field('Panel', 'panel', c.panel || '')}</div>
     <h3 style="margin-top:6px">App login details</h3>
@@ -1077,14 +1078,17 @@ async function waLoad() {
   catch (e) { toast(e.message, true); }
 }
 const NL_GROUPS = [['all', 'All customers'], ['paying', 'Paying customers (no trials)'], ['active', 'Active subscriptions'], ['expiring', 'Expiring soon'], ['expired', 'Expired subscriptions'], ['trial', 'Trial users']];
-const NL_LANGS = [['en', '🇬🇧 English'], ['fr', '🇫🇷 Français']];
-const nlBlank = () => ({ split: false, lang: 'en', content: { all: {}, en: {}, fr: {}, ar: {} }, badge: '', image: '', coupon: '', link: 'site', group: 'all' });
+const NL_LANGS = [['en', '🇬🇧 English'], ['fr', '🇫🇷 Français'], ['de', '🇩🇪 Deutsch'], ['es', '🇪🇸 Español'], ['it', '🇮🇹 Italiano']];
+const LANG5 = [['en', 'English'], ['fr', 'Français'], ['de', 'Deutsch'], ['es', 'Español'], ['it', 'Italiano']];
+const LANG5_CODES = LANG5.map((x) => x[0]);
+const nlBlank = () => ({ split: false, lang: 'en', content: { all: {}, en: {}, fr: {}, de: {}, es: {}, it: {} }, badge: '', image: '', coupon: '', link: 'site', group: 'all' });
 const nlFields = (k, c = {}) => `<div class="nl-c" data-k="${k}">${field('Email subject', 'subject_' + k, c.subject || '', { ph: 'e.g. 🎉 Black Friday: 50% off all packages' })}${field('Big title', 'title_' + k, c.title || '', { ph: 'e.g. Black Friday deal 🔥' })}${field('Message', 'body_' + k, c.body || '', { type: 'textarea', rows: 7, ph: 'Write your message. {name} = customer first name. *text* = bold. Empty line = new paragraph.' })}${field('Button text', 'button_' + k, c.button || '', { ph: 'e.g. Get the offer →' })}</div>`;
 function nlRead() {
   const f = $('[data-form=nl]'); if (!f) return null; const g = (n) => f.elements[n]?.value ?? '';
   const camp = { id: f.dataset.cid || undefined, split: g('split') === '1', lang: g('lang'), badge: g('badge'), image: g('image').trim(), coupon: g('coupon').trim(), group: g('group'), content: {} };
+  if (f.dataset.badges && g('badge') === f.dataset.badge0) { try { camp.badges = JSON.parse(f.dataset.badges); } catch {} } // translated badge of a seasonal template
   camp.link = g('link') === 'url' ? g('linkUrl').trim() : g('link');
-  for (const k of ['all', 'en', 'fr']) camp.content[k] = { subject: g('subject_' + k), title: g('title_' + k), body: g('body_' + k), button: g('button_' + k) };
+  for (const k of ['all', ...LANG5_CODES]) camp.content[k] = { subject: g('subject_' + k), title: g('title_' + k), body: g('body_' + k), button: g('button_' + k) };
   if (!camp.split) camp.content = { all: camp.content.all }; else delete camp.content.all;
   try { localStorage.setItem('tvp_nl_draft', JSON.stringify(camp)); } catch {}
   return camp;
@@ -1493,7 +1497,7 @@ function adminTrial(s) {
       <p class="small muted">The panel call for trials is the <b>trial</b> action in API settings.</p>
     </div>
     <div class="card"><h3>✉️ Email (Resend)</h3>
-      ${field('Language of emails', 'email.lang', s.email.lang || 'en', { type: 'select', options: [['en', 'English for everyone'], ['fr', 'French for everyone'], ['customer', 'Each customer’s own language']], help: 'Used for login, trial, reminder, renewal, order and confirmation emails.' })}${field('Resend API key', 'email.resendKey', e.resendKey, { type: 'password', attrs: 'autocomplete="off"', ph: 're_…', help: 'From resend.com → API Keys. Stored on the server only.' })}
+      ${field('Language of emails', 'email.lang', s.email.lang || 'en', { type: 'select', options: [['en', 'English for everyone'], ['fr', 'French for everyone'], ['de', 'German for everyone'], ['es', 'Spanish for everyone'], ['it', 'Italian for everyone'], ['customer', 'Each customer’s own language']], help: 'Used for login, trial, reminder, renewal, order and confirmation emails.' })}${field('Resend API key', 'email.resendKey', e.resendKey, { type: 'password', attrs: 'autocomplete="off"', ph: 're_…', help: 'From resend.com → API Keys. Stored on the server only.' })}
       ${field('Send from', 'email.from', e.from, { ph: 'My IPTV <noreply@yourdomain.com>', help: 'Must use a domain verified in Resend. For a quick test use <code>onboarding@resend.dev</code> (only sends to your own Resend email).' })}
       ${field('App link in emails', 'email.appUrl', e.appUrl || location.origin, { attrs: 'autocapitalize="none"' })}
       ${field('DNS / Portal shown to customers', 'email.dns', e.dns, { ph: s.player.serverUrl || 'http://line.yourdns.com', attrs: 'autocapitalize="none"', help: 'Used in the email for Username / Password / DNS and the M3U links. Empty = your streaming server URL.' })}
@@ -2218,7 +2222,9 @@ const actions = {
       ${item('mail-profile', '👤', 'Profile details', 'App username and password, with a button to their intproto-tv.store/profile page', c.profileMailAt)}
       ${item('email-login', '📺', 'Order details: TVplus line + M3U', 'Line username, password, DNS and M3U links', c.lineMailAt)}
       ${item('order-one', '💳', 'Payment link', 'A package with your payment link', c.orderSentAt)}
-      ${item('renewal-one', '🔁', 'Renewal', 'Renewal offer for an ended or ending subscription', c.renewalSentAt)}`);
+      ${item('renewal-one', '🔁', 'Renewal', 'Renewal offer for an ended or ending subscription', c.renewalSentAt)}
+      ${item('mail-invoice', '🧾', 'Invoice', 'Invoice for a payment, in the customer’s language', Math.max(0, ...Object.values(c.invoices || {})) || 0)}
+      <p class="small muted" style="margin:8px 0 0">Language: <b>${esc({ en: 'English', fr: 'Français', de: 'Deutsch', es: 'Español', it: 'Italiano' }[c.lang] || 'English')}</b> — change it in ✎ Edit.</p>`);
   },
   'mail-profile': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
@@ -2274,7 +2280,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', ['en', 'fr'].includes(c.lang) ? c.lang : 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français']] })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''))}</div>
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''))}</div>
       <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
@@ -2307,7 +2313,7 @@ const actions = {
     const o = promoForm(); const lang = 'en';
     try {
       const r = await api('POST', '/api/admin/templates/preview', { kind: 'renewal', lang, promo: o, appUrl: location.origin });
-      modal('👁 Renewal email with the promotion', `<div class="seg" style="margin-bottom:10px"><button type="button" class="on" data-act="promo-pv-l" data-l="en">English</button><button type="button" data-act="promo-pv-l" data-l="fr">Français</button></div><p class="small muted" style="margin:0 0 8px">Subject: <b id="pv-subj">${esc(r.subject)}</b></p><iframe title="Email preview" sandbox="" style="width:100%;height:62vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe>`, { wide: true });
+      modal('👁 Renewal email with the promotion', `<div class="seg" style="margin-bottom:10px">${LANG5.map(([k, n], i) => `<button type="button" class="${i ? '' : 'on'}" data-act="promo-pv-l" data-l="${k}">${n}</button>`).join('')}</div><p class="small muted" style="margin:0 0 8px">Subject: <b id="pv-subj">${esc(r.subject)}</b></p><iframe title="Email preview" sandbox="" style="width:100%;height:62vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe>`, { wide: true });
       $('.modal-body iframe').srcdoc = r.html; state.admin.promoPv = o;
     } catch (e) { toast(e.message, true); }
   },
@@ -2339,10 +2345,10 @@ const actions = {
   'rsl-copy': (el) => { navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Copied ✓'), () => toast(el.dataset.v)); },
   'rsl-show': (el) => { const c = document.getElementById(el.dataset.id); if (c) c.textContent = c.textContent.startsWith('•') ? c.dataset.secret : '••••••••'; },
   'rsl-buy': (el) => { const d = RSL.d; const x = d.packages.find((p) => p.id === el.dataset.id); if (!x) return;
-    modal(`🛒 ${x.credits} credits`, `<p style="margin-top:0"><b>${esc(x.name)}</b> · ${x.credits} credits · <b>${(ORDER_CUR[d.currency] || '') + x.price.toFixed(2)}${ORDER_CUR[d.currency] ? '' : ' ' + d.currency}</b></p>
-      <form data-form="rsl-order" data-id="${esc(x.id)}">${d.payMethods.length ? `<div class="field"><span>How do you want to pay?</span>${d.payMethods.map((m, i) => `<label class="list-item" style="cursor:pointer"><input type="radio" name="method" value="${esc(m)}" ${i ? '' : 'checked'}> ${esc(m)}</label>`).join('')}</div>` : ''}
-      ${field('Note (optional)', 'note', '', { ph: 'Anything we should know?' })}<p class="small muted">We send you the payment details right away. Your credits are added after payment and you get a confirmation email.</p>
-      <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Send order</button></div></form>`); },
+    modal(`🛒 ${x.credits} ${esc(t('rsl_credits'))}`, `<p style="margin-top:0"><b>${esc(x.name)}</b> · ${x.credits} ${esc(t('rsl_credits'))} · <b>${(ORDER_CUR[d.currency] || '') + x.price.toFixed(2)}${ORDER_CUR[d.currency] ? '' : ' ' + d.currency}</b></p>
+      <form data-form="rsl-order" data-id="${esc(x.id)}">${d.payMethods.length ? `<div class="field"><span>${esc(t('rsl_payHow'))}</span>${d.payMethods.map((m, i) => `<label class="list-item" style="cursor:pointer"><input type="radio" name="method" value="${esc(m)}" ${i ? '' : 'checked'}> ${esc(m)}</label>`).join('')}</div>` : ''}
+      ${field(t('rsl_note'), 'note', '', { ph: t('rsl_notePh') })}<p class="small muted">${esc(t('rsl_payInfo'))}</p>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${esc(t('cancel'))}</button><button class="btn primary">${esc(t('rsl_sendOrder'))}</button></div></form>`); },
   'conn-add': () => { const l = $('#conn-list'); if (!l) return; l.insertAdjacentHTML('beforeend', connRow({})); connNumber(); l.lastElementChild.querySelector('[data-cn="m3u"]')?.focus(); },
   'conn-del': (el) => { const r = el.closest('.conn-row'); const f = r?.closest('form'); r?.remove(); connNumber(); const t = $('#conn-total'); if (t && f) t.textContent = (Number(f.connections?.value) || 1) + connRead(f).reduce((a, x) => a + x.devices, 0); },
   'nl-open': async () => {
@@ -2351,11 +2357,12 @@ const actions = {
     const running = st.camp?.id && st.groups[st.camp.group]?.left > 0 && st.groups[st.camp.group]?.left < st.groups[st.camp.group]?.total;
     if (running) d = st.camp; d = { ...nlBlank(), ...(d || {}), content: { ...nlBlank().content, ...(d?.content || {}) } };
     const link = String(d.link || ''); const linkSel = ['', 'site', 'app', 'contact'].includes(link) ? link : link.startsWith('pkg:') ? 'contact' : 'url';
-    const body = modal('📣 Newsletter / promotion email', `<form data-form="nl" onsubmit="return false" ${running ? `data-cid="${esc(d.id)}"` : ''}>
+    const body = modal('📣 Newsletter / promotion email', `<form data-form="nl" onsubmit="return false" ${running ? `data-cid="${esc(d.id)}"` : ''} ${d.badges ? `data-badges="${esc(JSON.stringify(d.badges))}" data-badge0="${esc(d.badge || '')}"` : ''}>
+      ${running ? '' : `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px"><span class="small muted">📚 Ready templates (5 languages):</span>${[['blackfriday', '🖤 Black Friday'], ['cybermonday', '💻 Cyber Monday'], ['christmas', '🎄 Christmas'], ['newyear', '🎆 New Year']].map(([k, n]) => `<button type="button" class="btn sm" data-act="nl-season" data-k="${k}">${n}</button>`).join('')}</div>`}
       ${running ? `<div class="notice info">⏸ Your last campaign stopped with <b>${st.groups[d.group].left}</b> customers still waiting. Press <b>Send</b> to continue it, or <a data-act="nl-new" style="cursor:pointer;text-decoration:underline">start a new one</a>.</div>` : ''}
       <div class="grid2">${field('Send to', 'group', d.group, { type: 'select', options: NL_GROUPS.map(([k, l]) => [k, `${l} (${st.groups[k].total})`]) })}${field('Languages', 'split', d.split ? '1' : '0', { type: 'select', options: [['0', 'One message for everyone'], ['1', 'Different message per language (EN / FR / AR)']] })}</div>
       <div id="nl-one">${field('Email language (greeting & footer)', 'lang', d.lang || 'en', { type: 'select', options: NL_LANGS })}${nlFields('all', d.content.all)}</div>
-      <div id="nl-split"><p class="small muted" style="margin:0 0 6px">Each customer gets the version in their language. If one language is empty, they get English.</p><div class="row" style="gap:6px;margin-bottom:8px">${NL_LANGS.map(([k, l], i) => `<button type="button" class="btn sm ${i ? '' : 'primary'}" data-act="nl-tab" data-k="${k}">${l}</button>`).join('')}</div>${['en', 'fr'].map((k) => nlFields(k, d.content[k] || { subject: '', title: '', body: '', button: '' })).join('')}</div>
+      <div id="nl-split"><p class="small muted" style="margin:0 0 6px">Each customer gets the version in their language. If one language is empty, they get English.</p><div class="row" style="gap:6px;margin-bottom:8px">${NL_LANGS.map(([k, l], i) => `<button type="button" class="btn sm ${i ? '' : 'primary'}" data-act="nl-tab" data-k="${k}">${l}</button>`).join('')}</div>${LANG5_CODES.map((k) => nlFields(k, d.content[k] || { subject: '', title: '', body: '', button: '' })).join('')}</div>
       <div class="grid3">${field('Top badge (optional)', 'badge', d.badge, { ph: '🔥 Limited offer' })}${field('Coupon code (optional)', 'coupon', d.coupon, { ph: 'LION001' })}${field('Image URL (optional)', 'image', d.image, { attrs: 'autocapitalize="none"', ph: 'https://…/banner.jpg' })}</div>
       <div class="grid2">${field('Button opens', 'link', linkSel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['app', 'The INTPROTO-TV app'], ['contact', 'Contact us (WhatsApp)'], ['url', 'Other link (e.g. a payment link)…']] })}${field('Other link', 'linkUrl', linkSel === 'url' ? link : '', { attrs: 'autocapitalize="none"', ph: 'https://…' })}</div>
       <div class="row"><select id="nl-pvlang" style="width:auto">${NL_LANGS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button type="button" class="btn" data-act="nl-preview">👁 Preview</button><input id="nl-test" value="${esc(s.email.adminEmail || '')}" placeholder="test@email.com" style="flex:1;min-width:150px" autocapitalize="none"><button type="button" class="btn" data-act="nl-test">Send test</button></div>
@@ -2367,6 +2374,19 @@ const actions = {
     f.addEventListener('change', () => { sync(); nlRead(); }); f.addEventListener('input', () => nlRead());
     sync(); actions['nl-tab']({ dataset: { k: 'en' } });
   },
+  'mail-invoice': async (el) => {
+    const id = el.dataset.id; const c = state.admin.customers.find((x) => x.id === id); let d;
+    try { d = await api('GET', `/api/admin/customers/${id}/invoice`); } catch (e) { return toast(e.message, true); }
+    if (!d.sales.length) return modal('🧾 Invoice', '<p class="muted">No payment is recorded for this customer yet. Invoices are made from payments (renewals and new subscriptions with an amount).</p>');
+    modal(`🧾 Invoice · ${esc(c?.name || '')}`, `<p class="small muted" style="margin-top:0">Choose the payment. The invoice is in the customer’s language.</p>${d.sales.map((x) => `<div class="list-item"><span style="flex:1"><b>${esc(x.no)}</b> · ${fmtDate(x.at)} · ${esc(x.planName || '')} · ${esc(String(x.amount))} ${esc(x.currency || '')}${x.sent ? ` <span class="small muted">· sent ${fmtDate(x.sent)}</span>` : ''}</span><button class="btn sm" data-act="inv-pv" data-id="${id}" data-s="${x.id}">👁 Preview</button><button class="btn sm primary" data-act="inv-send" data-id="${id}" data-s="${x.id}">✉️ Send</button></div>`).join('')}`, { wide: true });
+  },
+  'inv-pv': async (el) => { try { const r = await api('GET', `/api/admin/customers/${el.dataset.id}/invoice?saleId=${encodeURIComponent(el.dataset.s)}&appUrl=${encodeURIComponent(location.origin)}`); modal('👁 ' + esc(r.subject), `<iframe title="Invoice preview" sandbox="" style="width:100%;height:68vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe><div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn ghost" data-act="mail-invoice" data-id="${el.dataset.id}">← Back</button><button class="btn primary" data-act="inv-send" data-id="${el.dataset.id}" data-s="${el.dataset.s}">✉️ Send</button></div>`, { wide: true }); $('.modal-body iframe').srcdoc = r.html; } catch (e) { toast(e.message, true); } },
+  'inv-send': async (el) => { el.disabled = true; try { const r = await api('POST', `/api/admin/customers/${el.dataset.id}/invoice`, { saleId: el.dataset.s, appUrl: location.origin }); closeModal(); toast(`Invoice ${r.no} sent ✓`); custRefresh?.(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'nl-season': (el) => { const k = el.dataset.k; const names = { blackfriday: '🖤 Black Friday', cybermonday: '💻 Cyber Monday', christmas: '🎄 Christmas', newyear: '🎆 New Year' }; const pr = state.admin.settings?.promo || {};
+    const y = new Date().getFullYear(); const ends = { blackfriday: pr.to || `${y}-12-01`, cybermonday: `${y}-12-02`, christmas: `${y}-12-26`, newyear: `${y + (new Date().getMonth() === 0 ? 0 : 1)}-01-07` };
+    modal(`${names[k]} · email template`, `<form data-form="nl-season" data-k="${k}"><p class="small muted" style="margin-top:0">Ready in English, French, German, Spanish and Italian — each customer gets their language. You can edit every text after loading it.</p>
+      <div class="grid3">${field('Discount (optional)', 'offer', k === 'blackfriday' ? pr.offer || '' : '', { ph: '30% OFF', help: 'Empty = a general wording without a number.' })}${field('Coupon code (optional)', 'code', k === 'blackfriday' ? pr.code || '' : '', { ph: k.toUpperCase() })}${field('Offer ends', 'end', ends[k], { type: 'date' })}</div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="nl-open">← Back</button><button class="btn primary">Load into the newsletter</button></div></form>`); },
   'nl-tab': (el) => { document.querySelectorAll('#nl-split .nl-c').forEach((x) => (x.style.display = x.dataset.k === el.dataset.k ? '' : 'none')); document.querySelectorAll('[data-act=nl-tab]').forEach((b) => b.classList.toggle('primary', b.dataset.k === el.dataset.k)); },
   'nl-new': async () => { await api('POST', '/api/admin/newsletter/new', {}); try { localStorage.removeItem('tvp_nl_draft'); } catch {} closeModal(); actions['nl-open'](); },
   'nl-preview': async () => {
@@ -2403,7 +2423,7 @@ const actions = {
     const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const body = modal('✍️ Custom package email', `<form data-form="order-custom" onsubmit="return false">
       <div class="grid2">${field('Email address', 'to', '', { type: 'email', attrs: 'required autocapitalize="none"', ph: 'customer@gmail.com' })}${field('Customer name', 'name', '', { ph: 'Leave empty for "Dear Valued Customer"' })}</div>
-      <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: [['en', 'English'], ['fr', 'Français']] })}${field('Package', 'pkg', p0.id, { type: 'select', options: packageOptions(s) })}</div>
+      <div class="grid2">${field('Language', 'lang', 'en', { type: 'select', options: LANG5 })}${field('Package', 'pkg', p0.id, { type: 'select', options: packageOptions(s) })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">Change the details (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: p0.title })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"', ph: String(p0.price ?? '') })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"', ph: String(p0.days ?? '') })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"', ph: String(p0.devices ?? '') })}${field('Top badge', 'badge', '', { ph: 'e.g. 🎁 Special offer' })}</div>
@@ -2806,8 +2826,10 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
-  async 'rsl-order'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { await api('POST', '/api/rsl/order', { pkg: f.dataset.id, method: f.method?.value || (f.querySelector('[name=method]:checked')?.value || ''), note: f.note.value }); closeModal(); toast('Order sent ✓ We will send you the payment details.'); RSL.tab = 'home'; renderRsl(); } catch (e) { toast(e.message, true); b.disabled = false; } },
-  async 'rsl-pass'(f) { try { await api('POST', '/api/rsl/password', { current: f.current.value, password: f.password.value }); toast('Password changed ✓'); f.reset(); } catch (e) { toast(e.message, true); } },
+  async 'nl-season'(f) { try { const q = new URLSearchParams({ kind: f.dataset.k, offer: f.offer.value.trim(), code: f.code.value.trim().toUpperCase(), end: f.end.value }); const d = await api('GET', '/api/admin/newsletter/season?' + q);
+      try { localStorage.setItem('tvp_nl_draft', JSON.stringify({ ...nlBlank(), ...d.campaign, group: 'active' })); } catch {} await actions['nl-open'](); toast('Template loaded in 5 languages ✓ Check it with Preview, then Send.'); } catch (e) { toast(e.message, true); } },
+  async 'rsl-order'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { await api('POST', '/api/rsl/order', { pkg: f.dataset.id, method: f.method?.value || (f.querySelector('[name=method]:checked')?.value || ''), note: f.note.value }); closeModal(); toast(t('rsl_orderSent')); RSL.tab = 'home'; renderRsl(); } catch (e) { toast(e.message, true); b.disabled = false; } },
+  async 'rsl-pass'(f) { try { await api('POST', '/api/rsl/password', { current: f.current.value, password: f.password.value }); toast(t('rsl_pwChanged')); f.reset(); } catch (e) { toast(e.message, true); } },
   async 'orders-set'(f) { const o = formToObj(f); for (const k of ['prefix', 'iboPrefix', 'rslPrefix']) { o[k] = String(o[k] || '').trim(); if (!/^[A-Za-z]{1,10}$/.test(o[k])) return toast('Prefixes: letters only, like WLF.', true); } o.series = [o.prefix, o.iboPrefix, o.rslPrefix].join(','); await saveSettings({ orders: o }); actions['orders-open'](); },
   async promo(f) {
     const o = formToObj(f); if (!String(o.code || '').trim()) return toast('Type the promo code first.', true);
@@ -2989,6 +3011,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
+  if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
   if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
@@ -3606,7 +3629,7 @@ const TPL_GROUPS = [
   ['OM', 'order', '💳 Package order email', 'Package email; the button uses the payment link you type when sending (or WhatsApp).', '{name} {app} {pkg} {price} {d} {n}'],
 ];
 const WA_NAMES = { pay: '💳 Payment link (place an order)', trial: '🎁 Free trial details', thanks: '🙏 Thank you for your purchase', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
-const LANG3 = [['en', 'English'], ['fr', 'Français']];
+const LANG3 = LANG5;
 const nice = (k) => k.replace(/([A-Z0-9])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 // Black Friday (seasonal) promotion: one switch, the code goes into renewal emails and WhatsApp / Telegram messages.
 async function promoCard() {
