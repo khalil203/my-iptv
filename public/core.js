@@ -241,7 +241,7 @@ export const ROLE_PRESETS = {
   'Full access': GRANTABLE_KEYS,
 };
 function permFor(method, path, body) {
-  if (['/api/admin/me', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
+  if (['/api/admin/me', '/api/admin/email/status', '/api/admin/stats', '/api/admin/panel/credits', '/api/admin/me/password'].includes(path) || path.startsWith('/api/admin/2fa')) return null;
   if (path.startsWith('/api/admin/tickets') || path.startsWith('/api/admin/chat') || path.startsWith('/api/admin/receipts') || path === '/api/admin/sync') return method === 'GET' ? 'customers_view' : 'customers_edit';
   // Anyone on the team can file a problem report; only disputes-permitted staff can view and process the tracker.
   if (path === '/api/admin/disputes' && method === 'POST') return null;
@@ -1314,7 +1314,56 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   const keyFp = (k) => { let h = 2166136261; for (const ch of String(k || '')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8, '0') + String(k || '').length.toString(16); };
   async function keyUse(key, n) {
     if (!key || !(n > 0)) return; try { const u = (await store.get('keyuse')) || {}; const f = keyFp(key); const mo = new Date().toISOString().slice(0, 7);
-      const x = u[f] || { total: 0, months: {} }; x.total += n; x.months[mo] = (x.months[mo] || 0) + n; x.last = Date.now(); u[f] = x; await store.put('keyuse', u); } catch {}
+      const x = u[f] || { total: 0, months: {} }; x.total += n; x.months[mo] = (x.months[mo] || 0) + n; x.last = Date.now();
+      const dy = new Date().toISOString().slice(0, 10); x.days = x.day === dy ? x.days || 0 : 0; x.day = dy; x.days += n; u[f] = x; await store.put('keyuse', u); } catch {}
+  }
+  // ---- Which plan each sending key is on (free trial account or paid), so the right key is used and none goes over its limit ----
+  // Resend free accounts: 100 emails a day and 3,000 a month. Paid plans: the monthly amount of the plan.
+  const MAIL_TIERS = { free: { name: 'Free trial', price: 0, quota: 3000, daily: 100 }, p50: { name: 'Paid · 50,000 emails', price: 20, quota: 50000, daily: 0 }, p100: { name: 'Paid · 100,000 emails', price: 35, quota: 100000, daily: 0 }, custom: { name: 'Paid · custom', price: 0, quota: 0, daily: 0 }, unset: { name: 'Plan not set', price: 0, quota: 0, daily: 0 } };
+  function keyPlan(row, accounts) { // the plan written on the key, else the one in Accounts & API keys, else "not set"
+    const t = MAIL_TIERS[row.tier] && row.tier !== 'unset' ? row.tier : null;
+    const acc = !t && row.key ? (accounts || []).find((a) => a.apiKey && a.apiKey === row.key && (a.kind === 'resend' || a.kind === 'marketing')) : null;
+    const tier = t || (acc ? (acc.plan?.tier && MAIL_TIERS[acc.plan.tier] ? acc.plan.tier : 'custom') : 'unset');
+    const base = MAIL_TIERS[tier];
+    const quota = Number(row.quota) > 0 && (tier === 'custom' || row.tier) ? Number(row.quota) : acc && !t && acc.plan?.quota ? Number(acc.plan.quota) : base.quota;
+    const price = row.price != null && row.price !== '' && Number(row.price) >= 0 && row.tier ? Number(row.price) || base.price : acc && !t ? Number(acc.plan?.price) || base.price : base.price;
+    return { tier, name: base.name, quota, daily: tier === 'free' ? Number(row.daily) || base.daily : Number(row.daily) || 0, price, paid: tier !== 'free' && tier !== 'unset', from: t ? 'key' : acc ? 'account' : 'none' };
+  }
+  const nextDay = () => { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); };
+  const nextMonth = () => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() + 1, 1); d.setUTCHours(0, 0, 0, 0); return d.getTime(); };
+  // What a Resend error means for the key: stop using it until tomorrow / next month, or for a few hours, or just try the next key.
+  function resendTrouble(status, msg) {
+    const m = String(msg || '').toLowerCase();
+    if (status === 429 && /month/.test(m)) return { until: nextMonth(), why: 'Monthly limit of this Resend account reached' };
+    if (status === 429 && /(daily|day|quota)/.test(m)) return { until: nextDay(), why: 'Daily limit of this Resend account reached (free accounts: 100 a day)' };
+    if (status === 429) return { until: Date.now() + 60000, why: 'Too many emails at once (rate limit)' };
+    if (status === 401 || /api key is invalid|invalid api key|api_key/.test(m)) return { until: Date.now() + 6 * 3600000, why: 'The API key is wrong or was deleted in Resend' };
+    if (status === 403 && /(testing emails|own email|verify a domain)/.test(m)) return { until: Date.now() + 6 * 3600000, why: 'Free trial account without a verified domain: it can only send to its own address' };
+    if (status === 403 || /domain.*not verified|not verified/.test(m)) return { until: Date.now() + 6 * 3600000, why: 'The domain is not verified on this Resend account' };
+    if (status === 422 && /from/.test(m)) return { until: Date.now() + 6 * 3600000, why: 'The sender address does not match a domain of this account' };
+    return null; // e.g. a wrong recipient address: not the key's fault
+  }
+  async function keyTrouble(key, t, msg) {
+    try { const h = (await store.get('keyhealth')) || {}; const f = keyFp(key);
+      h[f] = t ? { until: t.until, why: t.why, msg: String(msg || '').slice(0, 200), at: Date.now(), fails: ((h[f] && h[f].fails) || 0) + 1 } : { ok: Date.now() };
+      await store.put('keyhealth', h); } catch {}
+  }
+  // The keys that can send n emails now, best first: paid keys, then keys with no plan set, then free trial keys (each still under its limits).
+  async function mailCandidates(rows, n, accounts) {
+    const u = (await store.get('keyuse')) || {}; const h = (await store.get('keyhealth')) || {}; const mo = new Date().toISOString().slice(0, 7); const dy = new Date().toISOString().slice(0, 10); const now = Date.now();
+    const out = [];
+    for (const r of rows) {
+      if (!r.key || r.on === false) continue; const f = keyFp(r.key); const plan = keyPlan(r, accounts); const x = u[f] || {};
+      const month = x.months?.[mo] || 0, today = x.day === dy ? x.days || 0 : 0; const hh = h[f];
+      if (hh && hh.until > now) continue;
+      if (plan.quota && month + n > plan.quota) continue;
+      if (plan.daily && today + n > plan.daily) continue;
+      const rank = plan.paid ? 0 : plan.tier === 'unset' ? 1 : 2;
+      const room = plan.quota ? plan.quota - month : 1e9;
+      out.push({ row: r, plan, rank, room, rnd: Math.random() });
+    }
+    out.sort((a, b) => a.rank - b.rank || b.room - a.room || a.rnd - b.rnd);
+    return out.map((x) => x.row);
   }
   const getAccounts = async () => (await store.get('accounts')) || [];
   const saveAccounts = (l) => store.put('accounts', l);
@@ -1490,12 +1539,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   const rowsFromLegacy = (keys = [], domains = [], names = []) => keys.map((k, i) => ({ id: 'k' + (i + 1), key: String(k || '').trim(), domain: cleanDomain(domains[i]), name: String(names[i] || '').trim().slice(0, 80), on: true })).filter((r) => r.key && !r.key.startsWith('••••'));
   const transRowsOf = (s) => (Array.isArray(s.email.transRows) ? s.email.transRows : rowsFromLegacy(s.email.transKeys, s.email.transDomains, s.email.transSenders));
   const maskRows = (rows) => (rows || []).map((r) => ({ ...r, key: r.key ? '••••' + String(r.key).slice(-4) : '' }));
+  const MAIL_TIERS_KEYS = ['free', 'p50', 'p100', 'custom'];
   function normRows(input, old) { // a key shown as ••••abcd keeps the saved key of the same row
     const byId = new Map((old || []).map((r) => [r.id, r]));
     return (Array.isArray(input) ? input : []).slice(0, 200).map((r) => {
       const id = /^[\w-]{1,20}$/.test(String(r?.id || '')) ? String(r.id) : 'k' + uid(4); const prev = byId.get(id);
       const k = String(r?.key || '').trim(); const key = k.startsWith('••••') ? (prev ? prev.key : '') : k.replace(/\s/g, '').slice(0, 200);
-      return { id, key, domain: cleanDomain(r?.domain), name: String(r?.name || '').replace(/[<>"]/g, '').trim().slice(0, 80), on: r?.on !== false, testAt: prev?.testAt || 0, testOk: prev?.testOk ?? null, testMsg: prev?.testMsg || '' };
+      return { id, key, domain: cleanDomain(r?.domain), name: String(r?.name || '').replace(/[<>"]/g, '').trim().slice(0, 80), on: r?.on !== false, tier: MAIL_TIERS_KEYS.includes(r?.tier) ? r.tier : r?.tier === undefined ? prev?.tier || '' : '', quota: Math.max(0, Math.floor(Number(r?.quota ?? prev?.quota) || 0)), price: Math.max(0, Number(r?.price ?? prev?.price) || 0), testAt: prev?.testAt || 0, testOk: prev?.testOk ?? null, testMsg: prev?.testMsg || '' };
     }).filter((r) => r.key || r.domain);
   }
   function transPairs(s) {
@@ -1516,42 +1566,48 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return `${name} <${addr || 'noreply@intproto-tv.store'}>`;
   }
   const mailKeys = (s) => { const out = []; for (const k of [s.email.resendKey, ...transRowsOf(s).map((r) => r.key)]) { const v = String(k || '').trim(); if (v && !out.includes(v)) out.push(v); } return out; };
+  // The sending keys to try for n emails, in order. With no key rows, the single legacy key.
+  async function mailPairs(s, n) {
+    const rows = transRowsOf(s).filter((r) => r.on !== false && r.key);
+    if (!rows.length) { const p = transPair(s); return p.key ? [p] : []; }
+    const ok = await mailCandidates(rows, n, await getAccounts());
+    return ok.slice(0, 6).map((r) => ({ key: r.key, domain: r.domain, fromName: r.name }));
+  }
+  async function resendPost(s, pairs, path, build) { // tries each key until one works; a key in trouble is set aside
+    let last = 'Email is not set up (Resend key / sender missing).';
+    if (!pairs.length) return { ok: false, skipped: !transRowsOf(s).some((r) => r.key), error: transRowsOf(s).some((r) => r.key && r.on !== false) ? 'All sending keys are at their limit or paused right now. See Email sending status.' : last };
+    for (const pair of pairs) {
+      try {
+        const res = await fetchFn('https://api.resend.com' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + pair.key, 'Content-Type': 'application/json' }, body: JSON.stringify(build(transFrom(s, pair))) });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) { const h = (await store.get('keyhealth')) || {}; if (h[keyFp(pair.key)]?.until) await keyTrouble(pair.key, null); return { ok: true, data, key: pair.key }; }
+        last = data.message || 'Resend error ' + res.status;
+        const t = resendTrouble(res.status, last);
+        if (!t) return { ok: false, error: last };
+        await keyTrouble(pair.key, t, last);
+      } catch (err) { last = err.message; }
+    }
+    return { ok: false, error: last };
+  }
   async function sendEmail(s, to, subject, html) {
-    const e = s.email;
     to = cleanEmail(to);
     if (!to) return { ok: false, error: 'This is not a valid email address.' };
-    const pair = transPair(s);
-    if (!pair.key) return { ok: false, skipped: true, error: 'Email is not set up (Resend key / sender missing).' };
-    // (pair.key replaces resendKey below)
-    const auth = pair.key;
-    const fromHeader = transFrom(s, pair);
     const paused = (await getBad())[to];
     if (paused) return { ok: false, bounced: true, error: `Not sent: ${to} ${paused.why} before. Correct the address, or allow it again in Trial & email → Bounced addresses.` };
-    try {
-      const res = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: fromHeader, to: [to], subject, html }) });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) await keyUse(auth, 1);
-      return res.ok ? { ok: true, id: data.id } : { ok: false, error: data.message || 'Resend error ' + res.status };
-    } catch (err) { return { ok: false, error: err.message }; }
+    const r = await resendPost(s, await mailPairs(s, 1), '/emails', (from) => ({ from, to: [to], subject, html }));
+    if (r.ok) { await keyUse(r.key, 1); return { ok: true, id: r.data.id }; }
+    return { ok: false, skipped: r.skipped, error: r.error };
   }
   const withUrl = (s, u) => (s.email.appUrl || !u ? s : { ...s, email: { ...s.email, appUrl: String(u) } });
   // Send many emails in one request (Resend batch API, up to 100)
   async function sendBatch(s, msgs) {
-    const e = s.email;
-    const pair = transPair(s);
-    const auth = pair.key;
-    const fromHeader = transFrom(s, pair);
-    if (!auth) return { ok: false, error: 'Email is not set up (Resend key / sender missing).' };
     if (!msgs.length) return { ok: true, sent: 0 };
-    try {
-      const bad = await getBad();
-      msgs = msgs.map((m) => ({ ...m, to: cleanEmail(m.to) })).filter((m) => m.to && !bad[m.to]);
-      if (!msgs.length) return { ok: true, sent: 0 };
-      const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: fromHeader, to: [m.to], subject: m.subject, html: m.html }))) });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) await keyUse(auth, msgs.length);
-      return r.ok ? { ok: true, sent: msgs.length } : { ok: false, error: d.message || 'Resend error ' + r.status };
-    } catch (err) { return { ok: false, error: err.message }; }
+    const bad = await getBad();
+    msgs = msgs.map((m) => ({ ...m, to: cleanEmail(m.to) })).filter((m) => m.to && !bad[m.to]);
+    if (!msgs.length) return { ok: true, sent: 0 };
+    const r = await resendPost(s, await mailPairs(s, msgs.length), '/emails/batch', (from) => msgs.map((m) => ({ from, to: [m.to], subject: m.subject, html: m.html })));
+    if (r.ok) { await keyUse(r.key, msgs.length); return { ok: true, sent: msgs.length }; }
+    return { ok: false, error: r.error };
   }
   // Who can get a renewal email right now
   function renewalTargets(list, onlyRecentDays) {
@@ -2980,7 +3036,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!key) return err(400, 'Paste the Resend API key first.'); if (!domain) return err(400, 'Type the domain that is verified in Resend.');
         const to = cleanEmail(body.to || s.email.adminEmail || s.email.supportEmail || ''); if (!to) return err(400, 'Add your admin email in Trial & email setup, so the test has somewhere to go.');
         let okSend = false, msg = '';
-        try { const r = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: `${name} <noreply@${domain}>`, to: [to], subject: `Test from ${domain}`, html: `<p>This test was sent through your Resend key ••••${escHtml(key.slice(-4))} and the domain <b>${escHtml(domain)}</b>. It works.</p>` }) }); const d = await r.json().catch(() => ({})); okSend = r.ok; msg = r.ok ? 'Sent to ' + to : (d.message || 'Resend error ' + r.status); }
+        try { const r = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: `${name} <noreply@${domain}>`, to: [to], subject: `Test from ${domain}`, html: `<p>This test was sent through your Resend key ••••${escHtml(key.slice(-4))} and the domain <b>${escHtml(domain)}</b>. It works.</p>` }) }); const d = await r.json().catch(() => ({})); okSend = r.ok; msg = r.ok ? 'Sent to ' + to : (d.message || 'Resend error ' + r.status); if (r.ok) await keyTrouble(key, null); else { const t = resendTrouble(r.status, msg); if (t) await keyTrouble(key, t, msg); } }
         catch (e) { msg = e.message; }
         if (saved) { saved.testAt = Date.now(); saved.testOk = okSend; saved.testMsg = msg.slice(0, 200); if (scope === 'mkt') { m.rows = rows; await saveMkt(m); } else { s.email.transRows = rows; await saveSettings(s); } }
         return okSend ? ok({ ok: true, msg }) : err(502, msg);
@@ -3013,24 +3069,29 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
         const html = String(body.html || '').slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
-        for (let i = 0; i < recipients.length; i += 100) { // Resend batch API, 100 at a time
+        const accts = await getAccounts(); let stopped = '';
+        for (let i = 0; i < recipients.length; i += 100) { // Resend batch API, 100 at a time; paid keys first, a key at its limit or failing is skipped
           const bi = Math.floor(i / 100); const batch = recipients.slice(i, i + 100);
-          const keyIndex = bi % keys.length;
-          const key = keys[keyIndex];
-          const dom = domains[keyIndex] || (String(s.branding.supportUrl || '') ? '' : '');
-          const from = `${mrows[keyIndex].name || (senders.length ? senders[bi % senders.length] : app)} <noreply@${dom || 'intproto-tv.store'}>`;
+          const cands = await mailCandidates(mrows, batch.length, accts);
+          if (!cands.length) { stopped = 'Every marketing key is at its plan limit or paused. Add a paid key or wait for the limit to reset.'; await log('marketing', `Marketing stopped at ${i}/${recipients.length}: ${stopped}`); break; }
           const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
+          let done = false;
+          for (const row of cands.slice(0, 6)) {
+          const keyIndex = mrows.indexOf(row); const key = row.key; const dom = row.domain;
+          const from = `${row.name || (senders.length ? senders[bi % senders.length] : app)} <noreply@${dom || 'intproto-tv.store'}>`;
           try {
             const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(batch.map((to) => ({ from, to: [to], subject, html }))) });
             if (r.ok) await keyUse(key, batch.length);
-            if (r.ok) { sentCount += batch.length; spent += batch.length * perEmail; m.stats[day] = { sent: (Number(m.stats?.[day]?.sent) || 0) + batch.length }; m.perKey = m.perKey || {}; m.perKey[keyIndex + 1] = { sent: (Number(m.perKey?.[keyIndex + 1]?.sent) || 0) + batch.length, spend: Math.round(((Number(m.perKey?.[keyIndex + 1]?.spend) || 0) + batch.length * perEmail) * 100) / 100 }; }
-            else { const d = await r.json().catch(() => ({})); await log('marketing', `Marketing batch ${bi + 1} failed: ${d.message || 'Resend error ' + r.status}`); }
+            if (!r.ok) { const d = await r.json().catch(() => ({})); const msg = d.message || 'Resend error ' + r.status; const t = resendTrouble(r.status, msg); await log('marketing', `Marketing batch ${bi + 1} failed on key ${keyIndex + 1}: ${msg}${t ? ' — trying the next key' : ''}`); if (t) { await keyTrouble(key, t, msg); continue; } break; }
+            if (r.ok) { done = true; sentCount += batch.length; spent += batch.length * perEmail; m.stats[day] = { sent: (Number(m.stats?.[day]?.sent) || 0) + batch.length }; m.perKey = m.perKey || {}; m.perKey[keyIndex + 1] = { sent: (Number(m.perKey?.[keyIndex + 1]?.sent) || 0) + batch.length, spend: Math.round(((Number(m.perKey?.[keyIndex + 1]?.spend) || 0) + batch.length * perEmail) * 100) / 100 }; }
+            break;
           } catch (e) { await log('marketing', `Marketing batch ${bi + 1} failed: ${e.message}`); }
+          }
         }
         if (m.perKey) { const perKey = Object.entries(m.perKey).filter(([, v]) => v.sent).map(([k, v]) => `#${k}: ${v.sent} sent`).join(', '); await log('marketing', `Per-key sends: ${perKey}`); }
         m.totalSent = (Number(m.totalSent) || 0) + sentCount; m.totalSpendUsd = Math.round(((Number(m.totalSpendUsd) || 0) + spent) * 100) / 100; m.lastSendAt = Date.now();
         await saveMkt(m); await log('marketing', `Marketing campaign: ${sentCount}/${recipients.length} sent to "${listRef.name}" (keys rotating, ${senders.length || 1} sender name(s), ${subjects.length || 1} subject line(s))`);
-        return ok({ ok: true, sent: sentCount, removed: (doc.emails || []).length - recipients.length, spendUsd: Math.round(spent * 100) / 100 });
+        return ok({ ok: true, sent: sentCount, removed: (doc.emails || []).length - recipients.length, spendUsd: Math.round(spent * 100) / 100, stopped });
       }
 
       // ---------- SEO & social, Google Ads, Facebook Ads dashboards (spec §8.2–§8.4) ----------
@@ -3414,6 +3475,25 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       // ---------- Accounts (Resend / email marketing / Hostinger / Dynu): only the owner, Khalil and Nizar (permission 'secrets') ----------
+      if (R('GET', '/api/admin/email/status')) { // every agent can see this: plan, use and health of each sending key (never the key itself)
+        const sec = can('secrets'); const accts = await getAccounts(); const u = (await store.get('keyuse')) || {}; const h = (await store.get('keyhealth')) || {};
+        const mo = new Date().toISOString().slice(0, 7), dy = new Date().toISOString().slice(0, 10), now = Date.now();
+        const mk = await store.get('mkt') || {}; const mkRows = Array.isArray(mk.rows) ? mk.rows : [];
+        const one = (r, i, use) => { const f = keyFp(r.key); const x = u[f] || {}; const p = keyPlan(r, accts); const hh = h[f]; const month = x.months?.[mo] || 0, today = x.day === dy ? x.days || 0 : 0;
+          const limited = (p.quota && month >= p.quota) || (p.daily && today >= p.daily);
+          const state = r.on === false ? 'off' : hh && hh.until > now ? 'paused' : limited ? 'limit' : p.quota && month >= p.quota * 0.85 ? 'almost' : 'ok';
+          return { n: i + 1, use, label: r.name || (use === 'marketing' ? 'Marketing key ' : 'Sending key ') + (i + 1), domain: sec ? r.domain || '' : '', key: sec ? '••••' + String(r.key).slice(-4) : '', tier: p.tier, plan: p.name, price: p.price, quota: p.quota, daily: p.daily, paid: p.paid, planFrom: p.from,
+            month, today, total: x.total || 0, left: p.quota ? Math.max(0, p.quota - month) : null, leftToday: p.daily ? Math.max(0, p.daily - today) : null, pct: p.quota ? Math.min(100, Math.round(month / p.quota * 1000) / 10) : null,
+            state, why: state === 'paused' ? hh.why : state === 'limit' ? (p.daily && today >= p.daily ? 'Daily limit reached — sends again tomorrow' : 'Monthly limit reached — sends again next month') : '', until: state === 'paused' ? hh.until : 0, last: x.last || 0, lastError: hh && hh.why ? { why: hh.why, at: hh.at, msg: sec ? hh.msg : '' } : null }; };
+        const rows = [...transRowsOf(s).filter((r) => r.key).map((r, i) => one(r, i, 'customer')), ...mkRows.filter((r) => r.key).map((r, i) => one(r, i, 'marketing'))];
+        const live = (use) => rows.filter((r) => r.use === use && (r.state === 'ok' || r.state === 'almost'));
+        const sum = (list, f) => list.reduce((t, r) => t + (f(r) || 0), 0);
+        const cap = (use) => { const l = live(use); return l.some((r) => !r.quota) ? null : sum(l, (r) => r.left); };
+        const sum1 = { keys: rows.length, working: rows.filter((r) => r.state === 'ok' || r.state === 'almost').length, paused: rows.filter((r) => r.state === 'paused' || r.state === 'limit').length, paidKeys: rows.filter((r) => r.paid).length, freeKeys: rows.filter((r) => r.tier === 'free').length, unsetKeys: rows.filter((r) => r.tier === 'unset').length,
+          month: sum(rows, (r) => r.month), today: sum(rows, (r) => r.today), quota: sum(rows, (r) => r.quota), fees: Math.round(sum(rows.filter((r) => r.paid), (r) => r.price) * 100) / 100, leftCustomer: cap('customer'), leftMarketing: cap('marketing') };
+        const status = !rows.length ? 'none' : !live('customer').length && rows.some((r) => r.use === 'customer') ? 'down' : sum1.paused ? 'warn' : 'ok';
+        return ok({ rows, summary: sum1, status, tiers: Object.fromEntries(Object.entries(MAIL_TIERS).filter(([k]) => k !== 'unset')), canEdit: sec, month: mo });
+      }
       if (R('GET', '/api/admin/accounts')) {
         const a = await accRows(await getAccounts()); const tr = transRowsOf(s); const mk = ((await store.get('mkt')) || {}).rows || [];
         const known = new Set((await getAccounts()).map((x) => x.apiKey).filter(Boolean)); const loose = [...tr, ...mk].filter((r) => r.key && !known.has(r.key)).length;

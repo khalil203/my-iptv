@@ -1772,3 +1772,44 @@ test('support page: details required first, ticket goes to the queue, all agents
   assert.doesNotMatch((await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', appUrl: 'https://tv.example.com' }, tok)).json.text, /\/support/);
   const ss = (await x.call('GET', '/api/admin/settings', {}, tok)).json.support; assert.equal(ss.alertEmails, 'extra.agent@example.com'); assert.equal(ss.email, 'help@example.com');
 });
+
+test('email keys: paid keys first, free trial keys only up to 100 a day, a failing key is skipped, status shown to every agent without keys', async () => {
+  const used = []; let freeFails = false;
+  const x = setup(async (url, init) => {
+    if (!url.includes('api.resend.com/emails') || init.method !== 'POST') return null;
+    const key = init.headers.Authorization.replace('Bearer ', ''); used.push(key);
+    if (key === 're_PAID_dead') return { ok: false, status: 403, json: async () => ({ message: 'The intproto-tv.com domain is not verified. Please, add and verify your domain.' }) };
+    if (key === 're_FREE_1' && freeFails) return { ok: false, status: 429, json: async () => ({ message: 'You have reached your daily email sending quota.' }) };
+    return null;
+  });
+  const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { from: 'App <no-reply@example.com>', transRows: [
+    { id: 'a', key: 're_FREE_1', domain: 'free.example.com', name: 'Free one', on: true, tier: 'free' },
+    { id: 'b', key: 're_PAID_dead', domain: 'paid1.example.com', name: 'Paid broken', on: true, tier: 'p100' },
+    { id: 'c', key: 're_PAID_ok', domain: 'paid2.example.com', name: 'Paid good', on: true, tier: 'p50' }] } }, tok);
+  const saved = (await x.call('GET', '/api/admin/settings', {}, tok)).json.email.transRows; assert.deepEqual(saved.map((r) => r.tier), ['free', 'p100', 'p50']);
+  const c = await addCustomer(x, tok, { username: 'mailuser', email: 'mail.user@example.com' });
+  // send a few emails: the broken paid key is set aside, the working paid key sends; the free key is not needed
+  for (let i = 0; i < 3; i++) { used.length = 0; await x.call('POST', '/api/admin/email/test', { to: 'mail.user@example.com' }, tok); }
+  const st = (await x.call('GET', '/api/admin/email/status', {}, tok)).json;
+  const byLabel = Object.fromEntries(st.rows.map((r) => [r.label, r]));
+  assert.equal(byLabel['Paid broken'].state, 'paused'); assert.match(byLabel['Paid broken'].why, /not verified/);
+  assert.ok(byLabel['Paid good'].month >= 1); assert.equal(byLabel['Free one'].month, 0, 'free key not used while a paid key works');
+  assert.equal(st.status, 'warn');
+  // paid key turned off → the free key sends, but never more than 100 a day
+  await x.call('PUT', '/api/admin/settings', { email: { transRows: saved.map((r) => ({ ...r, on: r.id === 'a' })) } }, tok);
+  const s1 = (await x.call('GET', '/api/admin/email/status', {}, tok)).json; assert.equal(s1.rows.find((r) => r.label === 'Free one').daily, 100);
+  const keyuse = (await x.store.get('keyuse')) || {}; const day = new Date().toISOString().slice(0, 10), mo = day.slice(0, 7);
+  // find the fingerprint by sending one email with only the free key on
+  used.length = 0; await x.call('POST', '/api/admin/email/test', { to: 'mail.user@example.com' }, tok); assert.deepEqual(used, ['re_FREE_1']);
+  const ku = await x.store.get('keyuse'); const ffp = Object.keys(ku).find((k) => ku[k].day === day && !(keyuse[k]?.total));
+  ku[ffp].days = 100; ku[ffp].months[mo] = 100; await x.store.put('keyuse', ku);
+  used.length = 0; await x.call('POST', '/api/admin/email/test', { to: 'mail.user@example.com' }, tok);
+  assert.deepEqual(used, [], 'free key over its daily limit is not used'); 
+  const s2 = (await x.call('GET', '/api/admin/email/status', {}, tok)).json; assert.equal(s2.status, 'down'); assert.equal(s2.rows.find((r) => r.label === 'Free one').state, 'limit');
+  // an agent without the secrets permission sees the status but no key or domain
+  await x.call('POST', '/api/admin/team', { name: 'Agent Amy', username: 'amy', password: 'secret12', role: 'Support Agent', perms: ['customers_view'] }, tok);
+  const li = await x.call('POST', '/api/login', { username: 'amy', password: 'secret12' });
+  await signBylaws(x, li.json.token); const ag = await x.call('GET', '/api/admin/email/status', {}, li.json.token); assert.equal(ag.status, 200);
+  assert.ok(ag.json.rows.every((r) => !r.key && !r.domain)); assert.ok(!JSON.stringify(ag.json).includes('re_'));
+});

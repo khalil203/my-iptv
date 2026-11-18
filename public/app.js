@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=92';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=93';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -658,6 +658,33 @@ async function renderAdmin() {
   } catch (e) { if (state.token) $('#admin-body').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
 }
 
+
+// ---------------- email sending status (every agent can see it; keys stay hidden) ----------------
+const MS_STATE = { ok: ['st-active', 'Working'], almost: ['st-expiring', 'Almost at its limit'], limit: ['st-expired', 'Limit reached'], paused: ['st-expired', 'Paused'], off: ['', 'Switched off'] };
+const nfmt = (n) => Number(n || 0).toLocaleString('en-US');
+async function mailStatusCard(compact) {
+  let d; try { d = await api('GET', '/api/admin/email/status'); } catch { return ''; }
+  if (!d.rows.length) return compact ? '' : `<div class="card"><h3>📧 Email sending status</h3><p class="muted small">No sending key yet.</p></div>`;
+  const S = d.summary; const tone = d.status === 'down' ? 'danger' : d.status === 'warn' ? 'warning' : 'success';
+  const head = d.status === 'down' ? '❌ Customer emails cannot be sent right now: every sending key is paused or at its limit.' : d.status === 'warn' ? `⚠️ ${S.paused} sending key${S.paused > 1 ? 's are' : ' is'} paused or at the limit. Emails go out through the other keys.` : '✅ All sending keys are working.';
+  const left = (v) => (v === null ? 'no limit set' : nfmt(v) + ' left this month');
+  const top = `<div class="notice ${tone}" style="margin:0 0 10px">${head}</div>
+    <div class="stats" style="margin-bottom:10px">
+      <div class="stat"><span>Sent this month</span><b>${nfmt(S.month)}</b><span>${nfmt(S.today)} today</span></div>
+      <div class="stat c-ok"><span>Customer emails</span><b style="font-size:18px">${left(S.leftCustomer)}</b></div>
+      <div class="stat"><span>Marketing</span><b style="font-size:18px">${d.rows.some((r) => r.use === 'marketing') ? left(S.leftMarketing) : '—'}</b></div>
+      <div class="stat"><span>Keys</span><b>${S.working}/${S.keys}</b><span>${S.paidKeys} paid · ${S.freeKeys} free${S.unsetKeys ? ' · ' + S.unsetKeys + ' no plan' : ''}</span></div>
+      <div class="stat"><span>Paid plans</span><b>$${nfmt(S.fees)}</b><span>a month</span></div>
+    </div>`;
+  if (compact) return `<div class="card"><div class="row"><h3>📧 Email sending status</h3><span class="spacer"></span><a class="small" data-act="mail-status" style="cursor:pointer">Details →</a></div>${top}</div>`;
+  const bar = (r) => r.pct === null ? '' : `<div style="height:6px;border-radius:4px;background:rgba(127,127,127,.2);margin-top:4px"><i style="display:block;height:6px;border-radius:4px;width:${r.pct}%;background:${r.pct >= 100 ? '#ef4444' : r.pct >= 85 ? '#f59e0b' : '#22c55e'}"></i></div>`;
+  const rows = d.rows.map((r) => { const [cls, lab] = MS_STATE[r.state] || ['', r.state];
+    return `<div class="list-item" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(r.label)}</b> <span class="pill">${r.use === 'marketing' ? 'Marketing' : 'Customer emails'}</span> <span class="pill ${r.paid ? 'st-active' : r.tier === 'free' ? 'st-expiring' : ''}">${esc(r.plan)}${r.price ? ' · $' + r.price : ''}</span>
+      <div class="small muted">${d.canEdit && r.domain ? esc(r.domain) + ' · ' + esc(r.key) + ' · ' : ''}${nfmt(r.month)}${r.quota ? ' / ' + nfmt(r.quota) : ''} this month · ${nfmt(r.today)}${r.daily ? ' / ' + nfmt(r.daily) : ''} today · ${nfmt(r.total)} in total${r.last ? ' · last ' + fmtDT(r.last) : ''}</div>${bar(r)}
+      ${r.why ? `<div class="small" style="margin-top:4px">⚠️ ${esc(r.why)}${r.until ? ' · tried again ' + fmtDT(r.until) : ''}</div>` : ''}${r.tier === 'unset' ? '<div class="small muted" style="margin-top:4px">Plan not set: tell the owner or Khalil which plan this key is on.</div>' : ''}</div><span class="pill ${cls}">${lab}</span></div>`; }).join('');
+  return `${top}<div class="card">${rows}</div>
+    <p class="small muted">Paid keys are used first, then free trial keys. A key that reaches its limit or gets an error from Resend is set aside and the next key sends the email, so no email is lost. Free trial accounts can send 100 emails a day and 3,000 a month.${d.canEdit ? ' Set the plan of each key in API settings → Resend keys, Email marketing, or Accounts & API keys.' : ' Only the owner, Khalil and Nizar can change the keys and plans.'}</p>`;
+}
 async function adminOverview() {
   const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
   const max = Math.max(1, ...Object.values(st.byMonth || {}));
@@ -688,6 +715,7 @@ async function adminOverview() {
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
     ${st.totalBalanceUsd !== null && st.totalBalanceUsd !== undefined ? `<div class="stat c-ok" data-act="atab" data-tab="finance" style="cursor:pointer"><span>All banks (total)</span><b>${usd(st.totalBalanceUsd)}</b><span>${mad(st.totalBalanceUsd * st.madRate)}</span></div>` : ''}
   </div>
+  ${await mailStatusCard(true)}
   <div class="grid2 ${can('customers_view') ? '' : 'hidden'}" style="gap:16px">
     <div class="card"><div class="row"><h3>Expiring soon</h3><span class="spacer"></span><a class="small" data-act="atab" data-tab="subs" style="cursor:pointer">Tracker →</a></div>${st.expiringSoon.length ? st.expiringSoon.map(row).join('') : '<p class="muted">Nobody is expiring soon.</p>'}</div>
     <div class="card"><h3>Recently expired</h3>${st.recentlyExpired.length ? st.recentlyExpired.map(row).join('') : '<p class="muted">No expired customers.</p>'}</div>
@@ -1308,7 +1336,7 @@ async function adminApi(s) {
       <div class="row" style="position:sticky;bottom:12px"><button class="btn primary">💾 Save panel / API settings</button></div>
     </form>
     <form data-form="trans-settings" class="card"><h3>📧 Resend keys &amp; domains — customer emails</h3>
-      <p class="small muted" style="margin-top:0">Add as many keys and domains as you need. Each email uses the next key that is switched on.</p>
+      <p class="small muted" style="margin-top:0">Add as many keys and domains as you need. Set the plan of each key (free trial or paid): paid keys send first, free trial keys only up to 100 a day / 3,000 a month, and a key that fails is skipped so the email still goes out. <a data-act="mail-status" style="cursor:pointer">See the sending status →</a></p>
       ${keysEditor('trans', s.email.transRows || [])}
       <h3 style="margin-top:14px">Subject lines</h3><div class="grid2">${Array.from({ length: 4 }, (_, i) => `<div class="field"><input name="transSubject${i}" value="${esc(((s.email.transSubjects || [])[i] || ''))}" placeholder="Subject ${i + 1}" dir="ltr" autocomplete="off"></div>`).join('')}</div>
       <label class="field" style="margin-top:10px"><span>Cost per email (USD)</span><input type="number" step="0.0001" min="0" name="transCost" value="${esc(String(s.email.transCostPerEmail ?? 0.0004))}"></label>
@@ -1317,12 +1345,16 @@ async function adminApi(s) {
   </div>`;
 }
 // ---------- Resend sending keys: one row per key + domain, as many as you like ----------
+const KEY_TIERS = [['', 'Same as in Accounts & API keys (or not set)'], ['free', 'Free trial account · 100 a day, 3,000 a month'], ['p50', 'Paid · $20 for 50,000 emails a month'], ['p100', 'Paid · $35 for 100,000 emails a month'], ['custom', 'Paid · other amount (type it)']];
 const keyRow = (scope, r = {}) => `<div class="key-row card" data-key-row data-id="${esc(r.id || '')}" style="padding:10px;margin-bottom:8px">
   <div class="row" style="gap:6px;align-items:center"><label class="row small" style="gap:6px;flex:0 0 auto" title="Switch this key off without deleting it"><input type="checkbox" data-k="on" ${r.on === false ? '' : 'checked'} style="width:auto"> On</label>
     <input data-k="key" value="${esc(r.key || '')}" placeholder="Resend API key (re_…)" dir="ltr" autocomplete="off" spellcheck="false" style="flex:2;min-width:140px">
     <input data-k="domain" value="${esc(r.domain || '')}" placeholder="yourdomain.com" dir="ltr" autocomplete="off" style="flex:1;min-width:110px"></div>
   <div class="row" style="gap:6px;align-items:center;margin-top:6px"><input data-k="name" value="${esc(r.name || '')}" placeholder="Sender name, e.g. INTPROTO-TV Support" style="flex:1;min-width:150px">
     <button type="button" class="btn sm" data-act="key-test" data-scope="${scope}">🧪 Test</button><button type="button" class="btn sm danger" data-act="key-del" title="Delete this key">🗑</button></div>
+  <div class="row" style="gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap"><span class="small muted">Plan</span><select data-k="tier" data-input="key-tier" style="flex:1;min-width:190px">${KEY_TIERS.map(([k, n]) => `<option value="${k}" ${String(r.tier || '') === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <input data-k="quota" type="number" min="0" step="1000" value="${r.tier === 'custom' && r.quota ? esc(r.quota) : ''}" placeholder="Emails / month" title="Emails a month in this plan" style="width:130px" ${r.tier === 'custom' ? '' : 'hidden'}>
+    <input data-k="price" type="number" min="0" step="0.01" value="${r.tier === 'custom' && r.price ? esc(r.price) : ''}" placeholder="Price $" title="Price of the plan ($ a month)" style="width:95px" ${r.tier === 'custom' ? '' : 'hidden'}></div>
   <div class="small muted key-status" style="margin-top:4px">${r.testAt ? `${r.testOk ? '✅' : '❌'} Tested ${fmtDT(r.testAt)} · ${esc(r.testMsg || '')}` : 'Not tested yet'} · sends as <span dir="ltr">${esc(r.name || 'INTPROTO-TV')} &lt;noreply@${esc(r.domain || 'yourdomain.com')}&gt;</span></div></div>`;
 const keysHelp = (scope) => `<details class="small" style="margin:6px 0 12px"><summary style="cursor:pointer;font-weight:700">📖 How to add a key and domain</summary><ol style="margin:8px 0 0;padding-inline-start:18px;line-height:1.6">
   <li>In <a href="https://resend.com/domains" target="_blank" rel="noopener">Resend → Domains</a>, add your domain and put the DNS records it shows in your domain's DNS (Cloudflare or Hostinger). Wait until it says <b>Verified</b>.</li>
@@ -1332,7 +1364,7 @@ const keysHelp = (scope) => `<details class="small" style="margin:6px 0 12px"><s
   <p style="margin:8px 0 0">${scope === 'mkt' ? 'These keys are only for <b>marketing</b> emails (newsletter lists). Use different domains from your customer emails: if a newsletter gets spam reports, your login, payment and renewal emails keep arriving.' : 'These keys are for <b>customer</b> emails: login details, profile, payment links, renewals, trials. Keep newsletter domains separate (Email marketing page), so spam reports on promotions never block these.'}</p></details>`;
 const keysEditor = (scope, rows) => !can('secrets') ? `<div class="notice">🔒 API keys and sending domains are only visible to the owner, Khalil and Nizar.</div>` : `${keysHelp(scope)}<div data-keys="${scope}">${(rows || []).map((r) => keyRow(scope, r)).join('') || '<p class="small muted key-empty">No keys yet.</p>'}</div>
   <div class="row" style="gap:8px"><button type="button" class="btn" data-act="key-add" data-scope="${scope}">＋ Add key</button><span class="small muted">${(rows || []).filter((r) => r.on !== false && r.key).length} switched on · ${(rows || []).length} in total</span></div>`;
-const keysRead = (scope) => [...document.querySelectorAll(`[data-keys="${scope}"] [data-key-row]`)].map((el) => ({ id: el.dataset.id || undefined, key: el.querySelector('[data-k=key]').value.trim(), domain: el.querySelector('[data-k=domain]').value.trim(), name: el.querySelector('[data-k=name]').value.trim(), on: el.querySelector('[data-k=on]').checked })).filter((r) => r.key || r.domain);
+const keysRead = (scope) => [...document.querySelectorAll(`[data-keys="${scope}"] [data-key-row]`)].map((el) => ({ id: el.dataset.id || undefined, key: el.querySelector('[data-k=key]').value.trim(), domain: el.querySelector('[data-k=domain]').value.trim(), name: el.querySelector('[data-k=name]').value.trim(), on: el.querySelector('[data-k=on]').checked, tier: el.querySelector('[data-k=tier]')?.value || '', quota: el.querySelector('[data-k=quota]')?.value || 0, price: el.querySelector('[data-k=price]')?.value || 0 })).filter((r) => r.key || r.domain);
 async function adminSecurity(s) {
   const me = state.admin.me;
   if (me.role !== 'owner') return `<form data-form="staff-password" class="card" style="max-width:520px"><h3>My login</h3><p class="muted small">Signed in as <b>${esc(me.username)}</b>. Permissions: ${me.perms.map((p) => `<span class="tagp">${esc((me.allPerms.find((x) => x[0] === p) || [p, p])[1])}</span>`).join(' ') || 'none'}</p>
@@ -2453,6 +2485,7 @@ const actions = {
     try { const r = await api('POST', '/api/admin/reseller/login', body); toast(k === 'send' ? 'Login email sent ✓' : k === 'left' ? 'Saved ✓' : `Login: ${r.username} / ${r.pass}`); rsReload(el.dataset.id); } catch (e) { toast(e.message, true); } },
   'rsl-tab': (el) => { RSL.tab = el.dataset.t; rslDraw(); window.scrollTo(0, 0); },
   'rsl-reload': () => renderRsl(),
+  'mail-status': async () => { const h = await mailStatusCard(false); modal('📧 Email sending status', h, { wide: true }); },
   'sup-back': () => { SUP.step = 1; supDraw(); },
   'sup-another': () => { SUP.step = SUP.token ? 2 : 1; SUP.ref = ''; supDraw(); },
   'rsl-copy': (el) => { navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Copied ✓'), () => toast(el.dataset.v)); },
@@ -3153,6 +3186,7 @@ document.addEventListener('input', (e) => {
   if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
+  if (t.dataset.input === 'key-tier') { const row = t.closest('[data-key-row]'); row.querySelectorAll('[data-k=quota],[data-k=price]').forEach((x) => { x.hidden = t.value !== 'custom'; }); return; }
   if (t.dataset.input === 'sup-lang') { setLang(t.value, true); return supDraw(); }
   if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
@@ -4530,10 +4564,11 @@ async function adminMktPage() {
   state.admin.mkt = m; state.admin.mktSettings = st;
   const lists = m.lists || [];
   const input = (k, val, ph) => `<input name="${k}" data-k="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}" dir="ltr" autocomplete="off">`;
-  return `<p class="small muted">Marketing email lists are isolated from customer emails. Keys, sender names and subjects rotate batch by batch. Bounced/dead addresses are removed at upload and excluded at send. Sender is <b>noreply@<domain></b> — auto-generated from the domain paired with each key.</p>
+  const msCard = await mailStatusCard(true);
+  return `${msCard}<p class="small muted">Marketing email lists are isolated from customer emails. Keys, sender names and subjects rotate batch by batch. Bounced/dead addresses are removed at upload and excluded at send. Sender is <b>noreply@<domain></b> — auto-generated from the domain paired with each key.</p>
   <div class="chips" style="margin-bottom:12px"><a class="on">${m.keysSet} key${m.keysSet === 1 ? '' : 's'} on · ${m.rowsTotal || 0} in total</a><a class="on">${m.senders}/5 sender names</a><a class="on">${m.subjects}/5 subject lines</a><a class="on">Today: ${m.today} sent</a><a class="on">30 days: ${m.last30} sent</a><a class="on">Total spend: $${Number(m.totalSpendUsd || 0).toFixed(2)}</a></div>
   <div class="grid2" style="gap:16px;align-items:start">
-    <div class="card"><h3>🔑 Resend keys &amp; rotation</h3><p class="small muted" style="margin-top:0">As many keys and domains as you need, used in turn batch by batch. Saved keys show only their last 4 characters.</p>
+    <div class="card"><h3>🔑 Resend keys &amp; rotation</h3><p class="small muted" style="margin-top:0">As many keys and domains as you need. Set each key's plan: paid keys are used first, free trial keys only up to their limit, and a key that fails is skipped for the next one. Saved keys show only their last 4 characters.</p>
       <form data-form="mkt-settings">
         ${keysEditor('mkt', st.rows || [])}
         <h3 style="margin-top:12px">Sender names</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('sender' + i, st.senders[i] || '', 'Sender ' + (i + 1) + ' e.g. INTPROTO-TV')).join('')}</div>
