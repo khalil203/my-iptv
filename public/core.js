@@ -253,6 +253,7 @@ function permFor(method, path, body) {
     const k = Object.keys(body || {});
     if (k.length && k.every((x) => x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts', 'waTemplates'].includes(x))) return 'plans';
+    if (k.includes('notify')) return 'owner';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
@@ -263,6 +264,8 @@ function permFor(method, path, body) {
   if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
   if (path.startsWith('/api/admin/accounts')) return 'secrets';
+  if (path === '/api/admin/push/promo') return 'customers_edit';
+  if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/renewal/status') return 'customers_view';
@@ -575,6 +578,8 @@ const TX = {
     promoWa: '🖤 *È arrivato il {name}!*\n{lead} con il codice *{code}*{site}.{end}', promoLeadO: 'Ottieni *{offer}* su tutti i piani {app}', promoLead: "Ottieni il nostro sconto più grande dell'anno su tutti i piani {app}", promoAt: ' su {site}', promoEnd: "\n⏳ L'offerta termina il {end}, non perderla.",
     banner: '{lead} con il codice {code}', bannerO: '{offer} su tutti i piani', bannerN: "Il nostro sconto più grande dell'anno", until: 'Fino al' },
 };
+for (const [l, v] of Object.entries({"en": {"pushOn": "Notifications are on for this device ✓", "pushTest": "This is a test notification. It works ✓", "pushRenewT": "Thank you for renewing 🎉", "pushRenewB": "Your {app} subscription is active until {date}. Enjoy!", "pushRslT": "Thank you for your order 🎉", "pushRslB": "{n} credits were added to your reseller account ({ref}).", "pushExpT": "Your subscription ends soon ⏰", "pushExpB": "Your {app} subscription ends on {date}. Renew now to keep watching.", "pushExpiredT": "Your subscription has ended", "pushExpiredB": "Renew your {app} subscription to watch again. Tap to see the packages.", "pushPkgT": "Special offer on {app} packages 📺", "pushPkgB": "Choose your package and keep watching. Tap to see the prices.", "pushCredT": "Reseller credits available 🤝", "pushCredB": "Top up your credits now. Tap to order a credit package.", "pushReplyT": "New answer from support 💬", "pushReplyB": "Tap to read it."}, "fr": {"pushOn": "Les notifications sont activées sur cet appareil ✓", "pushTest": "Ceci est une notification de test. Ça marche ✓", "pushRenewT": "Merci pour votre renouvellement 🎉", "pushRenewB": "Votre abonnement {app} est actif jusqu’au {date}. Bon visionnage !", "pushRslT": "Merci pour votre commande 🎉", "pushRslB": "{n} crédits ont été ajoutés à votre compte revendeur ({ref}).", "pushExpT": "Votre abonnement se termine bientôt ⏰", "pushExpB": "Votre abonnement {app} se termine le {date}. Renouvelez maintenant pour continuer à regarder.", "pushExpiredT": "Votre abonnement est terminé", "pushExpiredB": "Renouvelez votre abonnement {app} pour regarder à nouveau. Touchez pour voir les offres.", "pushPkgT": "Offre spéciale sur les abonnements {app} 📺", "pushPkgB": "Choisissez votre abonnement et continuez à regarder. Touchez pour voir les prix.", "pushCredT": "Crédits revendeur disponibles 🤝", "pushCredB": "Rechargez vos crédits maintenant. Touchez pour commander un pack.", "pushReplyT": "Nouvelle réponse du support 💬", "pushReplyB": "Touchez pour la lire."}, "de": {"pushOn": "Benachrichtigungen sind auf diesem Gerät an ✓", "pushTest": "Dies ist eine Test-Benachrichtigung. Es funktioniert ✓", "pushRenewT": "Danke für Ihre Verlängerung 🎉", "pushRenewB": "Ihr {app}-Abonnement ist bis {date} aktiv. Viel Spaß!", "pushRslT": "Danke für Ihre Bestellung 🎉", "pushRslB": "{n} Credits wurden Ihrem Reseller-Konto gutgeschrieben ({ref}).", "pushExpT": "Ihr Abonnement endet bald ⏰", "pushExpB": "Ihr {app}-Abonnement endet am {date}. Jetzt verlängern und weiter schauen.", "pushExpiredT": "Ihr Abonnement ist abgelaufen", "pushExpiredB": "Verlängern Sie Ihr {app}-Abonnement, um wieder zu schauen. Tippen Sie für die Pakete.", "pushPkgT": "Sonderangebot für {app}-Pakete 📺", "pushPkgB": "Wählen Sie Ihr Paket und schauen Sie weiter. Tippen Sie für die Preise.", "pushCredT": "Reseller-Credits verfügbar 🤝", "pushCredB": "Laden Sie jetzt Ihre Credits auf. Tippen Sie, um ein Paket zu bestellen.", "pushReplyT": "Neue Antwort vom Support 💬", "pushReplyB": "Tippen Sie, um sie zu lesen."}, "es": {"pushOn": "Las notificaciones están activadas en este dispositivo ✓", "pushTest": "Esta es una notificación de prueba. Funciona ✓", "pushRenewT": "Gracias por renovar 🎉", "pushRenewB": "Tu suscripción a {app} está activa hasta el {date}. ¡Disfruta!", "pushRslT": "Gracias por tu pedido 🎉", "pushRslB": "Se han añadido {n} créditos a tu cuenta de revendedor ({ref}).", "pushExpT": "Tu suscripción termina pronto ⏰", "pushExpB": "Tu suscripción a {app} termina el {date}. Renueva ahora para seguir viendo.", "pushExpiredT": "Tu suscripción ha terminado", "pushExpiredB": "Renueva tu suscripción a {app} para volver a ver. Toca para ver los paquetes.", "pushPkgT": "Oferta especial en paquetes de {app} 📺", "pushPkgB": "Elige tu paquete y sigue viendo. Toca para ver los precios.", "pushCredT": "Créditos de revendedor disponibles 🤝", "pushCredB": "Recarga tus créditos ahora. Toca para pedir un paquete.", "pushReplyT": "Nueva respuesta del soporte 💬", "pushReplyB": "Toca para leerla."}, "it": {"pushOn": "Le notifiche sono attive su questo dispositivo ✓", "pushTest": "Questa è una notifica di prova. Funziona ✓", "pushRenewT": "Grazie per il rinnovo 🎉", "pushRenewB": "Il tuo abbonamento {app} è attivo fino al {date}. Buona visione!", "pushRslT": "Grazie per il tuo ordine 🎉", "pushRslB": "{n} crediti sono stati aggiunti al tuo account rivenditore ({ref}).", "pushExpT": "Il tuo abbonamento scade presto ⏰", "pushExpB": "Il tuo abbonamento {app} scade il {date}. Rinnova ora per continuare a guardare.", "pushExpiredT": "Il tuo abbonamento è scaduto", "pushExpiredB": "Rinnova il tuo abbonamento {app} per guardare di nuovo. Tocca per vedere i pacchetti.", "pushPkgT": "Offerta speciale sui pacchetti {app} 📺", "pushPkgB": "Scegli il tuo pacchetto e continua a guardare. Tocca per vedere i prezzi.", "pushCredT": "Crediti rivenditore disponibili 🤝", "pushCredB": "Ricarica ora i tuoi crediti. Tocca per ordinare un pacchetto.", "pushReplyT": "Nuova risposta dal supporto 💬", "pushReplyB": "Tocca per leggerla."}})) Object.assign(TX[l], v); // notifications
+
 export const supportUrl = (s, appUrl) => String(s.email?.appUrl || appUrl || 'https://intproto-tv.store').replace(/\/+$/, '') + '/support';
 export const supportMail = (s) => cleanEmailX(s.support?.email || s.email?.supportEmail) || 'contact@intproto-tv.com';
 const cleanEmailX = (v) => (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(String(v || '').trim()) ? String(v).trim().toLowerCase() : '');
@@ -1805,6 +1810,122 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     } catch {}
   }
   // Email every agent at once: the owner (admin email), each active team member who can see customers and has a work email, and extra addresses
+  // ---------- App & browser notifications (Web Push) ----------
+  // The push itself carries no data: it only wakes the device, whose service worker then picks up its notes
+  // from /api/push/pull. So nothing needs encrypting and it works the same on laptops, tablets, Android and iPhone (home-screen app).
+  const b64u = (buf) => { let t = ''; for (const x of new Uint8Array(buf)) t += String.fromCharCode(x); return btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+  async function vapidKeys() {
+    let v = await store.get('vapid'); if (v && v.pub && v.jwk) return v;
+    const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    v = { pub: b64u(await crypto.subtle.exportKey('raw', kp.publicKey)), jwk: await crypto.subtle.exportKey('jwk', kp.privateKey) }; await store.put('vapid', v); return v;
+  }
+  async function vapidAuth(endpoint, v, contact) {
+    const enc = (o) => b64u(new TextEncoder().encode(JSON.stringify(o)));
+    const unsigned = enc({ typ: 'JWT', alg: 'ES256' }) + '.' + enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:' + (contact || 'contact@intproto-tv.com') });
+    const key = await crypto.subtle.importKey('jwk', v.jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(unsigned));
+    return `vapid t=${unsigned}.${b64u(sig)}, k=${v.pub}`;
+  }
+  const getSubs = async () => (await store.get('pushsubs')) || [];
+  const saveSubs = (l) => store.put('pushsubs', l.slice(-2000));
+  const NOTIFY_DEF = { tickets: true, trials: true, receipts: true, shifts: true, shiftReminders: true, oversight: true, watch: [], customers: true, resellers: true, autoPromo: false, promoDays: 7 };
+  const notifyCfg = (s) => ({ ...NOTIFY_DEF, ...(s.notify || {}) });
+  // who: 'owner' · 'm:<team member id>' · 'c:<customer id>' · 'r:<reseller id>'
+  async function pushTo(s, who, note) {
+    const subs = await getSubs(); const list = subs.filter((x) => (typeof who === 'function' ? who(x.who, x) : [].concat(who).includes(x.who)));
+    if (!list.length) return { devices: 0, sent: 0 };
+    let v; try { v = await vapidKeys(); } catch { return { devices: list.length, sent: 0 }; }
+    const n = { id: uid(5), at: Date.now(), title: String(note.title || '').slice(0, 120), body: String(note.body || '').slice(0, 400), url: String(note.url || '/'), tag: String(note.tag || '').slice(0, 60), kind: note.kind || '' };
+    let sent = 0; const gone = new Set(); const contact = supportMail(s);
+    for (const sub of list.slice(0, 200)) {
+      const qk = 'pushq:' + sub.id; const q = (await store.get(qk)) || []; q.push(n); await store.put(qk, q.slice(-25), 3 * 86400);
+      if (note.wake === false) continue; // kept for the next wake-up of this device
+      try {
+        const r = await fetchFn(sub.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: note.urgent === false ? 'normal' : 'high', Authorization: await vapidAuth(sub.endpoint, v, contact), 'Content-Length': '0' } });
+        if (r.status === 404 || r.status === 410) gone.add(sub.id); else if (r.ok || r.status === 201) { sent++; sub.last = Date.now(); sub.fails = 0; } else sub.fails = (sub.fails || 0) + 1;
+      } catch { sub.fails = (sub.fails || 0) + 1; }
+    }
+    const keep = subs.filter((x) => !gone.has(x.id) && (x.fails || 0) < 30); await saveSubs(keep);
+    for (const id of gone) await store.del('pushq:' + id);
+    return { devices: list.length, sent };
+  }
+  // Everyone who works the support queue: the owner and active team members who can see customers.
+  async function agentIds(perm = 'customers_view') { const team = await getTeam(); return ['owner', ...team.filter((m) => m.status !== 'disabled' && (m.perms || []).includes(perm)).map((m) => 'm:' + m.id)]; }
+  async function pushAgents(s, kind, note) { const cfg = notifyCfg(s); if (cfg[kind] === false) return; try { await pushTo(s, await agentIds(), { ...note, kind, url: note.url || '/intprototv' }); } catch {} }
+  async function pushOwner(s, note) { try { await pushTo(s, 'owner', { url: '/intprototv', ...note }); } catch {} }
+  // The owner sees what the team does (Khalil, Said, Malak…): each action of a watched member, at most one alert every 20 seconds per member.
+  async function oversee(member, type, msg) {
+    try {
+      if (type === 'daily') return; const s = await getSettings(); const cfg = notifyCfg(s); if (!cfg.oversight) return;
+      if (Array.isArray(cfg.watch) && cfg.watch.length && !cfg.watch.includes(member.id)) return;
+      // every action is kept for the owner's devices; the devices are woken at most every 20 seconds per member (the rest arrive with the next one, or within 15 minutes)
+      const tk = 'ovrt:' + member.id; const last = Number(await store.get(tk)) || 0; const wake = Date.now() - last > 20000; if (wake) await store.put(tk, Date.now(), 3600);
+      await pushTo(s, 'owner', { title: `👀 ${member.name || member.username}`, body: String(msg).slice(0, 200), tag: 'act-' + member.id + '-' + Date.now(), url: '/intprototv', urgent: false, wake });
+    } catch {}
+  }
+  // Every 15 minutes: remind each agent when their shift starts, and tell the owner if someone has not checked in 20 minutes later.
+  function localNow(tz) {
+    let parts; try { parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((p) => [p.type, p.value])); } catch { return localNow('UTC'); }
+    const day = String(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.weekday));
+    return { day, min: Number(parts.hour) * 60 + Number(parts.minute), date: `${parts.year}-${parts.month}-${parts.day}` };
+  }
+  const hhmm = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  async function tick() {
+    const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
+    try { const subs = await getSubs(); let v = null; // wake devices that still have notes waiting
+      for (const sub of subs) { const q = (await store.get('pushq:' + sub.id)) || []; if (!q.length) continue; v = v || (await vapidKeys()); try { await fetchFn(sub.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'normal', Authorization: await vapidAuth(sub.endpoint, v, supportMail(s)), 'Content-Length': '0' } }); out.woken++; } catch {} } } catch {}
+    if (cfg.shiftReminders === false) return out;
+    const shifts = (await store.get('shifts')) || []; const team = await getTeam(); const att = await getAtt(); const leaves = (await store.get('leaves')) || []; const now = Date.now();
+    for (const sh of shifts) {
+      const m = team.find((x) => x.id === sh.memberId); if (!m || m.status === 'disabled') continue;
+      const L = localNow(sh.tz); const d = sh.days?.[L.day]; if (!d || !d.on || (sh.daysOff || []).includes(Number(L.day))) continue;
+      if (leaves.some((v) => v.by === m.id && v.status === 'approved' && now >= Number(v.from) && now <= Number(v.to) + DAYMS)) continue;
+      const since = L.min - d.start; const kR = `shiftrem:${m.id}:${L.date}`, kL = `shiftlate:${m.id}:${L.date}`;
+      if (since >= -15 && since < 15 && !(await store.get(kR))) {
+        await store.put(kR, 1, 2 * 86400); out.reminders++;
+        await pushTo(s, 'm:' + m.id, { title: since < 0 ? `⏰ Your shift starts at ${hhmm(d.start)}` : '⏰ Your shift starts now', body: `Hi ${String(m.name || m.username).split(' ')[0]}, open the panel and tap Check in (${hhmm(d.start)}–${hhmm(d.end)}).`, tag: 'shift-start', url: '/intprototv' });
+      }
+      if (since >= 20 && since < 180 && !(await store.get(kL))) {
+        await store.put(kL, 1, 2 * 86400);
+        const inToday = att.some((e) => e.by === m.id && (e.action === 'in' || e.action === 'login') && now - e.at < (since + 120) * 60000);
+        if (!inToday && cfg.shifts) { out.late++; await pushTo(s, 'owner', { title: `⏰ ${m.name || m.username} has not started the shift`, body: `The shift began at ${hhmm(d.start)} (${sh.tz}). No check-in yet.`, tag: 'late-' + m.id, url: '/intprototv' }); }
+      }
+    }
+    return out;
+  }
+  // Daily: renewal alerts on the customers' devices, and (if switched on) promotion reminders for packages and reseller credits.
+  async function dailyPush(s) {
+    const cfg = notifyCfg(s); const out = { expiring: 0, expired: 0, promo: 0 }; const subs = await getSubs(); if (!subs.length) return out;
+    const has = new Set(subs.map((x) => x.who)); const app = s.branding.appName || 'INTPROTO-TV';
+    if (cfg.customers) {
+      const list = await getCustomers(); let changed = false; const days = Number(s.email.reminderDays) || 3;
+      for (const c of list) {
+        if (!has.has('c:' + c.id) || c.status === 'disabled') continue; const lg = okLang(c.lang); const left = Math.ceil((c.expiresAt - Date.now()) / DAYMS);
+        const date = new Date(c.expiresAt).toLocaleDateString(langLocale(lg), { dateStyle: 'long' });
+        if (left > 0 && left <= days && c.pushExpFor !== c.expiresAt) { c.pushExpFor = c.expiresAt; changed = true; out.expiring++; await pushTo(s, 'c:' + c.id, { title: tx(lg, 'pushExpT'), body: tx(lg, 'pushExpB', { app, date }), url: '/profile', tag: 'renew' }); }
+        else if (left <= 0 && left > -2 && c.pushEndFor !== c.expiresAt) { c.pushEndFor = c.expiresAt; changed = true; out.expired++; await pushTo(s, 'c:' + c.id, { title: tx(lg, 'pushExpiredT'), body: tx(lg, 'pushExpiredB', { app }), url: '/profile', tag: 'renew' }); }
+      }
+      if (changed) await saveCustomers(list);
+    }
+    if (cfg.autoPromo) {
+      const last = Number(await store.get('promoPushAt')) || 0;
+      if (Date.now() - last >= Math.max(1, Number(cfg.promoDays) || 7) * DAYMS) { await store.put('promoPushAt', Date.now()); out.promo = (await sendPromo(s, 'auto')).devices; }
+    }
+    return out;
+  }
+  // Promotion reminders: packages for customers (expired, trials, or everyone), credit packages for resellers. Each in the person's language.
+  async function sendPromo(s, audience, custom) {
+    const subs = await getSubs(); const list = await getCustomers(); const rs = await getResellers(); const app = s.branding.appName || 'INTPROTO-TV'; const now = Date.now();
+    const byC = new Map(list.map((c) => [c.id, c])); const byR = new Map(rs.map((r) => [r.id, r])); let devices = 0, people = new Set();
+    const want = (c) => audience === 'all' || audience === 'customers' || (audience === 'auto' || audience === 'inactive' ? c.isTrial || c.expiresAt < now : audience === 'active' ? c.expiresAt >= now && !c.isTrial : audience === 'trials' ? !!c.isTrial : false);
+    for (const who of new Set(subs.map((x) => x.who))) {
+      let note = null;
+      if (who.startsWith('c:') && audience !== 'resellers') { const c = byC.get(who.slice(2)); if (!c || c.status === 'disabled' || c.unsub || !want(c)) continue; const lg = okLang(c.lang); note = { title: custom?.title || tx(lg, 'pushPkgT', { app }), body: custom?.body || tx(lg, 'pushPkgB', { app }), url: custom?.url || '/profile', tag: 'promo' }; }
+      if (who.startsWith('r:') && ['resellers', 'all', 'auto'].includes(audience)) { const r = byR.get(who.slice(2)); if (!r || r.status === 'paused') continue; const lg = okLang(r.lang); note = { title: custom?.title || tx(lg, 'pushCredT', { app }), body: custom?.body || tx(lg, 'pushCredB', { app }), url: custom?.url || '/rsl', tag: 'promo' }; }
+      if (!note) continue; const r = await pushTo(s, who, { ...note, urgent: false }); devices += r.devices; people.add(who);
+    }
+    return { devices, people: people.size };
+  }
   async function notifyAgents(s, subject, text, link) {
     const app = s.branding.appName || 'IPTV'; const team = await getTeam(); const to = new Set();
     const add = (e) => { const v = cleanEmail(e); if (v) to.add(v); };
@@ -2065,8 +2186,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
 
   async function handle({ method, path, query = {}, body = {}, token }) {
-    let actorName = '';
-    const log = (type, msg) => baseLog(type, msg, actorName);
+    let actorName = '', staffMember = null;
+    const log = async (type, msg) => { await baseLog(type, msg, actorName); if (staffMember) await oversee(staffMember, type, msg); };
     try {
       const s = await getSettings();
       const R = (m, p) => method === m && path === p;
@@ -2133,6 +2254,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const entry = { id: uid(6), name, email, phone, whatsapp, telegram, lang: okLang(body.lang), at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
           tql.unshift(entry); await store.put('trialqueue', tql.slice(0, 300));
           await log('trial', `Free trial request queued for ${name} <${email}> (all-agents queue)`);
+          await pushAgents(s, 'trials', { title: '🎁 Free trial request waiting', body: `${name} · ${email}`, tag: 'trial-' + entry.id });
           await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for an agent to process it.\n\n${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\n\nOpen Trial queue in the dashboard, paste the M3U link from your panel and send the trial.`);
           if (tgOn(s) && s.telegram.adminChat) await tgSend(s, s.telegram.adminChat, `🎁 Free trial request waiting\n\n${name}\n${email}\n${phone}${telegram ? '\n@' + telegram : ''}\n\nOpen the dashboard → Trial queue, paste the M3U link and send.`);
           return ok({ ok: true, queued: true, hours: s.trial.hours, telegram: tgOn(s) ? { bot: s.telegram.botUsername || '', link: tgBotLink(s), start: tgBotLink(s, email) } : null });
@@ -2169,6 +2291,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
         let sent = { ok: false };
         if (lineReady) { const m = accessEmail(s, c, password, 'trial', body.appUrl); sent = await sendEmail(s, email, m.subject, m.html); }
+        await pushAgents(s, 'trials', { title: '🎁 New free trial', body: `${name} · ${email}${lineReady ? '' : ' · waiting for a line'}`, tag: 'trial-' + username, urgent: !lineReady });
         await log('trial', `Free trial ${username} for ${name} <${email}>${lineReady ? (sent.ok ? ' · email sent' : ' · email NOT sent: ' + (sent.error || '')) : ' · WAITING for a line'}`);
         const who = `${name}\n${email}\n${phone}${whatsapp && whatsapp !== phone ? '\nWhatsApp ' + whatsapp : ''}${telegram ? '\nTelegram @' + telegram : ''}\nApp login: ${username}`;
         if (!lineReady) await notifyAdmin(s, `Trial request waiting: ${name}`, `A customer asked for a free trial and is waiting for a line.\n\n${who}\n\n${panelError ? 'The panel API answered: ' + panelError + '\n\n' : ''}Open Customers → Alerts → “Waiting for a line”, tap Edit, paste the M3U link from your panel and save. The customer then gets the login email automatically.`);
@@ -2221,6 +2344,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const r = await applyStripePayment(s, event, good.accountId);
         return ok({ ok: true, result: r.duplicate ? 'duplicate' : r.status });
       }
+      // ---------- notifications: the device asks for its notes when a push wakes it ----------
+      if (R('GET', '/api/push/key')) return ok({ key: (await vapidKeys()).pub });
+      if (R('POST', '/api/push/pull')) {
+        const ep = String(body.endpoint || ''); if (!/^https:\/\//.test(ep)) return ok({ notes: [] });
+        const sub = (await getSubs()).find((x) => x.endpoint === ep); if (!sub) return ok({ notes: [], gone: true });
+        const qk = 'pushq:' + sub.id; const notes = (await store.get(qk)) || []; await store.del(qk);
+        return ok({ notes: notes.filter((n) => Date.now() - n.at < 2 * 86400000) });
+      }
       // ---------- Public support page (intproto-tv.store/support) ----------
       if (R('GET', '/api/support/info')) return ok({ email: supportMail(s), whatsapp: String(s.branding.whatsapp || '').replace(/\D/g, ''), telegram: String(s.branding.telegram || '').replace(/^@/, ''), app: s.branding.appName || 'IPTV', logo: s.branding.logoUrl || '' });
       if (R('POST', '/api/support/start')) { // step 1: the customer's details (required before any ticket)
@@ -2248,6 +2379,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('support', `New ticket ${ref} from the support page: ${info.name} <${info.email}> — ${subject}`);
         const app = s.branding.appName || 'IPTV'; const url = String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, '');
         const cats = { login: 'Login / activation', channels: 'Channels not working', payment: 'Payment / renewal', device: 'Device setup', other: 'Other' };
+        await pushAgents(s, 'tickets', { title: `🛟 New support ticket ${ref}`, body: `${info.name}: ${subject}`, tag: 'tk-' + ref });
         const al = await notifyAgents(s, `🛟 New support ticket ${ref}: ${subject}`, `${info.name}${c ? ` (customer ${c.username}${c.orderNo ? ' · ' + c.orderNo : ''})` : ' (not found in customers)'}\nEmail: ${info.email}\nWhatsApp: ${info.phone}${info.device ? '\nDevice: ' + info.device : ''}\nTopic: ${cats[cat]}\n\n${subject}\n\n${text}`, url ? url + '/intprototv' : '');
         try { if (tgOn(s) && s.telegram.adminChat) await tgSend(s, s.telegram.adminChat, `🛟 New support ticket ${ref}\n\n${info.name} · ${info.phone}\n${cats[cat]}: ${subject}`); } catch {}
         // confirmation to the customer, in their language
@@ -2362,6 +2494,24 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       const ses = await getSession(token);
       if (!ses) return err(401, 'Please sign in again.');
+      // ---------- notifications on this device (owner, team, customers, resellers) ----------
+      if (path.startsWith('/api/push/')) {
+        const who = ses.role === 'admin' ? 'owner' : ses.role === 'staff' ? 'm:' + ses.id : ses.role === 'user' ? 'c:' + ses.id : ses.role === 'reseller' ? 'r:' + ses.id : '';
+        if (!who) return err(403, 'Not allowed.');
+        const subs = await getSubs();
+        if (R('POST', '/api/push/subscribe')) {
+          const ep = String(body.sub?.endpoint || ''); if (!/^https:\/\/[^\s]+$/.test(ep) || ep.length > 1000) return err(400, 'This browser did not give a valid push address.');
+          const label = cleanText(body.label, 60) || 'Device'; const old = subs.find((x) => x.endpoint === ep);
+          if (old) { old.who = who; old.label = label; old.at = Date.now(); old.fails = 0; } else subs.push({ id: uid(8), who, endpoint: ep, label, ua: cleanText(body.ua, 160), at: Date.now(), last: 0, fails: 0 });
+          await saveSubs(subs);
+          if (!body.silent) await pushTo(s, (w, x) => x.endpoint === ep, { title: '🔔 ' + (s.branding.appName || 'INTPROTO-TV'), body: tx(okLang(body.lang), 'pushOn'), tag: 'welcome', url: body.url || '/' }).catch(() => {});
+          return ok({ ok: true, devices: subs.filter((x) => x.who === who).length });
+        }
+        if (R('POST', '/api/push/unsubscribe')) { const ep = String(body.endpoint || ''); const keep = subs.filter((x) => !(x.who === who && (x.endpoint === ep || x.id === body.id))); await saveSubs(keep); return ok({ ok: true }); }
+        if (R('GET', '/api/push/mine')) return ok({ devices: subs.filter((x) => x.who === who).map((x) => ({ id: x.id, label: x.label, at: x.at, last: x.last, mine: x.endpoint === String(query.endpoint || '') })) });
+        if (R('POST', '/api/push/test')) { const r = await pushTo(s, who, { title: '🔔 Test', body: tx(okLang(body.lang), 'pushTest'), tag: 'test', url: body.url || '/' }); return ok(r); }
+        return err(404, 'Not found');
+      }
 
       // ---------- reseller dashboard (intproto-tv.store/rsl) ----------
       if (ses.role === 'reseller') {
@@ -2495,6 +2645,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const tk = { id: uid(5), customerId: c.id, username: c.username, name: c.name, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: c.name || c.username, at: now, text, ...(att ? { att } : {}) }] };
           all.unshift(tk); await saveTickets(all);
           await log('support', `New ticket from ${c.username}: ${subject}`);
+          await pushAgents(s, 'tickets', { title: '🛟 New support request', body: `${c.name || c.username}: ${subject}`, tag: 'tk-' + c.id });
           return ok({ ok: true, id: tk.id });
         }
         if (R('GET', '/api/me/tickets/att')) { // only pictures from the customer's own requests
@@ -2529,6 +2680,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const cur = s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
           const all = await getReceipts(); const rc = { id: uid(5), customerId: c.id, username: c.username, name: c.name, pkg: pk.id, pkgTitle: pk.title, days: pk.days, devices: pk.devices, amount: pk.price, cur, att, note: cleanText(body.note, 300), status: 'pending', at: Date.now() };
           all.unshift(rc); await store.put('receipts', all.slice(0, 400));
+          await pushAgents(s, 'receipts', { title: '🧾 Payment receipt to check', body: `${c.name || c.username} sent a payment receipt`, tag: 'rc-' + c.id });
           await log('payment', `${c.username} uploaded a payment receipt for "${pk.title}"`);
           await notifyAdmin(s, `Payment receipt to check: ${c.name || c.username}`, `${c.name || ''} (${c.username}) uploaded a payment receipt.\n\nPackage: ${pk.title} · ${pk.days} days · ${pk.price} ${cur}${rc.note ? '\nNote: ' + rc.note : ''}\n\nOpen Money → Payment receipts, look at the picture and tap Approve. The subscription is extended and the customer is told.`);
           return ok({ ok: true, id: rc.id });
@@ -2538,6 +2690,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const text = cleanText(body.text, 1000); if (!text) return err(400, 'chat_empty');
           const k = 'chatrate:' + c.id; const n = Number(await store.get(k)) || 0; if (n >= 30) return err(429, 'chat_slow'); await store.put(k, n + 1, 600);
           const { ch, quiet } = await chatAdd(c, 'c', c.name || c.username, text);
+          if (quiet) await pushAgents(s, 'tickets', { title: '💬 New chat message', body: `${c.name || c.username}: ${text.slice(0, 140)}`, tag: 'chat-' + c.id });
           if (quiet) await notifyAdmin(s, `New chat message from ${c.name || c.username}`, `${c.name || ''} (${c.username}) wrote in the live chat:\n\n${text}\n\nAnswer in the dashboard: Customers → Live chat.`);
           return ok({ messages: ch.messages.map(({ from, at, text: t }) => ({ from, at, text: t })) });
         }
@@ -2609,7 +2762,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         perms = (member.perms || []).filter((p) => !isOwnerOnly(p));
         // A trainee is limited to view, attendance and tasks for their first 14 days (spec §3)
         if (member.traineeUntil && member.traineeUntil > Date.now()) perms = perms.filter((p) => ['customers_view', 'attendance', 'tasks'].includes(p));
-        actorName = member.name || member.username;
+        actorName = member.name || member.username; staffMember = member;
       }
       // 'secrets' (API keys, accounts, hosting, domains): the owner, anyone given it, and the Technical Manager (Khalil).
       const can = (p) => isOwner || (!isOwnerOnly(p) && (perms.includes(p) || (p === 'secrets' && /technical|panel manager/i.test((member && member.role) || ''))));
@@ -3189,6 +3342,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/attendance')) {
         const action = ['in', 'out', 'break_start', 'break_end'].includes(body.action) ? body.action : null; if (!action) return err(400, 'Unknown action.');
         const me = meWorks(); await attLog(me.id, me.name, action, body.note);
+        if ((action === 'in' || action === 'out') && notifyCfg(s).shifts) { const team = await getTeam(); const to = ['owner', ...team.filter((m) => m.id !== me.id && m.status !== 'disabled' && (m.perms || []).includes('attendance_all')).map((m) => 'm:' + m.id)].filter((w) => w !== (me.id === 'owner' ? 'owner' : ''));
+          await pushTo(s, to, { title: action === 'in' ? `🟢 ${me.name} started the shift` : `⚪ ${me.name} ended the shift`, body: action === 'in' ? `Checked in${body.note ? ' · ' + cleanText(body.note, 80) : ''}. Tap to see the team attendance.` : `Checked out${body.note ? ' · ' + cleanText(body.note, 80) : ''}.`, tag: 'shift-' + me.id, url: '/intprototv' }).catch(() => {}); }
         return ok({ ok: true });
       }
       if (R('GET', '/api/admin/shifts')) return ok((await getShifts()));
@@ -3215,6 +3370,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const me = meWorks(); const reason = cleanText(body.reason, 500);
         const l = await getLeaves(); l.unshift({ id: uid(6), by: me.id, name: me.name, kind, from, to, reason, status: 'pending', createdAt: Date.now(), decidedBy: '', decidedAt: 0 });
         await store.put('leaves', l.slice(0, 300));
+        await pushOwner(s, { title: `🗓 Leave request: ${me.name}`, body: `${kind} · ${new Date(from).toLocaleDateString('en-GB')} → ${new Date(to).toLocaleDateString('en-GB')}`, tag: 'leave-' + me.id });
         await notifyAdmin(s, `Leave request: ${me.name}`, `${me.name} asked for ${kind} leave from ${new Date(from).toLocaleDateString()} to ${new Date(to).toLocaleDateString()}${reason ? '\n' + reason : ''}`);
         return ok({ ok: true });
       }
@@ -3306,6 +3462,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const cu = (await getCustomers()).find((x) => x.id === body.id); if (!cu) return err(404, 'Customer not found.');
         const text = cleanText(body.text, 1000); if (!text) return err(400, 'Write a message first.');
         const { ch } = await chatAdd(cu, 's', aliasName, text);
+        if (notifyCfg(s).customers) await pushTo(s, 'c:' + cu.id, { title: tx(okLang(cu.lang), 'pushReplyT'), body: text.slice(0, 160), url: '/profile', tag: 'chat' }).catch(() => {});
         return ok({ id: cu.id, name: cu.name, username: cu.username, messages: ch.messages });
       }
       if (R('GET', '/api/admin/tickets')) return ok((await getTickets()).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || b.updatedAt - a.updatedAt));
@@ -3324,6 +3481,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (['low', 'normal', 'high'].includes(body.priority)) tk.priority = body.priority;
         tk.updatedAt = Date.now(); await saveTickets(all);
         await log('support', `Ticket "${tk.subject}" (${tk.username}): ${text ? 'answered' : tk.status}`);
+        if (text && tk.customerId && notifyCfg(s).customers) { const cu = (await getCustomers()).find((x) => x.id === tk.customerId); const lg = okLang(cu?.lang); await pushTo(s, 'c:' + tk.customerId, { title: tx(lg, 'pushReplyT'), body: tk.subject + ' — ' + tx(lg, 'pushReplyB'), url: '/profile', tag: 'tk-' + tk.id }).catch(() => {}); }
         return ok({ ok: true, ticket: tk });
       }
       if (R('GET', '/api/admin/payments')) { // card fraud risk heuristic (spec §2): high = unmatched customer, medium = unclear package or cross-domain email, else low
@@ -3425,6 +3583,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           next.orders = { prefix: pf(q.prefix, 'WLF'), iboPrefix: pf(q.iboPrefix, 'IBO'), rslPrefix: pf(q.rslPrefix, 'RLS'), pad: Math.max(1, Math.min(6, Number(q.pad) || 3)), devPad: 2 }; next.orders.series = [next.orders.prefix, next.orders.iboPrefix, next.orders.rslPrefix].join(','); }
         if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
           next.promo = { on: !!q.on, name: String(q.name || 'Black Friday').trim().slice(0, 40) || 'Black Friday', code: String(q.code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 30), offer: String(q.offer || '').trim().slice(0, 60), from: day(q.from), to: day(q.to), email: q.email !== false, whatsapp: q.whatsapp !== false, telegram: q.telegram !== false }; }
+        if (isObj(body.notify)) { const q = { ...notifyCfg(s), ...body.notify }; const b = (k) => q[k] !== false && q[k] !== 'false';
+          next.notify = { tickets: b('tickets'), trials: b('trials'), receipts: b('receipts'), shifts: b('shifts'), shiftReminders: b('shiftReminders'), oversight: b('oversight'), customers: b('customers'), resellers: b('resellers'), autoPromo: q.autoPromo === true, promoDays: Math.max(1, Math.min(60, Math.round(Number(q.promoDays) || 7))), watch: (Array.isArray(q.watch) ? q.watch : []).map(String).filter((x) => /^[\w-]{1,20}$/.test(x)).slice(0, 50) }; }
         if (isObj(body.support)) { const q = { ...(s.support || {}), ...body.support }; const em = cleanEmail(q.email);
           next.support = { email: em || 'contact@intproto-tv.com', waLink: q.waLink !== false, alertEmails: String(q.alertEmails || '').split(/[\s,;]+/).map(cleanEmail).filter(Boolean).slice(0, 25).join(', ') }; }
         if (newRows) { next.email.transRows = newRows; next.email.transKeys = []; next.email.transDomains = []; }
@@ -3475,6 +3635,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       // ---------- Accounts (Resend / email marketing / Hostinger / Dynu): only the owner, Khalil and Nizar (permission 'secrets') ----------
+      if (R('POST', '/api/admin/push/promo')) { // promotion reminder for packages (customers) or credits (resellers), on their devices
+        const aud = ['inactive', 'active', 'trials', 'customers', 'resellers', 'all'].includes(body.audience) ? body.audience : 'inactive';
+        const custom = body.title || body.body ? { title: cleanText(body.title, 120), body: cleanText(body.body, 300), url: /^\/[\w\/-]*$/.test(String(body.url || '')) ? body.url : '' } : null;
+        const r = await sendPromo(s, aud, custom); await log('marketing', `Promotion notification (${aud}) sent to ${r.people} people on ${r.devices} device(s)`); return ok(r);
+      }
+      if (R('GET', '/api/admin/push/devices')) { // who gets notifications (labels only)
+        const subs = await getSubs(); const team = await getTeam(); const cnt = (p) => subs.filter((x) => x.who.startsWith(p)).length;
+        const people = [['owner', 'Owner'], ...team.map((m) => ['m:' + m.id, m.name || m.username])].map(([w, n]) => ({ who: w, name: n, devices: subs.filter((x) => x.who === w).map((x) => ({ label: x.label, at: x.at, last: x.last })) }));
+        return ok({ team: people, customers: cnt('c:'), resellers: cnt('r:'), settings: notifyCfg(s), members: team.map((m) => ({ id: m.id, name: m.name || m.username, role: m.role || '' })) });
+      }
       if (R('GET', '/api/admin/email/status')) { // every agent can see this: plan, use and health of each sending key (never the key itself)
         const sec = can('secrets'); const accts = await getAccounts(); const u = (await store.get('keyuse')) || {}; const h = (await store.get('keyhealth')) || {};
         const mo = new Date().toISOString().slice(0, 7), dy = new Date().toISOString().slice(0, 10), now = Date.now();
@@ -3847,6 +4017,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await saveCustomers(list);
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${s.currency})`);
+          if (notifyCfg(s).customers) { const lg = okLang(c.lang); await pushTo(s, 'c:' + c.id, { title: tx(lg, 'pushRenewT'), body: tx(lg, 'pushRenewB', { app: (s.branding.appName || 'INTPROTO-TV'), date: new Date(c.expiresAt).toLocaleDateString(langLocale(lg), { dateStyle: 'long' }) }), url: '/profile', tag: 'renew' }).catch(() => {}); }
           return ok({ customer: viewP(c, s), panel });
         }
         if (method === 'POST' && sub === 'email') {
@@ -4364,6 +4535,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.sendEmail !== false) mail = await rsSendOrderMail(s, rp, order, body.appUrl, { isNew }); else await rsEnsureLogin(rp);
           await saveResellers(rs); if (s.resellerSeq !== seq0) await saveSettings(s);
           x.username = rp.rslId; x.customerId = rp.id; await store.put('sales', sales);
+          if (notifyCfg(s).resellers) { const lg = okLang(rp.lang); await pushTo(s, 'r:' + rp.id, { title: tx(lg, 'pushRslT'), body: tx(lg, 'pushRslB', { n: pk.credits, ref }), url: '/rsl', tag: 'rsl-order' }).catch(() => {}); }
           await log('customer', `Reseller order ${ref} for ${rp.name} (${rp.rslId})${isNew ? ' — new reseller registered' : ''}${mail ? (mail.ok ? ' — confirmation email sent' : ' — email not sent: ' + mail.error) : ''}`); }
         await log('renewal', `Sold reseller package ${pk.name} (${pk.credits} credits) to ${rp ? rp.name : name}`);
         return ok({ ...x, reseller: rp ? { id: rp.id, rslId: rp.rslId, name: rp.name, isNew, login: rp.login ? { username: rp.login.username, pass: rp.login.pass } : null } : null, order, emailed: mail ? !!mail.ok : false, emailError: mail && !mail.ok ? mail.error : '' });
@@ -4785,9 +4957,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (r.ok) { const now = Date.now(); batch.forEach((c) => { markSent(c, 'email'); c.renewalSentFor = c.expiresAt; c.renewalSentAt = now; }); await saveCustomers(list); await store.put(t.k, t.n + batch.length, 2 * 86400); out.reminders += batch.length; }
       }
     }
+    try { out.push = await dailyPush(s); } catch {}
     if (out.alert || out.reminders) await log('daily', `Daily check: ${out.reminders} reminder(s)${out.alert ? ', low-credit alert sent' : ''}`);
     return out;
   }
 
-  return { handle, getSettings, daily };
+  return { handle, getSettings, daily, tick };
 }

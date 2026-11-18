@@ -75,7 +75,8 @@ export default {
   // Runs once a day (see wrangler.toml): low-credit alerts + expiry reminder emails.
   async scheduled(event, env, ctx) {
     if (!backend) backend = createBackend({ store: kvStore(env.DB), fetchFn: (u, i) => fetch(u, i), cacheMs: 30000, mode: 'server' });
-    ctx.waitUntil(backend.daily());
+    // '0 2 * * *' = the daily job; the 15-minute one = shift reminders for the team
+    ctx.waitUntil(event.cron === '0 2 * * *' ? backend.daily() : backend.tick());
   },
 };
 

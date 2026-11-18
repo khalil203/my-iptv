@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=93';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=94';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=92';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=94';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -203,6 +203,7 @@ function route() {
   if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
+  if (state.token) pushRelink();
   const path = location.pathname.replace(/\/+$/, '') || '/';
   // Reseller dashboard: intproto-tv.store/rsl
   if (state.token && state.role === 'reseller') { if (path !== '/rsl') history.replaceState(null, '', '/rsl'); return renderRsl(); }
@@ -449,6 +450,7 @@ function rslDraw() {
   if (RSL.tab === 'account') body = `<div class="card"><h3 style="margin-top:0">${esc(t('rsl_details'))}</h3>
       ${kv(t('rsl_id'), P.rslId)}${kv(t('rsl_name'), P.name)}${P.org ? kv(t('rsl_company'), P.org) : ''}${kv(t('email'), P.email || '—')}${kv(t('phone'), P.phone || '—')}${kv(t('rsl_signinName'), P.username)}${P.joinedAt ? kv(t('rsl_since'), fmtDate(P.joinedAt)) : ''}
       <div class="list-item"><span class="muted small" style="width:130px">${esc(t('language'))}</span>${rslLangSel()}</div>
+      ${pushBox(false)}
       <p class="small muted">${esc(t('rsl_changeInfo'))}</p></div>
     <div class="card" style="margin-top:14px"><h3 style="margin-top:0">${esc(t('rsl_changePw'))}</h3><form data-form="rsl-pass">${field(t('rsl_curPw'), 'current', '', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field(t('rsl_newPw'), 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<button class="btn primary">${esc(t('rsl_savePw'))}</button></form></div>`;
   $('#app').innerHTML = `<div class="rsl" style="max-width:1000px;margin:0 auto;padding:18px 14px 90px">
@@ -509,6 +511,7 @@ const ADMIN_TABS = [
   ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['tasks', '✅', 'Tasks', 'tasks', 'Team', 'tasks daily weekly plan status priority deadline completed delayed blocked assignee'],
   ['attendance', '🕒', 'Attendance & shifts', 'attendance', 'Team', 'attendance check in out breaks night shift timezone leave days off reports weekly performance clock'],
+  ['notify', '🔔', 'Notifications', null, 'Team', 'push notifications devices phone iphone android laptop tablet alerts shift reminders owner check-in promotions'],
   ['teamchat', '💬', 'Team chat', null, 'Team', 'team chat internal handover announcements staff channel'],
   ['cc', '💳', 'CC Collection', 'owner', 'Money', 'cc collection card kast trade okx epay exchangers live declined owner'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
@@ -640,6 +643,7 @@ async function renderAdmin() {
     else if (t === 'api') body.innerHTML = await adminApi(s);
     else if (t === 'accounts') body.innerHTML = await adminAccounts();
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
+    else if (t === 'notify') { body.innerHTML = await adminNotify(s); pushPaint(); }
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
     else if (t === 'receipts') body.innerHTML = await adminReceipts();
@@ -685,6 +689,88 @@ async function mailStatusCard(compact) {
   return `${top}<div class="card">${rows}</div>
     <p class="small muted">Paid keys are used first, then free trial keys. A key that reaches its limit or gets an error from Resend is set aside and the next key sends the email, so no email is lost. Free trial accounts can send 100 emails a day and 3,000 a month.${d.canEdit ? ' Set the plan of each key in API settings → Resend keys, Email marketing, or Accounts & API keys.' : ' Only the owner, Khalil and Nizar can change the keys and plans.'}</p>`;
 }
+
+// ---------------- notifications on this device (laptops, tablets, iPhone, Android) ----------------
+const PUSH = { ok: 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window };
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function devLabel() {
+  const u = navigator.userAgent;
+  const os = /iphone/i.test(u) ? 'iPhone' : /ipad/i.test(u) || (isIOS() && !/iphone/i.test(u)) ? 'iPad' : /android/i.test(u) ? (/mobile/i.test(u) ? 'Android phone' : 'Android tablet') : /mac/i.test(u) ? 'Mac' : /windows/i.test(u) ? 'Windows PC' : /cros/i.test(u) ? 'Chromebook' : /linux/i.test(u) ? 'Linux' : 'Device';
+  const br = /edg\//i.test(u) ? 'Edge' : /opr\//i.test(u) ? 'Opera' : /samsungbrowser/i.test(u) ? 'Samsung Internet' : /chrome|crios/i.test(u) ? 'Chrome' : /firefox|fxios/i.test(u) ? 'Firefox' : /safari/i.test(u) ? 'Safari' : 'Browser';
+  return `${os} · ${br}${isStandalone() ? ' (app)' : ''}`;
+}
+const b64ToU8 = (b) => { const s = atob((b + '='.repeat((4 - (b.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, (c) => c.charCodeAt(0)); };
+async function swReg(make) { // never waits forever: the page may run without the service worker
+  if (!('serviceWorker' in navigator)) return null; let r = await navigator.serviceWorker.getRegistration().catch(() => null);
+  if (!r && make) r = await navigator.serviceWorker.register('/sw.js').catch(() => null);
+  if (r && !r.active && make) { await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(ok, 6000))]); r = await navigator.serviceWorker.getRegistration().catch(() => r); }
+  return r || null;
+}
+async function pushSub() { if (!PUSH.ok) return null; try { const reg = await swReg(false); return reg ? await reg.pushManager.getSubscription() : null; } catch { return null; } }
+async function pushState() {
+  if (!PUSH.ok) return isIOS() && !isStandalone() ? 'ios-home' : 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  return (await pushSub()) && Notification.permission === 'granted' ? 'on' : 'off';
+}
+async function pushEnable() {
+  const perm = await Notification.requestPermission(); if (perm !== 'granted') throw new Error(t('notifDenied'));
+  const reg = await swReg(true); if (!reg) throw new Error(t('notifNo')); const { key } = await api('GET', '/api/push/key');
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) });
+  await api('POST', '/api/push/subscribe', { sub: sub.toJSON(), label: devLabel(), ua: navigator.userAgent.slice(0, 150), lang: getLang(), url: isAdminUI() ? '/intprototv' : state.role === 'reseller' ? '/rsl' : '/profile' });
+}
+async function pushDisable() { const sub = await pushSub(); if (sub) { await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe().catch(() => {}); } }
+async function pushForget() { try { const sub = await pushSub(); if (sub && state.token) await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint }); } catch {} }
+// After sign-in, a device that already allowed notifications is linked to the person signed in now (no welcome message).
+async function pushRelink() { try { if (!state.token || !PUSH.ok || Notification.permission !== 'granted') return; const sub = await pushSub(); if (!sub) return; const k = 'tvp_push_' + state.role + '_' + (state.token || '').slice(-6); if (sessionStorage.getItem(k)) return; await api('POST', '/api/push/subscribe', { sub: sub.toJSON(), label: devLabel(), ua: navigator.userAgent.slice(0, 150), silent: true }); sessionStorage.setItem(k, '1'); } catch {} }
+new MutationObserver(() => { const b = document.querySelector('#push-box [data-push-state]:not([data-painted])'); if (b) { b.dataset.painted = '1'; pushPaint(); } }).observe(document.getElementById('app') || document.body, { childList: true, subtree: true });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'push' && document.visibilityState === 'visible') { const n = (e.data.notes || []).slice(-1)[0]; if (n) toast(`${n.title}${n.body ? ' — ' + n.body.split('\n')[0] : ''}`); } });
+// The on/off box for this device (same box in the panel, the customer profile and the reseller dashboard)
+function pushBox(admin) {
+  const T = (k, en) => (admin ? en : t(k));
+  return `<div class="card push-box" id="push-box"><h3>🔔 ${T('notifT', 'Notifications on this device')}</h3><p class="small muted" style="margin-top:0">${T('notifText', 'Get an alert on this laptop, tablet or phone the moment something needs you, even when the panel is closed.')}</p><div data-push-state><p class="muted small">…</p></div></div>`;
+}
+async function pushPaint(admin = isAdminUI()) {
+  const box = document.querySelector('#push-box [data-push-state]'); if (!box) return;
+  const T = (k, en, v) => (admin ? en : t(k, v));
+  const st = await pushState(); const lab = esc(devLabel());
+  const btn = (act, label, cls = '') => `<button class="btn ${cls}" data-act="${act}">${label}</button>`;
+  if (st === 'on') box.innerHTML = `<div class="notice success small" style="margin:0 0 10px">✅ ${T('notifIsOn', 'On for this device')} · ${lab}</div><div class="row" style="gap:8px;flex-wrap:wrap">${btn('push-test', T('notifTestBtn', 'Send a test'))}${btn('push-off', T('notifOffBtn', 'Turn off on this device'), 'ghost')}</div>`;
+  else if (st === 'off') box.innerHTML = `${btn('push-on', '🔔 ' + T('notifOnBtn', 'Turn on notifications'), 'primary')}<p class="small muted">${lab}</p>`;
+  else if (st === 'denied') box.innerHTML = `<div class="notice warning small" style="margin:0">${T('notifBlocked', 'Notifications are blocked for this site. Allow them in the browser settings (the lock icon next to the address), then reload.')}</div>`;
+  else if (st === 'ios-home') box.innerHTML = `<div class="notice info small" style="margin:0">📱 ${T('notifIos', 'On iPhone and iPad: tap Share → “Add to Home Screen”, open the app from the home screen, then turn notifications on here (iOS 16.4 or newer).')}</div>`;
+  else box.innerHTML = `<div class="notice warning small" style="margin:0">${T('notifNo', 'This browser cannot show notifications. Use Chrome, Edge, Firefox or Safari.')}</div>`;
+}
+async function adminNotify(s) {
+  let d = null; try { d = await api('GET', '/api/admin/push/devices'); } catch {}
+  const me = state.admin.me; const owner = me?.role === 'owner'; const N = d?.settings || {};
+  const tg = (k, label, help) => `<label style="display:flex;flex-direction:row;align-items:flex-start;gap:10px;margin:0 0 12px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit"><input type="checkbox" name="${k}" ${N[k] !== false ? 'checked' : ''} style="width:auto;margin-top:3px"><div><b>${label}</b>${help ? `<div class="small muted">${help}</div>` : ''}</div></label>`;
+  const who = d ? `<div class="card"><h3>Who gets notifications</h3>${d.team.map((p) => `<div class="list-item"><div style="flex:1"><b>${esc(p.name)}</b><div class="small muted">${p.devices.length ? p.devices.map((x) => esc(x.label)).join(' · ') : 'No device yet'}</div></div><span class="pill ${p.devices.length ? 'st-active' : 'st-expiring'}">${p.devices.length} device${p.devices.length === 1 ? '' : 's'}</span></div>`).join('')}
+      <p class="small muted">Customers with notifications on: <b>${d.customers}</b> device(s) · resellers: <b>${d.resellers}</b>. Each agent turns it on once per device in this tab.</p></div>` : '';
+  const settings = owner && d ? `<form class="card" data-form="notify-set"><h3>What sends a notification</h3>
+      <p class="small muted" style="margin-top:0">Only you (the owner) can change this.</p>
+      <h4 style="margin:6px 0">To the agents (owner + everyone who can see customers)</h4>
+      ${tg('tickets', '🛟 New support requests and chat messages', 'From intproto-tv.store/support, the in-app support and the live chat — sent at once to every agent device.')}
+      ${tg('trials', '🎁 Free trial requests', 'Every new free trial, and every request waiting in the trial queue.')}
+      ${tg('receipts', '🧾 Payment receipts to check')}
+      <h4 style="margin:12px 0 6px">Team & shifts</h4>
+      ${tg('shiftReminders', '⏰ Shift start reminder to each agent', 'Sent to the agent when their shift starts (from Attendance & shifts).')}
+      ${tg('shifts', '🟢 Tell me when an agent starts or ends the shift', 'Check-in and check-out alerts, and an alert if someone has not checked in 20 minutes after the shift started.')}
+      ${tg('oversight', '👀 Check-ins on what the team does', 'An alert for each action of the team members you pick below (grouped so your phone rings at most once every 20 seconds per person).')}
+      <div class="row" style="gap:6px 14px;flex-wrap:wrap;margin:0 0 8px 28px">${d.members.map((m) => `<label class="small row" style="gap:6px"><input type="checkbox" name="watch" value="${esc(m.id)}" ${!N.watch?.length || N.watch.includes(m.id) ? 'checked' : ''} style="width:auto">${esc(m.name)}${m.role ? ' · ' + esc(m.role) : ''}</label>`).join('') || '<span class="small muted">No team members yet.</span>'}</div>
+      <h4 style="margin:12px 0 6px">Customers & resellers (in their language)</h4>
+      ${tg('customers', '🙏 Customers: “Thank you for renewing”, renewal alerts and support answers', 'Renewal alert a few days before the end and on the day it ends.')}
+      ${tg('resellers', '🤝 Resellers: “Thank you for your order” when credits are added')}
+      <div style="display:flex;align-items:flex-start;gap:10px;margin:0 0 12px"><input type="checkbox" name="autoPromo" id="nt-ap" ${N.autoPromo ? 'checked' : ''} style="width:auto;margin-top:3px"><div><b>📣 Automatic promotion reminders</b><div class="small muted">Packages to expired customers and trials, credit packages to resellers.</div><div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span class="small">Every</span><input type="number" name="promoDays" value="${esc(N.promoDays || 7)}" min="1" max="60" style="width:80px"><span class="small">days</span></div></div></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn primary">Save</button></div></form>` : '';
+  const promo = can('customers_edit') ? `<form class="card" data-form="push-promo"><h3>📣 Send a promotion reminder now</h3>
+      <p class="small muted" style="margin-top:0">Goes to the devices of customers and resellers who turned notifications on. Leave the text empty to use the ready message in each person's language.</p>
+      ${field('Who', 'audience', 'inactive', { type: 'select', options: [['inactive', 'Customers: expired + free trials (packages)'], ['active', 'Customers: active subscriptions'], ['trials', 'Customers: free trials only'], ['customers', 'All customers'], ['resellers', 'Resellers (credit packages)'], ['all', 'Everyone']] })}
+      ${field('Title (optional)', 'title', '', { attrs: 'maxlength="120"', ph: 'Special offer on our packages 📺' })}
+      ${field('Text (optional)', 'body', '', { type: 'textarea', rows: 2, attrs: 'maxlength="300"' })}
+      <div class="row" style="justify-content:flex-end"><button class="btn primary">Send</button></div></form>` : '';
+  return `<div class="grid2" style="gap:16px;align-items:start"><div>${pushBox(true)}${who}</div><div>${settings}${promo}</div></div>`;
+}
 async function adminOverview() {
   const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
   const max = Math.max(1, ...Object.values(st.byMonth || {}));
@@ -715,6 +801,7 @@ async function adminOverview() {
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
     ${st.totalBalanceUsd !== null && st.totalBalanceUsd !== undefined ? `<div class="stat c-ok" data-act="atab" data-tab="finance" style="cursor:pointer"><span>All banks (total)</span><b>${usd(st.totalBalanceUsd)}</b><span>${mad(st.totalBalanceUsd * st.madRate)}</span></div>` : ''}
   </div>
+  ${(await pushState()) === 'off' ? `<div class="notice info">🔔 <b>Get support requests, free trials and shift reminders instantly on this device.</b> <button class="btn sm primary" data-act="push-on" style="margin-inline-start:8px">Turn on notifications</button> <a class="small" data-act="atab" data-tab="notify" style="cursor:pointer">More</a></div>` : ''}
   ${await mailStatusCard(true)}
   <div class="grid2 ${can('customers_view') ? '' : 'hidden'}" style="gap:16px">
     <div class="card"><div class="row"><h3>Expiring soon</h3><span class="spacer"></span><a class="small" data-act="atab" data-tab="subs" style="cursor:pointer">Tracker →</a></div>${st.expiringSoon.length ? st.expiringSoon.map(row).join('') : '<p class="muted">Nobody is expiring soon.</p>'}</div>
@@ -1842,6 +1929,7 @@ async function renderUserTab() {
       <div class="card"><h3>${t('tfaT')}</h3><p class="muted small" style="margin-top:0">${user.twoFactor ? t('tfaOnText') : t('tfaText')}</p>${user.twoFactor ? `<span class="pill st-active">${t('tfaOn')}</span> <button class="btn sm" data-act="utfa-off" style="margin-inline-start:8px">${t('turnOff')}</button>` : `<button class="btn primary" data-act="utfa-setup">${t('turnOn')}</button>`}</div>
       ${sourcesCard()}
       <div class="card" id="acc-guide"><h3>${t('userGuide')}</h3><ol class="guide-ol"><li>${t('gStep1')}</li><li>${t('gStep2')}</li><li>${t('gStep3')}</li><li>${t('gStep4')}</li></ol></div>
+      ${pushBox(false)}
       ${parentalCard()}
       <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
@@ -2485,6 +2573,9 @@ const actions = {
     try { const r = await api('POST', '/api/admin/reseller/login', body); toast(k === 'send' ? 'Login email sent ✓' : k === 'left' ? 'Saved ✓' : `Login: ${r.username} / ${r.pass}`); rsReload(el.dataset.id); } catch (e) { toast(e.message, true); } },
   'rsl-tab': (el) => { RSL.tab = el.dataset.t; rslDraw(); window.scrollTo(0, 0); },
   'rsl-reload': () => renderRsl(),
+  'push-on': async (el) => { el.disabled = true; try { await pushEnable(); toast(isAdminUI() ? 'Notifications are on for this device ✓' : t('notifIsOn')); } catch (e) { toast(e.message, true); } pushPaint(); if (isAdminUI() && state.admin.tab === 'notify') renderAdmin(); },
+  'push-off': async () => { await pushDisable(); pushPaint(); },
+  'push-test': async () => { try { const r = await api('POST', '/api/push/test', { lang: getLang(), url: location.pathname }); toast(r.sent ? (isAdminUI() ? `Test sent to ${r.sent} device(s)` : '✓') : (isAdminUI() ? 'No device answered. Turn notifications off and on again.' : t('notifNo')), !r.sent); } catch (e) { toast(e.message, true); } },
   'mail-status': async () => { const h = await mailStatusCard(false); modal('📧 Email sending status', h, { wide: true }); },
   'sup-back': () => { SUP.step = 1; supDraw(); },
   'sup-another': () => { SUP.step = SUP.token ? 2 : 1; SUP.ref = ''; supDraw(); },
@@ -2751,7 +2842,7 @@ trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }
   },
   'modal-bg': (el, e) => { if (e.target === el) closeModal(); },
   'pw-eye': (el) => { const i = el.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; },
-  logout: async () => { try { await api('POST', '/api/logout'); } catch {} setSession(null); state.showLogin = /^\/intprototv/i.test(location.pathname); document.body.className = ''; await refreshConfig(); route(); },
+  logout: async () => { await pushForget(); try { await api('POST', '/api/logout'); } catch {} setSession(null); state.showLogin = /^\/intprototv/i.test(location.pathname); document.body.className = ''; await refreshConfig(); route(); },
   atab: (el) => { state.admin.tab = el.dataset.tab; window.scrollTo(0, 0); renderAdmin(); },
   'menu-open': () => { $('#side')?.classList.add('open'); document.querySelector('.side-bg')?.classList.add('open'); setTimeout(() => $('.nav-search')?.focus(), 50); },
   'menu-close': () => { $('#side')?.classList.remove('open'); document.querySelector('.side-bg')?.classList.remove('open'); },
@@ -3439,6 +3530,9 @@ Object.assign(forms, {
   'pin-off'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); localStorage.removeItem(pinKey()); toast(t('pinRemoved')); renderUserTab(); },
   'pin-unlock'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); state.user.unlocked = true; closeModal(); renderUserTab(); },
   async 'sup-set'(f) { await saveSettings({ support: { email: f.email.value.trim(), alertEmails: f.alertEmails.value, waLink: f.waLink.checked } }); $('#admin-body').innerHTML = await adminSupport(); },
+  async 'notify-set'(f) { const g = (k) => !!f.elements[k]?.checked; const watch = [...f.querySelectorAll('[name=watch]')]; const all = watch.every((x) => x.checked);
+    await saveSettings({ notify: { tickets: g('tickets'), trials: g('trials'), receipts: g('receipts'), shiftReminders: g('shiftReminders'), shifts: g('shifts'), oversight: g('oversight'), customers: g('customers'), resellers: g('resellers'), autoPromo: g('autoPromo'), promoDays: Number(f.promoDays.value) || 7, watch: all ? [] : watch.filter((x) => x.checked).map((x) => x.value) } }); renderAdmin(); },
+  async 'push-promo'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { const r = await api('POST', '/api/admin/push/promo', { audience: f.audience.value, title: f.title.value, body: f.body.value }); toast(`Sent to ${r.people} people (${r.devices} device${r.devices === 1 ? '' : 's'})`); } catch (e) { toast(e.message, true); } b.disabled = false; },
   async 'sup-start'(f) {
     const b = f.querySelector('button.primary'); const box = f.querySelector('#sup-err');
     const F = { name: f.name.value.trim(), email: f.email.value.trim(), phone: fullPhone(f, 'phone'), username: f.username.value.trim(), orderNo: f.orderNo.value.trim(), device: f.device.value.trim() };

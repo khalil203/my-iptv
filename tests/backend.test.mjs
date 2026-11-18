@@ -1813,3 +1813,81 @@ test('email keys: paid keys first, free trial keys only up to 100 a day, a faili
   await signBylaws(x, li.json.token); const ag = await x.call('GET', '/api/admin/email/status', {}, li.json.token); assert.equal(ag.status, 200);
   assert.ok(ag.json.rows.every((r) => !r.key && !r.domain)); assert.ok(!JSON.stringify(ag.json).includes('re_'));
 });
+
+test('notifications: devices subscribe, instant alerts to agents, shift start, owner check-ins, renewal thanks, reseller thanks, promos, dead devices removed', async () => {
+  const pushes = []; const dead = new Set();
+  const x = setup(async (url, init) => {
+    if (!url.startsWith('https://push.example.com/')) return null;
+    pushes.push({ url, auth: init.headers.Authorization, ttl: init.headers.TTL });
+    return dead.has(url) ? { ok: false, status: 410, json: async () => ({}) } : { ok: true, status: 201, json: async () => ({}) };
+  });
+  const tok = await adminToken(x);
+  const sub = (name) => ({ endpoint: 'https://push.example.com/' + name, keys: { p256dh: 'x', auth: 'y' } });
+  const pull = async (name) => (await x.call('POST', '/api/push/pull', { endpoint: 'https://push.example.com/' + name })).json.notes;
+  const key = (await x.call('GET', '/api/push/key')).json.key; assert.ok(key.length > 80);
+  assert.equal((await x.call('POST', '/api/push/subscribe', { sub: sub('owner-laptop'), label: 'Mac · Chrome' }, tok)).status, 200);
+  assert.match((await pull('owner-laptop'))[0].title, /🔔/, 'welcome note on the new device');
+  // the push carries a valid VAPID signature
+  const p0 = pushes[0]; assert.equal(p0.ttl, '86400'); const m = p0.auth.match(/^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/); assert.ok(m); assert.equal(m[4], key);
+  const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - key.length % 4) % 4)), (c) => c.charCodeAt(0));
+  const pub = await crypto.subtle.importKey('raw', raw, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+  const sig = Uint8Array.from(atob(m[3].replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - m[3].length % 4) % 4)), (c) => c.charCodeAt(0));
+  assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, sig, new TextEncoder().encode(m[1] + '.' + m[2])));
+  assert.equal(JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/'))).alg, 'ES256');
+  // two agents on their phones, one finance member (not an agent)
+  await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'khalil', password: 'secret12', role: 'Technical Manager', perms: ['customers_view', 'customers_edit', 'attendance'] }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Malak', username: 'malak', password: 'secret12', role: 'Support Agent', perms: ['customers_view', 'attendance'] }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Fred', username: 'fred', password: 'secret12', role: 'Finance', perms: ['finance_view'] }, tok);
+  const lg = async (u) => { const r = await x.call('POST', '/api/login', { username: u, password: 'secret12' }); await signBylaws(x, r.json.token); return r.json.token; };
+  const kt = await lg('khalil'), mt = await lg('malak'), ft = await lg('fred');
+  await x.call('POST', '/api/push/subscribe', { sub: sub('khalil-iphone'), label: 'iPhone · Safari (app)', silent: true }, kt);
+  await x.call('POST', '/api/push/subscribe', { sub: sub('malak-android'), label: 'Android phone · Chrome', silent: true }, mt);
+  await x.call('POST', '/api/push/subscribe', { sub: sub('fred-pc'), label: 'Windows PC', silent: true }, ft);
+  await pull('owner-laptop'); await pull('khalil-iphone'); await pull('malak-android');
+  // 1. support request → every agent device at once
+  const st = await x.call('POST', '/api/support/start', { name: 'Test Person', email: 'test.person@example.com', phone: '+27763456789' });
+  await x.call('POST', '/api/support/ticket', { token: st.json.token, subject: 'Sport channels freeze', text: 'Since yesterday the sport channels freeze.' });
+  for (const d of ['owner-laptop', 'khalil-iphone', 'malak-android']) assert.ok((await pull(d)).some((n) => /support ticket/.test(n.title)), d);
+  assert.equal((await pull('fred-pc')).length, 0, 'not an agent');
+  // free trial request
+  await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents', enabled: true } }, tok);
+  await x.call('POST', '/api/trial', { name: 'Trial Person', email: 'trial.person@example.com', phone: '+12025550143', ip: '9.9.9.9' });
+  assert.ok((await pull('malak-android')).some((n) => /free trial/i.test(n.title)));
+  // 2. shift start: check-in tells the owner; reminder at the planned start
+  await pull('owner-laptop'); await x.call('POST', '/api/admin/attendance', { action: 'in' }, mt);
+  assert.ok((await pull('owner-laptop')).some((n) => /Malak started the shift/.test(n.title)));
+  const team = (await x.call('GET', '/api/admin/team', {}, tok)).json; const malak = team.find((t) => t.username === 'malak');
+  const now = new Date(); const day = String(now.getUTCDay()); const min = now.getUTCHours() * 60 + now.getUTCMinutes();
+  await x.call('PUT', '/api/admin/shifts', { memberId: malak.id, memberName: 'Malak', tz: 'UTC', days: { [day]: { on: true, start: min, end: Math.min(1440, min + 480) } } }, tok);
+  await pull('malak-android'); const tk = await x.be.tick(); assert.equal(tk.reminders, 1);
+  assert.ok((await pull('malak-android')).some((n) => /shift starts/.test(n.title)));
+  assert.equal((await x.be.tick()).reminders, 0, 'only once a day');
+  // 3. owner check-ins on Khalil's actions
+  await pull('owner-laptop'); await addCustomer(x, kt, { username: 'oversee1', email: 'o1@example.com' });
+  assert.ok((await pull('owner-laptop')).some((n) => /Khalil/.test(n.title)));
+  // only watched members
+  await x.call('PUT', '/api/admin/settings', { notify: { watch: [malak.id] } }, tok);
+  await addCustomer(x, kt, { username: 'oversee2', email: 'o2@example.com' }); assert.ok(!(await pull('owner-laptop')).some((n) => /Khalil/.test(n.title)));
+  assert.equal((await x.call('PUT', '/api/admin/settings', { notify: { oversight: false } }, kt)).status, 403, 'staff cannot switch off the owner check-ins');
+  // 4. customer: renewal thanks + renewal alert, in their language
+  const c = await addCustomer(x, tok, { username: 'renewme', email: 'renew.me@example.com', lang: 'fr' });
+  const cl = await x.call('POST', '/api/login', { username: 'renewme', password: 'secret12' });
+  await x.call('POST', '/api/push/subscribe', { sub: sub('cust-phone'), label: 'Android phone', lang: 'fr' }, cl.json.token);
+  assert.match((await pull('cust-phone'))[0].body, /appareil/);
+  await x.call('POST', `/api/admin/customers/${c.id}/renew`, { days: 30, price: 10 }, tok);
+  assert.ok((await pull('cust-phone')).some((n) => /Merci pour votre renouvellement/.test(n.title)));
+  const list = await x.store.get('customers'); list.find((y) => y.id === c.id).expiresAt = Date.now() + 2 * 86400000; await x.store.put('customers', list);
+  const dd = await x.be.daily(); assert.equal(dd.push.expiring, 1); assert.ok((await pull('cust-phone')).some((n) => /se termine bientôt/.test(n.title)));
+  // reseller thanks + credits promo
+  const r = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Test Reseller', email: 'test.reseller@example.com' }, tok);
+  const rl = await x.call('POST', '/api/login', { username: r.json.reseller.login.username, password: r.json.reseller.login.pass });
+  await x.call('POST', '/api/push/subscribe', { sub: sub('rsl-tablet'), label: 'iPad', silent: true }, rl.json.token);
+  await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', resellerId: r.json.reseller.id }, tok);
+  const rn = await pull('rsl-tablet'); assert.ok(rn.some((n) => /Thank you for your order/.test(n.title)), JSON.stringify(rn));
+  const pr = await x.call('POST', '/api/admin/push/promo', { audience: 'resellers' }, tok); assert.equal(pr.json.people, 1);
+  assert.ok((await pull('rsl-tablet')).some((n) => /credits/i.test(n.title)));
+  // a device that is gone (410) is removed
+  dead.add('https://push.example.com/fred-pc'); await x.call('POST', '/api/push/test', {}, ft);
+  assert.ok(!(await x.store.get('pushsubs')).some((s) => s.endpoint.endsWith('fred-pc')));
+  const devs = (await x.call('GET', '/api/admin/push/devices', {}, tok)).json; assert.equal(devs.customers, 1); assert.equal(devs.resellers, 1);
+});
