@@ -1733,3 +1733,42 @@ test('currency: USD everywhere, EUR for Europe (email ending, then phone code); 
   assert.match((await x.call('POST', `/api/admin/customers/${de.id}/wamsg`, { type: 'renew' }, tok)).json.text, /€\d/);
   assert.equal((await x.call('GET', '/api/config', {})).json.packages?.[0]?.cur || 'EUR', 'EUR');
 });
+
+test('support page: details required first, ticket goes to the queue, all agents emailed, guest reply by email, WhatsApp support link', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { adminEmail: 'owner@example.com', resendKey: 're_test', from: 'App <no-reply@example.com>' }, support: { alertEmails: 'extra.agent@example.com, bad-email', email: 'help@example.com' } }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Agent Amy', username: 'amy', password: 'secret12', role: 'Support Agent', perms: ['customers_view'], notifyEmail: 'amy.work@example.com' }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Finance Fred', username: 'fred', password: 'secret12', role: 'Finance', perms: ['finance'], notifyEmail: 'fred@example.com' }, tok);
+  const info = (await x.call('GET', '/api/support/info')).json; assert.equal(info.email, 'help@example.com');
+  // no details → no ticket
+  assert.equal((await x.call('POST', '/api/support/ticket', { token: 'nope', subject: 'Help me', text: 'Nothing works at all' })).json.error, 'sup_again');
+  assert.equal((await x.call('POST', '/api/support/start', { name: 'Test Person', email: 'not-an-email', phone: '+27763456789' })).json.error, 'sup_info');
+  assert.equal((await x.call('POST', '/api/support/start', { name: 'Test Person', email: 'test.person@example.com', phone: '12' })).json.error, 'sup_info');
+  const st = await x.call('POST', '/api/support/start', { name: 'Test Person', email: 'test.person@example.com', phone: '+27763456789', device: 'Firestick', lang: 'de', ip: '1.2.3.4' });
+  assert.equal(st.status, 200); assert.equal(st.json.known, false);
+  const before = x.mails.length;
+  assert.equal((await x.call('POST', '/api/support/ticket', { token: st.json.token, subject: 'x', text: 'y' })).json.error, 'ticket_short');
+  const tk = await x.call('POST', '/api/support/ticket', { token: st.json.token, category: 'channels', subject: 'Sport channels freeze', text: 'Since yesterday the sport channels freeze after 10 seconds.' });
+  assert.equal(tk.status, 200); assert.match(tk.json.ref, /^SUP-\d{6}$/);
+  const to = x.mails.slice(before).flatMap((m) => [].concat(m.to));
+  for (const e of ['owner@example.com', 'amy.work@example.com', 'extra.agent@example.com', 'test.person@example.com']) assert.ok(to.includes(e), 'email to ' + e);
+  assert.ok(!to.includes('fred@example.com'), 'members who cannot see customers get no alert');
+  const q = (await x.call('GET', '/api/admin/tickets', {}, tok)).json; const t1 = q.find((k) => k.ref === tk.json.ref);
+  assert.ok(t1 && t1.status === 'open' && t1.guest && t1.contact.email === 'test.person@example.com' && t1.contact.device === 'Firestick' && t1.category === 'channels');
+  // agent answers → emailed to the guest
+  const n = x.mails.length;
+  assert.equal((await x.call('POST', '/api/admin/tickets/reply', { id: t1.id, text: 'Please restart the app, it is fixed now.', status: 'answered' }, tok)).status, 200);
+  assert.ok(x.mails.slice(n).some((m) => [].concat(m.to).includes('test.person@example.com') && /restart the app/.test(m.html)));
+  assert.ok((await x.call('GET', '/api/admin/tickets', {}, tok)).json.find((k) => k.id === t1.id).messages.at(-1).emailed);
+  // a known customer is matched by email
+  const c = await addCustomer(x, tok, { username: 'knownuser', email: 'known@example.com' });
+  assert.equal((await x.call('POST', '/api/support/start', { name: 'Known', email: 'known@example.com', phone: '+12025550143' })).json.known, true);
+  // WhatsApp: every message ends with the support link; the support type works; switch off
+  const w = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', appUrl: 'https://tv.example.com' }, tok)).json.text;
+  assert.match(w, /24\/7 support: https:\/\/tv\.example\.com\/support/);
+  const sm = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'support', appUrl: 'https://tv.example.com' }, tok)).json;
+  assert.equal(sm.type, 'support'); assert.match(sm.text, /https:\/\/tv\.example\.com\/support/); assert.match(sm.text, /help@example\.com/);
+  await x.call('PUT', '/api/admin/settings', { support: { waLink: false } }, tok);
+  assert.doesNotMatch((await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'renew', appUrl: 'https://tv.example.com' }, tok)).json.text, /\/support/);
+  const ss = (await x.call('GET', '/api/admin/settings', {}, tok)).json.support; assert.equal(ss.alertEmails, 'extra.agent@example.com'); assert.equal(ss.email, 'help@example.com');
+});

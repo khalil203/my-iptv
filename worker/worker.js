@@ -51,7 +51,7 @@ export default {
         if (url.pathname === '/api/forgot') body.appUrl = url.origin;
       }
       if (url.pathname === '/api/diag') { body.ip = request.headers.get('cf-connecting-ip') || ''; body.ua = request.headers.get('user-agent') || ''; }
-      if (url.pathname === '/api/trial') body.ip = request.headers.get('cf-connecting-ip') || '';
+      if (url.pathname === '/api/trial' || url.pathname.startsWith('/api/support/')) body.ip = request.headers.get('cf-connecting-ip') || '';
       if (url.pathname === '/api/trial' && body && typeof body === 'object' && !body.appUrl) body.appUrl = url.origin;
       if (url.pathname === '/api/telegram/webhook') body.__tgSecret = request.headers.get('x-telegram-bot-api-secret-token') || '';
       const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
@@ -65,7 +65,7 @@ export default {
     if (/^\/intprototv\/+$/i.test(url.pathname)) return Response.redirect(url.origin + '/intprototv', 301); // admin sign-in, without the trailing slash
     if (url.pathname === '/tv' || url.pathname === '/apk') return Response.redirect(url.origin + '/apk/INTPROTO-TV.apk', 302);
     // Public landing pages served by the single-page app (clean URLs, no .html)
-    if (url.pathname === '/freetrial' || url.pathname === '/resellers' || url.pathname === '/profile' || /^\/rsl\/?$/i.test(url.pathname) || /^\/intprototv$/i.test(url.pathname)) {
+    if (url.pathname === '/freetrial' || url.pathname === '/resellers' || url.pathname === '/profile' || /^\/support\/?$/i.test(url.pathname) || /^\/rsl\/?$/i.test(url.pathname) || /^\/intprototv$/i.test(url.pathname)) {
       const r = await env.ASSETS.fetch(new Request(url.origin + '/index.html', { method: 'GET', headers: request.headers }));
       return serveAsset(request, r);
     }

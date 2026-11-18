@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=91';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=92';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=90';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=92';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -206,6 +206,7 @@ function route() {
   const path = location.pathname.replace(/\/+$/, '') || '/';
   // Reseller dashboard: intproto-tv.store/rsl
   if (state.token && state.role === 'reseller') { if (path !== '/rsl') history.replaceState(null, '', '/rsl'); return renderRsl(); }
+  if (/^\/support$/i.test(path) && !isAdminUI() && state.role !== 'admin' && state.role !== 'staff') return renderSupport();
   if (/^\/rsl$/i.test(path) && !isAdminUI()) { if (!state.token) { state.showLogin = true; return renderLogin(); } return renderRsl(); }
   // Public landing pages live on clean URLs; keep them out of the way of the
   // sign-in flow and of signed-in users (otherwise route() would redraw them forever).
@@ -340,6 +341,69 @@ function renderResellers() {
   if (state.token && state.role === 'user') loadResellerPanel();
   else if (state.token) $('#rs-body').innerHTML = `<div class="card" style="padding:18px"><p style="margin-top:0">${esc(t('resellerIntro'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a></div>`;
   else $('#rs-body').innerHTML = `<div class="card" style="padding:18px"><p style="margin-top:0">${esc(t('resellerSignIn'))}</p><button class="btn primary block" data-act="site-login">${esc(t('signIn'))}</button></div>`;
+  window.scrollTo(0, 0);
+}
+
+// ---------------- public support page (/support) ----------------
+// Step 1 asks who the customer is (required). Only then can a ticket be opened; it lands in the agents' queue right away.
+const SUP = { step: 1, token: '', known: false, info: null, ref: '', me: null, form: {} };
+const supLangSel = () => `<select data-input="sup-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+async function renderSupport() {
+  document.documentElement.dir = 'ltr';
+  const b = state.config.branding || {};
+  if (!SUP.info) { try { SUP.info = await api('GET', '/api/support/info'); } catch { SUP.info = { email: 'contact@intproto-tv.com', whatsapp: waNum(b) }; } }
+  if (state.token && state.role === 'user' && !SUP.me) { try { SUP.me = (await api('GET', '/api/me')).user; } catch { SUP.me = {}; } }
+  supDraw();
+}
+function supDraw() {
+  const b = state.config.branding || {}; const I = SUP.info || {}; const me = SUP.me || {}; const F = SUP.form;
+  const wa = String(I.whatsapp || waNum(b) || '').replace(/\D/g, ''); const mail = I.email || 'contact@intproto-tv.com';
+  setWaFab(b, t('waMsg', { app: b.appName || 'INTPROTO-TV', u: me.username || '' }));
+  const steps = `<div class="sup-steps"><span class="${SUP.step === 1 ? 'on' : 'done'}">${esc(t('sup_step1'))}</span><span class="${SUP.step === 2 ? 'on' : SUP.step > 2 ? 'done' : ''}">${esc(t('sup_step2'))}</span></div>`;
+  let body = '';
+  if (SUP.step === 1) {
+    body = `<form data-form="sup-start" class="card" style="padding:18px" novalidate>
+      ${me.username ? `<div class="notice info small" style="margin:0 0 12px">${esc(t('sup_signedIn', { u: me.username }))}</div>` : ''}
+      ${field(t('sup_name'), 'name', F.name || me.name || '', { attrs: 'required minlength="2" maxlength="80" autocomplete="name"' })}
+      ${field(t('sup_email'), 'email', F.email || me.email || '', { type: 'email', attrs: 'required maxlength="120" autocomplete="email"' })}
+      ${phoneField(esc(t('sup_phone')), 'phone', true, F.phone || me.whatsapp || me.phone || '')}
+      ${field(t('sup_user'), 'username', F.username || me.username || '', { attrs: 'maxlength="60" autocomplete="username"' })}
+      <div class="row" style="gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:150px">${field(t('sup_order'), 'orderNo', F.orderNo || me.orderNo || '', { attrs: 'maxlength="40"' })}</div><div style="flex:1;min-width:150px">${field(t('sup_device'), 'device', F.device || '', { ph: t('sup_devicePh'), attrs: 'maxlength="60"' })}</div></div>
+      <div id="sup-err"></div>
+      <button class="btn primary block">${esc(t('sup_next'))}</button>
+    </form>`;
+  } else if (SUP.step === 2) {
+    const cats = ['login', 'channels', 'payment', 'device', 'other'];
+    body = `<form data-form="sup-ticket" class="card" style="padding:18px">
+      <div class="notice ${SUP.known ? 'success' : 'info'} small" style="margin:0 0 12px">${esc(SUP.known ? t('sup_known') : t('sup_new'))} · ${esc(F.name || '')} · ${esc(F.email || '')}</div>
+      ${field(t('sup_cat'), 'category', 'other', { type: 'select', options: cats.map((k) => [k, t('sup_cat_' + k)]) })}
+      ${field(t('sup_subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}
+      ${field(t('sup_msg'), 'text', '', { type: 'textarea', rows: 5, ph: t('sup_msgPh'), attrs: 'required minlength="5" maxlength="2000"' })}
+      <label class="field"><span>${esc(t('attAdd'))}</span><input type="file" name="image" accept="image/*"></label>
+      <div id="sup-err"></div>
+      <button class="btn primary block">${esc(t('sup_send'))}</button>
+      <button type="button" class="btn ghost block" data-act="sup-back" style="margin-top:8px">${esc(t('sup_back'))}</button>
+    </form>`;
+  } else {
+    body = `<div class="card" style="padding:22px;text-align:center"><div style="font-size:42px">✅</div><h2 style="margin:6px 0">${esc(t('sup_done'))}</h2>
+      <p class="muted">${esc(t('sup_doneText', { ref: SUP.ref, wa: wa ? t('sup_doneWa') : '' }))}</p>
+      <div style="font-size:22px;font-weight:700;letter-spacing:1px;margin:10px 0" id="sup-ref">${esc(SUP.ref)}</div>
+      <button class="btn primary" data-act="sup-another">${esc(t('sup_another'))}</button>
+      ${state.token && state.role === 'user' ? '' : `<p class="small muted" style="margin-top:14px">${esc(t('sup_account'))} <a href="/profile">${esc(t('signIn'))}</a></p>`}</div>`;
+  }
+  $('#app').innerHTML = `<div class="site"><main class="s-doc" id="main" style="max-width:640px;margin:0 auto">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:10px"><a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>${supLangSel()}</div>
+    <h1>🎧 ${esc(t('sup_title'))}</h1>
+    <div class="sup-badge">🟢 ${esc(t('sup_247'))}</div>
+    <p class="s-sub">${esc(t('sup_intro'))}</p>
+    ${SUP.step < 3 ? steps : ''}
+    ${body}
+    <div class="card" style="margin-top:16px"><p class="small muted" style="margin:0">${esc(t('sup_or'))}</p>
+      <div class="s-cta" style="margin-top:10px;justify-content:flex-start">
+        <a class="btn" href="mailto:${esc(mail)}">📧 ${esc(mail)}</a>
+        ${wa ? `<a class="btn wa-btn" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 WhatsApp</a>` : ''}
+      </div></div>
+  </main></div>`;
   window.scrollTo(0, 0);
 }
 
@@ -1365,7 +1429,7 @@ function memberForm(m) {
     <div class="grid2">${field('Username', 'username', m.username || '', { attrs: (isNew ? 'required minlength="3"' : 'disabled') + ' autocapitalize="none"' })}${field(isNew ? 'Password' : 'New password (optional)', 'password', '', { type: 'password', attrs: isNew ? 'required minlength="6"' : '' })}</div>
     <div class="grid2">${field('Western alias (shown to customers)', 'alias', m.alias || '', { ph: 'e.g. Mark, Simon, Jasmin' })}${field('Payroll bank', 'bank', m.bank || '', { type: 'select', options: [['', '—'], ['CIH', 'CIH (MAD)'], ['IBAN', 'European IBAN'], ['US', 'US bank'], ['other', 'Other']] })}</div>
     ${field('Payroll account / IBAN', 'bankDetails', m.bankDetails || '', { attrs: 'autocapitalize="none"', ph: 'e.g. MA64 3508 0000 0001 2345 6789 01' })}
-    ${field('Escalation email (Technical Manager)', 'notifyEmail', m.notifyEmail || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'Escalation copies go here — usually Khalil’s email' })}
+    ${field('Work email (support alerts & escalations)', 'notifyEmail', m.notifyEmail || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'agent@example.com', help: 'New tickets from the support page are emailed here when this member can see customers.' })}
     ${isNew ? toggle('Start as an unpaid 14-day trainee', 'trainee', true, 'Restricted to Customers (view), Attendance and Tasks until you promote them') : (m.traineeUntil && m.traineeUntil > Date.now() ? `<p class="notice warning" style="margin:6px 0">⏳ Trainee · ${Math.ceil((m.traineeUntil - Date.now()) / 86400000)} day(s) left · restricted access</p>` : '')}
     <h3>Role preset</h3>
     <div class="chips">${Object.keys(roles).map((k) => `<a data-act="preset" data-p="${esc(k)}">${esc(k)}</a>`).join('')}</div>
@@ -2327,7 +2391,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''))}</div>
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''))}</div>
       <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
@@ -2389,6 +2453,8 @@ const actions = {
     try { const r = await api('POST', '/api/admin/reseller/login', body); toast(k === 'send' ? 'Login email sent ✓' : k === 'left' ? 'Saved ✓' : `Login: ${r.username} / ${r.pass}`); rsReload(el.dataset.id); } catch (e) { toast(e.message, true); } },
   'rsl-tab': (el) => { RSL.tab = el.dataset.t; rslDraw(); window.scrollTo(0, 0); },
   'rsl-reload': () => renderRsl(),
+  'sup-back': () => { SUP.step = 1; supDraw(); },
+  'sup-another': () => { SUP.step = SUP.token ? 2 : 1; SUP.ref = ''; supDraw(); },
   'rsl-copy': (el) => { navigator.clipboard?.writeText(el.dataset.v).then(() => toast('Copied ✓'), () => toast(el.dataset.v)); },
   'rsl-show': (el) => { const c = document.getElementById(el.dataset.id); if (c) c.textContent = c.textContent.startsWith('•') ? c.dataset.secret : '••••••••'; },
   'rsl-buy': (el) => { const d = RSL.d; const x = d.packages.find((p) => p.id === el.dataset.id); if (!x) return;
@@ -3087,6 +3153,7 @@ document.addEventListener('input', (e) => {
   if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
+  if (t.dataset.input === 'sup-lang') { setLang(t.value, true); return supDraw(); }
   if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
@@ -3223,7 +3290,7 @@ async function loadAccountExtras() {
   });
 }
 function ticketThread(x, admin) {
-  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>` : ''}</div>`).join('')}</div>`;
+  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${admin && m.emailed ? '<div class="small muted">📧 emailed to the customer</div>' : ''}${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>` : ''}</div>`).join('')}</div>`;
 }
 function openTicket(id) {
   const x = (state.user.tickets || []).find((k) => k.id === id); if (!x) return;
@@ -3244,17 +3311,31 @@ function showReset() {
 }
 
 // ---------------- admin: support desk ----------------
+const TK_CATS = { login: 'Login / activation', channels: 'Channels', payment: 'Payment / renewal', device: 'Device setup', other: 'Other' };
 async function adminSupport() {
   const list = await api('GET', '/api/admin/tickets'); state.admin.tickets = list;
   const f = state.admin.tkFilter || 'open';
   const shown = list.filter((x) => f === 'all' || x.status === f);
   const count = (st) => list.filter((x) => x.status === st).length;
-  return `<div class="chips">${[['open', `Waiting for reply (${count('open')})`], ['answered', `Answered (${count('answered')})`], ['closed', `Closed (${count('closed')})`], ['all', `All (${list.length})`]].map(([k, n]) => `<a class="${f === k ? 'on' : ''}" data-act="tk-filter" data-f="${k}">${n}</a>`).join('')}</div>
-    <div class="card">${shown.length ? shown.map((x) => `<div class="list-item" data-act="tk-open" data-id="${esc(x.id)}" style="cursor:pointer" tabindex="0"><div class="avatar">${esc(initials(x.name))}</div><div style="flex:1;min-width:0"><b>${esc(x.subject)}</b>${x.priority === 'high' ? ' <span class="pill st-expired">high</span>' : ''}<div class="small muted">${esc(x.name)} · ${esc(x.username)} · ${fmtDT(x.updatedAt)} · ${x.messages.length} message${x.messages.length > 1 ? 's' : ''}</div></div>${tpill(x.status)}</div>`).join('') : `<div class="empty"><span class="ic">💬</span>${list.length ? 'Nothing in this list.' : 'No support requests yet. Customers open them from Account → Support in the app.'}</div>`}</div>`;
+  const S = state.admin.settings?.support || {};
+  const setup = can('settings') ? `<details class="card" style="margin-bottom:12px"><summary><b>🎧 Support page settings</b> <span class="small muted">· ${esc(location.origin)}/support · open 24/7</span></summary>
+    <form data-form="sup-set" style="margin-top:10px">
+      <p class="small muted" style="margin-top:0">Customers must give their name, email and WhatsApp number before they can open a ticket. Each new ticket appears here at once and is emailed to the owner, every active team member who can see customers (their “work email”), and the extra emails below.</p>
+      ${field('Support email shown to customers', 'email', S.email || 'contact@intproto-tv.com', { type: 'email', attrs: 'autocapitalize="none"' })}
+      ${field('Extra alert emails (comma separated)', 'alertEmails', S.alertEmails || '', { ph: 'agent1@example.com, agent2@example.com', attrs: 'autocapitalize="none"' })}
+      <label class="field" style="flex-direction:row;align-items:center;gap:10px"><input type="checkbox" name="waLink" ${S.waLink !== false ? 'checked' : ''} style="width:auto"><span>Add the support link at the end of every WhatsApp message</span></label>
+      <div class="row" style="justify-content:flex-end;gap:8px"><a class="btn ghost" href="/support" target="_blank" rel="noopener">Open the page ↗</a><button class="btn primary">Save</button></div>
+    </form></details>` : '';
+  return `${setup}<div class="chips">${[['open', `Waiting for reply (${count('open')})`], ['answered', `Answered (${count('answered')})`], ['closed', `Closed (${count('closed')})`], ['all', `All (${list.length})`]].map(([k, n]) => `<a class="${f === k ? 'on' : ''}" data-act="tk-filter" data-f="${k}">${n}</a>`).join('')}</div>
+    <div class="card">${shown.length ? shown.map((x) => `<div class="list-item" data-act="tk-open" data-id="${esc(x.id)}" style="cursor:pointer" tabindex="0"><div class="avatar">${esc(initials(x.name))}</div><div style="flex:1;min-width:0"><b>${esc(x.subject)}</b>${x.priority === 'high' ? ' <span class="pill st-expired">high</span>' : ''}${x.source === 'support page' ? ` <span class="pill">🎧 ${esc(x.ref || 'support page')}</span>` : ''}${x.category ? ` <span class="pill">${esc(TK_CATS[x.category] || x.category)}</span>` : ''}<div class="small muted">${esc(x.name)} · ${esc(x.guest ? (x.contact?.email || x.username) : x.username)}${x.guest ? ' · new contact' : ''} · ${fmtDT(x.updatedAt)} · ${x.messages.length} message${x.messages.length > 1 ? 's' : ''}</div></div>${tpill(x.status)}</div>`).join('') : `<div class="empty"><span class="ic">💬</span>${list.length ? 'Nothing in this list.' : 'No support requests yet. Customers open them at /support or from Account → Support in the app.'}</div>`}</div>`;
 }
 function adminTicketModal(id) {
   const x = (state.admin.tickets || []).find((k) => k.id === id); if (!x) return;
-  modal(esc(x.subject), `<p class="small muted" style="margin-top:0">${esc(x.name)} · ${esc(x.username)} · opened ${fmtDT(x.createdAt)} ${tpill(x.status)}</p>${ticketThread(x, true)}
+  const C = x.contact || null; const ph = C ? String(C.phone || '').replace(/\D/g, '') : '';
+  const contactCard = C ? `<div class="card" style="padding:10px 12px;margin:0 0 10px"><div class="small"><b>🎧 ${esc(x.ref || '')}</b> · from the support page${x.category ? ' · ' + esc(TK_CATS[x.category] || x.category) : ''}${x.guest ? ' · <span class="pill st-expiring">not matched to a customer</span>' : ' · <span class="pill st-active">customer found</span>'}</div>
+    <div class="small muted" style="margin-top:4px">${esc(C.name || '')} · <a href="mailto:${esc(C.email || '')}">${esc(C.email || '')}</a>${ph ? ` · <a href="https://wa.me/${ph}" target="_blank" rel="noopener">WhatsApp +${ph}</a>` : ''}${C.username ? ' · user ' + esc(C.username) : ''}${C.orderNo ? ' · order ' + esc(C.orderNo) : ''}${C.device ? ' · ' + esc(C.device) : ''}${C.lang ? ' · ' + esc(String(C.lang).toUpperCase()) : ''}</div>
+    ${x.guest ? '<div class="small muted" style="margin-top:4px">Your answer is emailed to this person.</div>' : ''}</div>` : '';
+  modal(esc(x.subject), `<p class="small muted" style="margin-top:0">${esc(x.name)} · ${esc(x.username)} · opened ${fmtDT(x.createdAt)} ${tpill(x.status)}</p>${contactCard}${ticketThread(x, true)}
     <form data-form="tk-reply" data-id="${esc(x.id)}" data-perm="customers_edit">${field('Your answer', 'text', '', { type: 'textarea', rows: 4, ph: 'Write the answer the customer will read in the app…', attrs: 'maxlength="2000"' })}<label class="field"><span>${'Attach a picture (optional)'}</span><input type="file" name="image" accept="image/*"></label>
       <div class="grid2">${field('Status after saving', 'status', x.status === 'closed' ? 'closed' : 'answered', { type: 'select', options: [['answered', 'Answered'], ['open', 'Still waiting for reply'], ['closed', 'Closed']] })}${field('Priority', 'priority', x.priority, { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div>
       <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Save</button></div></form>`, { wide: true });
@@ -3323,6 +3404,25 @@ Object.assign(forms, {
   'pin-on'(f) { const pin = f.pin.value.trim(); if (!/^\d{4}$/.test(pin)) return toast(t('pinNeeds'), true); localStorage.setItem(pinKey(), pin); state.user.unlocked = false; state.user.cache = {}; toast(t('pinSaved')); renderUserTab(); },
   'pin-off'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); localStorage.removeItem(pinKey()); toast(t('pinRemoved')); renderUserTab(); },
   'pin-unlock'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); state.user.unlocked = true; closeModal(); renderUserTab(); },
+  async 'sup-set'(f) { await saveSettings({ support: { email: f.email.value.trim(), alertEmails: f.alertEmails.value, waLink: f.waLink.checked } }); $('#admin-body').innerHTML = await adminSupport(); },
+  async 'sup-start'(f) {
+    const b = f.querySelector('button.primary'); const box = f.querySelector('#sup-err');
+    const F = { name: f.name.value.trim(), email: f.email.value.trim(), phone: fullPhone(f, 'phone'), username: f.username.value.trim(), orderNo: f.orderNo.value.trim(), device: f.device.value.trim() };
+    if (F.name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(F.email) || !F.phone) { box.innerHTML = `<div class="err-box">${esc(t('sup_info'))}</div>`; return; }
+    b.disabled = true;
+    try { const r = await api('POST', '/api/support/start', { ...F, lang: getLang() }); SUP.form = F; SUP.token = r.token; SUP.known = !!r.known; SUP.step = 2; supDraw(); }
+    catch (e) { box.innerHTML = `<div class="err-box">${esc(tErr(e.message))}</div>`; b.disabled = false; }
+  },
+  async 'sup-ticket'(f) {
+    const b = f.querySelector('button.primary'); const box = f.querySelector('#sup-err'); b.disabled = true;
+    try {
+      const r = await api('POST', '/api/support/ticket', { token: SUP.token, category: f.category.value, subject: f.subject.value, text: f.text.value, image: await pickedImage(f) });
+      SUP.ref = r.ref; SUP.step = 3; supDraw();
+    } catch (e) {
+      if (e.message === 'sup_again') { SUP.token = ''; SUP.step = 1; supDraw(); const x = $('#sup-err'); if (x) x.innerHTML = `<div class="err-box">${esc(t('sup_again'))}</div>`; return; }
+      box.innerHTML = `<div class="err-box">${esc(tErr(e.message))}</div>`; b.disabled = false;
+    }
+  },
   async 'ticket-new'(f) {
     try { await api('POST', '/api/me/tickets', { subject: f.subject.value, text: f.text.value, image: await pickedImage(f) }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
     catch (e) { toast(tErr(e.message), true); }
@@ -3703,7 +3803,7 @@ const TPL_GROUPS = [
   ['RM', 'renewal', '🔁 Renewal offer email', 'Sent to customers whose subscription or trial has ended.', '{name} {app} {site} {coupon}'],
   ['OM', 'order', '💳 Package order email', 'Package email; the button uses the payment link you type when sending (or WhatsApp).', '{name} {app} {pkg} {price} {d} {n}'],
 ];
-const WA_NAMES = { pay: '💳 Payment link (place an order)', trial: '🎁 Free trial details', thanks: '🙏 Thank you for your purchase', renew: '🔁 Renewal reminder', login: '🔑 Login details' };
+const WA_NAMES = { pay: '💳 Payment link (place an order)', trial: '🎁 Free trial details', thanks: '🙏 Thank you for your purchase', renew: '🔁 Renewal reminder', login: '🔑 Login details', support: '🎧 Support link (24/7 help page)' };
 const LANG3 = LANG5;
 const nice = (k) => k.replace(/([A-Z0-9])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 // Black Friday (seasonal) promotion: one switch, the code goes into renewal emails and WhatsApp / Telegram messages.
