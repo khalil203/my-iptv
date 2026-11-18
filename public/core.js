@@ -120,6 +120,7 @@ export const DEFAULT_SETTINGS = () => ({
   // WhatsApp / Telegram messages for renewals, trials and orders, and it is ready as a newsletter and a Telegram channel post.
   // Order numbers: next number = highest number used in the series + 1 (one shared counter, like the Google Sheet: WLF-139, IBO-142 → next 143).
   orders: { prefix: 'WLF', iboPrefix: 'IBO', rslPrefix: 'RLS', series: 'WLF,IBO,RLS', pad: 3, devPad: 2 },
+  currencyRule: { on: true }, // USD everywhere, EUR for Europe (email ending, then phone code)
   promo: { on: false, name: 'Black Friday', code: 'BLACKFRIDAY', offer: '', from: '2026-11-17', to: '2026-12-01', email: true, whatsapp: true, telegram: true },
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false, mode: 'auto', notifyAdmin: true },
@@ -216,6 +217,7 @@ export const PERMS = [
   ['attendance_all', 'See the whole team attendance & reports', 'Team'],
   ['settings', 'App settings (API, branding, trial, email, user dashboard)', 'System'],
   ['activity', 'See activity log', 'System'],
+  ['secrets', 'API keys, email accounts (Resend), hosting (Hostinger) & domains (Dynu) — see and edit', 'System'],
   // Owner-only modules: they can never be granted to a team member.
   ['exports', 'Export or download any data (Excel, CSV, JSON)', 'System'],
   ['calls', 'Call management & call logs', 'System'],
@@ -230,7 +232,7 @@ const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
 
 // Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
 export const ROLE_PRESETS = {
-  'Technical Manager': ['customers_view', 'customers_edit', 'customers_phone', 'disputes', 'tasks', 'attendance', 'activity', 'ibo', 'marketing', 'templates_edit'],
+  'Technical Manager': ['customers_view', 'customers_edit', 'customers_phone', 'disputes', 'tasks', 'attendance', 'activity', 'ibo', 'marketing', 'templates_edit', 'secrets'],
   'Sales Agent': ['customers_view', 'customers_edit', 'customers_phone', 'tasks', 'attendance'],
   Accountant: ['finance_view', 'finance_edit', 'profits', 'stock', 'stripe', 'tasks', 'attendance'],
   Manager: ['customers_view', 'customers_edit', 'customers_delete', 'customers_phone', 'disputes', 'finance_view', 'finance_edit', 'profits', 'stock', 'plans', 'tasks', 'attendance', 'activity'],
@@ -258,6 +260,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/order/send') return 'customers_edit';
   if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
+  if (path.startsWith('/api/admin/accounts')) return 'secrets';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
   if (path === '/api/admin/renewal/status') return 'customers_view';
@@ -506,6 +509,27 @@ export function cleanEmail(x) {
   return m ? m[0] : '';
 }
 // Language of emails: one language for everyone (English unless changed in Trial & email setup), or each customer's own.
+// ---- Currency: US dollars for everyone, euros for customers in Europe ----
+// Europe is found from the email ending (.de, .ch, .fr, .co.uk …), then from the phone country code (+41, +49 …).
+const EU_TLD = new Set('eu ad al at ba be bg by ch cy cz de dk ee es fi fo fr gb gg gi gr hr hu ie im is it je li lt lu lv mc md mk mt nl no pl pt ro rs se si sk sm ua uk va xk'.split(' '));
+const EU_DIAL = ['30', '31', '32', '33', '34', '350', '351', '352', '353', '354', '355', '356', '357', '358', '359', '36', '370', '371', '372', '373', '375', '376', '377', '378', '379', '380', '381', '382', '383', '385', '386', '387', '389', '39', '40', '41', '420', '421', '423', '43', '44', '45', '46', '47', '48', '49'];
+export function isEurope(c) {
+  const dom = String(c?.email || '').trim().toLowerCase().split('@')[1] || ''; const tld = dom.split('.').pop();
+  if (dom && EU_TLD.has(tld)) return true;
+  const ph = String(c?.whatsapp || c?.phone || '').replace(/[^\d+]/g, ''); if (!ph.startsWith('+') && !/^00/.test(ph) && ph.length < 11) return false;
+  const d = ph.replace(/^\+|^00/, ''); return EU_DIAL.some((x) => d.startsWith(x));
+}
+export const CUR_SYMBOL = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ', THB: '฿', GBP: '£' };
+export const fmtCur = (n, cur) => (CUR_SYMBOL[cur] && cur !== 'MAD' ? CUR_SYMBOL[cur] + Number(n || 0).toFixed(2) : Number(n || 0).toFixed(2) + ' ' + cur);
+// The currency a customer (or reseller) sees: their own choice, else USD / EUR by the rule (when it is on), else the shop currency.
+export function custCurrency(s, c) {
+  const own = String(c?.curOverride || '').toUpperCase(); if (['USD', 'EUR'].includes(own)) return own; // set by hand in the customer form (the imported 'currency' column is only history)
+  if (s.currencyRule?.on !== false) return isEurope(c) ? 'EUR' : 'USD';
+  return s.orderCurrency && s.orderCurrency !== 'ALL' ? s.orderCurrency : s.currency || 'EUR';
+}
+// A typed price like "$109.99" or "109,99 €" shown in the customer's currency (same number).
+export const priceIn = (txt, cur) => { const m = String(txt || '').replace(',', '.').match(/(\d+(?:\.\d+)?)/); return m ? fmtCur(Number(m[1]), cur) : String(txt || ''); };
+
 // ---- Languages: English, French, German, Spanish, Italian ----
 export const LANG_CODES = ['en', 'fr', 'de', 'es', 'it'];
 export const LANG_NAMES = { en: 'English', fr: 'Français', de: 'Deutsch', es: 'Español', it: 'Italiano' };
@@ -929,7 +953,7 @@ export function pickPayLink(s, pkg) { // only a link the admin types for one ord
 export function orderEmail(s, c, pkg, appUrl, chosen, curParam) {
   const lang = ml(c); const L = OM[lang] || OM.en; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const pl = chosen || pickPayLink(s, pkg);
-  const cur = curParam || (s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR');
+  const cur = curParam || (s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : s.orderCurrency || 'EUR');
   const price = (CUR_SIGN[cur] || '') + Number(pkg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
   const n = Math.max(1, Number(pkg.devices) || 1);
   const v = (k, x = {}) => String(L[k]).replace(/\{(\w+)\}/g, (_, m) => (m === 'app' ? e(app) : m === 'pkg' ? e(pkg.title) : m === 'price' ? e(price) : m === 'n' ? n : m === 'd' ? pkg.days : e(x[m] ?? '')));
@@ -1119,7 +1143,9 @@ export function invoiceEmail(s, c, sale, appUrl) {
   const d = (t) => new Date(t).toLocaleDateString(langLocale(lang), { day: 'numeric', month: 'long', year: 'numeric' });
   const kind = { renew: I.renew, new: I.new, trial: I.trial, reseller: I.reseller }[sale.type] || I.new;
   const desc = `${kind} · ${sale.planName || ''}`.replace(/ · $/, '');
-  const amt = money5(sale.amount, sale.currency);
+  let cur = sale.currency || 'USD', amount = Number(sale.amount) || 0; const want = s.currencyRule?.on !== false ? custCurrency(s, c) : cur; const rates = s.finance?.rates || {};
+  if (want !== cur && (cur === 'USD' || rates[cur]) && (want === 'USD' || rates[want])) { amount = Math.round(fromUsd(Number(sale.amountUsd) || toUsd(amount, cur, rates), want, rates) * 100) / 100; cur = want; }
+  const amt = money5(amount, cur);
   const row = (k, v, strong) => `<tr><td style="padding:9px 0;font-size:13px;color:#64748b;border-bottom:1px solid #e2e8f0">${e(k)}</td><td align="right" style="padding:9px 0;font-size:14px;color:#0f172a;border-bottom:1px solid #e2e8f0;font-weight:${strong ? 800 : 600}">${v}</td></tr>`;
   const table = `<table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:6px 0 18px">${row(I.no, e(no), true)}${row(I.date, e(d(sale.at || Date.now())))}${c.orderNo ? row(I.order, e(c.orderNo)) : ''}${row(I.billed, e(c.name || c.username))}${row(I.desc, e(desc))}${sale.days ? row(I.period, e(I.days.replace('{n}', sale.days))) : ''}${row(I.devices, e(String(Number(c.connections) || 1)))}${row(I.total, `<span style="font-size:18px">${e(amt)}</span>`, true)}${row(I.status, `<span style="display:inline-block;background:#dcfce7;color:#15803d;font-size:12px;font-weight:800;padding:3px 10px;border-radius:50px">✓ ${e(I.paid)}</span>`)}</table>`;
   const valid = c.expiresAt ? I.valid.replace('{date}', d(c.expiresAt)) : '';
@@ -1154,7 +1180,7 @@ ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="95" style="display:block;
 ${pr ? `<tr><td class="mobile-pad" style="padding:0 40px 18px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#0f172a;border-radius:14px"><tr><td align="center" style="padding:22px 24px;text-align:center;color:#fff"><div style="font-size:12px;font-weight:800;letter-spacing:3px;color:#fbbf24;text-transform:uppercase;margin-bottom:6px">🖤 ${e(pr.name || 'Black Friday')}</div><div dir="auto" style="font-size:20px;font-weight:800;line-height:1.35;color:#fff">${e(promoBanner(lang, pr))}</div>${promoEnd(pr, lang) ? `<div style="font-size:13px;color:#cbd5e1;margin-top:8px">⏳ ${tx(lang, 'until')} ${e(promoEnd(pr, lang))}</div>` : ''}</td></tr></table></td></tr>` : ''}<tr><td class="mobile-pad" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:2px solid #7dd3fc;border-radius:14px;overflow:hidden"><tr><td align="center" style="padding:26px 24px;text-align:center">
 <div style="font-size:13px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">${L.offerLabel}</div>
 <div dir="auto" style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.3;margin-bottom:6px">${e(o.title || '')}</div>
-${o.price ? `<div dir="auto" style="font-size:32px;font-weight:900;color:#0284c7;margin-bottom:8px">${e(o.price)}</div>` : ''}
+${o.price ? `<div dir="auto" style="font-size:32px;font-weight:900;color:#0284c7;margin-bottom:8px">${e(s.currencyRule?.on !== false ? priceIn(o.price, custCurrency(s, c)) : o.price)}</div>` : ''}
 ${o.bonus ? `<div dir="auto" style="display:inline-block;background:#dcfce7;border:1px solid #86efac;color:#166534;font-size:13px;font-weight:700;padding:4px 12px;border-radius:50px;margin-bottom:20px">✨ ${e(o.bonus)}</div>` : ''}
 ${o.coupon ? `<div style="background:#fff;border:2px dashed #38bdf8;border-radius:10px;padding:14px 20px;margin-bottom:20px"><div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:6px">${L.coupon}</div><div style="font-family:'Courier New',monospace;font-size:22px;font-weight:800;color:#0284c7;letter-spacing:2px">${e(o.coupon)}</div></div>` : ''}
 ${site ? `<a href="${e(site)}" class="cta-btn" style="display:inline-block;background:#0284c7;color:#fff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;box-shadow:0 4px 12px rgba(2,132,199,.25)">${L.cta}</a>` : ''}
@@ -1277,6 +1303,46 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   // A profile can be typed in by hand, made from customer rows (one person can have many order rows) or read from pasted text.
   const getResellers = async () => (await store.get('resellers')) || [];
   const saveResellers = (l) => store.put('resellers', l);
+  // ---- How many emails each API key sent (to see the spend per key). Keys are never stored here, only a fingerprint. ----
+  const keyFp = (k) => { let h = 2166136261; for (const ch of String(k || '')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8, '0') + String(k || '').length.toString(16); };
+  async function keyUse(key, n) {
+    if (!key || !(n > 0)) return; try { const u = (await store.get('keyuse')) || {}; const f = keyFp(key); const mo = new Date().toISOString().slice(0, 7);
+      const x = u[f] || { total: 0, months: {} }; x.total += n; x.months[mo] = (x.months[mo] || 0) + n; x.last = Date.now(); u[f] = x; await store.put('keyuse', u); } catch {}
+  }
+  const getAccounts = async () => (await store.get('accounts')) || [];
+  const saveAccounts = (l) => store.put('accounts', l);
+  const ACC_KINDS = { resend: 'Resend (email)', marketing: 'Email marketing', hostinger: 'Hostinger (hosting)', dynu: 'Dynu (domains / DNS)', other: 'Other' };
+  const ACC_PLANS = { free: { name: 'Free', price: 0, quota: 3000 }, p50: { name: 'Paid · 50,000 emails', price: 20, quota: 50000 }, p100: { name: 'Paid · 100,000 emails', price: 35, quota: 100000 }, custom: { name: 'Custom', price: 0, quota: 0 } };
+  function accClean(b, old = {}) {
+    const t = (v, n = 200) => String(v ?? '').replace(/[<>]/g, '').trim().slice(0, n);
+    const kind = ACC_KINDS[b.kind] ? b.kind : old.kind || 'resend';
+    const mailKind = kind === 'resend' || kind === 'marketing';
+    const tier = ACC_PLANS[b.tier] ? b.tier : old.plan?.tier || (mailKind ? 'free' : 'custom'); const pre = mailKind ? ACC_PLANS[tier] : { price: 0, quota: 0 };
+    const num = (v, d) => (v === '' || v == null || isNaN(Number(v)) ? d : Math.max(0, Number(v)));
+    const keep = (v, o) => (v === undefined || /^••••/.test(String(v)) ? o || '' : t(v, 300)); // masked value = keep the saved one
+    const domains = (Array.isArray(b.domains) ? b.domains : String(b.domains ?? (old.domains || []).join(', ')).split(/[\s,;]+/)).map((d) => String(d).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)).slice(0, 30);
+    return { ...old, kind, name: t(b.name ?? old.name, 80) || ACC_KINDS[kind], email: t(b.email ?? old.email, 120), password: keep(b.password, old.password), apiKey: keep(b.apiKey, old.apiKey), domains,
+      plan: { tier, price: tier === 'custom' ? num(b.price, old.plan?.price || 0) : num(b.price, 0) || pre.price, quota: tier === 'custom' ? num(b.quota, old.plan?.quota || 0) : num(b.quota, 0) || pre.quota, paid: b.paid !== undefined ? !!b.paid && b.paid !== 'false' : !!old.plan?.paid, paidAt: num(b.paidAt, old.plan?.paidAt || 0), paidUntil: t(b.paidUntil ?? old.plan?.paidUntil, 10) },
+      use: ['customer', 'marketing', 'both', ''].includes(b.use) ? b.use : old.use || '', note: t(b.note ?? old.note, 500), url: t(b.url ?? old.url, 200) };
+  }
+  // Spend per key: emails sent this month × (plan price ÷ emails in the plan), plus the plan fee when paid.
+  async function accRows(list) {
+    const u = (await store.get('keyuse')) || {}; const mo = new Date().toISOString().slice(0, 7);
+    const rows = list.map((a) => { const x = a.apiKey ? u[keyFp(a.apiKey)] || {} : {}; const month = x.months?.[mo] || 0; const cpe = a.plan?.quota ? (a.plan.price || 0) / a.plan.quota : 0;
+      return { ...a, usage: { month, total: x.total || 0, last: x.last || 0, pct: a.plan?.quota ? Math.round(month / a.plan.quota * 1000) / 10 : null, cpe: Math.round(cpe * 1e6) / 1e6, usedCost: Math.round(month * cpe * 100) / 100, fee: a.plan?.paid ? a.plan.price || 0 : 0 } }; });
+    const sum = (f) => Math.round(rows.reduce((t, r) => t + (f(r) || 0), 0) * 100) / 100;
+    return { rows, totals: { accounts: rows.length, keys: rows.filter((r) => r.apiKey).length, paid: rows.filter((r) => r.plan?.paid).length, month: sum((r) => r.usage.month), total: sum((r) => r.usage.total), quota: sum((r) => (r.apiKey ? r.plan?.quota : 0)), fees: sum((r) => r.usage.fee), usedCost: sum((r) => r.usage.usedCost) } };
+  }
+  const accSheetRow = (a) => [a.name, ACC_KINDS[a.kind] || a.kind, a.email, a.password, a.apiKey, (a.domains || []).join(', '), a.plan?.price ?? '', a.plan?.quota ?? '', a.plan?.paid ? 'yes' : 'no', a.plan?.paidUntil || '', a.use || '', a.note || ''];
+  const ACC_HEAD = ['Name', 'Type', 'Account email', 'Password', 'API key', 'Domains', 'Plan price $', 'Emails in plan', 'Paid', 'Paid until', 'Used for', 'Note'];
+  function accFromRows(rows) { // rows from Google Sheets or pasted text (same columns as ACC_HEAD)
+    const kindOf = (v) => { const x = String(v || '').toLowerCase(); return x.includes('hostinger') ? 'hostinger' : x.includes('dynu') ? 'dynu' : x.includes('market') ? 'marketing' : x.includes('resend') || x.includes('email') ? 'resend' : 'other'; };
+    return rows.filter((r) => Array.isArray(r) && r.some((x) => String(x || '').trim()) && String(r[0] || '').trim().toLowerCase() !== 'name').map((r) => {
+      const price = Number(String(r[6] || '').replace(/[^\d.]/g, '')) || 0, quota = Number(String(r[7] || '').replace(/[^\d]/g, '')) || 0;
+      const tier = quota === 50000 ? 'p50' : quota === 100000 ? 'p100' : !price && (!quota || quota === 3000) ? 'free' : 'custom';
+      return { name: r[0], kind: kindOf(r[1]), email: r[2], password: r[3], apiKey: r[4], domains: r[5], tier, price, quota, paid: /^(yes|oui|paid|true|1|✓)/i.test(String(r[8] || '')), paidUntil: r[9], use: ['customer', 'marketing', 'both'].includes(String(r[10] || '').toLowerCase()) ? String(r[10]).toLowerCase() : '', note: r[11] };
+    });
+  }
   // Reseller dashboard login (intproto-tv.store/rsl). The password is kept so it can be sent again in emails, like the customers' one.
   const rsGenPass = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let o = ''; const r = crypto.getRandomValues(new Uint8Array(10)); for (const b of r) o += a[b % a.length]; return o; };
   async function rsSetPass(p, pass) { const salt = uid(8); p.login = { ...(p.login || {}), username: p.login?.username || p.rslId, pass, salt, hash: await hashPassword(pass, salt), at: Date.now() }; return p.login; }
@@ -1457,6 +1523,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     try {
       const res = await fetchFn('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: fromHeader, to: [to], subject, html }) });
       const data = await res.json().catch(() => ({}));
+      if (res.ok) await keyUse(auth, 1);
       return res.ok ? { ok: true, id: data.id } : { ok: false, error: data.message || 'Resend error ' + res.status };
     } catch (err) { return { ok: false, error: err.message }; }
   }
@@ -1475,6 +1542,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (!msgs.length) return { ok: true, sent: 0 };
       const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json' }, body: JSON.stringify(msgs.map((m) => ({ from: fromHeader, to: [m.to], subject: m.subject, html: m.html }))) });
       const d = await r.json().catch(() => ({}));
+      if (r.ok) await keyUse(auth, msgs.length);
       return r.ok ? { ok: true, sent: msgs.length } : { ok: false, error: d.message || 'Resend error ' + r.status };
     } catch (err) { return { ok: false, error: err.message }; }
   }
@@ -1836,7 +1904,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const state = c.status === 'disabled' ? 'disabled' : c.expiresAt < now ? 'expired' : daysLeft <= warn ? 'expiring' : 'active';
     const plan = s.plans.find((p) => p.id === c.planId);
     const { passwordHash, salt, totp, emailCode, ...rest } = c; // secrets never leave the server
-    return { ...rest, twoFactor: !!(totp && totp.on), emailVerified: !!c.emailVerified && c.emailVerified === cleanEmail(c.email), daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
+    return { ...rest, cur: custCurrency(s, c), twoFactor: !!(totp && totp.on), emailVerified: !!c.emailVerified && c.emailVerified === cleanEmail(c.email), daysLeft, hoursLeft: Math.max(0, Math.round((c.expiresAt - now) / 3600000)), state, planName: c.isTrial ? 'Trial' : plan ? plan.name : 'Custom', planDays: plan ? plan.days : Math.max(1, Math.round((c.expiresAt - c.startAt) / DAY)) };
   }
 
   // Use the username / password / DNS the panel gives back (if it returns them).
@@ -1933,8 +2001,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       // ---------- public ----------
       if (R('GET', '/api/config')) {
         await getAdmin();
-        const cur = s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
-        const rcur = s.resellerCurrency || 'EUR';
+        const cur = s.currencyRule?.on !== false ? 'USD' : s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
+        const rcur = s.currencyRule?.on !== false ? 'USD' : s.resellerCurrency || 'EUR';
         const kindOf = (p) => /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription';
         const orderPackages = (s.orderPackages || []).filter((p) => (p.title || p.name) && Number(p.price) > 0).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', cur, kind: kindOf(p) }));
         const resellerPackages = (s.resellerPackages || []).filter((p) => (p.name || p.title) && Number(p.price) > 0).map((p) => ({ id: p.id, name: p.name || p.title, title: p.name || p.title, credits: Number(p.credits) || 0, price: Number(p.price) || 0, cur: rcur, kind: 'reseller' }));
@@ -2192,7 +2260,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (ses.role === 'reseller') {
         const rs = await getResellers(); const p = rs.find((x) => x.id === ses.id);
         if (!p) return err(401, 'Account not found.'); if (p.status === 'paused') return err(401, 'This reseller account is paused.');
-        const cur = s.resellerCurrency || 'EUR';
+        const cur = s.currencyRule?.on !== false ? custCurrency(s, p) : s.resellerCurrency || 'EUR';
         if (R('GET', '/api/rsl/me')) {
           const sales = await getSales(); const list = await getCustomers(); const now = Date.now(); const warn = 7 * DAY;
           const row = rsRows([p], s, sales, list)[0] || {};
@@ -2263,7 +2331,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const sales = (await getSales()).filter((x) => x.customerId === c.id && Number(x.amount) > 0);
           const totalPaidUsd = Math.round(sales.reduce((a, x) => a + (Number(x.amountUsd) || 0), 0) * 100) / 100;
           return ok({
-            user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency,
+            user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency, myCurrency: s.currencyRule?.on !== false ? custCurrency(s, c) : '',
             plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
             orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', kind: /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription', cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.name || p.title, name: p.name || p.title, credits: Number(p.credits) || 0, days: 0, devices: 0, price: Number(p.price) || 0, badge: '', kind: 'reseller', cur: s.resellerCurrency || 'EUR' })),
@@ -2351,7 +2419,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const k = 'rcday:' + c.id; const n = Number(await store.get(k)) || 0; if (n >= 3) return err(429, 'rc_limit');
           let att; try { att = await saveAttachment(body.image); } catch { return err(400, 'att_bad'); }
           await store.put(k, n + 1, 86400);
-          const cur = s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
+          const cur = s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
           const all = await getReceipts(); const rc = { id: uid(5), customerId: c.id, username: c.username, name: c.name, pkg: pk.id, pkgTitle: pk.title, days: pk.days, devices: pk.devices, amount: pk.price, cur, att, note: cleanText(body.note, 300), status: 'pending', at: Date.now() };
           all.unshift(rc); await store.put('receipts', all.slice(0, 400));
           await log('payment', `${c.username} uploaded a payment receipt for "${pk.title}"`);
@@ -2436,7 +2504,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (member.traineeUntil && member.traineeUntil > Date.now()) perms = perms.filter((p) => ['customers_view', 'attendance', 'tasks'].includes(p));
         actorName = member.name || member.username;
       }
-      const can = (p) => isOwner || (!isOwnerOnly(p) && perms.includes(p));
+      // 'secrets' (API keys, accounts, hosting, domains): the owner, anyone given it, and the Technical Manager (Khalil).
+      const can = (p) => isOwner || (!isOwnerOnly(p) && (perms.includes(p) || (p === 'secrets' && /technical|panel manager/i.test((member && member.role) || ''))));
       const need = permFor(method, path, body);
       if (need === 'owner' && !isOwner) { await log('security', `${actorName} was blocked from ${method} ${path} (owner only)`); return err(403, 'Only the owner can do this.'); }
       if (need && need !== 'owner' && !can(need)) {
@@ -2476,7 +2545,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa === true };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
         if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
+        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: can('secrets') && !perms.includes('secrets') ? [...perms, 'secrets'] : perms, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -2852,7 +2921,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ ok: true });
       }
       if (R('POST', '/api/admin/email/test-key')) { // checks one sending row: sends a test email through that key and domain
-        if (!(isOwner || /technical|panel manager/i.test((member && member.role) || ''))) return err(403, 'Only the owner and the Technical Manager can test API keys.');
+        if (!(can('secrets'))) return err(403, 'Only the owner and the Technical Manager can test API keys.');
         const scope = body.scope === 'mkt' ? 'mkt' : 'trans'; const m = scope === 'mkt' ? await getMkt() : null;
         const rows = scope === 'mkt' ? mktRowsOf(m) : transRowsOf(s); const saved = rows.find((r) => r.id === String(body.id || ''));
         const typed = String(body.key || '').trim(); const key = typed && !typed.startsWith('••••') ? typed : saved?.key || '';
@@ -2902,6 +2971,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
           try {
             const r = await fetchFn('https://api.resend.com/emails/batch', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(batch.map((to) => ({ from, to: [to], subject, html }))) });
+            if (r.ok) await keyUse(key, batch.length);
             if (r.ok) { sentCount += batch.length; spent += batch.length * perEmail; m.stats[day] = { sent: (Number(m.stats?.[day]?.sent) || 0) + batch.length }; m.perKey = m.perKey || {}; m.perKey[keyIndex + 1] = { sent: (Number(m.perKey?.[keyIndex + 1]?.sent) || 0) + batch.length, spend: Math.round(((Number(m.perKey?.[keyIndex + 1]?.spend) || 0) + batch.length * perEmail) * 100) / 100 }; }
             else { const d = await r.json().catch(() => ({})); await log('marketing', `Marketing batch ${bi + 1} failed: ${d.message || 'Resend error ' + r.status}`); }
           } catch (e) { await log('marketing', `Marketing batch ${bi + 1} failed: ${e.message}`); }
@@ -3208,7 +3278,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           telegram: { ...src.telegram, botToken: src.telegram?.botToken ? '••••' : '', webhookSecret: src.telegram?.webhookSecret ? '••••' : '' },
         });
         if (can('settings')) {
-          const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
+          const isTm = can('secrets');
           if (isTm) return ok({ ...maskStripe(s), email: { ...s.email, transRows: maskRows(transRowsOf(s)) } }); // Nizar & Khalil: full access (sending keys shown as ••••last 4)
           return ok(maskPanel(maskKeys(maskStripe(s)))); // Other staff: everything masked (panel creds too)
         }
@@ -3219,7 +3289,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         // IPTV panel keys, Resend keys, Stripe keys and other API credentials. Everyone else is locked out at the API level.
         const API_KEY_PATHS = [['panel', 'dino'], ['panel', 'xtream'], ['panel', 'mega'], ['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets'], ['telegram', 'botToken'], ['telegram', 'webhookSecret']];
         const touchesKey = API_KEY_PATHS.some(([a, b]) => body?.[a] && (Array.isArray(body[a]) ? body[a].some((x) => Object.keys(x || {}).some((k) => k === b)) : Object.keys(body[a] || {}).some((k) => k === b)));
-        const isTm = isOwner || /technical|panel manager/i.test((member && member.role) || '');
+        const isTm = can('secrets');
         if (touchesKey && !isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.');
         if (body?.finance?.stripeKey === '••••') delete body.finance.stripeKey;
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
@@ -3286,6 +3356,83 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(next);
       }
 
+      // ---------- Accounts (Resend / email marketing / Hostinger / Dynu): only the owner, Khalil and Nizar (permission 'secrets') ----------
+      if (R('GET', '/api/admin/accounts')) {
+        const a = await accRows(await getAccounts()); const tr = transRowsOf(s); const mk = ((await store.get('mkt')) || {}).rows || [];
+        const known = new Set((await getAccounts()).map((x) => x.apiKey).filter(Boolean)); const loose = [...tr, ...mk].filter((r) => r.key && !known.has(r.key)).length;
+        return ok({ ...a, kinds: ACC_KINDS, plans: ACC_PLANS, sheetUrl: s.accountsSheet || '', looseKeys: loose, head: ACC_HEAD });
+      }
+      if (R('POST', '/api/admin/accounts/save')) {
+        const list = await getAccounts(); let a = body.id ? list.find((x) => x.id === String(body.id)) : null;
+        if (body.id && !a) return err(404, 'Account not found.');
+        const v = accClean(body, a || {}); if (!v.name) return err(400, 'Give the account a name.');
+        if (v.apiKey && v.kind === 'resend' && !/^re_\w{8,}/.test(v.apiKey)) return err(400, 'A Resend API key starts with re_');
+        if (v.apiKey && list.some((x) => x !== a && x.apiKey === v.apiKey)) return err(409, 'This API key is already in another account.');
+        if (a) Object.assign(a, v, { updatedAt: Date.now(), by: actorName }); else { a = { id: uid(6), ...v, createdAt: Date.now(), updatedAt: Date.now(), by: actorName }; list.push(a); }
+        await saveAccounts(list); await log('security', `Account "${a.name}" (${ACC_KINDS[a.kind]}) ${body.id ? 'changed' : 'added'} by ${actorName}`);
+        return ok({ account: (await accRows([a])).rows[0] });
+      }
+      if (R('POST', '/api/admin/accounts/delete')) {
+        const list = await getAccounts(); const a = list.find((x) => x.id === String(body.id || '')); if (!a) return err(404, 'Account not found.');
+        await saveAccounts(list.filter((x) => x !== a)); await log('security', `Account "${a.name}" deleted by ${actorName}`); return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/accounts/import-keys')) { // the sending keys already in Email settings / Email marketing become accounts
+        const list = await getAccounts(); const have = new Set(list.map((x) => x.apiKey).filter(Boolean)); let n = 0;
+        const add = (r, use) => { if (!r.key || have.has(r.key)) return; have.add(r.key); n++; list.push({ id: uid(6), ...accClean({ kind: 'resend', name: r.name || (r.domain ? 'Resend · ' + r.domain : 'Resend key'), apiKey: r.key, domains: r.domain ? [r.domain] : [], use, tier: 'free' }), createdAt: Date.now(), updatedAt: Date.now(), by: actorName }); };
+        for (const r of transRowsOf(s)) add(r, 'customer'); for (const r of ((await store.get('mkt')) || {}).rows || []) add(r, 'marketing');
+        await saveAccounts(list); await log('security', `${n} sending key(s) added to Accounts by ${actorName}`); return ok({ added: n });
+      }
+      if (R('POST', '/api/admin/accounts/resend-domains')) { // what Resend says about the domains of this key, with the DNS records it needs
+        const a = (await getAccounts()).find((x) => x.id === String(body.id || '')); if (!a?.apiKey) return err(400, 'This account has no API key.');
+        const H = { Authorization: 'Bearer ' + a.apiKey };
+        let r, d; try { r = await fetchFn('https://api.resend.com/domains', { headers: H }); d = await r.json().catch(() => ({})); } catch (e) { return err(502, 'Resend could not be reached: ' + e.message); }
+        if (!r.ok) return err(502, 'Resend: ' + (d.message || 'error ' + r.status));
+        const out = [];
+        for (const dm of (d.data || []).slice(0, 10)) { let recs = []; try { const x = await fetchFn('https://api.resend.com/domains/' + encodeURIComponent(dm.id), { headers: H }); const j = await x.json().catch(() => ({})); recs = (j.records || []).map((q) => ({ record: q.record, name: q.name, type: q.type, value: q.value, priority: q.priority, status: q.status, ttl: q.ttl })); } catch {} out.push({ id: dm.id, name: dm.name, status: dm.status, region: dm.region, records: recs }); }
+        return ok({ domains: out });
+      }
+      if (R('POST', '/api/admin/accounts/dynu')) { // add the DNS records Resend asks for to the domain at Dynu
+        const L = await getAccounts(); const dy = L.find((x) => x.id === String(body.dynuId || '')), re = L.find((x) => x.id === String(body.resendId || ''));
+        if (!dy?.apiKey) return err(400, 'Choose a Dynu account with its API key.'); if (!re?.apiKey) return err(400, 'Choose a Resend account with its API key.');
+        const domain = String(body.domain || '').trim().toLowerCase(); if (!domain) return err(400, 'Choose the domain.');
+        const RH = { Authorization: 'Bearer ' + re.apiKey }, DH = { 'API-Key': dy.apiKey, accept: 'application/json', 'Content-Type': 'application/json' };
+        let rl = await fetchFn('https://api.resend.com/domains', { headers: RH }); let rd = await rl.json().catch(() => ({}));
+        const rdom = (rd.data || []).find((x) => String(x.name).toLowerCase() === domain); if (!rdom) return err(404, `${domain} is not added in this Resend account yet.`);
+        const rj = await (await fetchFn('https://api.resend.com/domains/' + encodeURIComponent(rdom.id), { headers: RH })).json().catch(() => ({}));
+        const dl = await (await fetchFn('https://api.dynu.com/v2/dns', { headers: DH })).json().catch(() => ({}));
+        const zone = (dl.domains || []).filter((z) => domain === String(z.name).toLowerCase() || domain.endsWith('.' + String(z.name).toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0];
+        if (!zone) return err(404, `${domain} is not in this Dynu account.`);
+        const zn = String(zone.name).toLowerCase(); const existing = await (await fetchFn(`https://api.dynu.com/v2/dns/${zone.id}/record`, { headers: DH })).json().catch(() => ({}));
+        const have = (existing.dnsRecords || []).map((x) => `${String(x.recordType).toUpperCase()}|${String(x.nodeName || '').toLowerCase()}|${String(x.textData || x.host || x.content || '').toLowerCase()}`);
+        const added = [], skipped = [], failed = [];
+        for (const q of rj.records || []) {
+          let node = String(q.name || '').toLowerCase().replace(/\.$/, ''); if (node === zn) node = ''; else if (node.endsWith('.' + zn)) node = node.slice(0, -(zn.length + 1));
+          // Resend gives names relative to the main domain (e.g. "send.mail" for mail.example.com), which is what Dynu wants as the node name
+          const type = String(q.type).toUpperCase(); const val = String(q.value || '');
+          const k = `${type}|${node}|${val.toLowerCase()}`; if (have.includes(k)) { skipped.push(`${type} ${node || '@'}`); continue; }
+          const rec = { nodeName: node, recordType: type, ttl: 3600, state: true, ...(type === 'TXT' ? { textData: val } : type === 'MX' ? { host: val, priority: Number(q.priority) || 10 } : type === 'CNAME' ? { host: val } : { content: val }) };
+          try { const x = await fetchFn(`https://api.dynu.com/v2/dns/${zone.id}/record`, { method: 'POST', headers: DH, body: JSON.stringify(rec) }); if (x.ok) added.push(`${type} ${node || '@'}`); else { const j = await x.json().catch(() => ({})); failed.push(`${type} ${node || '@'}: ${j.message || x.status}`); } } catch (e) { failed.push(`${type} ${node || '@'}: ${e.message}`); }
+        }
+        await log('security', `Dynu DNS for ${domain}: ${added.length} added, ${skipped.length} already there, ${failed.length} failed (by ${actorName})`);
+        return ok({ added, skipped, failed, zone: zn });
+      }
+      if (R('POST', '/api/admin/accounts/sheet')) { // Google Sheets: save the Apps Script link, send the accounts to the sheet, or read them back
+        if (body.url !== undefined) { const u = String(body.url || '').trim(); if (u && !/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) return err(400, 'Paste the Apps Script web app link (https://script.google.com/macros/s/…/exec).'); s.accountsSheet = u; await saveSettings(s); }
+        const url = s.accountsSheet; if (!url) return ok({ saved: true });
+        if (body.push) { const list = await getAccounts(); let r; try { r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Accounts', header: ACC_HEAD, rows: list.map(accSheetRow) }) }); } catch (e) { return err(502, 'Google Sheets could not be reached: ' + e.message); }
+          if (!r.ok) return err(502, 'Google Sheets answered ' + r.status + '. Check the script is deployed for "Anyone".'); await log('security', `Accounts sent to Google Sheets by ${actorName} (${list.length})`); return ok({ pushed: list.length }); }
+        if (body.pull) { let d; try { const r = await fetchFn(url + (url.includes('?') ? '&' : '?') + 'sheet=Accounts'); d = await r.json(); } catch (e) { return err(502, 'Could not read the sheet: ' + e.message); }
+          const rows = accFromRows(d.rows || d.values || []); const list = await getAccounts(); let added = 0, changed = 0;
+          for (const r of rows) { const old = list.find((x) => (r.apiKey && x.apiKey === r.apiKey) || (x.name === String(r.name || '').trim() && x.kind === r.kind)); if (old) { Object.assign(old, accClean(r, old), { updatedAt: Date.now() }); changed++; } else { list.push({ id: uid(6), ...accClean(r), createdAt: Date.now(), updatedAt: Date.now(), by: actorName }); added++; } }
+          await saveAccounts(list); await log('security', `Accounts read from Google Sheets by ${actorName}: ${added} new, ${changed} updated`); return ok({ added, changed }); }
+        return ok({ saved: true });
+      }
+      if (R('POST', '/api/admin/accounts/import')) { // pasted rows (copied from the sheet)
+        const rows = String(body.text || '').split(/\r?\n/).map((l) => (l.includes('\t') ? l.split('\t') : l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((x) => x.replace(/^"|"$/g, '')))); const got = accFromRows(rows);
+        const list = await getAccounts(); let added = 0, changed = 0;
+        for (const r of got) { const old = list.find((x) => (r.apiKey && x.apiKey === r.apiKey) || (x.name === String(r.name || '').trim() && x.kind === r.kind)); if (old) { Object.assign(old, accClean(r, old), { updatedAt: Date.now() }); changed++; } else { list.push({ id: uid(6), ...accClean(r), createdAt: Date.now(), updatedAt: Date.now(), by: actorName }); added++; } }
+        await saveAccounts(list); return ok({ added, changed });
+      }
       if (R('GET', '/api/admin/orders')) { // numbering summary: next number, duplicates, multi-device orders, backups
         const list = (await getCustomers()).filter((c) => !c.rsOrder);
         const by = new Map(); for (const c of list) { const k = orderKey(c.orderNo); if (!k) continue; (by.get(k) || by.set(k, []).get(k)).push(c); }
@@ -3480,6 +3627,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.email2 !== undefined && (String(body.email2 || '') !== '' && cleanEmail(body.email2) !== cleanEmail(c.email2 || ''))) { const prob = await emailProblem(cleanEmail(body.email2)); if (prob) return err(400, 'Secondary email: ' + prob); }
           for (const k of ['name', 'phone', 'note', 'lineUsername', 'linePassword', 'lineId', 'planId', 'email', 'whatsapp', 'lang']) if (body[k] !== undefined) c[k] = String(body[k]);
           if (body.lang !== undefined) c.lang = okLang(c.lang);
+          if (body.curOverride !== undefined) { const v = String(body.curOverride || '').toUpperCase(); if (['USD', 'EUR'].includes(v)) c.curOverride = v; else delete c.curOverride; }
           if (body.email !== undefined) c.email = cleanEmail(body.email) || String(body.email).trim();
           if (body.email2 !== undefined) c.email2 = cleanEmail(body.email2) || String(body.email2 || '').trim().toLowerCase();
           const lineWas = c.lineUsername + '\n' + c.linePassword;
@@ -3619,7 +3767,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
           const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL', 'MAD', 'THB'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
           const pl = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
-          const cur = st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
+          const cur = body.currency && body.currency !== 'AUTO' && body.currency !== 'ALL' ? body.currency : s.currencyRule?.on !== false ? custCurrency(s, c) : st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
           const price = (CUR_SIGN[cur] || '') + Number(pk.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
           const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
           const lu = c.lineUsername || c.username, lp = c.linePassword || c.loginPassword || '';
@@ -4140,6 +4288,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.panelUrl !== undefined) { const u = String(body.panelUrl || '').trim(); if (u && !/^https?:\/\/\S+$/.test(u)) return err(400, 'The panel address must start with http:// or https://'); p.panelUrl = u.slice(0, 300); }
         if (body.panelUser !== undefined) p.panelUser = rsText(body.panelUser, 80);
         if (body.lang !== undefined) p.lang = okLang(String(body.lang || ''));
+        if (body.curOverride !== undefined) { const v = String(body.curOverride || '').toUpperCase(); if (['USD', 'EUR'].includes(v)) p.curOverride = v; else delete p.curOverride; }
         if (body.panelPass !== undefined) p.panelPass = String(body.panelPass || '').replace(/[<>\s]/g, '').slice(0, 80);
         if (body.telegram !== undefined) p.telegram = String(body.telegram || '').trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '').replace(/[^\w+]/g, '').slice(0, 40);
         p.status = body.status === 'paused' ? 'paused' : 'active'; p.updatedAt = Date.now();
@@ -4328,7 +4477,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       if (R('POST', '/api/admin/panels/test')) { // check that a Dino/Xtream/Mega panel is reachable + auth ok
-        const tm = isOwner || /technical|panel manager/i.test((member && member.role) || ''); if (!tm) return err(403, 'Only the owner and the Technical Manager can test panels.');
+        const tm = can('secrets'); if (!tm) return err(403, 'Only the owner and the Technical Manager can test panels.');
         const baseUrl = String(body.baseUrl || '').trim().replace(/\/+$/, ''); const u = String(body.username || '').trim().slice(0, 80); const pw = String(body.password || '').slice(0, 200);
         if (!/^https?:\/\//.test(baseUrl)) return err(400, 'Base URL must start with http:// or https://');
         const type = ['dino', 'xtream', 'mega'].includes(String(body.type || '').toLowerCase()) ? String(body.type).toLowerCase() : 'xtream';
@@ -4406,7 +4555,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('customer', `Imported ${added} clients${skipped ? ` (${skipped} skipped: already exist)` : ''}`);
         return ok({ added, skipped, total: list.length });
       }
-      if (R('GET', '/api/admin/backup')) return ok({ version: 2, exportedAt: Date.now(), settings: s, customers: await getCustomers(), sales: await getSales(), tx: await getTx(), stock: await getStock(), resellers: await getResellers() });
+      if (R('GET', '/api/admin/backup')) return ok({ version: 2, exportedAt: Date.now(), settings: s, customers: await getCustomers(), sales: await getSales(), tx: await getTx(), stock: await getStock(), resellers: await getResellers(), accounts: await getAccounts() });
       if (R('POST', '/api/admin/restore')) {
         if (!isObj(body.settings) || !Array.isArray(body.customers)) return err(400, 'This is not a valid backup file.');
         const next = deepMerge(DEFAULT_SETTINGS(), body.settings);
@@ -4417,6 +4566,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (Array.isArray(body.tx)) await store.put('tx', body.tx);
         if (Array.isArray(body.stock)) await store.put('stock', body.stock);
         if (Array.isArray(body.resellers)) await store.put('resellers', body.resellers);
+        if (Array.isArray(body.accounts)) await store.put('accounts', body.accounts);
         await log('admin', `Backup restored (${body.customers.length} customers)`);
         return ok({ ok: true });
       }

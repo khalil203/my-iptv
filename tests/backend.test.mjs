@@ -5,11 +5,12 @@ import { webcrypto } from 'node:crypto';
 import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail, parseResellerText, parseLooseDate, parseMoney, cleanPhoneText, scrubCards, cleanRslId } from '../public/core.js';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
-function setup() {
+function setup(hook) {
   const db = new Map(); const mails = []; const calls = []; const tg = [];
   const store = { get: async (k) => { const v = db.get(k); if (!v) return null; if (v.e && v.e < Date.now()) { db.delete(k); return null; } return JSON.parse(v.v); }, put: async (k, v, ttl) => { db.set(k, { v: JSON.stringify(v), e: ttl ? Date.now() + ttl * 1000 : 0 }); }, del: async (k) => { db.delete(k); } };
   const fetchFn = async (url, init) => {
     calls.push(url);
+    if (hook) { const r = await hook(String(url), init || {}); if (r) return r; }
     if (String(url).includes('api.resend.com')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm1' }) }; }
     if (String(url).includes('api.telegram.org')) { tg.push(JSON.parse(init.body || '{}')); return { ok: true, status: 200, json: async () => ({ ok: true, result: { username: 'testbot' } }) }; }
     return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
@@ -1045,7 +1046,7 @@ test('email templates: login/trial, renewal, order and newsletter render in Engl
     email: { appUrl: 'https://app.test', supportEmail: 'help@test.example', website: 'https://test.example', dns: 'http://line.test:8080' },
     trial: { hours: 24 }, player: { serverUrl: 'http://line.test:8080' },
     renewalOffer: { title: '1-Year Plan', price: '$99.99', bonus: '2 months free', coupon: 'SAVE10', url: 'https://test.example' },
-    orderCurrency: 'EUR' };
+    orderCurrency: 'EUR', currencyRule: { on: false } };
   const c = { name: 'Sara & Co', lang: 'en', username: 'sara', loginPassword: 'Login1234', lineUsername: 'line_sara', linePassword: 'p@ss&1',
     dns: 'http://line.test:8080', expiresAt: Date.parse('2027-01-31T12:00:00Z'),
     m3u: 'http://line.test/get.php?username=line_sara&password=p%40ss%261&type=m3u_plus', ibo: { mac: 'AA:BB:CC:DD:EE:FF', key: 'KEY-123' } };
@@ -1643,4 +1644,92 @@ test('5 languages: WhatsApp, renewal, profile, invoice, reseller emails and seas
   const sv = await x.call('POST', '/api/admin/reseller/save', { id: r.json.reseller.id, name: 'Rivenditore Prova', email: 'riv@example.com', lang: 'it' }, tok); assert.equal(sv.status, 200, JSON.stringify(sv.json));
   const s2 = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r20', resellerId: r.json.reseller.id }, tok); assert.equal(s2.status, 200, JSON.stringify(s2.json)); assert.equal(s2.json.emailed, true, JSON.stringify(s2.json));
   assert.match(x.mails.at(-1).subject, /^Ordine confermato: 20 crediti/); assert.match(x.mails.at(-1).html, /La tua dashboard rivenditore/);
+});
+
+
+test('accounts & API keys: only owner / Technical Manager / given permission; masked keys kept; spend per key; sheets; Resend + Dynu DNS', async () => {
+  const sheet = { rows: [] }; const dynuAdded = []; const J = (o, status = 200) => ({ ok: status < 300, status, json: async () => o, text: async () => JSON.stringify(o) });
+  const x = setup(async (url, init) => {
+    if (url === 'https://api.resend.com/domains') return J({ data: [{ id: 'd1', name: 'mail.intproto-tv.store', status: 'not_started', region: 'us-east-1' }] });
+    if (url === 'https://api.resend.com/domains/d1') return J({ records: [{ record: 'SPF', name: 'send.mail', type: 'MX', value: 'feedback-smtp.us-east-1.amazonses.com', priority: 10, status: 'not_started' }, { record: 'SPF', name: 'send.mail', type: 'TXT', value: 'v=spf1 include:amazonses.com ~all', status: 'not_started' }, { record: 'DKIM', name: 'resend._domainkey.mail', type: 'TXT', value: 'p=MIGf', status: 'not_started' }] });
+    if (url === 'https://api.dynu.com/v2/dns') return J({ domains: [{ id: 77, name: 'intproto-tv.store' }] });
+    if (url === 'https://api.dynu.com/v2/dns/77/record' && init.method === 'POST') { assert.equal(init.headers['API-Key'], 'dynu_key_123'); dynuAdded.push(JSON.parse(init.body)); return J({ id: 1 }); }
+    if (url === 'https://api.dynu.com/v2/dns/77/record') return J({ dnsRecords: [{ recordType: 'TXT', nodeName: 'resend._domainkey.mail', textData: 'p=MIGf' }] });
+    if (url.startsWith('https://script.google.com/') && init.method === 'POST') { const d = JSON.parse(init.body); sheet.rows = [d.header, ...d.rows]; return J('ok'); }
+    if (url.startsWith('https://script.google.com/')) return J({ rows: sheet.rows });
+  });
+  const tok = await adminToken(x);
+  // staff: Khalil (Technical Manager) and an agent
+  await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'khalil', password: 'secret12', role: 'Technical Manager', perms: ['customers_view', 'settings'] }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'settings', 'marketing'] }, tok);
+  const kt = (await x.call('POST', '/api/login', { username: 'khalil', password: 'secret12' })).json.token; await signBylaws(x, kt);
+  const at = (await x.call('POST', '/api/login', { username: 'said', password: 'secret12' })).json.token; await signBylaws(x, at);
+  assert.ok((await x.call('GET', '/api/admin/me', {}, kt)).json.perms.includes('secrets'), 'Khalil gets the keys permission from his role');
+  assert.ok(!(await x.call('GET', '/api/admin/me', {}, at)).json.perms.includes('secrets'));
+  assert.equal((await x.call('GET', '/api/admin/accounts', {}, at)).status, 403, 'agents cannot open accounts');
+  assert.equal((await x.call('POST', '/api/admin/accounts/save', { name: 'x' }, at)).status, 403);
+  // agent with settings: email keys masked and not changeable
+  await x.call('PUT', '/api/admin/settings', { email: { transRows: [{ key: 're_ownerkey_abcdef', domain: 'mail.intproto-tv.store', name: 'INTPROTO', on: true }], from: 'App <no-reply@intproto-tv.store>' } }, tok);
+  const st = (await x.call('GET', '/api/admin/settings', {}, at)).json; assert.match(st.email.transRows[0].key, /^••••/); assert.doesNotMatch(JSON.stringify(st), /re_ownerkey_abcdef/);
+  assert.equal((await x.call('PUT', '/api/admin/settings', { email: { transRows: [] } }, at)).status, 403);
+  // Khalil adds accounts
+  let r = await x.call('POST', '/api/admin/accounts/save', { kind: 'resend', name: 'Resend #1', email: 'mail1@example.com', password: 'Pw-1', apiKey: 're_test_key_111111', domains: 'mail.intproto-tv.store', tier: 'p100', paid: true, use: 'marketing' }, kt);
+  assert.equal(r.status, 200, JSON.stringify(r.json)); const id = r.json.account.id; assert.equal(r.json.account.plan.price, 35); assert.equal(r.json.account.plan.quota, 100000);
+  assert.equal((await x.call('POST', '/api/admin/accounts/save', { kind: 'resend', name: 'bad', apiKey: 'nope' }, kt)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/accounts/save', { kind: 'resend', name: 'dup', apiKey: 're_test_key_111111' }, kt)).status, 409);
+  await x.call('POST', '/api/admin/accounts/save', { id, name: 'Resend #1', apiKey: '••••1111', password: '••••Pw-1' }, kt);
+  let list = (await x.call('GET', '/api/admin/accounts', {}, tok)).json; assert.equal(list.rows[0].apiKey, 're_test_key_111111', 'masked value keeps the saved key'); assert.equal(list.rows[0].password, 'Pw-1');
+  assert.equal(list.looseKeys, 1); assert.equal((await x.call('POST', '/api/admin/accounts/import-keys', {}, tok)).json.added, 1);
+  await x.call('POST', '/api/admin/accounts/save', { kind: 'dynu', name: 'Dynu', apiKey: 'dynu_key_123', domains: 'intproto-tv.store' }, kt);
+  // spend: customer emails sent with the owner key are counted for that key
+  await x.call('PUT', '/api/admin/accounts/save', {}, tok);
+  await addCustomer(x, tok, { username: 'spend1' }); await x.call('POST', '/api/forgot', { login: 'spend1', appUrl: 'https://a' });
+  list = (await x.call('GET', '/api/admin/accounts', {}, tok)).json; const own = list.rows.find((a) => a.apiKey === 're_ownerkey_abcdef'); assert.ok(own.usage.month >= 1, JSON.stringify(own.usage));
+  await x.call('POST', '/api/admin/accounts/save', { id: own.id, name: own.name, tier: 'p50', paid: true }, tok);
+  list = (await x.call('GET', '/api/admin/accounts', {}, tok)).json; const o2 = list.rows.find((a) => a.id === own.id);
+  assert.equal(o2.usage.cpe, 0.0004); assert.equal(list.totals.fees, 55); assert.equal(list.totals.paid, 2);
+  // Resend domains and Dynu records (the DKIM already exists → skipped)
+  const dm = (await x.call('POST', '/api/admin/accounts/resend-domains', { id }, kt)).json; assert.equal(dm.domains[0].records.length, 3);
+  const dy = list.rows.find((a) => a.kind === 'dynu');
+  const dn = await x.call('POST', '/api/admin/accounts/dynu', { dynuId: dy.id, resendId: id, domain: 'mail.intproto-tv.store' }, kt); assert.equal(dn.status, 200, JSON.stringify(dn.json));
+  assert.deepEqual(dn.json.added, ['MX send.mail', 'TXT send.mail']); assert.deepEqual(dn.json.skipped, ['TXT resend._domainkey.mail']);
+  assert.deepEqual(dynuAdded.map((q) => [q.recordType, q.nodeName, q.host || q.textData, q.priority]), [['MX', 'send.mail', 'feedback-smtp.us-east-1.amazonses.com', 10], ['TXT', 'send.mail', 'v=spf1 include:amazonses.com ~all', undefined]]);
+  // Google Sheets: send, change in the sheet, read back
+  assert.equal((await x.call('POST', '/api/admin/accounts/sheet', { url: 'https://evil.example/x' }, kt)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/accounts/sheet', { url: 'https://script.google.com/macros/s/abc/exec', push: true }, kt)).json.pushed, 3);
+  assert.equal(sheet.rows[0][4], 'API key'); assert.ok(sheet.rows.some((row) => row[4] === 're_test_key_111111'));
+  sheet.rows.find((row) => row[0] === 'Resend #1')[3] = 'New-Pass-9'; sheet.rows.push(['Hostinger main', 'Hostinger', 'host@example.com', 'H0st!', '', 'intproto-tv.store', '2.99', '', 'yes', '2027-01-01', '', 'websites']);
+  const pull = (await x.call('POST', '/api/admin/accounts/sheet', { pull: true }, kt)).json; assert.deepEqual([pull.added, pull.changed], [1, 3]);
+  list = (await x.call('GET', '/api/admin/accounts', {}, tok)).json; assert.equal(list.rows.find((a) => a.name === 'Resend #1').password, 'New-Pass-9'); assert.equal(list.rows.find((a) => a.kind === 'hostinger').plan.paid, true);
+  // agent still blocked from everything; backups keep accounts
+  assert.equal((await x.call('POST', '/api/admin/accounts/delete', { id }, at)).status, 403);
+  assert.ok((await x.call('GET', '/api/admin/backup', {}, tok)).json.accounts.length === 4);
+});
+
+test('currency: USD everywhere, EUR for Europe (email ending, then phone code); own choice wins; switch off', async () => {
+  const { isEurope, custCurrency, priceIn } = await import('../public/core.js');
+  assert.equal(isEurope({ email: 'a@web.de' }), true); assert.equal(isEurope({ email: 'a@bluewin.ch' }), true); assert.equal(isEurope({ email: 'a@x.co.uk' }), true);
+  assert.equal(isEurope({ email: 'a@gmail.com', whatsapp: '+41791234567' }), true); assert.equal(isEurope({ email: 'a@gmail.com', phone: '+12025550143' }), false);
+  assert.equal(isEurope({ email: 'a@gmail.com', phone: '+27763456789' }), false, 'South Africa is not Europe'); assert.equal(isEurope({ email: 'a@mail.za' }), false);
+  assert.equal(custCurrency({}, { email: 'a@web.de', curOverride: 'USD' }), 'USD'); assert.equal(custCurrency({ currencyRule: { on: false }, orderCurrency: 'EUR' }, { email: 'a@gmail.com' }), 'EUR');
+  assert.equal(priceIn('$109.99', 'EUR'), '€109.99');
+  const x = setup(); const tok = await adminToken(x);
+  const us = await addCustomer(x, tok, { username: 'usa1', email: 'john@gmail.com', phone: '+12025550143' });
+  const de = await addCustomer(x, tok, { username: 'ger1', email: 'hans@web.de', lang: 'de' });
+  const rows = (await x.call('GET', '/api/admin/customers', {}, tok)).json; assert.equal(rows.find((c) => c.id === us.id).cur, 'USD'); assert.equal(rows.find((c) => c.id === de.id).cur, 'EUR');
+  assert.match((await x.call('POST', `/api/admin/customers/${us.id}/wamsg`, { type: 'renew' }, tok)).json.text, /\$\d/);
+  assert.match((await x.call('POST', `/api/admin/customers/${de.id}/wamsg`, { type: 'renew' }, tok)).json.text, /€\d/);
+  assert.match((await x.call('GET', `/api/admin/customers/${de.id}/renewalpreview`, {}, tok)).json.html, /€109\.99/);
+  assert.match((await x.call('GET', `/api/admin/customers/${us.id}/renewalpreview`, {}, tok)).json.html, /\$109\.99/);
+  // hand choice
+  await x.call('PUT', `/api/admin/customers/${us.id}`, { curOverride: 'EUR' }, tok);
+  assert.equal((await x.call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.id === us.id).cur, 'EUR');
+  // reseller dashboard currency
+  const r = await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Swiss Reseller', email: 'rs@bluewin.ch' }, tok);
+  const lg = await x.call('POST', '/api/login', { username: r.json.reseller.login.username, password: r.json.reseller.login.pass });
+  assert.equal((await x.call('GET', '/api/rsl/me', {}, lg.json.token)).json.currency, 'EUR');
+  // switch off → shop currency again
+  await x.call('PUT', '/api/admin/settings', { currencyRule: { on: false }, orderCurrency: 'EUR' }, tok);
+  assert.match((await x.call('POST', `/api/admin/customers/${de.id}/wamsg`, { type: 'renew' }, tok)).json.text, /€\d/);
+  assert.equal((await x.call('GET', '/api/config', {})).json.packages?.[0]?.cur || 'EUR', 'EUR');
 });

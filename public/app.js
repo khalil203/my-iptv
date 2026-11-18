@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=90';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=91';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -402,7 +402,7 @@ async function loadResellerPanel() {
   const el = $('#rs-body'); if (!el) return;
   el.innerHTML = `<div class="card" style="padding:18px"><p class="muted small" style="margin:0">${t('loadingDots')}</p></div>`;
   try {
-    const me = await api('GET', '/api/me');
+    const me = await api('GET', '/api/me'); state.myCur = me.myCurrency || '';
     const u = me.user || {};
     const hist = (u.renewals || []).slice().reverse();
     const credit = Number(u.credit || u.creditBalance || 0);
@@ -465,6 +465,7 @@ const ADMIN_TABS = [
   ['userdash', '📱', 'User dashboard', 'settings', 'App', 'customer app sections announcement maintenance playlists'],
   ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name whatsapp number theme'],
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
+  ['accounts', '🔐', 'Accounts & API keys', 'secrets', 'System', 'resend email marketing hostinger dynu domains api keys passwords google sheets spend cost'],
   ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
   ['holidays', '🗓', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
   ['browser', '🌐', 'In-panel browser', null, 'System', 'browser internet search google sheets drive resend stripe duckduckgo'],
@@ -573,6 +574,7 @@ async function renderAdmin() {
     else if (t === 'userdash') body.innerHTML = adminUserDash(s);
     else if (t === 'branding') body.innerHTML = adminBranding(s);
     else if (t === 'api') body.innerHTML = await adminApi(s);
+    else if (t === 'accounts') body.innerHTML = await adminAccounts();
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
@@ -689,6 +691,7 @@ const rsProfileForm = (x = {}) => `<form data-form="rs-profile" onsubmit="return
   <div class="grid2">${field('Phone / WhatsApp', 'phone', x.phone || '', { type: 'tel', ph: '+66812345678' })}${field('Reseller since (date)', 'joined', rsDay(x.joinedAt), { type: 'date' })}</div>
   <div class="grid3">${field('Organization', 'org', x.org || '')}${field('Server', 'server', x.server || '', { ph: 'MEGA, DINO…' })}${field('Panel tag', 'tag', x.tag || '')}</div>
   <div class="grid3">${field('Telegram username', 'telegram', x.telegram || '', { ph: 'without @', attrs: 'autocapitalize="none"' })}${field('Panel URL (for the email)', 'panelUrl', x.panelUrl || '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}${field('Language', 'lang', x.lang || 'en', { type: 'select', options: LANG5, help: 'Emails and the /rsl dashboard.' })}</div>
+  <div class="grid3">${field('Currency', 'curOverride', x.curOverride || '', { type: 'select', options: [['', 'Automatic ($, € for Europe)'], ['USD', 'US dollar $'], ['EUR', 'Euro €']] })}</div>
   <div class="grid2">${field('Panel username', 'panelUser', x.panelUser || '', { attrs: 'autocapitalize="none" autocomplete="off"' })}${field('Panel password', 'panelPass', x.panelPass || '', { attrs: 'autocapitalize="none" autocomplete="off"' })}</div>
   <div class="grid2">${field('Status', 'status', x.status || 'active', { type: 'select', options: [['active', 'Active'], ['paused', 'Paused']] })}${field('Note', 'note', x.note || '')}</div>
   <div class="row"><button type="button" class="btn primary" data-act="rs-save">💾 Save</button>${x.id ? `<span class="spacer"></span><button type="button" class="btn danger" data-act="rs-del" data-id="${x.id}">Delete reseller</button>` : ''}</div></form>`;
@@ -924,7 +927,7 @@ function customerForm(c) {
     <div class="grid2">${field('Secondary email', 'email2', c.email2 || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'Backup/reminder address' })}</div>
     <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
     <div class="grid3">${field('Telegram handle', 'telegram', c.telegram || '', { ph: '@username or id', attrs: 'autocapitalize="none"' })}${field('App / device', 'deviceApp', c.deviceApp || '', { ph: 'IBO Player, Smarters, MAC…' })}${field('MAC address', 'macAddress', c.macAddress || '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false"' })}</div>
-    <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: LANG5, help: 'Emails, WhatsApp / Telegram messages and the app use this language.' })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
+    <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: LANG5, help: 'Emails, WhatsApp / Telegram messages and the app use this language.' })}${field('Currency', 'curOverride', c.curOverride || '', { type: 'select', options: [['', `Automatic${c.cur ? ' (now ' + c.cur + ')' : ''}`], ['USD', 'US dollar $'], ['EUR', 'Euro €']], help: 'Automatic: $ everywhere, € for Europe (email ending like .de .ch, or phone +41 +49 …).' })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '', { ph: isNew ? 'Empty = next number automatically' : '', help: isNew ? 'Leave empty: the next number of your series is given (like WLF-143). Several devices stay on this one number: WLF-143-01, -02…' : 'Must not be used by another customer.' })}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
     <div class="grid3">${field('Address', 'address', c.address || '')}${field('Server', 'server', c.server || '', { ph: 'MEGA, DINO…' })}${field('Panel', 'panel', c.panel || '')}</div>
     <h3 style="margin-top:6px">App login details</h3>
@@ -1063,6 +1066,7 @@ function adminOrderSection(s) {
   const op = s.orderPackages || []; const cur = ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR';
   return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
     <p class="small muted">Customers see these packages in their account and tap <b>🛒 Request</b> or WhatsApp. You get an email and a 🛒 mark on the customer (filter <b>🛒 requests</b>). Then you send the package email (💳 on the customer) with <b>your own payment link</b> for that order. Without a link, the email button says "Contact us to order" and opens your WhatsApp.</p>
+    <label class="row small" style="gap:8px;margin:10px 0;cursor:pointer"><input type="checkbox" data-act="cur-rule" ${s.currencyRule?.on !== false ? 'checked' : ''} style="width:auto"> <span><b>Automatic currency:</b> US dollars ($) for everyone, euros (€) for customers in Europe — found from the email ending (.de, .ch, .fr, .co.uk…) or the phone code (+41, +49…). Used in package emails, WhatsApp, renewal emails, invoices and the reseller dashboard. Same price number, only the sign changes.</span></label>
     <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
     <details style="margin-top:10px"><summary class="small muted" style="cursor:pointer">Edit packages & prices</summary><div style="margin-top:10px">
       <div id="ops">${op.map((p)=>opRow(p,s)).join('')}</div>
@@ -1154,6 +1158,48 @@ function adminBranding(s) {
     <div><h3>Live preview</h3><div class="preview-box" id="login-preview">${loginCard(b, { preview: true })}</div></div></div>`;
 }
 
+// ---------- 🔐 Accounts & API keys (owner, Khalil, Nizar) ----------
+const ACC = { d: null, kind: 'all', q: '', show: {} };
+async function adminAccounts() {
+  try { ACC.d = await api('GET', '/api/admin/accounts'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
+  return accPage();
+}
+function accPage() {
+  const d = ACC.d; const T = d.totals; const usd = (n) => '$' + Number(n || 0).toFixed(2);
+  const kinds = [['all', 'All'], ...Object.entries(d.kinds)];
+  const q = ACC.q.toLowerCase(); const list = d.rows.filter((a) => (ACC.kind === 'all' || a.kind === ACC.kind) && (!q || [a.name, a.email, (a.domains || []).join(' '), a.note].join(' ').toLowerCase().includes(q)));
+  const sec = (a, k, label) => { const v = a[k]; if (!v) return '<span class="muted">—</span>'; const id = a.id + k; return `<code id="ac-${id}" style="word-break:break-all">${ACC.show[id] ? esc(v) : '••••' + esc(String(v).slice(-4))}</code> <button class="btn sm ghost" data-act="acc-eye" data-k="${id}" title="Show / hide ${label}">👁</button><button class="btn sm ghost" data-act="rsl-copy" data-v="${esc(v)}" title="Copy">📋</button>`; };
+  const bar = (pct) => pct === null ? '' : `<div style="height:6px;background:var(--line,#e2e8f0);border-radius:6px;overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.min(100, pct)}%;background:${pct > 90 ? '#dc2626' : pct > 70 ? '#f59e0b' : '#16a34a'}"></div></div>`;
+  return `<div class="notice" style="margin-bottom:12px">🔐 Only the owner, Khalil and Nizar can open this page. Support agents never see these keys, passwords or domains.</div>
+  <div class="stats">
+    <div class="stat c-acc"><span>Accounts</span><b>${T.accounts}</b><span>${T.keys} API keys · ${T.paid} paid</span></div>
+    <div class="stat"><span>Emails sent this month</span><b>${Number(T.month).toLocaleString()}</b><span>${T.quota ? `of ${Number(T.quota).toLocaleString()} in the plans` : ''}</span></div>
+    <div class="stat c-ok"><span>Plans paid (monthly)</span><b>${usd(T.fees)}</b><span>all keys together</span></div>
+    <div class="stat"><span>Cost of emails sent</span><b>${usd(T.usedCost)}</b><span>this month · ${Number(T.total).toLocaleString()} sent in total</span></div>
+  </div>
+  <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="acc-edit">＋ Add account</button>${d.looseKeys ? `<button class="btn" data-act="acc-importkeys">⤵ Add the ${d.looseKeys} sending key(s) from Email settings</button>` : ''}<button class="btn" data-act="acc-sheet">📊 Google Sheets</button><button class="btn" data-act="acc-paste">📋 Paste rows</button><button class="btn" data-act="acc-dns">🌐 Resend ↔ Dynu DNS</button></div>
+  <div class="row" style="gap:8px;margin-bottom:10px"><input placeholder="🔎 Search name, email, domain…" value="${esc(ACC.q)}" data-input="acc-q" style="flex:1"><div class="chips" style="margin:0">${kinds.map(([k, n]) => `<a class="${ACC.kind === k ? 'on' : ''}" data-act="acc-kind" data-k="${k}">${esc(n)}</a>`).join('')}</div></div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Account</th><th>Login</th><th>API key</th><th>Domains</th><th>Plan & spend</th><th></th></tr></thead><tbody>${list.map((a) => { const u = a.usage, pl = a.plan || {};
+    return `<tr><td><b>${esc(a.name)}</b><div class="small muted">${esc(d.kinds[a.kind] || a.kind)}${a.use ? ' · for ' + esc(a.use === 'both' ? 'customers + marketing' : a.use === 'customer' ? 'customer emails' : 'marketing') : ''}</div>${a.url ? `<a class="small" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.url.replace(/^https?:\/\//, ''))}</a>` : ''}</td>
+      <td class="small">${esc(a.email || '—')}<div>${a.password ? sec(a, 'password', 'password') : ''}</div></td><td class="small">${sec(a, 'apiKey', 'API key')}</td><td class="small">${(a.domains || []).map((x) => `<span class="tagp">${esc(x)}</span>`).join(' ') || '—'}</td>
+      <td class="small">${pl.paid ? `<span class="pill st-active">✓ Paid $${esc(String(pl.price))}</span>` : `<span class="pill st-expired">${pl.price ? 'Not paid' : 'Free'}</span>`} ${pl.quota ? Number(pl.quota).toLocaleString() + ' emails' : ''}${pl.paidUntil ? ` · until ${esc(pl.paidUntil)}` : ''}
+        ${a.apiKey ? `<div>${Number(u.month).toLocaleString()} sent this month${u.pct !== null ? ` (${u.pct}%)` : ''} · ${usd(u.usedCost)}${u.cpe ? ` <span class="muted">($${u.cpe}/email)</span>` : ''}</div>${bar(u.pct)}` : ''}</td>
+      <td style="white-space:nowrap"><button class="btn sm" data-act="acc-edit" data-id="${a.id}">✎ Edit</button>${a.kind === 'resend' && a.apiKey ? `<button class="btn sm" data-act="acc-domains" data-id="${a.id}" title="Domain status at Resend">🌐</button>` : ''}<button class="btn sm danger" data-act="acc-del" data-id="${a.id}" title="Delete">🗑</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">No accounts yet. Add one, or add the keys from Email settings.</td></tr>'}</tbody></table></div>
+  <p class="small muted">Spend = emails sent this month × (plan price ÷ emails in the plan). Sends are counted from today for every key used by the app (customer emails, marketing and resellers).</p>`;
+}
+function accForm(a = {}) {
+  const d = ACC.d; const pl = a.plan || { tier: a.kind && !['resend', 'marketing'].includes(a.kind) ? 'custom' : 'free' };
+  return `<form data-form="acc" data-id="${esc(a.id || '')}">
+    <div class="grid3">${field('Type', 'kind', a.kind || 'resend', { type: 'select', options: Object.entries(d.kinds) })}${field('Name', 'name', a.name || '', { ph: 'Resend #3 · intproto mail', attrs: 'required maxlength="80"' })}${field('Used for', 'use', a.use || '', { type: 'select', options: [['', '—'], ['customer', 'Customer emails'], ['marketing', 'Email marketing'], ['both', 'Both']] })}</div>
+    <div class="grid3">${field('Account email (login)', 'email', a.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}${field('Account password', 'password', a.password || '', { attrs: 'autocomplete="off" autocapitalize="none"' })}${field('Website / panel link', 'url', a.url || '', { ph: 'https://resend.com/…', attrs: 'autocapitalize="none"' })}</div>
+    ${field('API key', 'apiKey', a.apiKey || '', { ph: 're_… (Resend) · Dynu / Hostinger API key', attrs: 'autocomplete="off" autocapitalize="none" spellcheck="false"' })}
+    ${field('Domains (comma or space between)', 'domains', (a.domains || []).join(', '), { ph: 'mail.intproto-tv.store, intproto-tv.com' })}
+    <div class="grid3">${field('Plan', 'tier', pl.tier || 'free', { type: 'select', options: Object.entries(d.plans).map(([k, v]) => [k, v.name + (v.price ? ` · $${v.price}` : '')]) })}${field('Plan price $ / month', 'price', pl.price ?? '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Emails in the plan', 'quota', pl.quota ?? '', { type: 'number', attrs: 'min="0"' })}</div>
+    <div class="grid2">${toggle('✓ Plan paid', 'paid', !!pl.paid)}${field('Paid until', 'paidUntil', pl.paidUntil || '', { type: 'date' })}</div>
+    ${field('Note', 'note', a.note || '', { type: 'textarea', rows: 2 })}
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">💾 Save</button></div></form>`;
+}
+
 async function adminApi(s) {
   const r = s.reseller;
   try { state.admin.mktSettings = await api('GET', '/api/admin/emailmkt/settings'); } catch {}
@@ -1220,7 +1266,7 @@ const keysHelp = (scope) => `<details class="small" style="margin:6px 0 12px"><s
   <li>Here, tap <b>＋ Add key</b>, paste the key, type the domain and a sender name, then <b>🧪 Test</b>. A test email goes to your admin email.</li>
   <li>Tap <b>💾 Save</b>. Every key that is switched <b>On</b> is used in turn; a paused key is skipped.</li></ol>
   <p style="margin:8px 0 0">${scope === 'mkt' ? 'These keys are only for <b>marketing</b> emails (newsletter lists). Use different domains from your customer emails: if a newsletter gets spam reports, your login, payment and renewal emails keep arriving.' : 'These keys are for <b>customer</b> emails: login details, profile, payment links, renewals, trials. Keep newsletter domains separate (Email marketing page), so spam reports on promotions never block these.'}</p></details>`;
-const keysEditor = (scope, rows) => `${keysHelp(scope)}<div data-keys="${scope}">${(rows || []).map((r) => keyRow(scope, r)).join('') || '<p class="small muted key-empty">No keys yet.</p>'}</div>
+const keysEditor = (scope, rows) => !can('secrets') ? `<div class="notice">🔒 API keys and sending domains are only visible to the owner, Khalil and Nizar.</div>` : `${keysHelp(scope)}<div data-keys="${scope}">${(rows || []).map((r) => keyRow(scope, r)).join('') || '<p class="small muted key-empty">No keys yet.</p>'}</div>
   <div class="row" style="gap:8px"><button type="button" class="btn" data-act="key-add" data-scope="${scope}">＋ Add key</button><span class="small muted">${(rows || []).filter((r) => r.on !== false && r.key).length} switched on · ${(rows || []).length} in total</span></div>`;
 const keysRead = (scope) => [...document.querySelectorAll(`[data-keys="${scope}"] [data-key-row]`)].map((el) => ({ id: el.dataset.id || undefined, key: el.querySelector('[data-k=key]').value.trim(), domain: el.querySelector('[data-k=domain]').value.trim(), name: el.querySelector('[data-k=name]').value.trim(), on: el.querySelector('[data-k=on]').checked })).filter((r) => r.key || r.domain);
 async function adminSecurity(s) {
@@ -1566,7 +1612,7 @@ async function renderUser() {
   if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify('_stream' in u.me ? u.me._stream : u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); applySource(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); applySource(); }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); state.myCur = u.me.myCurrency || ''; applySource(); }
     catch (e) {
       const msg = String(e.message || '');
       if (msg.includes('terms_required')) return renderTermsScreen(); // first open: must accept the terms
@@ -1593,7 +1639,7 @@ async function renderProfile() {
   if (u.me && u.me.agreed === false) return renderTermsScreen();
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); state.myCur = u.me.myCurrency || ''; }
     catch (e) {
       const msg = String(e.message || '');
       if (msg.includes('terms_required')) return renderTermsScreen();
@@ -1824,7 +1870,8 @@ async function xtFetch(action, params = {}) {
   return (c[key] = await api('GET', '/api/xtream?' + q));
 }
 const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ', THB: 'THB ' };
-const priceTxt = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
+const priceTxt = (n, c0) => { const c = (state.role === 'user' && state.myCur) || c0; return priceTxt0(n, c); };
+const priceTxt0 = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
 const WA_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" fill="#fff" aria-hidden="true"><path d="M16 3C9 3 3.3 8.6 3.3 15.6c0 2.5.7 4.8 1.9 6.8L3 29l6.8-2.2c1.9 1 4 1.6 6.2 1.6 7 0 12.7-5.7 12.7-12.7S23 3 16 3zm0 23.1c-2 0-3.9-.6-5.6-1.6l-.4-.2-4 1.3 1.3-3.9-.3-.4c-1.1-1.7-1.7-3.7-1.7-5.7C5.3 9.8 10.1 5 16 5s10.7 4.8 10.7 10.7S21.9 26.1 16 26.1zm5.9-8c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1c-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.2s0-.5.1-.6l.5-.6c.2-.2.2-.4.3-.6s0-.4 0-.6l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4s-1.2 1.1-1.2 2.7 1.2 3.2 1.4 3.4 2.4 3.6 5.7 5c.8.3 1.4.5 1.9.7.8.3 1.5.2 2.1.1.6-.1 1.9-.8 2.2-1.5s.3-1.4.2-1.5-.3-.2-.6-.4z"/></svg>';
 const waNum = (b) => String(b?.whatsapp || (/wa\.me\/(\d+)/.exec(b?.supportUrl || '') || [])[1] || '').replace(/\D/g, '');
 const waUrl = (b, text) => { const n = waNum(b); return n ? `https://wa.me/${n}${text ? '?text=' + encodeURIComponent(text) : ''}` : ''; };
@@ -2382,6 +2429,26 @@ const actions = {
   },
   'inv-pv': async (el) => { try { const r = await api('GET', `/api/admin/customers/${el.dataset.id}/invoice?saleId=${encodeURIComponent(el.dataset.s)}&appUrl=${encodeURIComponent(location.origin)}`); modal('👁 ' + esc(r.subject), `<iframe title="Invoice preview" sandbox="" style="width:100%;height:68vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe><div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn ghost" data-act="mail-invoice" data-id="${el.dataset.id}">← Back</button><button class="btn primary" data-act="inv-send" data-id="${el.dataset.id}" data-s="${el.dataset.s}">✉️ Send</button></div>`, { wide: true }); $('.modal-body iframe').srcdoc = r.html; } catch (e) { toast(e.message, true); } },
   'inv-send': async (el) => { el.disabled = true; try { const r = await api('POST', `/api/admin/customers/${el.dataset.id}/invoice`, { saleId: el.dataset.s, appUrl: location.origin }); closeModal(); toast(`Invoice ${r.no} sent ✓`); custRefresh?.(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'cur-rule': async (el) => { try { await saveSettings({ currencyRule: { on: el.checked } }, true); toast(el.checked ? 'Automatic currency on ✓ ($, € for Europe)' : 'Automatic currency off — the package currency is used'); } catch (e) { toast(e.message, true); el.checked = !el.checked; } },
+  'acc-kind': (el) => { ACC.kind = el.dataset.k; $('#admin-body').innerHTML = accPage(); },
+  'acc-eye': (el) => { ACC.show[el.dataset.k] = !ACC.show[el.dataset.k]; $('#admin-body').innerHTML = accPage(); },
+  'acc-edit': (el) => { const a = el?.dataset?.id ? ACC.d.rows.find((x) => x.id === el.dataset.id) : null; modal(a ? `✎ ${esc(a.name)}` : '＋ Add account', accForm(a || {}), { wide: true }); },
+  'acc-del': async (el) => { const a = ACC.d.rows.find((x) => x.id === el.dataset.id); if (!a || !confirm(`Delete the account "${a.name}"? Its key and password are removed from the app (not from Resend).`)) return; try { await api('POST', '/api/admin/accounts/delete', { id: a.id }); toast('Deleted'); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  'acc-importkeys': async () => { try { const r = await api('POST', '/api/admin/accounts/import-keys', {}); toast(`${r.added} key(s) added ✓ Set their plan with ✎ Edit.`); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  'acc-domains': async (el) => { modal('🌐 Domains at Resend', '<p class="muted">Asking Resend…</p>', { wide: true });
+    try { const r = await api('POST', '/api/admin/accounts/resend-domains', { id: el.dataset.id }); $('.modal-body').innerHTML = r.domains.length ? r.domains.map((x) => `<div class="card" style="margin-bottom:10px"><div class="row"><b style="flex:1">${esc(x.name)}</b><span class="pill ${x.status === 'verified' ? 'st-active' : 'st-expiring'}">${esc(x.status)}</span></div>${x.records.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Status</th></tr></thead><tbody>${x.records.map((q) => `<tr><td>${esc(q.type)}${q.priority ? ' ' + q.priority : ''}</td><td><code>${esc(q.name)}</code></td><td><code style="word-break:break-all">${esc(q.value)}</code> <button class="btn sm ghost" data-act="rsl-copy" data-v="${esc(q.value)}">📋</button></td><td>${esc(q.status || '')}</td></tr>`).join('')}</tbody></table></div>` : ''}</div>`).join('') : '<p class="muted">No domain in this Resend account yet.</p>'; } catch (e) { $('.modal-body').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } },
+  'acc-dns': () => { const d = ACC.d; const rs = d.rows.filter((a) => a.kind === 'resend' && a.apiKey), dy = d.rows.filter((a) => a.kind === 'dynu' && a.apiKey);
+    if (!dy.length || !rs.length) return modal('🌐 Resend ↔ Dynu DNS', `<p>Add a <b>Resend</b> account and a <b>Dynu</b> account, each with its API key (Dynu: Control Panel → API Credentials). Then this button puts the DNS records Resend needs (SPF, DKIM, MX) into your Dynu domain for you.</p>`);
+    modal('🌐 Resend ↔ Dynu DNS', `<form data-form="acc-dns"><p class="small muted" style="margin-top:0">Adds the records Resend asks for (SPF, DKIM, MX) to the domain at Dynu. Records already there are skipped. Then press “Verify” in Resend.</p>
+      <div class="grid3">${field('Resend account', 'resendId', rs[0].id, { type: 'select', options: rs.map((a) => [a.id, a.name]) })}${field('Dynu account', 'dynuId', dy[0].id, { type: 'select', options: dy.map((a) => [a.id, a.name]) })}${field('Domain', 'domain', (rs[0].domains || [])[0] || '', { ph: 'mail.intproto-tv.store', attrs: 'required autocapitalize="none"' })}</div>
+      <div class="row" style="justify-content:flex-end"><button class="btn primary">Add the records</button></div></form><div id="dns-out"></div>`); },
+  'acc-sheet': () => { const d = ACC.d; modal('📊 Google Sheets', `<p class="small" style="margin-top:0">Keep the same accounts in a Google Sheet: <b>Send</b> writes them to the sheet, <b>Read</b> brings changes you made in the sheet back here.</p>
+      <div class="notice warning small">The sheet will hold the passwords and API keys. Share it only with Khalil and Nizar.</div>
+      <details style="margin:8px 0"><summary class="small">How to connect the sheet (2 minutes)</summary><ol class="small"><li>Open your Google Sheet → Extensions → Apps Script.</li><li>Paste this code and save:</li></ol><textarea readonly rows="9" style="width:100%;font-family:monospace;font-size:12px">function doPost(e){var d=JSON.parse(e.postData.contents);var ss=SpreadsheetApp.getActive();var sh=ss.getSheetByName(d.sheet)||ss.insertSheet(d.sheet);sh.clear();sh.appendRow(d.header);if(d.rows.length)sh.getRange(2,1,d.rows.length,d.header.length).setValues(d.rows);return ContentService.createTextOutput('ok');}
+function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter||{}).sheet||'Accounts');var v=sh?sh.getDataRange().getValues():[];return ContentService.createTextOutput(JSON.stringify({rows:v})).setMimeType(ContentService.MimeType.JSON);}</textarea><ol class="small" start="3"><li>Deploy → New deployment → Web app → Execute as <b>Me</b>, Who has access <b>Anyone</b> → Deploy.</li><li>Copy the web app link and paste it below.</li></ol></details>
+      <form data-form="acc-sheet">${field('Apps Script web app link', 'url', d.sheetUrl || '', { ph: 'https://script.google.com/macros/s/…/exec', attrs: 'autocapitalize="none"' })}
+      <div class="row" style="justify-content:flex-end;gap:6px"><button class="btn" data-do="save">Save link</button><button class="btn" data-do="pull" ${d.sheetUrl ? '' : 'disabled'}>⬇ Read from sheet</button><button class="btn primary" data-do="push" ${d.sheetUrl ? '' : 'disabled'}>⬆ Send to sheet</button></div></form>`, { wide: true }); },
+  'acc-paste': () => modal('📋 Paste rows', `<p class="small muted" style="margin-top:0">Copy rows from your sheet (columns: ${esc(ACC.d.head.join(' · '))}) and paste them here. Existing accounts (same API key or same name) are updated.</p><form data-form="acc-paste"><textarea name="text" rows="8" style="width:100%" required></textarea><div class="row" style="justify-content:flex-end"><button class="btn primary">Add</button></div></form>`, { wide: true }),
   'nl-season': (el) => { const k = el.dataset.k; const names = { blackfriday: '🖤 Black Friday', cybermonday: '💻 Cyber Monday', christmas: '🎄 Christmas', newyear: '🎆 New Year' }; const pr = state.admin.settings?.promo || {};
     const y = new Date().getFullYear(); const ends = { blackfriday: pr.to || `${y}-12-01`, cybermonday: `${y}-12-02`, christmas: `${y}-12-26`, newyear: `${y + (new Date().getMonth() === 0 ? 0 : 1)}-01-07` };
     modal(`${names[k]} · email template`, `<form data-form="nl-season" data-k="${k}"><p class="small muted" style="margin-top:0">Ready in English, French, German, Spanish and Italian — each customer gets their language. You can edit every text after loading it.</p>
@@ -2826,6 +2893,12 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async acc(f) { const o = formToObj(f); o.id = f.dataset.id || undefined; try { await api('POST', '/api/admin/accounts/save', o); closeModal(); toast('Saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  async 'acc-dns'(f) { const b = f.querySelector('button.primary'); b.disabled = true; $('#dns-out').innerHTML = '<p class="muted">Working…</p>';
+    try { const r = await api('POST', '/api/admin/accounts/dynu', formToObj(f)); $('#dns-out').innerHTML = `<div class="notice success">Dynu zone <b>${esc(r.zone)}</b>: ${r.added.length} added${r.added.length ? ' (' + esc(r.added.join(', ')) + ')' : ''}, ${r.skipped.length} already there.${r.failed.length ? `<br>Not added: ${esc(r.failed.join(' · '))}` : ''}</div><p class="small">Now open Resend → Domains → press <b>Verify</b>. DNS can take a few minutes.</p>`; }
+    catch (e) { $('#dns-out').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } b.disabled = false; },
+  async 'acc-sheet'(f, ev) { const what = ev?.submitter?.dataset?.do || 'save'; try { const r = await api('POST', '/api/admin/accounts/sheet', { url: f.url.value.trim(), push: what === 'push', pull: what === 'pull' }); closeModal(); toast(what === 'push' ? `Sent ${r.pushed} account(s) to the sheet ✓` : what === 'pull' ? `From the sheet: ${r.added} new, ${r.changed} updated ✓` : 'Link saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  async 'acc-paste'(f) { try { const r = await api('POST', '/api/admin/accounts/import', { text: f.text.value }); closeModal(); toast(`${r.added} new, ${r.changed} updated ✓`); renderAdmin(); } catch (e) { toast(e.message, true); } },
   async 'nl-season'(f) { try { const q = new URLSearchParams({ kind: f.dataset.k, offer: f.offer.value.trim(), code: f.code.value.trim().toUpperCase(), end: f.end.value }); const d = await api('GET', '/api/admin/newsletter/season?' + q);
       try { localStorage.setItem('tvp_nl_draft', JSON.stringify({ ...nlBlank(), ...d.campaign, group: 'active' })); } catch {} await actions['nl-open'](); toast('Template loaded in 5 languages ✓ Check it with Preview, then Send.'); } catch (e) { toast(e.message, true); } },
   async 'rsl-order'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { await api('POST', '/api/rsl/order', { pkg: f.dataset.id, method: f.method?.value || (f.querySelector('[name=method]:checked')?.value || ''), note: f.note.value }); closeModal(); toast(t('rsl_orderSent')); RSL.tab = 'home'; renderRsl(); } catch (e) { toast(e.message, true); b.disabled = false; } },
@@ -2983,7 +3056,7 @@ document.addEventListener('submit', (e) => {
   if (!f || f.dataset.busy === '1') { if (f) e.preventDefault(); return; } // duplicate-submit guard (spec §6)
   e.preventDefault();
   f.dataset.busy = '1';
-  Promise.resolve(forms[f.dataset.form]?.(f)).catch((err) => toast(err.message, true)).finally(() => { delete f.dataset.busy; });
+  Promise.resolve(forms[f.dataset.form]?.(f, e)).catch((err) => toast(err.message, true)).finally(() => { delete f.dataset.busy; });
 });
 document.addEventListener('input', (e) => {
   const el = e.target; if (!el.dataset || el.dataset.m3ufill !== '1') return;
@@ -3011,6 +3084,8 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
+  if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
+  if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
   if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
@@ -3762,7 +3837,7 @@ const TZ_CC = { 'Africa/Casablanca': 'MA', 'Africa/Algiers': 'DZ', 'Africa/Tunis
 function guessCountry() {
   try { const tz = TZ_CC[Intl.DateTimeFormat().resolvedOptions().timeZone]; if (tz) return tz; } catch {}
   for (const l of navigator.languages || []) { const r = (l.split('-')[1] || '').toUpperCase(); if (DIAL.some((d) => d[0] === r)) return r; }
-  return '';
+  return 'US'; // unknown: +1 (USA)
 }
 const flag = (cc) => String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 let regionNames = null; const countryName = (cc) => { try { regionNames ||= new Intl.DisplayNames([getLang()], { type: 'region' }); return regionNames.of(cc); } catch { return cc; } };
