@@ -263,7 +263,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/order/send') return 'customers_edit';
   if (path === '/api/admin/order/custom') return 'customers_edit';
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
-  if (path.startsWith('/api/admin/accounts')) return 'secrets';
+  if (path.startsWith('/api/admin/accounts') || path === '/api/admin/email/plan' || path === '/api/admin/email/sending') return 'secrets';
   if (path === '/api/admin/push/promo') return 'customers_edit';
   if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
@@ -1384,7 +1384,42 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const domains = (Array.isArray(b.domains) ? b.domains : String(b.domains ?? (old.domains || []).join(', ')).split(/[\s,;]+/)).map((d) => String(d).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)).slice(0, 30);
     return { ...old, kind, name: t(b.name ?? old.name, 80) || ACC_KINDS[kind], email: t(b.email ?? old.email, 120), password: keep(b.password, old.password), apiKey: keep(b.apiKey, old.apiKey), domains,
       plan: { tier, price: tier === 'custom' ? num(b.price, old.plan?.price || 0) : num(b.price, 0) || pre.price, quota: tier === 'custom' ? num(b.quota, old.plan?.quota || 0) : num(b.quota, 0) || pre.quota, paid: b.paid !== undefined ? !!b.paid && b.paid !== 'false' : !!old.plan?.paid, paidAt: num(b.paidAt, old.plan?.paidAt || 0), paidUntil: t(b.paidUntil ?? old.plan?.paidUntil, 10) },
-      use: ['customer', 'marketing', 'both', ''].includes(b.use) ? b.use : old.use || '', note: t(b.note ?? old.note, 500), url: t(b.url ?? old.url, 200) };
+      sending: b.sending !== undefined ? !(b.sending === false || /^(false|off|no|0)$/i.test(String(b.sending))) : old.sending !== false, use: ['customer', 'marketing', 'both', ''].includes(b.use) ? b.use : old.use || '', note: t(b.note ?? old.note, 500), url: t(b.url ?? old.url, 200) };
+  }
+  // ---- Email accounts ⇄ sending keys: one list. The account (login email, password, domains, plan) and the key the app sends with stay in step. ----
+  const mailKind = (a) => a.kind === 'resend' || a.kind === 'marketing';
+  async function mailRowsAll(s) { const mk = (await store.get('mkt')) || {}; return { trows: transRowsOf(s).map((r) => ({ ...r })), mk, mrows: (Array.isArray(mk.rows) ? mk.rows : []).map((r) => ({ ...r })) }; }
+  async function saveMailRows(s, trows, mk, mrows) {
+    const s2 = await getSettings(); s2.email.transRows = trows; await saveSettings(s2); Object.assign(s, { email: s2.email });
+    mk.rows = mrows; await store.put('mkt', mk);
+  }
+  // keys added in API settings / Email marketing → accounts (with the plan set on the key)
+  async function rowsToAccounts(s) {
+    const list = await getAccounts(); const { trows, mrows } = await mailRowsAll(s); let ch = 0;
+    const one = (r, use) => { if (!r.key) return; let a = list.find((x) => x.apiKey === r.key);
+      if (!a) { list.push({ id: uid(6), ...accClean({ kind: use === 'marketing' ? 'marketing' : 'resend', name: r.domain ? 'Resend · ' + r.domain : 'Resend key', apiKey: r.key, domains: r.domain ? [r.domain] : [], use, tier: r.tier || 'free', paid: !!r.tier && r.tier !== 'free', sending: r.on !== false }), createdAt: Date.now(), updatedAt: Date.now(), by: 'auto' }); ch++; return; }
+      const upd = {}; if (r.tier && ACC_PLANS[r.tier] && a.plan?.tier !== r.tier) Object.assign(upd, { tier: r.tier, paid: r.tier !== 'free', ...(r.tier === 'custom' ? { price: r.price, quota: r.quota } : {}) });
+      if (r.domain && !(a.domains || []).includes(r.domain)) upd.domains = [...(a.domains || []), r.domain];
+      if (a.use !== 'both' && a.use && a.use !== use) upd.use = 'both'; else if (!a.use) upd.use = use;
+      if (Object.keys(upd).length) { Object.assign(a, accClean(upd, a), { updatedAt: Date.now() }); ch++; } };
+    trows.forEach((r) => one(r, 'customer')); mrows.forEach((r) => one(r, 'marketing'));
+    if (ch) await saveAccounts(list); return ch;
+  }
+  // accounts changed here or in Google Sheets → the sending keys follow (plan, domain, on/off; a new account with a key starts sending)
+  async function accountsToRows(s, removedKey) {
+    const list = (await getAccounts()).filter((a) => mailKind(a) && a.apiKey); const { trows, mk, mrows } = await mailRowsAll(s); let ch = 0;
+    const fix = (r, a) => { const tier = a.plan?.tier && a.plan.tier !== 'unset' ? a.plan.tier : r.tier; const dom = (a.domains || []).includes(r.domain) ? r.domain : (a.domains || [])[0] || r.domain; const on = a.sending !== false;
+      const want = { tier, domain: dom, on, quota: tier === 'custom' ? Number(a.plan?.quota) || 0 : r.quota || 0, price: tier === 'custom' ? Number(a.plan?.price) || 0 : r.price || 0 };
+      for (const [k, v] of Object.entries(want)) if (r[k] !== v) { r[k] = v; ch++; } };
+    const drop = (rows) => rows.filter((r) => { if (removedKey && r.key === removedKey) { ch++; return false; } return true; });
+    let T = drop(trows), M = drop(mrows);
+    for (const a of list) {
+      const inT = T.filter((r) => r.key === a.apiKey), inM = M.filter((r) => r.key === a.apiKey); [...inT, ...inM].forEach((r) => fix(r, a));
+      const wantT = a.kind === 'resend' && a.use !== 'marketing', wantM = a.kind === 'marketing' || a.use === 'marketing' || a.use === 'both';
+      const nr = () => { const r = { id: uid(6), key: a.apiKey, domain: (a.domains || [])[0] || '', name: '', on: a.sending !== false, testAt: 0, testOk: null, testMsg: '' }; fix(r, a); ch++; return r; };
+      if (wantT && !inT.length && !inM.length) T.push(nr()); else if (wantM && !inM.length && !inT.length) M.push(nr());
+    }
+    if (ch) await saveMailRows(s, T.slice(0, 40), mk, M.slice(0, 40)); return ch;
   }
   // Spend per key: emails sent this month × (plan price ÷ emails in the plan), plus the plan fee when paid.
   async function accRows(list) {
@@ -1394,14 +1429,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const sum = (f) => Math.round(rows.reduce((t, r) => t + (f(r) || 0), 0) * 100) / 100;
     return { rows, totals: { accounts: rows.length, keys: rows.filter((r) => r.apiKey).length, paid: rows.filter((r) => r.plan?.paid).length, month: sum((r) => r.usage.month), total: sum((r) => r.usage.total), quota: sum((r) => (r.apiKey ? r.plan?.quota : 0)), fees: sum((r) => r.usage.fee), usedCost: sum((r) => r.usage.usedCost) } };
   }
-  const accSheetRow = (a) => [a.name, ACC_KINDS[a.kind] || a.kind, a.email, a.password, a.apiKey, (a.domains || []).join(', '), a.plan?.price ?? '', a.plan?.quota ?? '', a.plan?.paid ? 'yes' : 'no', a.plan?.paidUntil || '', a.use || '', a.note || ''];
-  const ACC_HEAD = ['Name', 'Type', 'Account email', 'Password', 'API key', 'Domains', 'Plan price $', 'Emails in plan', 'Paid', 'Paid until', 'Used for', 'Note'];
+  const accSheetRow = (a) => [a.name, ACC_KINDS[a.kind] || a.kind, a.email, a.password, a.apiKey, (a.domains || []).join(', '), a.plan?.price ?? '', a.plan?.quota ?? '', a.plan?.paid ? 'yes' : 'no', a.plan?.paidUntil || '', a.use || '', a.note || '', a.sending === false ? 'off' : 'on'];
+  const ACC_HEAD = ['Name', 'Type', 'Account email', 'Password', 'API key', 'Domains', 'Plan price $', 'Emails in plan', 'Paid', 'Paid until', 'Used for', 'Note', 'Sending'];
   function accFromRows(rows) { // rows from Google Sheets or pasted text (same columns as ACC_HEAD)
     const kindOf = (v) => { const x = String(v || '').toLowerCase(); return x.includes('hostinger') ? 'hostinger' : x.includes('dynu') ? 'dynu' : x.includes('market') ? 'marketing' : x.includes('resend') || x.includes('email') ? 'resend' : 'other'; };
     return rows.filter((r) => Array.isArray(r) && r.some((x) => String(x || '').trim()) && String(r[0] || '').trim().toLowerCase() !== 'name').map((r) => {
       const price = Number(String(r[6] || '').replace(/[^\d.]/g, '')) || 0, quota = Number(String(r[7] || '').replace(/[^\d]/g, '')) || 0;
       const tier = quota === 50000 ? 'p50' : quota === 100000 ? 'p100' : !price && (!quota || quota === 3000) ? 'free' : 'custom';
-      return { name: r[0], kind: kindOf(r[1]), email: r[2], password: r[3], apiKey: r[4], domains: r[5], tier, price, quota, paid: /^(yes|oui|paid|true|1|✓)/i.test(String(r[8] || '')), paidUntil: r[9], use: ['customer', 'marketing', 'both'].includes(String(r[10] || '').toLowerCase()) ? String(r[10]).toLowerCase() : '', note: r[11] };
+      return { name: r[0], kind: kindOf(r[1]), email: r[2], password: r[3], apiKey: r[4], domains: r[5], tier, price, quota, paid: /^(yes|oui|paid|true|1|✓)/i.test(String(r[8] || '')), paidUntil: r[9], use: ['customer', 'marketing', 'both'].includes(String(r[10] || '').toLowerCase()) ? String(r[10]).toLowerCase() : '', note: r[11] , ...(String(r[12] ?? '').trim() ? { sending: !/^(off|no|0|false|stop)/i.test(String(r[12]).trim()) } : {}) };
     });
   }
   // Reseller dashboard login (intproto-tv.store/rsl). The password is kept so it can be sent again in emails, like the customers' one.
@@ -3647,6 +3682,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ team: people, customers: cnt('c:'), resellers: cnt('r:'), settings: notifyCfg(s), members: team.map((m) => ({ id: m.id, name: m.name || m.username, role: m.role || '' })) });
       }
       if (R('GET', '/api/admin/email/status')) { // every agent can see this: plan, use and health of each sending key (never the key itself)
+        try { await rowsToAccounts(s); } catch {}
         const sec = can('secrets'); const accts = await getAccounts(); const u = (await store.get('keyuse')) || {}; const h = (await store.get('keyhealth')) || {};
         const mo = new Date().toISOString().slice(0, 7), dy = new Date().toISOString().slice(0, 10), now = Date.now();
         const mk = await store.get('mkt') || {}; const mkRows = Array.isArray(mk.rows) ? mk.rows : [];
@@ -3655,6 +3691,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const state = r.on === false ? 'off' : hh && hh.until > now ? 'paused' : limited ? 'limit' : p.quota && month >= p.quota * 0.85 ? 'almost' : 'ok';
           return { n: i + 1, use, label: r.name || (use === 'marketing' ? 'Marketing key ' : 'Sending key ') + (i + 1), domain: sec ? r.domain || '' : '', key: sec ? '••••' + String(r.key).slice(-4) : '', tier: p.tier, plan: p.name, price: p.price, quota: p.quota, daily: p.daily, paid: p.paid, planFrom: p.from,
             month, today, total: x.total || 0, left: p.quota ? Math.max(0, p.quota - month) : null, leftToday: p.daily ? Math.max(0, p.daily - today) : null, pct: p.quota ? Math.min(100, Math.round(month / p.quota * 1000) / 10) : null,
+            ...(sec ? (() => { const a = accts.find((y) => y.apiKey === r.key); return { accountId: a?.id || '', accountName: a?.name || '', login: a?.email || '', hasPassword: !!a?.password, url: a?.url || '', domains: a?.domains || (r.domain ? [r.domain] : []), paidUntil: a?.plan?.paidUntil || '', planPaid: !!a?.plan?.paid, note: a?.note || '' }; })() : {}),
             state, why: state === 'paused' ? hh.why : state === 'limit' ? (p.daily && today >= p.daily ? 'Daily limit reached — sends again tomorrow' : 'Monthly limit reached — sends again next month') : '', until: state === 'paused' ? hh.until : 0, last: x.last || 0, lastError: hh && hh.why ? { why: hh.why, at: hh.at, msg: sec ? hh.msg : '' } : null }; };
         const rows = [...transRowsOf(s).filter((r) => r.key).map((r, i) => one(r, i, 'customer')), ...mkRows.filter((r) => r.key).map((r, i) => one(r, i, 'marketing'))];
         const live = (use) => rows.filter((r) => r.use === use && (r.state === 'ok' || r.state === 'almost'));
@@ -3663,7 +3700,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const sum1 = { keys: rows.length, working: rows.filter((r) => r.state === 'ok' || r.state === 'almost').length, paused: rows.filter((r) => r.state === 'paused' || r.state === 'limit').length, paidKeys: rows.filter((r) => r.paid).length, freeKeys: rows.filter((r) => r.tier === 'free').length, unsetKeys: rows.filter((r) => r.tier === 'unset').length,
           month: sum(rows, (r) => r.month), today: sum(rows, (r) => r.today), quota: sum(rows, (r) => r.quota), fees: Math.round(sum(rows.filter((r) => r.paid), (r) => r.price) * 100) / 100, leftCustomer: cap('customer'), leftMarketing: cap('marketing') };
         const status = !rows.length ? 'none' : !live('customer').length && rows.some((r) => r.use === 'customer') ? 'down' : sum1.paused ? 'warn' : 'ok';
-        return ok({ rows, summary: sum1, status, tiers: Object.fromEntries(Object.entries(MAIL_TIERS).filter(([k]) => k !== 'unset')), canEdit: sec, month: mo });
+        return ok({ rows, summary: sum1, status, sheet: sec ? !!s.accountsSheet : undefined, tiers: Object.fromEntries(Object.entries(MAIL_TIERS).filter(([k]) => k !== 'unset')), canEdit: sec, month: mo });
       }
       if (R('GET', '/api/admin/accounts')) {
         const a = await accRows(await getAccounts()); const tr = transRowsOf(s); const mk = ((await store.get('mkt')) || {}).rows || [];
@@ -3677,12 +3714,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (v.apiKey && v.kind === 'resend' && !/^re_\w{8,}/.test(v.apiKey)) return err(400, 'A Resend API key starts with re_');
         if (v.apiKey && list.some((x) => x !== a && x.apiKey === v.apiKey)) return err(409, 'This API key is already in another account.');
         if (a) Object.assign(a, v, { updatedAt: Date.now(), by: actorName }); else { a = { id: uid(6), ...v, createdAt: Date.now(), updatedAt: Date.now(), by: actorName }; list.push(a); }
+        const oldKey = body.id ? (await getAccounts()).find((x) => x.id === a.id)?.apiKey : '';
         await saveAccounts(list); await log('security', `Account "${a.name}" (${ACC_KINDS[a.kind]}) ${body.id ? 'changed' : 'added'} by ${actorName}`);
+        if (mailKind(a)) { if (oldKey && oldKey !== a.apiKey) { const { trows, mk, mrows } = await mailRowsAll(s); for (const r of [...trows, ...mrows]) if (r.key === oldKey) r.key = a.apiKey; await saveMailRows(s, trows, mk, mrows); } await accountsToRows(s); }
         return ok({ account: (await accRows([a])).rows[0] });
       }
       if (R('POST', '/api/admin/accounts/delete')) {
         const list = await getAccounts(); const a = list.find((x) => x.id === String(body.id || '')); if (!a) return err(404, 'Account not found.');
-        await saveAccounts(list.filter((x) => x !== a)); await log('security', `Account "${a.name}" deleted by ${actorName}`); return ok({ ok: true });
+        await saveAccounts(list.filter((x) => x !== a)); await log('security', `Account "${a.name}" deleted by ${actorName}`);
+        if (body.removeKey && a.apiKey) await accountsToRows(s, a.apiKey); return ok({ ok: true });
       }
       if (R('POST', '/api/admin/accounts/import-keys')) { // the sending keys already in Email settings / Email marketing become accounts
         const list = await getAccounts(); const have = new Set(list.map((x) => x.apiKey).filter(Boolean)); let n = 0;
@@ -3698,6 +3738,54 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const out = [];
         for (const dm of (d.data || []).slice(0, 10)) { let recs = []; try { const x = await fetchFn('https://api.resend.com/domains/' + encodeURIComponent(dm.id), { headers: H }); const j = await x.json().catch(() => ({})); recs = (j.records || []).map((q) => ({ record: q.record, name: q.name, type: q.type, value: q.value, priority: q.priority, status: q.status, ttl: q.ttl })); } catch {} out.push({ id: dm.id, name: dm.name, status: dm.status, region: dm.region, records: recs }); }
         return ok({ domains: out });
+      }
+      if (R('POST', '/api/admin/email/plan')) { // quick switch: free trial ⇄ paid plan (account and its sending key together)
+        const list = await getAccounts(); const a = list.find((x) => x.id === String(body.id || '')); if (!a) return err(404, 'Account not found.');
+        if (!ACC_PLANS[body.tier]) return err(400, 'Choose a plan.');
+        const was = a.plan?.tier; Object.assign(a, accClean({ tier: body.tier, paid: body.tier !== 'free', price: body.price, quota: body.quota, paidUntil: body.paidUntil }, a), { updatedAt: Date.now(), by: actorName });
+        await saveAccounts(list); await accountsToRows(s);
+        await log('security', `Email account "${a.name}": plan ${ACC_PLANS[was]?.name || was || '—'} → ${ACC_PLANS[a.plan.tier].name}${a.plan.price ? ' ($' + a.plan.price + ')' : ''} by ${actorName}`);
+        return ok({ account: (await accRows([a])).rows[0] });
+      }
+      if (R('POST', '/api/admin/email/sending')) { // switch a key on or off for sending
+        const list = await getAccounts(); const a = list.find((x) => x.id === String(body.id || '')); if (!a) return err(404, 'Account not found.');
+        a.sending = body.on !== false; a.updatedAt = Date.now(); await saveAccounts(list); await accountsToRows(s);
+        await log('security', `Email account "${a.name}" ${a.sending ? 'switched on' : 'switched off'} for sending by ${actorName}`); return ok({ ok: true });
+      }
+      if (R('POST', '/api/admin/accounts/hostinger')) { // what is on the Hostinger account: websites, domains, subscriptions
+        const a = (await getAccounts()).find((x) => x.id === String(body.id || '')); if (!a?.apiKey) return err(400, 'Add the Hostinger API token to this account first (hPanel → Profile → API).');
+        const H = { Authorization: 'Bearer ' + a.apiKey, accept: 'application/json' }; const get = async (p) => { try { const r = await fetchFn('https://developers.hostinger.com' + p, { headers: H }); const j = await r.json().catch(() => ({})); if (!r.ok) return { error: j.message || j.error || 'Hostinger answered ' + r.status, status: r.status }; return { data: Array.isArray(j) ? j : j.data || [] }; } catch (e) { return { error: e.message }; } };
+        const [w, d, b] = [await get('/api/hosting/v1/websites?per_page=100'), await get('/api/domains/v1/portfolio'), await get('/api/billing/v1/subscriptions')];
+        if (w.status === 401 || d.status === 401) return err(401, 'Hostinger refused the token. Make a new API token in hPanel → Profile → API and paste it in this account.');
+        await log('security', `Hostinger account "${a.name}" checked by ${actorName}`);
+        return ok({ websites: (w.data || []).map((x) => ({ domain: x.domain, enabled: x.is_enabled, type: x.website_type || x.vhost_type || '', username: x.username || '', created: x.created_at })), domains: (d.data || []).map((x) => ({ domain: x.domain, status: x.status, type: x.type, expires: x.expires_at })), subscriptions: (b.data || []).map((x) => ({ name: x.name, status: x.status, price: x.total_price, renew: x.renewal_price, currency: x.currency_code, expires: x.expires_at, auto: x.is_auto_renewed })), errors: [w.error, d.error, b.error].filter(Boolean) });
+      }
+      if (R('POST', '/api/admin/accounts/hostinger-dns')) { // add the DNS records Resend asks for to a domain whose DNS is at Hostinger
+        const L = await getAccounts(); const ho = L.find((x) => x.id === String(body.hostingerId || '')), re = L.find((x) => x.id === String(body.resendId || ''));
+        if (!ho?.apiKey) return err(400, 'Choose a Hostinger account with its API token.'); if (!re?.apiKey) return err(400, 'Choose a Resend account with its API key.');
+        const domain = String(body.domain || '').trim().toLowerCase(); if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return err(400, 'Choose the domain.');
+        const RH = { Authorization: 'Bearer ' + re.apiKey }, HH = { Authorization: 'Bearer ' + ho.apiKey, accept: 'application/json', 'Content-Type': 'application/json' };
+        const rd = await (await fetchFn('https://api.resend.com/domains', { headers: RH })).json().catch(() => ({}));
+        const rdom = (rd.data || []).find((x) => String(x.name).toLowerCase() === domain); if (!rdom) return err(404, `${domain} is not added in this Resend account yet.`);
+        const rj = await (await fetchFn('https://api.resend.com/domains/' + encodeURIComponent(rdom.id), { headers: RH })).json().catch(() => ({}));
+        // the zone at Hostinger is the main domain (mail.example.com lives in example.com)
+        const parts = domain.split('.'); let zone = '', existing = null;
+        for (let i = 0; i <= parts.length - 2 && !zone; i++) { const z = parts.slice(i).join('.'); try { const r = await fetchFn('https://developers.hostinger.com/api/dns/v1/zones/' + encodeURIComponent(z), { headers: HH }); if (r.ok) { zone = z; existing = await r.json().catch(() => []); } else if (r.status === 401) return err(401, 'Hostinger refused the token.'); } catch {} }
+        if (!zone) return err(404, `${domain} is not a DNS zone in this Hostinger account (or its DNS is managed elsewhere, e.g. Dynu).`);
+        const have = new Set((Array.isArray(existing) ? existing : existing.data || []).flatMap((x) => (x.records || []).map((q) => `${String(x.type).toUpperCase()}|${String(x.name || '@').toLowerCase()}|${String(q.content || '').toLowerCase().replace(/\.$/, '')}`)));
+        const add = [], skipped = [];
+        for (const q of rj.records || []) {
+          let name = String(q.name || '').toLowerCase().replace(/\.$/, ''); if (name === zone) name = '@'; else if (name.endsWith('.' + zone)) name = name.slice(0, -(zone.length + 1));
+          // Resend names are relative to the domain it sends from; inside the main zone they need that subdomain
+          if (domain !== zone && name !== '@' && !name.endsWith(domain.slice(0, -(zone.length + 1)))) name = name + '.' + domain.slice(0, -(zone.length + 1));
+          const type = String(q.type).toUpperCase(); const content = type === 'MX' ? `${Number(q.priority) || 10} ${q.value}` : String(q.value || '');
+          const k = `${type}|${name}|${content.toLowerCase().replace(/\.$/, '')}`; if (have.has(k)) { skipped.push(`${type} ${name}`); continue; }
+          add.push({ name, type, ttl: 3600, records: [{ content }] });
+        }
+        let failed = '';
+        if (add.length) { try { const r = await fetchFn('https://developers.hostinger.com/api/dns/v1/zones/' + encodeURIComponent(zone), { method: 'PUT', headers: HH, body: JSON.stringify({ overwrite: false, zone: add }) }); if (!r.ok) { const j = await r.json().catch(() => ({})); failed = j.message || 'Hostinger answered ' + r.status; } } catch (e) { failed = e.message; } }
+        await log('security', `Hostinger DNS for ${domain}: ${failed ? 0 : add.length} added, ${skipped.length} already there${failed ? ', failed: ' + failed : ''} (by ${actorName})`);
+        return ok({ added: failed ? [] : add.map((x) => `${x.type} ${x.name}`), skipped, failed: failed ? [failed] : [], zone });
       }
       if (R('POST', '/api/admin/accounts/dynu')) { // add the DNS records Resend asks for to the domain at Dynu
         const L = await getAccounts(); const dy = L.find((x) => x.id === String(body.dynuId || '')), re = L.find((x) => x.id === String(body.resendId || ''));
@@ -3732,14 +3820,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.pull) { let d; try { const r = await fetchFn(url + (url.includes('?') ? '&' : '?') + 'sheet=Accounts'); d = await r.json(); } catch (e) { return err(502, 'Could not read the sheet: ' + e.message); }
           const rows = accFromRows(d.rows || d.values || []); const list = await getAccounts(); let added = 0, changed = 0;
           for (const r of rows) { const old = list.find((x) => (r.apiKey && x.apiKey === r.apiKey) || (x.name === String(r.name || '').trim() && x.kind === r.kind)); if (old) { Object.assign(old, accClean(r, old), { updatedAt: Date.now() }); changed++; } else { list.push({ id: uid(6), ...accClean(r), createdAt: Date.now(), updatedAt: Date.now(), by: actorName }); added++; } }
-          await saveAccounts(list); await log('security', `Accounts read from Google Sheets by ${actorName}: ${added} new, ${changed} updated`); return ok({ added, changed }); }
+          await saveAccounts(list); await log('security', `Accounts read from Google Sheets by ${actorName}: ${added} new, ${changed} updated`); await accountsToRows(s); return ok({ added, changed }); }
         return ok({ saved: true });
       }
       if (R('POST', '/api/admin/accounts/import')) { // pasted rows (copied from the sheet)
         const rows = String(body.text || '').split(/\r?\n/).map((l) => (l.includes('\t') ? l.split('\t') : l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((x) => x.replace(/^"|"$/g, '')))); const got = accFromRows(rows);
         const list = await getAccounts(); let added = 0, changed = 0;
         for (const r of got) { const old = list.find((x) => (r.apiKey && x.apiKey === r.apiKey) || (x.name === String(r.name || '').trim() && x.kind === r.kind)); if (old) { Object.assign(old, accClean(r, old), { updatedAt: Date.now() }); changed++; } else { list.push({ id: uid(6), ...accClean(r), createdAt: Date.now(), updatedAt: Date.now(), by: actorName }); added++; } }
-        await saveAccounts(list); return ok({ added, changed });
+        await saveAccounts(list); await accountsToRows(s); return ok({ added, changed });
       }
       if (R('GET', '/api/admin/orders')) { // numbering summary: next number, duplicates, multi-device orders, backups
         const list = (await getCustomers()).filter((c) => !c.rsOrder);

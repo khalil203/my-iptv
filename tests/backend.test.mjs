@@ -1922,3 +1922,59 @@ test('time left: a trial keeps exactly its hours when its line is added; unchang
   assert.equal(vv.daysLeft, plan.days, 'a fresh plan shows its full days');
   const tv = (v.customers || v).find((y) => y.id === c.id); assert.equal(tv.daysLeft, 5); assert.ok([120, 121].includes(tv.hoursLeft));
 });
+
+test('email accounts page: keys and accounts stay in step, trial → paid switch, sending on/off, Google Sheets pull adds keys, Hostinger overview and DNS, agents see no secrets', async () => {
+  const hs = []; const sheetRows = [];
+  const x = setup(async (url, init = {}) => {
+    if (url.startsWith('https://developers.hostinger.com/')) { hs.push({ url, method: init.method || 'GET', body: init.body });
+      if (/\/hosting\/v1\/websites/.test(url)) return { ok: true, status: 200, json: async () => ({ data: [{ domain: 'intproto-tv.store', is_enabled: true, website_type: 'main', created_at: '2026-01-01' }] }) };
+      if (/\/domains\/v1\/portfolio/.test(url)) return { ok: true, status: 200, json: async () => [{ domain: 'example-shop.com', status: 'active', type: 'domain', expires_at: '2027-01-01' }] };
+      if (/\/billing\/v1\/subscriptions/.test(url)) return { ok: true, status: 200, json: async () => [{ name: 'Business Web Hosting', status: 'active', total_price: 3588, renewal_price: 3588, currency_code: 'USD', expires_at: '2027-01-01', is_auto_renewed: true }] };
+      if (/\/dns\/v1\/zones\/mail\.example-shop\.com/.test(url)) return { ok: false, status: 404, json: async () => ({ message: 'not found' }) };
+      if (/\/dns\/v1\/zones\/example-shop\.com/.test(url) && (init.method || 'GET') === 'GET') return { ok: true, status: 200, json: async () => [{ name: '@', type: 'A', ttl: 300, records: [{ content: '1.2.3.4' }] }] };
+      if (/\/dns\/v1\/zones\/example-shop\.com/.test(url) && init.method === 'PUT') return { ok: true, status: 200, json: async () => ({ message: 'ok' }) };
+    }
+    if (url === 'https://api.resend.com/domains') return { ok: true, status: 200, json: async () => ({ data: [{ id: 'd1', name: 'mail.example-shop.com' }] }) };
+    if (url === 'https://api.resend.com/domains/d1') return { ok: true, status: 200, json: async () => ({ records: [{ name: 'resend._domainkey.mail', type: 'TXT', value: 'p=MIGf' }, { name: 'send.mail', type: 'MX', value: 'feedback-smtp.example.com', priority: 10 }] }) };
+    if (url.startsWith('https://script.google.com/')) { if ((init.method || 'GET') === 'GET') return { ok: true, status: 200, json: async () => ({ rows: sheetRows }) }; return { ok: true, status: 200, json: async () => ({ ok: true }) }; }
+    return null;
+  });
+  const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { from: 'App <no-reply@example.com>', transRows: [{ id: 'a', key: 're_PAIDKEY_123456', domain: 'mail.example-one.com', on: true, tier: 'p50' }, { id: 'b', key: 're_FREEKEY_654321', domain: 'mail.example-two.com', on: true, tier: 'free' }] } }, tok);
+  // opening the status page makes one account per key, with the plan of the key
+  const st = (await x.call('GET', '/api/admin/email/status', {}, tok)).json; assert.equal(st.rows.length, 2); assert.ok(st.rows.every((r) => r.accountId));
+  const acc = (await x.call('GET', '/api/admin/accounts', {}, tok)).json.rows; assert.equal(acc.length, 2);
+  const free = acc.find((a) => a.apiKey === 're_FREEKEY_654321'); assert.equal(free.plan.tier, 'free'); assert.equal(acc.find((a) => a.apiKey === 're_PAIDKEY_123456').plan.tier, 'p50');
+  // add the login email, then upgrade the free trial to paid in one click: the sending key follows
+  await x.call('POST', '/api/admin/accounts/save', { id: free.id, email: 'resend-two@example.com', password: 'secret-pass' }, tok);
+  assert.equal((await x.call('POST', '/api/admin/email/plan', { id: free.id, tier: 'p100' }, tok)).status, 200);
+  let rows = (await x.call('GET', '/api/admin/settings', {}, tok)).json.email.transRows; assert.equal(rows.find((r) => r.id === 'b').tier, 'p100');
+  const st2 = (await x.call('GET', '/api/admin/email/status', {}, tok)).json.rows.find((r) => r.accountId === free.id); assert.equal(st2.paid, true); assert.equal(st2.quota, 100000); assert.equal(st2.login, 'resend-two@example.com');
+  // switch it off
+  await x.call('POST', '/api/admin/email/sending', { id: free.id, on: false }, tok);
+  assert.equal((await x.call('GET', '/api/admin/settings', {}, tok)).json.email.transRows.find((r) => r.id === 'b').on, false);
+  // a new account typed in the Google Sheet becomes a sending key
+  await x.call('POST', '/api/admin/accounts/sheet', { url: 'https://script.google.com/macros/s/abc/exec' }, tok);
+  sheetRows.push(['Name', 'Type'], ['Resend three', 'Resend', 'resend-three@example.com', 'pw3', 're_SHEETKEY_999999', 'mail.example-three.com', '20', '50000', 'yes', '2026-12-31', 'customer', '', 'on']);
+  const pl = await x.call('POST', '/api/admin/accounts/sheet', { pull: true }, tok); assert.equal(pl.json.added, 1);
+  rows = (await x.call('GET', '/api/admin/settings', {}, tok)).json.email.transRows; const n3 = rows.find((r) => r.domain === 'mail.example-three.com');
+  assert.ok(n3 && n3.tier === 'p50' && n3.on, JSON.stringify(rows));
+  // deleting the account stops the key
+  const a3 = (await x.call('GET', '/api/admin/accounts', {}, tok)).json.rows.find((a) => a.apiKey === 're_SHEETKEY_999999');
+  await x.call('POST', '/api/admin/accounts/delete', { id: a3.id, removeKey: true }, tok);
+  assert.ok(!(await x.call('GET', '/api/admin/settings', {}, tok)).json.email.transRows.some((r) => r.domain === 'mail.example-three.com'));
+  // Hostinger: overview and Resend DNS records into the zone
+  const ho = (await x.call('POST', '/api/admin/accounts/save', { kind: 'hostinger', name: 'Hostinger main', apiKey: 'hostinger-token-123' }, tok)).json.account;
+  const hv = (await x.call('POST', '/api/admin/accounts/hostinger', { id: ho.id }, tok)).json; assert.equal(hv.websites[0].domain, 'intproto-tv.store'); assert.equal(hv.subscriptions[0].name, 'Business Web Hosting');
+  const paid = (await x.call('GET', '/api/admin/accounts', {}, tok)).json.rows.find((a) => a.apiKey === 're_PAIDKEY_123456');
+  const dn = (await x.call('POST', '/api/admin/accounts/hostinger-dns', { hostingerId: ho.id, resendId: paid.id, domain: 'mail.example-shop.com' }, tok)).json;
+  assert.equal(dn.zone, 'example-shop.com'); assert.deepEqual(dn.added, ['TXT resend._domainkey.mail', 'MX send.mail']);
+  const put = JSON.parse(hs.find((h) => h.method === 'PUT').body); assert.equal(put.overwrite, false); assert.equal(put.zone.find((z) => z.type === 'MX').records[0].content, '10 feedback-smtp.example.com');
+  // a support agent sees the status but no account email, key, password or domain, and cannot use these tools
+  await x.call('POST', '/api/admin/team', { name: 'Agent Amy', username: 'amy', password: 'secret12', role: 'Support Agent', perms: ['customers_view'] }, tok);
+  const lt = (await x.call('POST', '/api/login', { username: 'amy', password: 'secret12' })).json.token; await signBylaws(x, lt);
+  const ag = await x.call('GET', '/api/admin/email/status', {}, lt); assert.equal(ag.status, 200);
+  const txt = JSON.stringify(ag.json); for (const bad of ['re_', 'resend-two@example.com', 'example-one.com', 'secret-pass']) assert.ok(!txt.includes(bad), bad);
+  assert.equal((await x.call('POST', '/api/admin/email/plan', { id: free.id, tier: 'free' }, lt)).status, 403);
+  assert.equal((await x.call('POST', '/api/admin/accounts/hostinger', { id: ho.id }, lt)).status, 403);
+});

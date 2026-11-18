@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=95';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=96';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -535,6 +535,7 @@ const ADMIN_TABS = [
   ['userdash', '📱', 'User dashboard', 'settings', 'App', 'customer app sections announcement maintenance playlists'],
   ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name whatsapp number theme'],
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
+  ['mail', '📧', 'Email sending', null, 'System', 'email sending status resend api keys domains plans free trial paid google sheets hostinger dynu accounts'],
   ['accounts', '🔐', 'Accounts & API keys', 'secrets', 'System', 'resend email marketing hostinger dynu domains api keys passwords google sheets spend cost'],
   ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
   ['holidays', '🗓', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
@@ -646,6 +647,7 @@ async function renderAdmin() {
     else if (t === 'api') body.innerHTML = await adminApi(s);
     else if (t === 'accounts') body.innerHTML = await adminAccounts();
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
+    else if (t === 'mail') body.innerHTML = await adminMail();
     else if (t === 'notify') { body.innerHTML = await adminNotify(s); pushPaint(); }
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
@@ -669,7 +671,7 @@ async function renderAdmin() {
 // ---------------- email sending status (every agent can see it; keys stay hidden) ----------------
 const MS_STATE = { ok: ['st-active', 'Working'], almost: ['st-expiring', 'Almost at its limit'], limit: ['st-expired', 'Limit reached'], paused: ['st-expired', 'Paused'], off: ['', 'Switched off'] };
 const nfmt = (n) => Number(n || 0).toLocaleString('en-US');
-async function mailStatusCard(compact) {
+async function mailStatusCard(compact, onPage) {
   let d; try { d = await api('GET', '/api/admin/email/status'); } catch { return ''; }
   if (!d.rows.length) return compact ? '' : `<div class="card"><h3>📧 Email sending status</h3><p class="muted small">No sending key yet.</p></div>`;
   const S = d.summary; const tone = d.status === 'down' ? 'danger' : d.status === 'warn' ? 'warning' : 'success';
@@ -683,7 +685,7 @@ async function mailStatusCard(compact) {
       <div class="stat"><span>Keys</span><b>${S.working}/${S.keys}</b><span>${S.paidKeys} paid · ${S.freeKeys} free${S.unsetKeys ? ' · ' + S.unsetKeys + ' no plan' : ''}</span></div>
       <div class="stat"><span>Paid plans</span><b>$${nfmt(S.fees)}</b><span>a month</span></div>
     </div>`;
-  if (compact) return `<div class="card"><div class="row"><h3>📧 Email sending status</h3><span class="spacer"></span><a class="small" data-act="mail-status" style="cursor:pointer">Details →</a></div>${top}</div>`;
+  if (compact) return `<div class="card"><div class="row"><h3>📧 Email sending status</h3><span class="spacer"></span>${onPage ? '' : '<a class="small" data-act="atab" data-tab="mail" style="cursor:pointer">Details →</a>'}</div>${top}</div>`;
   const bar = (r) => r.pct === null ? '' : `<div style="height:6px;border-radius:4px;background:rgba(127,127,127,.2);margin-top:4px"><i style="display:block;height:6px;border-radius:4px;width:${r.pct}%;background:${r.pct >= 100 ? '#ef4444' : r.pct >= 85 ? '#f59e0b' : '#22c55e'}"></i></div>`;
   const rows = d.rows.map((r) => { const [cls, lab] = MS_STATE[r.state] || ['', r.state];
     return `<div class="list-item" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(r.label)}</b> <span class="pill">${r.use === 'marketing' ? 'Marketing' : 'Customer emails'}</span> <span class="pill ${r.paid ? 'st-active' : r.tier === 'free' ? 'st-expiring' : ''}">${esc(r.plan)}${r.price ? ' · $' + r.price : ''}</span>
@@ -773,6 +775,44 @@ async function adminNotify(s) {
       ${field('Text (optional)', 'body', '', { type: 'textarea', rows: 2, attrs: 'maxlength="300"' })}
       <div class="row" style="justify-content:flex-end"><button class="btn primary">Send</button></div></form>` : '';
   return `<div class="grid2" style="gap:16px;align-items:start"><div>${pushBox(true)}${who}</div><div>${settings}${promo}</div></div>`;
+}
+
+// ---------------- 📧 Email sending: status for every agent; accounts, keys, domains and plans for the owner, Khalil and Nizar ----------------
+async function adminMail() {
+  let d; try { d = await api('GET', '/api/admin/email/status'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
+  if (!d.canEdit) return await mailStatusCard(false);
+  try { ACC.d = await api('GET', '/api/admin/accounts'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
+  const A = (id) => ACC.d.rows.find((x) => x.id === id) || {};
+  const S = d.summary; const nf = (n) => Number(n || 0).toLocaleString('en-US');
+  const secV = (a, k, label) => { const v = a[k]; if (!v) return '<span class="muted">—</span>'; const id = a.id + k; return `<code style="word-break:break-all">${ACC.show[id] ? esc(v) : '••••' + esc(String(v).slice(-4))}</code> <button class="btn sm ghost" data-act="acc-eye" data-k="${id}" title="Show / hide ${label}">👁</button><button class="btn sm ghost" data-act="rsl-copy" data-v="${esc(v)}" title="Copy">📋</button>`; };
+  const tierOpts = [['free', 'Free trial · 100/day · 3,000/month'], ['p50', 'Paid · $20 · 50,000/month'], ['p100', 'Paid · $35 · 100,000/month'], ['custom', 'Paid · other amount…']];
+  const cards = d.rows.map((r) => { const a = A(r.accountId); const [cls, lab] = MS_STATE[r.state] || ['', r.state]; const pct = r.pct;
+    const bar = pct === null ? '' : `<div style="height:6px;border-radius:4px;background:rgba(127,127,127,.2);margin-top:4px"><i style="display:block;height:6px;border-radius:4px;width:${pct}%;background:${pct >= 100 ? '#ef4444' : pct >= 85 ? '#f59e0b' : '#22c55e'}"></i></div>`;
+    return `<div class="card mail-acc" style="margin-bottom:12px">
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:16px">${esc(r.accountName || r.label)}</b><span class="pill">${r.use === 'marketing' ? 'Marketing' : 'Customer emails'}</span><span class="pill ${cls}">${lab}</span><span class="spacer" style="flex:1"></span>
+        <label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;cursor:pointer"><input type="checkbox" data-input="mail-on" data-id="${esc(r.accountId)}" ${r.state !== 'off' ? 'checked' : ''} style="width:auto"> Sending on</label></div>
+      <div class="grid3" style="margin-top:10px;gap:10px">
+        <div><div class="small muted">Resend account (login)</div>${r.login ? `<div>${esc(r.login)}</div>` : '<div class="muted small">— add it with ✎ Edit</div>'}${a.password ? `<div class="small">${secV(a, 'password', 'password')}</div>` : ''}</div>
+        <div><div class="small muted">API key</div><div class="small">${secV(a, 'apiKey', 'API key')}</div></div>
+        <div><div class="small muted">Domains</div>${(r.domains || []).map((x) => `<span class="tagp">${esc(x)}</span>`).join(' ') || '—'}</div>
+      </div>
+      <div class="grid2" style="margin-top:10px;gap:10px;align-items:end">
+        <div><div class="small muted">Plan ${r.paid ? '<span class="pill st-active">Paid</span>' : r.tier === 'free' ? '<span class="pill st-expiring">Free trial</span>' : ''}</div>
+          <select data-input="mail-plan" data-id="${esc(r.accountId)}">${tierOpts.map(([k, n]) => `<option value="${k}" ${r.tier === k ? 'selected' : ''}>${n}${k === 'custom' && r.tier === 'custom' ? ` ($${r.price} · ${nf(r.quota)})` : ''}</option>`).join('')}${r.tier === 'unset' ? '<option value="" selected>Plan not set — choose</option>' : ''}</select>
+          ${r.paidUntil ? `<div class="small muted">Paid until ${esc(r.paidUntil)}</div>` : ''}</div>
+        <div><div class="small">${nf(r.month)}${r.quota ? ' / ' + nf(r.quota) : ''} this month · ${nf(r.today)}${r.daily ? ' / ' + nf(r.daily) : ''} today · ${nf(r.total)} total</div>${bar}</div>
+      </div>
+      ${r.why ? `<div class="small" style="margin-top:6px">⚠️ ${esc(r.why)}${r.until ? ' · tried again ' + fmtDT(r.until) : ''}${r.lastError?.msg ? ` <span class="muted">(${esc(r.lastError.msg)})</span>` : ''}</div>` : ''}
+      ${r.note ? `<div class="small muted" style="margin-top:6px">📝 ${esc(r.note)}</div>` : ''}
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">${r.accountId ? `<button class="btn sm" data-act="acc-edit" data-id="${esc(r.accountId)}">✎ Edit all details</button><button class="btn sm" data-act="acc-domains" data-id="${esc(r.accountId)}">🌐 Domain status at Resend</button><button class="btn sm danger" data-act="acc-del" data-id="${esc(r.accountId)}">🗑 Remove</button>` : ''}</div>
+    </div>`; }).join('');
+  const others = ACC.d.rows.filter((a) => a.kind === 'hostinger' || a.kind === 'dynu');
+  return `<div class="notice" style="margin-bottom:12px">🔐 You see the keys, passwords and domains because you are the owner, Khalil or Nizar. Support agents see this page without them.</div>
+    ${await mailStatusCard(true, true)}
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="mail-add">＋ Add email account</button><button class="btn" data-act="acc-sheet">📊 Google Sheets ${d.sheet ? '<span class="pill st-active">linked</span>' : '<span class="pill">not linked</span>'}</button><button class="btn" data-act="acc-dns">🌐 Add Resend DNS records</button>${others.filter((a) => a.kind === 'hostinger' && a.apiKey).map((a) => `<button class="btn" data-act="acc-hostinger" data-id="${a.id}">🏠 ${esc(a.name)}</button>`).join('')}<a class="btn ghost" data-act="atab" data-tab="accounts">🔐 All accounts (Hostinger, Dynu…)</a></div>
+    ${cards || '<div class="card"><p class="muted">No email account yet. Press ＋ Add email account.</p></div>'}
+    <div class="card"><h3>Hosting & domains</h3>${others.length ? others.map((a) => `<div class="list-item"><div style="flex:1"><b>${esc(a.name)}</b> <span class="pill">${a.kind === 'hostinger' ? 'Hostinger' : 'Dynu'}</span><div class="small muted">${esc(a.email || '')}${(a.domains || []).length ? ' · ' + a.domains.map(esc).join(', ') : ''}${a.apiKey ? ' · API ✓' : ' · no API key yet'}</div></div><button class="btn sm" data-act="acc-edit" data-id="${a.id}">✎</button>${a.kind === 'hostinger' && a.apiKey ? `<button class="btn sm" data-act="acc-hostinger" data-id="${a.id}">🏠 Open</button>` : ''}</div>`).join('') : '<p class="small muted">No Hostinger or Dynu account yet. Add them in <a data-act="atab" data-tab="accounts" style="cursor:pointer">🔐 Accounts & API keys</a> (type Hostinger / Dynu) with their API key.</p>'}</div>
+    <p class="small muted">Everything here is the same list as 🔐 Accounts & API keys and the Google Sheet: change it in any of the three and the sending keys follow (plan, domain, on/off). Paid keys send first; free trial keys only up to 100 a day and 3,000 a month.</p>`;
 }
 async function adminOverview() {
   const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
@@ -1359,14 +1399,14 @@ function accPage() {
     <div class="stat c-ok"><span>Plans paid (monthly)</span><b>${usd(T.fees)}</b><span>all keys together</span></div>
     <div class="stat"><span>Cost of emails sent</span><b>${usd(T.usedCost)}</b><span>this month · ${Number(T.total).toLocaleString()} sent in total</span></div>
   </div>
-  <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="acc-edit">＋ Add account</button>${d.looseKeys ? `<button class="btn" data-act="acc-importkeys">⤵ Add the ${d.looseKeys} sending key(s) from Email settings</button>` : ''}<button class="btn" data-act="acc-sheet">📊 Google Sheets</button><button class="btn" data-act="acc-paste">📋 Paste rows</button><button class="btn" data-act="acc-dns">🌐 Resend ↔ Dynu DNS</button></div>
+  <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="acc-edit">＋ Add account</button>${d.looseKeys ? `<button class="btn" data-act="acc-importkeys">⤵ Add the ${d.looseKeys} sending key(s) from Email settings</button>` : ''}<button class="btn" data-act="acc-sheet">📊 Google Sheets</button><button class="btn" data-act="acc-dns">🌐 Add Resend DNS records</button><button class="btn" data-act="acc-paste">📋 Paste rows</button><button class="btn" data-act="acc-dns">🌐 Resend ↔ Dynu DNS</button></div>
   <div class="row" style="gap:8px;margin-bottom:10px"><input placeholder="🔎 Search name, email, domain…" value="${esc(ACC.q)}" data-input="acc-q" style="flex:1"><div class="chips" style="margin:0">${kinds.map(([k, n]) => `<a class="${ACC.kind === k ? 'on' : ''}" data-act="acc-kind" data-k="${k}">${esc(n)}</a>`).join('')}</div></div>
   <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Account</th><th>Login</th><th>API key</th><th>Domains</th><th>Plan & spend</th><th></th></tr></thead><tbody>${list.map((a) => { const u = a.usage, pl = a.plan || {};
     return `<tr><td><b>${esc(a.name)}</b><div class="small muted">${esc(d.kinds[a.kind] || a.kind)}${a.use ? ' · for ' + esc(a.use === 'both' ? 'customers + marketing' : a.use === 'customer' ? 'customer emails' : 'marketing') : ''}</div>${a.url ? `<a class="small" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.url.replace(/^https?:\/\//, ''))}</a>` : ''}</td>
       <td class="small">${esc(a.email || '—')}<div>${a.password ? sec(a, 'password', 'password') : ''}</div></td><td class="small">${sec(a, 'apiKey', 'API key')}</td><td class="small">${(a.domains || []).map((x) => `<span class="tagp">${esc(x)}</span>`).join(' ') || '—'}</td>
       <td class="small">${pl.paid ? `<span class="pill st-active">✓ Paid $${esc(String(pl.price))}</span>` : `<span class="pill st-expired">${pl.price ? 'Not paid' : 'Free'}</span>`} ${pl.quota ? Number(pl.quota).toLocaleString() + ' emails' : ''}${pl.paidUntil ? ` · until ${esc(pl.paidUntil)}` : ''}
         ${a.apiKey ? `<div>${Number(u.month).toLocaleString()} sent this month${u.pct !== null ? ` (${u.pct}%)` : ''} · ${usd(u.usedCost)}${u.cpe ? ` <span class="muted">($${u.cpe}/email)</span>` : ''}</div>${bar(u.pct)}` : ''}</td>
-      <td style="white-space:nowrap"><button class="btn sm" data-act="acc-edit" data-id="${a.id}">✎ Edit</button>${a.kind === 'resend' && a.apiKey ? `<button class="btn sm" data-act="acc-domains" data-id="${a.id}" title="Domain status at Resend">🌐</button>` : ''}<button class="btn sm danger" data-act="acc-del" data-id="${a.id}" title="Delete">🗑</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">No accounts yet. Add one, or add the keys from Email settings.</td></tr>'}</tbody></table></div>
+      <td style="white-space:nowrap"><button class="btn sm" data-act="acc-edit" data-id="${a.id}">✎ Edit</button>${a.kind === 'resend' && a.apiKey ? `<button class="btn sm" data-act="acc-domains" data-id="${a.id}" title="Domain status at Resend">🌐</button>` : ''}${a.kind === 'hostinger' && a.apiKey ? `<button class="btn sm" data-act="acc-hostinger" data-id="${a.id}" title="Websites, domains and plans at Hostinger">🏠</button>` : ''}<button class="btn sm danger" data-act="acc-del" data-id="${a.id}" title="Delete">🗑</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">No accounts yet. Add one, or add the keys from Email settings.</td></tr>'}</tbody></table></div>
   <p class="small muted">Spend = emails sent this month × (plan price ÷ emails in the plan). Sends are counted from today for every key used by the app (customer emails, marketing and resellers).</p>`;
 }
 function accForm(a = {}) {
@@ -1377,7 +1417,8 @@ function accForm(a = {}) {
     ${field('API key', 'apiKey', a.apiKey || '', { ph: 're_… (Resend) · Dynu / Hostinger API key', attrs: 'autocomplete="off" autocapitalize="none" spellcheck="false"' })}
     ${field('Domains (comma or space between)', 'domains', (a.domains || []).join(', '), { ph: 'mail.intproto-tv.store, intproto-tv.com' })}
     <div class="grid3">${field('Plan', 'tier', pl.tier || 'free', { type: 'select', options: Object.entries(d.plans).map(([k, v]) => [k, v.name + (v.price ? ` · $${v.price}` : '')]) })}${field('Plan price $ / month', 'price', pl.price ?? '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Emails in the plan', 'quota', pl.quota ?? '', { type: 'number', attrs: 'min="0"' })}</div>
-    <div class="grid2">${toggle('✓ Plan paid', 'paid', !!pl.paid)}${field('Paid until', 'paidUntil', pl.paidUntil || '', { type: 'date' })}</div>
+    <div class="grid3">${toggle('✓ Plan paid', 'paid', !!pl.paid)}${field('Paid until', 'paidUntil', pl.paidUntil || '', { type: 'date' })}${toggle('📤 Send emails with this key', 'sending', a.sending !== false)}</div>
+    <p class="small muted" style="margin-top:0">Resend: the API key starts with re_. Hostinger: make an API token in hPanel → Profile → API. Dynu: Control Panel → API Credentials.</p>
     ${field('Note', 'note', a.note || '', { type: 'textarea', rows: 2 })}
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">💾 Save</button></div></form>`;
 }
@@ -2624,17 +2665,27 @@ const actions = {
   'inv-send': async (el) => { el.disabled = true; try { const r = await api('POST', `/api/admin/customers/${el.dataset.id}/invoice`, { saleId: el.dataset.s, appUrl: location.origin }); closeModal(); toast(`Invoice ${r.no} sent ✓`); custRefresh?.(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'cur-rule': async (el) => { try { await saveSettings({ currencyRule: { on: el.checked } }, true); toast(el.checked ? 'Automatic currency on ✓ ($, € for Europe)' : 'Automatic currency off — the package currency is used'); } catch (e) { toast(e.message, true); el.checked = !el.checked; } },
   'acc-kind': (el) => { ACC.kind = el.dataset.k; $('#admin-body').innerHTML = accPage(); },
-  'acc-eye': (el) => { ACC.show[el.dataset.k] = !ACC.show[el.dataset.k]; $('#admin-body').innerHTML = accPage(); },
+  'acc-eye': async (el) => { ACC.show[el.dataset.k] = !ACC.show[el.dataset.k]; $('#admin-body').innerHTML = state.admin.tab === 'mail' ? await adminMail() : accPage(); },
   'acc-edit': (el) => { const a = el?.dataset?.id ? ACC.d.rows.find((x) => x.id === el.dataset.id) : null; modal(a ? `✎ ${esc(a.name)}` : '＋ Add account', accForm(a || {}), { wide: true }); },
-  'acc-del': async (el) => { const a = ACC.d.rows.find((x) => x.id === el.dataset.id); if (!a || !confirm(`Delete the account "${a.name}"? Its key and password are removed from the app (not from Resend).`)) return; try { await api('POST', '/api/admin/accounts/delete', { id: a.id }); toast('Deleted'); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  'acc-del': async (el) => { const a = ACC.d.rows.find((x) => x.id === el.dataset.id); if (!a || !confirm(`Delete the account "${a.name}"? Its key and password are removed from the app (not from Resend)${a.apiKey && ['resend', 'marketing'].includes(a.kind) ? ', and the app stops sending emails with this key' : ''}.`)) return; try { await api('POST', '/api/admin/accounts/delete', { id: a.id, removeKey: true }); toast('Deleted'); renderAdmin(); } catch (e) { toast(e.message, true); } },
   'acc-importkeys': async () => { try { const r = await api('POST', '/api/admin/accounts/import-keys', {}); toast(`${r.added} key(s) added ✓ Set their plan with ✎ Edit.`); renderAdmin(); } catch (e) { toast(e.message, true); } },
   'acc-domains': async (el) => { modal('🌐 Domains at Resend', '<p class="muted">Asking Resend…</p>', { wide: true });
     try { const r = await api('POST', '/api/admin/accounts/resend-domains', { id: el.dataset.id }); $('.modal-body').innerHTML = r.domains.length ? r.domains.map((x) => `<div class="card" style="margin-bottom:10px"><div class="row"><b style="flex:1">${esc(x.name)}</b><span class="pill ${x.status === 'verified' ? 'st-active' : 'st-expiring'}">${esc(x.status)}</span></div>${x.records.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Status</th></tr></thead><tbody>${x.records.map((q) => `<tr><td>${esc(q.type)}${q.priority ? ' ' + q.priority : ''}</td><td><code>${esc(q.name)}</code></td><td><code style="word-break:break-all">${esc(q.value)}</code> <button class="btn sm ghost" data-act="rsl-copy" data-v="${esc(q.value)}">📋</button></td><td>${esc(q.status || '')}</td></tr>`).join('')}</tbody></table></div>` : ''}</div>`).join('') : '<p class="muted">No domain in this Resend account yet.</p>'; } catch (e) { $('.modal-body').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } },
-  'acc-dns': () => { const d = ACC.d; const rs = d.rows.filter((a) => a.kind === 'resend' && a.apiKey), dy = d.rows.filter((a) => a.kind === 'dynu' && a.apiKey);
-    if (!dy.length || !rs.length) return modal('🌐 Resend ↔ Dynu DNS', `<p>Add a <b>Resend</b> account and a <b>Dynu</b> account, each with its API key (Dynu: Control Panel → API Credentials). Then this button puts the DNS records Resend needs (SPF, DKIM, MX) into your Dynu domain for you.</p>`);
-    modal('🌐 Resend ↔ Dynu DNS', `<form data-form="acc-dns"><p class="small muted" style="margin-top:0">Adds the records Resend asks for (SPF, DKIM, MX) to the domain at Dynu. Records already there are skipped. Then press “Verify” in Resend.</p>
-      <div class="grid3">${field('Resend account', 'resendId', rs[0].id, { type: 'select', options: rs.map((a) => [a.id, a.name]) })}${field('Dynu account', 'dynuId', dy[0].id, { type: 'select', options: dy.map((a) => [a.id, a.name]) })}${field('Domain', 'domain', (rs[0].domains || [])[0] || '', { ph: 'mail.intproto-tv.store', attrs: 'required autocapitalize="none"' })}</div>
+  'acc-dns': () => { const d = ACC.d; const rs = d.rows.filter((a) => a.kind === 'resend' && a.apiKey), dns = d.rows.filter((a) => (a.kind === 'dynu' || a.kind === 'hostinger') && a.apiKey);
+    if (!dns.length || !rs.length) return modal('🌐 Resend DNS records', `<p>Add a <b>Resend</b> account and a <b>Dynu</b> or <b>Hostinger</b> account, each with its API key (Dynu: Control Panel → API Credentials · Hostinger: hPanel → Profile → API). Then this puts the DNS records Resend needs (SPF, DKIM, MX) into your domain for you.</p>`);
+    modal('🌐 Resend DNS records → Dynu or Hostinger', `<form data-form="acc-dns"><p class="small muted" style="margin-top:0">Adds the records Resend asks for (SPF, DKIM, MX) to the domain where its DNS is kept. Records already there are skipped, nothing is deleted. Then press “Verify” in Resend.</p>
+      <div class="grid3">${field('Resend account', 'resendId', rs[0].id, { type: 'select', options: rs.map((a) => [a.id, a.name + (a.domains?.length ? ' · ' + a.domains[0] : '')]) })}${field('DNS is at', 'dnsId', dns[0].id, { type: 'select', options: dns.map((a) => [a.id, (a.kind === 'dynu' ? 'Dynu · ' : 'Hostinger · ') + a.name]) })}${field('Domain', 'domain', (rs[0].domains || [])[0] || '', { ph: 'mail.intproto-tv.com', attrs: 'required autocapitalize="none"' })}</div>
       <div class="row" style="justify-content:flex-end"><button class="btn primary">Add the records</button></div></form><div id="dns-out"></div>`); },
+  'acc-hostinger': async (el) => { modal('🏠 Hostinger', '<p class="muted">Asking Hostinger…</p>', { wide: true });
+    try { const r = await api('POST', '/api/admin/accounts/hostinger', { id: el.dataset.id }); const dt = (v) => (v ? new Date(v).toLocaleDateString() : '—');
+      $('.modal-body').innerHTML = `${r.errors.length ? `<div class="notice warning small">${r.errors.map(esc).join('<br>')}</div>` : ''}
+        <h3>Websites & apps (${r.websites.length})</h3>${r.websites.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Domain</th><th>Type</th><th>Status</th><th>Since</th></tr></thead><tbody>${r.websites.map((w) => `<tr><td><a href="https://${esc(w.domain)}" target="_blank" rel="noopener">${esc(w.domain)}</a></td><td>${esc(w.type)}</td><td>${w.enabled ? '<span class="pill st-active">on</span>' : '<span class="pill st-expired">off</span>'}</td><td>${dt(w.created)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No website.</p>'}
+        <h3>Domains (${r.domains.length})</h3>${r.domains.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Domain</th><th>Status</th><th>Ends</th></tr></thead><tbody>${r.domains.map((x) => `<tr><td>${esc(x.domain || '—')}</td><td>${esc(x.status)}</td><td>${dt(x.expires)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No domain.</p>'}
+        <h3>Subscriptions (${r.subscriptions.length})</h3>${r.subscriptions.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Plan</th><th>Status</th><th>Renewal</th><th>Ends</th><th>Auto-renew</th></tr></thead><tbody>${r.subscriptions.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.status)}</td><td>${x.renew != null ? esc(String(x.renew / 100)) + ' ' + esc(x.currency || '') : '—'}</td><td>${dt(x.expires)}</td><td>${x.auto ? '✓' : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No subscription.</p>'}
+        <p class="small muted">Manage websites and files in <a href="https://hpanel.hostinger.com" target="_blank" rel="noopener">hPanel</a>. To point a domain's email records at Resend, use “🌐 Add Resend DNS records”.</p>`;
+    } catch (e) { $('.modal-body').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } },
+  'mail-add': () => modal('＋ Add email account', accForm({ kind: 'resend', use: 'customer' }), { wide: true }),
+  'mail-plan-custom': (el) => { const a = ACC.d?.rows.find((x) => x.id === el.dataset.id); if (a) modal(`✎ ${esc(a.name)}`, accForm(a), { wide: true }); },
   'acc-sheet': () => { const d = ACC.d; modal('📊 Google Sheets', `<p class="small" style="margin-top:0">Keep the same accounts in a Google Sheet: <b>Send</b> writes them to the sheet, <b>Read</b> brings changes you made in the sheet back here.</p>
       <div class="notice warning small">The sheet will hold the passwords and API keys. Share it only with Khalil and Nizar.</div>
       <details style="margin:8px 0"><summary class="small">How to connect the sheet (2 minutes)</summary><ol class="small"><li>Open your Google Sheet → Extensions → Apps Script.</li><li>Paste this code and save:</li></ol><textarea readonly rows="9" style="width:100%;font-family:monospace;font-size:12px">function doPost(e){var d=JSON.parse(e.postData.contents);var ss=SpreadsheetApp.getActive();var sh=ss.getSheetByName(d.sheet)||ss.insertSheet(d.sheet);sh.clear();sh.appendRow(d.header);if(d.rows.length)sh.getRange(2,1,d.rows.length,d.header.length).setValues(d.rows);return ContentService.createTextOutput('ok');}
@@ -3088,7 +3139,8 @@ async function saveSettings(partial, quiet) {
 const forms = {
   async acc(f) { const o = formToObj(f); o.id = f.dataset.id || undefined; try { await api('POST', '/api/admin/accounts/save', o); closeModal(); toast('Saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
   async 'acc-dns'(f) { const b = f.querySelector('button.primary'); b.disabled = true; $('#dns-out').innerHTML = '<p class="muted">Working…</p>';
-    try { const r = await api('POST', '/api/admin/accounts/dynu', formToObj(f)); $('#dns-out').innerHTML = `<div class="notice success">Dynu zone <b>${esc(r.zone)}</b>: ${r.added.length} added${r.added.length ? ' (' + esc(r.added.join(', ')) + ')' : ''}, ${r.skipped.length} already there.${r.failed.length ? `<br>Not added: ${esc(r.failed.join(' · '))}` : ''}</div><p class="small">Now open Resend → Domains → press <b>Verify</b>. DNS can take a few minutes.</p>`; }
+    try { const o = formToObj(f); const dz = ACC.d.rows.find((a) => a.id === o.dnsId); const isH = dz?.kind === 'hostinger';
+      const r = await api('POST', isH ? '/api/admin/accounts/hostinger-dns' : '/api/admin/accounts/dynu', isH ? { hostingerId: o.dnsId, resendId: o.resendId, domain: o.domain } : { dynuId: o.dnsId, resendId: o.resendId, domain: o.domain }); $('#dns-out').innerHTML = `<div class="notice success">${isH ? 'Hostinger' : 'Dynu'} zone <b>${esc(r.zone)}</b>: ${r.added.length} added${r.added.length ? ' (' + esc(r.added.join(', ')) + ')' : ''}, ${r.skipped.length} already there.${r.failed.length ? `<br>Not added: ${esc(r.failed.join(' · '))}` : ''}</div><p class="small">Now open Resend → Domains → press <b>Verify</b>. DNS can take a few minutes.</p>`; }
     catch (e) { $('#dns-out').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } b.disabled = false; },
   async 'acc-sheet'(f, ev) { const what = ev?.submitter?.dataset?.do || 'save'; try { const r = await api('POST', '/api/admin/accounts/sheet', { url: f.url.value.trim(), push: what === 'push', pull: what === 'pull' }); closeModal(); toast(what === 'push' ? `Sent ${r.pushed} account(s) to the sheet ✓` : what === 'pull' ? `From the sheet: ${r.added} new, ${r.changed} updated ✓` : 'Link saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
   async 'acc-paste'(f) { try { const r = await api('POST', '/api/admin/accounts/import', { text: f.text.value }); closeModal(); toast(`${r.added} new, ${r.changed} updated ✓`); renderAdmin(); } catch (e) { toast(e.message, true); } },
@@ -3287,6 +3339,9 @@ document.addEventListener('input', (e) => {
   if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
+  if (t.dataset.input === 'mail-plan') { if (!t.value) return; if (t.value === 'custom') return actions['mail-plan-custom'](t);
+    api('POST', '/api/admin/email/plan', { id: t.dataset.id, tier: t.value }).then(() => { toast(t.value === 'free' ? 'Set to free trial ✓' : 'Upgraded to paid ✓'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
+  if (t.dataset.input === 'mail-on') { api('POST', '/api/admin/email/sending', { id: t.dataset.id, on: t.checked }).then(() => { toast(t.checked ? 'Sending switched on ✓' : 'Sending switched off'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
   if (t.dataset.input === 'key-tier') { const row = t.closest('[data-key-row]'); row.querySelectorAll('[data-k=quota],[data-k=price]').forEach((x) => { x.hidden = t.value !== 'custom'; }); return; }
   if (t.dataset.input === 'sup-lang') { setLang(t.value, true); return supDraw(); }
   if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
