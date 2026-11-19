@@ -2295,3 +2295,57 @@ test('work planning: schedule for every agent, check off today only, owner-only 
   // reminders when an activity starts
   const out = await x.be.tick(); assert.ok(out !== undefined);
 });
+
+test('owner planning: owner only, 4 months, recurring blocks, day-only vs future edits, checks, 10 Resend keys a day, alerts', async () => {
+  const pushes = []; const x = setup(); const tok = await adminToken(x);
+  await x.call('POST', '/api/admin/team', { name: 'Sara', username: 'sara', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'attendance', 'secrets', 'templates_edit'] }, tok);
+  const st = (await x.call('POST', '/api/login', { username: 'sara', password: 'secret12' })).json.token; await signBylaws(x, st).catch(() => {});
+  assert.equal((await x.call('GET', '/api/admin/ownerplan', {}, st)).status, 403, 'agents never see the owner planning');
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/check', { date: '2026-01-01', id: 'wake' }, st)).status, 403);
+  const g = (await x.call('GET', '/api/admin/ownerplan', {}, tok)).json; assert.equal(g.months.length, 4); const T = g.today; const wd = new Date(T + 'T12:00:00Z').getUTCDay();
+  const ids = g.rows[0].blocks.map((b) => b.id); assert.ok(ids.includes('wake') && ids.includes('api') && ids.includes('bank') && ids.includes('sleep'));
+  assert.equal(ids.includes('muay'), wd >= 2 && wd <= 5); assert.equal(ids.includes('legs'), wd === 1); assert.equal(ids.includes('support'), wd >= 1 && wd <= 5);
+  // the monthly meeting on the 29th (Feb: the 28th)
+  const febM = g.months.find((m) => m.endsWith('-02')); if (febM) { const f = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: febM + '-01', to: febM + '-28' })).json; assert.ok(f.rows.find((r) => r.date === febM + '-28').blocks.some((b) => b.id === 'meet')); }
+  const m0 = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: g.months[0] + '-29', to: g.months[0] + '-29' })).json; assert.ok(m0.rows[0].blocks.some((b) => b.id === 'meet'));
+  // check off, stats
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/check', { date: T, id: 'wake' }, tok)).status, 200);
+  const later = new Date(new Date(T + 'T12:00:00Z').getTime() + 86400000).toISOString().slice(0, 10);
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/check', { date: later, id: 'wake' }, tok)).status, 400, 'not a future day');
+  let t = (await x.call('GET', '/api/admin/ownerplan', {}, tok)).json; assert.equal(t.stats.today.done, 1); assert.ok(t.rows[0].blocks.find((b) => b.id === 'wake').done);
+  // edit today only → tomorrow unchanged; edit future → tomorrow changed, today keeps the day-only edit
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'edit', id: 'lunch', date: T, scope: 'day', block: { start: '12:00', end: '13:00', title: 'Lunch with family' } }, tok)).status, 200);
+  let two = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: T, to: later })).json; assert.equal(two.rows[0].blocks.find((b) => b.id === 'lunch').title, 'Lunch with family'); assert.equal(two.rows[1].blocks.find((b) => b.id === 'lunch').title, 'Lunch, Shower & Rest');
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'edit', id: 'bank', date: later, scope: 'future', block: { start: '22:00', end: '22:20', title: 'Bank & books' } }, tok)).status, 200);
+  two = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: T, to: later })).json; assert.equal(two.rows[0].blocks.find((b) => b.id === 'bank').title, 'Clear Bank Balances & Register Financial Transactions'); assert.equal(two.rows[1].blocks.find((b) => b.id === 'bank').end, '22:20');
+  const end = g.last; const e2 = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: end, to: end })).json; assert.equal(e2.rows[0].blocks.find((b) => b.id === 'bank').title, 'Bank & books', 'applies to all future months');
+  // add day-only + recurring, duplicate, delete
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'add', date: T, scope: 'day', block: { start: '16:00', end: '16:30', title: 'Call the accountant', icon: '📞' } }, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'add', date: T, scope: 'future', block: { start: '07:00', end: '07:30', title: 'Morning run', rule: 'weekly', days: [wd] } }, tok)).status, 200);
+  t = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: T, to: new Date(new Date(T + 'T12:00:00Z').getTime() + 7 * 86400000).toISOString().slice(0, 10) })).json;
+  assert.ok(t.rows[0].blocks.some((b) => b.title === 'Call the accountant')); assert.ok(!t.rows[7].blocks.some((b) => b.title === 'Call the accountant')); assert.ok(t.rows[7].blocks.some((b) => b.title === 'Morning run'));
+  const added = t.rows[0].blocks.find((b) => b.title === 'Call the accountant');
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'dup', id: added.id, date: T, toDate: later, scope: 'day' }, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'del', id: 'dinner', date: T, scope: 'day' }, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/block', { op: 'edit', id: 'sleep', date: T, scope: 'day', block: { start: '23:00', end: '22:00' } }, tok)).status, 400, 'end after start');
+  t = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: T, to: later })).json; assert.ok(!t.rows[0].blocks.some((b) => b.id === 'dinner')); assert.ok(t.rows[1].blocks.some((b) => b.id === 'dinner')); assert.ok(t.rows[1].blocks.some((b) => b.title === 'Call the accountant'));
+  // 10 Resend keys: key goes to Accounts (masked here), not sending until the owner turns it on; 10 linked → the routine is checked off
+  let r = await x.call('POST', '/api/admin/ownerplan/api', { date: T, i: 0, domain: 'gptchat.site', apiKey: 're_TEST12345678abcd', status: 'created' }, tok); assert.equal(r.status, 200); assert.equal(r.json.entry.hint, 're_••••abcd'); assert.ok(!JSON.stringify(r.json).includes('re_TEST1234'));
+  const accs = await x.store.get('accounts'); const acc = accs.find((a) => a.domains.includes('gptchat.site')); assert.ok(acc); assert.equal(acc.sending, false); assert.equal(acc.apiKey, 're_TEST12345678abcd');
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/api', { date: T, i: 1, domain: 'gptchat.site' }, tok)).status, 409, 'one domain once');
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/api', { date: T, i: 1, domain: 'bad domain' }, tok)).status, 400);
+  for (let i = 0; i < 10; i++) await x.call('POST', '/api/admin/ownerplan/api', { date: T, i, domain: i ? `d${i}-test.site` : 'gptchat.site', status: 'linked' }, tok);
+  t = (await x.call('GET', '/api/admin/ownerplan', {}, tok)).json; assert.equal(t.rows[0].apiLinked, 10); assert.ok(t.rows[0].blocks.find((b) => b.id === 'api').done, 'auto checked at 10/10'); assert.equal(t.api[T].length, 10); assert.ok(!JSON.stringify(t).includes('re_TEST1234'));
+  // holiday + notification settings
+  assert.equal((await x.call('POST', '/api/admin/ownerplan/holiday', { date: later, name: 'Family day' }, tok)).status, 200);
+  t = (await x.call('GET', '/api/admin/ownerplan', {}, tok, { from: later, to: later })).json; assert.ok(t.rows[0].holidays.some((h) => h.name === 'Family day'));
+  assert.equal((await x.call('PUT', '/api/admin/ownerplan/notify', { pre: 10, tg: false, per: { sleep: { push: false } } }, tok)).status, 200);
+  // alerts at the exact times (Bangkok): 10 min before, at the start, and when left unchecked
+  const at = (hm) => new Date(`${T}T${hm}:00+07:00`).getTime();
+  const a1 = await x.be.ownerAlerts(at('08:20')); assert.equal(a1.sent, 1);
+  assert.equal((await x.be.ownerAlerts(at('08:21'))).sent, 0, 'once');
+  assert.equal((await x.be.ownerAlerts(at('08:30'))).sent, 1);
+  assert.equal((await x.be.ownerAlerts(at('09:30'))).sent, 1, 'only the next block starts; wake is checked so no late alert');
+  assert.equal((await x.be.ownerAlerts(at('11:30'))).sent, 1, 'morning block left unchecked → late alert, and lunch... (moved to 12:00 today) not yet');
+  assert.equal((await x.be.ownerAlerts(at('11:50'))).sent, 1, '10 min before the moved lunch');
+});

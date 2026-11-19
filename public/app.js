@@ -1,9 +1,9 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=119';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=120';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=119';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=120';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -525,6 +525,7 @@ function renderSetup() {
 const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
   ['guide', '🎓', 'Agent guide', null, 'Home', 'help how instructions video tutorial training'],
+  ['ownerplan', '🗓️', 'My planning', 'owner', 'Home', 'owner personal business planning calendar month week day schedule muay thai gym bank resend api keys domains meet party holidays reminders'],
   ['workplan', '📌', 'Work planning', null, 'Home', 'schedule planning planner tasks check off rules daily weekly agent work google sheets meeting'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
   ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
@@ -670,6 +671,7 @@ async function renderAdmin() {
     const body = $('#admin-body');
     if (t === 'guide') body.innerHTML = agentGuide();
     else if (t === 'workplan') body.innerHTML = await adminWorkPlan();
+    else if (t === 'ownerplan') body.innerHTML = await adminOwnerPlan();
     else if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
@@ -5565,12 +5567,158 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
       <h3 style="margin-top:14px">Day by day tasks</h3><p class="small muted" style="margin-top:0">What to post or send in each slot. Empty = the slot title only.</p>
       ${['1', '2', '3', '4', '5', '6', '0'].map((k) => `<details ${k === '1' ? 'open' : ''}><summary><b>${dayName(k)}</b></summary>${P.slots.map((sl) => `<label class="field"><span>${esc(sl.start)} · ${esc(sl.title)}</span><input data-day="${k}" data-slot="${esc(sl.id)}" value="${esc((P.days[k] || {})[sl.id] || '')}"></label>`).join('')}</details>`).join('')}
       <h3 style="margin-top:14px">Rules</h3><textarea name="rules" rows="7" style="width:100%">${esc(P.rules.join('\n'))}</textarea>
-      <h3 style="margin-top:14px">Monthly meeting</h3><div class="grid3">${field('Name', 'meetTitle', P.meet.title)}${field('Which', 'meetNth', P.meet.nth, { type: 'select', options: [['1', '1st'], ['2', '2nd'], ['3', '3rd'], ['4', '4th']] })}${field('Day', 'meetWd', P.meet.weekday, { type: 'select', options: WD_NAMES.map((n, i) => [String(i), n]) })}</div><div class="grid2">${field('Time', 'meetTime', P.meet.time, { type: 'time' })}${field('Time zone of the schedule', 'tz', P.tz, { ph: 'Europe/Paris' })}</div>${toggle('Meeting reminders on', 'meetOn', P.meet.on)}
+      <h3 style="margin-top:14px">Monthly meeting</h3><div class="grid3">${field('Name', 'meetTitle', P.meet.title)}${field('Day of the month (0 = use the weekday below)', 'meetDom', P.meet.dom || 0, { type: 'number', attrs: 'min="0" max="31"' })}</div><div class="grid2">${field('Which', 'meetNth', P.meet.nth, { type: 'select', options: [['1', '1st'], ['2', '2nd'], ['3', '3rd'], ['4', '4th']] })}${field('Day', 'meetWd', P.meet.weekday, { type: 'select', options: WD_NAMES.map((n, i) => [String(i), n]) })}</div><div class="grid2">${field('Time', 'meetTime', P.meet.time, { type: 'time' })}${field('Time zone of the schedule', 'tz', P.tz, { ph: 'Europe/Paris' })}</div>${toggle('Meeting reminders on', 'meetOn', P.meet.on)}
       <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" data-act="wp-save">💾 Save the planning</button></div></form>`, { wide: true }); },
   'wp-slot-add': () => document.getElementById('wp-slots').insertAdjacentHTML('beforeend', `<div class="row wp-slot" style="gap:6px;margin-bottom:6px;flex-wrap:wrap" data-id=""><input data-k="icon" value="•" style="width:52px"><input data-k="start" type="time" style="width:110px"><input data-k="end" type="time" style="width:110px"><input data-k="title" style="flex:1;min-width:200px" placeholder="Activity"><label class="small" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-k="noCheck" style="width:auto"> no check</label><button type="button" class="btn sm ghost" data-act="wp-slot-del">✕</button></div>`),
   'wp-slot-del': (el) => el.closest('.wp-slot').remove(),
   'wp-save': async (el) => { const f = el.closest('form'); const P = state.admin.wp.plan;
     const slots = [...f.querySelectorAll('.wp-slot')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`); return { id: r.dataset.id, icon: g('icon').value, start: g('start').value, end: g('end').value, title: g('title').value, noCheck: g('noCheck').checked, tab: (P.slots.find((x) => x.id === r.dataset.id) || {}).tab || '' }; });
     const days = {}; f.querySelectorAll('[data-day]').forEach((i) => { (days[i.dataset.day] = days[i.dataset.day] || {})[i.dataset.slot] = i.value; });
-    try { await api('PUT', '/api/admin/workplan', { slots, days, rules: f.rules.value.split('\n').map((x) => x.trim()).filter(Boolean), meet: { title: f.meetTitle.value, nth: f.meetNth.value, weekday: f.meetWd.value, time: f.meetTime.value, on: f.meetOn.checked }, tz: f.tz.value.trim() }); toast('Work planning saved ✓'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); } },
+    try { await api('PUT', '/api/admin/workplan', { slots, days, rules: f.rules.value.split('\n').map((x) => x.trim()).filter(Boolean), meet: { title: f.meetTitle.value, dom: Number(f.meetDom.value) || 0, nth: f.meetNth.value, weekday: f.meetWd.value, time: f.meetTime.value, on: f.meetOn.checked }, tz: f.tz.value.trim() }); toast('Work planning saved ✓'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); } },
 });
+
+// ===== Owner personal & business planning (owner only) =====
+const OP = { view: 'day', date: '', month: '', data: null, cache: null };
+const OP_STATUS = [['todo', '⬜ To do'], ['created', '🔑 Key created'], ['dns', '🌐 Domain added (DNS)'], ['verified', '✅ Domain verified'], ['linked', '🔗 Linked']];
+const opAdd = (d, n) => new Date(new Date(d + 'T12:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10);
+const opMon = (d) => opAdd(d, -((new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7));
+const opWd = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
+const opMonthName = (m) => new Date(m + '-15T12:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const opDayName = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+async function adminOwnerPlan() {
+  const base = await api('GET', '/api/admin/ownerplan'); const today = base.today;
+  if (!OP.date || OP.date < base.first || OP.date > base.last) OP.date = today; if (!OP.month || !base.months.includes(OP.month)) OP.month = OP.date.slice(0, 7);
+  let from = OP.date, to = OP.date;
+  if (OP.view === 'week') { from = opMon(OP.date); to = opAdd(from, 6); }
+  if (OP.view === 'month') { from = opMon(OP.month + '-01'); const end = OP.month + '-' + String(new Date(Date.UTC(+OP.month.slice(0, 4), +OP.month.slice(5, 7), 0)).getUTCDate()).padStart(2, '0'); to = opAdd(opMon(end), 6); }
+  const r = from === today && to === today ? base : await api('GET', `/api/admin/ownerplan?from=${from}&to=${to}`); OP.data = r; OP.cache = base;
+  const S = base.stats; const pctCls = (p) => (p >= 100 ? 'ok' : p >= 60 ? '' : 'bad');
+  const stat = (label, big, sub = '') => `<div class="stat"><span>${label}</span><b>${big}</b>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
+  const ms = S.months[OP.month] || S.all;
+  const head = `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1;min-width:200px">🗓️ My planning <span class="badge">🔒 Owner only</span></h3>
+      <button class="btn sm primary" data-act="op-add">＋ Add activity</button><button class="btn sm" data-act="op-holiday">🏖️ Holidays</button><button class="btn sm" data-act="op-notify">🔔 Alerts</button></div>
+    <div class="op-tabs" style="margin-top:12px">${base.months.map((m) => `<button class="btn sm ${m === OP.month ? 'primary' : ''}" data-act="op-month" data-m="${m}">${opMonthName(m)}</button>`).join('')}</div>
+    <div class="op-tabs" style="margin-top:8px">${[['day', '📋 Day'], ['week', '📅 Week'], ['month', '🗓️ Month']].map(([k, n]) => `<button class="btn sm ${OP.view === k ? 'primary' : 'ghost'}" data-act="op-view" data-v="${k}">${n}</button>`).join('')}<span class="spacer"></span><button class="btn sm" data-act="op-go" data-d="today">Today</button></div>
+    <div class="stats" style="margin-top:12px">${stat('Today', S.today.pct + '%', `${S.today.done}/${S.today.total} done`)}${stat('This week', S.week.pct + '%', `${S.week.done}/${S.week.total}`)}${stat(opMonthName(OP.month), ms.done + '/' + ms.total, ms.pct + '% of the month')}${stat('Compliance so far', `<span class="${pctCls(S.all.compliance)}">${S.all.compliance}%</span>`, `${S.all.dueDone}/${S.all.due} due tasks · goal 100%`)}${stat('Resend keys today', `${S.today.api}/${base.apiDaily}`, `week ${S.week.api}/${S.week.apiGoal} · 4 months ${S.all.api}/${S.all.apiGoal}`)}</div>
+    <div class="wp-bar"><i style="width:${S.all.compliance}%"></i></div>
+    ${S.today.pending ? `<div class="notice warning" style="margin-top:10px">⏳ <b>${S.today.pending} activit${S.today.pending > 1 ? 'ies' : 'y'} of today not checked off</b> — ${base.rows[0].blocks.filter((b) => b.past && !b.done).map((b) => esc(b.title)).join(' · ')}</div>` : ''}</div>`;
+  let body = '';
+  if (OP.view === 'day') body = opDayCard(r.rows[0], r);
+  else if (OP.view === 'week') body = opWeekCard(r);
+  else body = opMonthCard(r);
+  return head + body;
+}
+function opBlockRow(b, row, r, compact = false) {
+  const can = row.date <= r.today; const late = b.past && !b.done;
+  const chk = `<label class="wp-check" title="${can ? 'Done?' : 'Future day'}"><input type="checkbox" data-act="op-check" data-date="${row.date}" data-id="${esc(b.id)}" ${b.done ? 'checked' : ''} ${can ? '' : 'disabled'}>${compact ? '' : `<span>${b.done ? '✓ Done' : 'Done?'}</span>`}</label>`;
+  const tools = `<span class="op-tools"><button class="btn sm ghost" data-act="op-edit" data-date="${row.date}" data-id="${esc(b.id)}" title="Edit">✏️</button><button class="btn sm ghost" data-act="op-dup" data-date="${row.date}" data-id="${esc(b.id)}" title="Duplicate">⧉</button><button class="btn sm ghost" data-act="op-del" data-date="${row.date}" data-id="${esc(b.id)}" title="Delete">🗑</button></span>`;
+  if (compact) return `<div class="op-mini ${b.done ? 'wp-done' : ''} ${b.now ? 'wp-now' : ''} ${late ? 'op-late' : ''}">${chk}<div style="flex:1;min-width:0"><b>${esc(b.start)}</b> ${esc(b.icon)} ${esc(b.title)}</div><button class="btn sm ghost" data-act="op-edit" data-date="${row.date}" data-id="${esc(b.id)}" title="Edit">✏️</button></div>`;
+  return `<div class="list-item wp-today op-item ${b.now ? 'wp-now' : ''} ${b.done ? 'wp-done' : ''} ${late ? 'op-late' : ''}"><span style="font-size:22px">${esc(b.icon)}</span><div style="flex:1;min-width:0"><b>${esc(b.start)}–${esc(b.end)} · ${esc(b.title)}</b>${b.now ? ' <span class="pill st-expiring">now</span>' : ''}${late ? ' <span class="badge bad">⏳ pending</span>' : ''}${b.changed ? ' <span class="badge">changed today</span>' : ''}${!b.recurring ? ' <span class="badge">this day only</span>' : ''}<div class="small muted">${b.recurring ? (b.rule === 'monthly' ? `Every month on the ${b.dom}th` : (b.days || []).length === 7 ? 'Every day' : (b.days || []).map((d) => WD_NAMES[d].slice(0, 3)).join(' · ')) : ''}${b.note ? ' · ' + esc(b.note) : ''}${b.api ? ` · ${row.apiLinked}/${r.apiDaily} keys linked` : ''}</div></div>${tools}${chk}</div>`;
+}
+function opDayCard(row, r) {
+  const idx = r.months.indexOf(row.date.slice(0, 7));
+  const nav = `<div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1;min-width:200px">📋 ${esc(opDayName(row.date))}${row.date === r.today ? ' <span class="pill st-active">today</span>' : ''} <span class="small muted">${row.done}/${row.total} · ${row.total ? Math.round((row.done / row.total) * 100) : 0}%</span></h3><button class="btn sm" data-act="op-go" data-d="-1" ${row.date <= r.first ? 'disabled' : ''}>← Previous day</button><button class="btn sm" data-act="op-go" data-d="1" ${row.date >= r.last ? 'disabled' : ''}>Next day →</button></div>`; void idx;
+  const hol = row.holidays.length ? `<div class="notice" style="margin-top:10px">🏖️ <b>${row.holidays.map((h) => esc(h.name) + ` <span class="small muted">(${esc(h.region)})</span>`).join(' · ')}</b></div>` : '';
+  const list = row.blocks.length ? row.blocks.map((b) => opBlockRow(b, row, r)).join('') : '<p class="muted">Nothing planned on this day.</p>';
+  return `<div class="card">${nav}${hol}<div style="margin-top:10px">${list}</div><button class="btn sm" data-act="op-add" style="margin-top:8px">＋ Add an activity on this day</button></div>${row.blocks.some((b) => b.api) ? opApiCard(row, r) : ''}`;
+}
+function opApiCard(row, r) {
+  const list = (r.api || {})[row.date] || []; const n = r.apiDaily; const linked = list.filter((e) => e.status === 'linked').length;
+  const rows = Array.from({ length: n }, (_, i) => { const e = list[i] || { domain: '', hint: '', status: 'todo' };
+    return `<form class="op-api ${e.status === 'linked' ? 'wp-done' : ''}" data-form="op-api" data-i="${i}" data-date="${row.date}"><b class="op-n">${i + 1}</b><input name="domain" value="${esc(e.domain || '')}" placeholder="domain.site" autocapitalize="none" spellcheck="false"><input name="apiKey" value="" placeholder="${e.hint ? esc(e.hint) + ' (saved)' : 're_… paste the new key'}" autocomplete="off" autocapitalize="none" spellcheck="false"><select name="status">${OP_STATUS.map(([k, t]) => `<option value="${k}" ${e.status === k ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="btn sm primary">Save</button></form>`; }).join('');
+  return `<div class="card"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0;flex:1;min-width:200px">🔑 Daily Resend API keys & domains <span class="small muted">${linked}/${n} linked</span></h3><a class="btn sm" data-act="atab" data-tab="accounts">🗝️ Accounts & API keys →</a></div>
+    <div class="wp-bar"><i style="width:${Math.round((linked / n) * 100)}%"></i></div>
+    <p class="small muted">Create the key in Resend, paste it here with its domain, then move the status to 🔗 Linked. The key is saved in <b>Accounts & API keys</b> (owner / technical service only) with sending <b>off</b> — turn it on there once the domain is verified. Here and everywhere else only a masked hint (re_••••1234) is shown; agents never see keys. At ${n}/${n} linked the routine is checked off automatically.</p>
+    <div class="op-api-list">${rows}</div></div>`;
+}
+function opWeekCard(r) {
+  const days = r.rows;
+  return `<div class="card"><div class="row" style="gap:6px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1">📅 Week of ${esc(opDayName(days[0].date))}</h3><button class="btn sm" data-act="op-go" data-d="-7">← Previous week</button><button class="btn sm" data-act="op-go" data-d="7">Next week →</button></div>
+    <div class="op-week" style="margin-top:10px">${days.map((row) => `<div class="op-col ${row.date === r.today ? 'op-today' : ''}"><a class="op-colh" data-act="op-open" data-d="${row.date}"><b>${WD_NAMES[row.wd].slice(0, 3)} ${row.date.slice(8)}</b> <span class="small muted">${row.total ? Math.round((row.done / row.total) * 100) : 0}%</span>${row.holidays.length ? `<div class="small op-hol">🏖️ ${esc(row.holidays[0].name)}</div>` : ''}</a>${row.blocks.map((b) => opBlockRow(b, row, r, true)).join('') || '<p class="small muted">—</p>'}</div>`).join('')}</div></div>`;
+}
+function opMonthCard(r) {
+  const m = OP.month; const cells = r.rows.map((row) => { const out = row.date.slice(0, 7) !== m; const p = row.total ? Math.round((row.done / row.total) * 100) : 0; const meet = row.blocks.find((b) => b.id === 'meet');
+    return `<a class="op-day ${out ? 'op-out' : ''} ${row.date === r.today ? 'op-today' : ''} ${row.date < r.first || row.date > r.last ? 'op-off' : ''}" data-act="op-open" data-d="${row.date}"><div class="row" style="justify-content:space-between"><b>${Number(row.date.slice(8))}</b><span class="small ${p >= 100 ? 'ok' : ''}">${row.date <= r.today && row.date >= r.since ? p + '%' : ''}</span></div>
+      <div class="op-dbar"><i style="width:${p}%"></i></div>${meet ? '<div class="small op-meet">🎉 Meet Party ' + esc(meet.start) + '</div>' : ''}${row.holidays.map((h) => `<div class="small op-hol">🏖️ ${esc(h.name)}</div>`).join('')}<div class="small muted op-cnt">${row.total} activities${row.apiLinked ? ` · 🔑 ${row.apiLinked}` : ''}</div></a>`; }).join('');
+  const pad = r.rows.length ? '<div></div>'.repeat((r.rows[0].wd + 6) % 7) : '';
+  return `<div class="card"><h3 style="margin-top:0">🗓️ ${opMonthName(m)}</h3><div class="op-month">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div class="op-wdh">${d}</div>`).join('')}${pad}${cells}</div><p class="small muted" style="margin-bottom:0">Tap a day to open it, check off activities and edit them.</p></div>`;
+}
+function opFindBlock(date, id) { const row = (OP.data?.rows || []).find((x) => x.date === date) || (OP.cache?.rows || []).find((x) => x.date === date); return row && row.blocks.find((b) => b.id === id); }
+function opForm(b = {}, mode = 'add', date = OP.date) {
+  const rule = b.rule || 'weekly'; const days = b.days || [opWd(date)]; const recurring = mode === 'add' ? false : b.recurring;
+  const scope = mode === 'add' ? `<div class="op-scope"><label><input type="radio" name="scope" value="day" checked> Only on ${esc(opDayName(date))}</label><label><input type="radio" name="scope" value="future"> Repeat from this day on (all future weeks / months)</label></div>`
+    : recurring ? `<div class="op-scope"><label><input type="radio" name="scope" value="day" checked> Save for this day only</label><label><input type="radio" name="scope" value="future"> Apply to all future weeks/months (from ${esc(date)})</label></div>` : '<p class="small muted">This activity is only on this day.</p>';
+  return `<form data-form="op-block" data-mode="${mode}" data-id="${esc(b.id || '')}" data-date="${date}" onsubmit="return false">
+    <div class="grid2">${field('Title', 'title', b.title || '', { attrs: 'required maxlength="120"' })}${field('Icon (emoji)', 'icon', b.icon || '📌', { attrs: 'maxlength="4"' })}</div>
+    <div class="grid2">${field('Start', 'start', b.start || '09:00', { type: 'time' })}${field('End', 'end', b.end || '10:00', { type: 'time' })}</div>
+    ${mode === 'dup' ? field('Copy to the day', 'toDate', date, { type: 'date', attrs: `min="${OP.cache.first}" max="${OP.cache.last}"` }) : ''}
+    ${field('Note (optional)', 'note', b.note || '', { attrs: 'maxlength="200"' })}
+    <div class="op-repeat"><b class="small">Repeats</b><div class="row" style="gap:10px;flex-wrap:wrap;margin:6px 0"><label><input type="radio" name="rule" value="weekly" ${rule === 'weekly' ? 'checked' : ''}> Weekly on</label>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="op-wdl"><input type="checkbox" name="d${d}" ${days.includes(d) ? 'checked' : ''}> ${WD_NAMES[d].slice(0, 3)}</label>`).join('')}</div>
+      <div class="row" style="gap:10px;align-items:center"><label><input type="radio" name="rule" value="monthly" ${rule === 'monthly' ? 'checked' : ''}> Monthly on day</label><input name="dom" type="number" min="1" max="31" value="${b.dom || Number(date.slice(8))}" style="width:80px"></div><p class="small muted" style="margin:4px 0 0">Used when it repeats (future). Short months use their last day.</p></div>
+    ${scope}
+    <div class="row" style="justify-content:flex-end;gap:6px;margin-top:10px">${mode === 'edit' && b.changed ? `<button class="btn sm ghost" data-act="op-restore">↺ Back to the usual</button>` : ''}<button class="btn primary" data-act="op-save">💾 Save</button></div></form>`;
+}
+async function opReload() { await renderAdmin(); opAlertsRefresh(); }
+Object.assign(actions, {
+  'op-month': (el) => { OP.month = el.dataset.m; if (OP.view === 'day') OP.view = 'month'; const t = OP.cache?.today || ''; OP.date = t.startsWith(OP.month) ? t : OP.month + '-01'; renderAdmin(); },
+  'op-view': (el) => { OP.view = el.dataset.v; renderAdmin(); },
+  'op-open': (el) => { const d = el.dataset.d; if (OP.cache && (d < OP.cache.first || d > OP.cache.last)) return toast('Outside the planning (this month and the next 3).', true); OP.date = d; OP.month = d.slice(0, 7); OP.view = 'day'; renderAdmin(); },
+  'op-go': (el) => { const c = OP.cache; if (el.dataset.d === 'today') { OP.date = c.today; OP.month = c.today.slice(0, 7); } else { let d = opAdd(OP.date, Number(el.dataset.d)); if (d < c.first) d = c.first; if (d > c.last) d = c.last; OP.date = d; OP.month = d.slice(0, 7); } renderAdmin(); },
+  'op-check': async (el) => { const done = el.checked; try { await api('POST', '/api/admin/ownerplan/check', { date: el.dataset.date, id: el.dataset.id, done }); toast(done ? '✓ Checked off' : 'Unchecked'); opReload(); } catch (e) { el.checked = !done; toast(e.message, true); } },
+  'op-add': () => modal('＋ Add an activity', opForm({}, 'add', OP.date)),
+  'op-edit': (el) => { const b = opFindBlock(el.dataset.date, el.dataset.id); if (!b) return; modal('✏️ Edit · ' + b.title, opForm(b, 'edit', el.dataset.date)); },
+  'op-dup': (el) => { const b = opFindBlock(el.dataset.date, el.dataset.id); if (!b) return; modal('⧉ Duplicate · ' + b.title, opForm({ ...b, recurring: true }, 'dup', el.dataset.date)); },
+  'op-del': (el) => { const b = opFindBlock(el.dataset.date, el.dataset.id); if (!b) return; const d = el.dataset.date;
+    modal('🗑 Delete · ' + b.title, `<form data-form="op-del" data-id="${esc(b.id)}" data-date="${d}" onsubmit="return false"><p>${esc(b.start)}–${esc(b.end)} · ${esc(b.title)}</p>${b.recurring ? `<div class="op-scope"><label><input type="radio" name="scope" value="day" checked> Delete on ${esc(opDayName(d))} only</label><label><input type="radio" name="scope" value="future"> Delete from this day and all future weeks/months</label></div>` : ''}<div class="row" style="justify-content:flex-end"><button class="btn danger" data-act="op-del-ok">Delete</button></div></form>`); },
+  'op-del-ok': async (el) => { const f = el.closest('form'); try { await api('POST', '/api/admin/ownerplan/block', { op: 'del', id: f.dataset.id, date: f.dataset.date, scope: f.scope ? f.querySelector('[name=scope]:checked').value : 'day' }); closeModal(); toast('Deleted'); opReload(); } catch (e) { toast(e.message, true); } },
+  'op-restore': async (el) => { const f = el.closest('form'); try { await api('POST', '/api/admin/ownerplan/block', { op: 'restore', id: f.dataset.id, date: f.dataset.date }); closeModal(); toast('Back to the usual'); opReload(); } catch (e) { toast(e.message, true); } },
+  'op-save': async (el) => { const f = el.closest('form'); const mode = f.dataset.mode; const sc = f.querySelector('[name=scope]:checked');
+    const block = { title: f.elements.title.value.trim(), icon: f.icon.value.trim(), start: f.start.value, end: f.end.value, note: f.note.value.trim(), rule: f.querySelector('[name=rule]:checked')?.value || 'weekly', days: [0, 1, 2, 3, 4, 5, 6].filter((d) => f['d' + d].checked), dom: Number(f.dom.value) || 1 };
+    if (!block.title) return toast('Give the activity a title.', true); if (block.end <= block.start) return toast('The end time must be after the start time.', true);
+    if (block.rule === 'weekly' && sc?.value === 'future' && !block.days.length) return toast('Pick at least one day of the week.', true);
+    try { await api('POST', '/api/admin/ownerplan/block', { op: mode, id: f.dataset.id || undefined, date: f.dataset.date, toDate: f.toDate?.value, scope: sc ? sc.value : 'day', block }); closeModal(); toast(mode === 'add' ? 'Added ✓' : mode === 'dup' ? 'Duplicated ✓' : 'Saved ✓'); if (mode === 'dup' && f.toDate?.value) { OP.date = f.toDate.value; OP.month = OP.date.slice(0, 7); } opReload(); } catch (e) { toast(e.message, true); } },
+  'op-notify': () => { const n = OP.cache.notify; const blocks = OP.cache.blocks.filter((b) => b.v && !b.v.off);
+    modal('🔔 Planning alerts', `<form data-form="op-notify" onsubmit="return false"><p class="small muted" style="margin-top:0">Alerts come ${n.pre} min before and at the start of every activity, and again if it is not checked off by its end. Sounds and banners play in the panel; push notifications reach your phone/browser (turn them on in 🔔 Notifications).</p>
+      <div class="row" style="gap:16px;flex-wrap:wrap">${toggle('Push notifications', 'push', n.push)}${toggle('Sound + banner in the panel', 'sound', n.sound)}${toggle('Telegram bot message', 'tg', n.tg, 'To the admin chat of your Telegram bot')}</div>
+      ${field('Minutes before (0 = only at the start)', 'pre', n.pre, { type: 'number', attrs: 'min="0" max="60"' })}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Activity</th><th>Push</th><th>Sound</th><th>Telegram</th></tr></thead><tbody>${blocks.map((b) => { const p = n.per[b.id] || {}; return `<tr><td>${esc(b.v.icon)} ${esc(b.v.start)} · ${esc(b.v.title)}</td><td><input type="checkbox" name="p_${b.id}" ${p.push !== false ? 'checked' : ''}></td><td><input type="checkbox" name="s_${b.id}" ${p.sound !== false ? 'checked' : ''}></td><td><input type="checkbox" name="t_${b.id}" ${p.tg ? 'checked' : ''}></td></tr>`; }).join('')}</tbody></table></div>
+      <div class="row" style="justify-content:flex-end;gap:6px;margin-top:10px"><button class="btn sm" data-act="op-snd-test">🔊 Test the sound</button><button class="btn primary" data-act="op-notify-save">💾 Save</button></div></form>`, { wide: true }); },
+  'op-snd-test': () => opBanner({ icon: '🔔', title: 'Test alert', start: '', end: '' }, 'start', true),
+  'op-notify-save': async (el) => { const f = el.closest('form'); const per = {}; for (const b of OP.cache.blocks) if (f['p_' + b.id]) per[b.id] = { push: f['p_' + b.id].checked, sound: f['s_' + b.id].checked, tg: f['t_' + b.id].checked };
+    try { await api('PUT', '/api/admin/ownerplan/notify', { push: f.push.checked, sound: f.sound.checked, tg: f.tg.checked, pre: Number(f.pre.value) || 0, per }); closeModal(); toast('Alerts saved ✓'); opReload(); } catch (e) { toast(e.message, true); } },
+  'op-holiday': () => { const c = OP.cache; const list = c.holidaysCustom || [];
+    modal('🏖️ Holidays', `<p class="small muted" style="margin-top:0">Official holidays (US, Europe, Islamic dates approx.) are highlighted automatically on the calendar. Add your own days here.</p>
+      ${list.length ? `<div>${list.map((h) => `<div class="list-item"><div style="flex:1"><b>${esc(h.name)}</b> <span class="small muted">${esc(h.date)}</span></div><button class="btn sm ghost" data-act="op-hol-del" data-id="${esc(h.id)}">🗑</button></div>`).join('')}</div>` : ''}
+      <form data-form="op-hol" onsubmit="return false"><div class="grid2">${field('Date', 'date', OP.date, { type: 'date' })}${field('Name', 'name', '', { ph: 'Family day', attrs: 'maxlength="80"' })}</div><div class="row" style="justify-content:flex-end"><button class="btn primary" data-act="op-hol-add">＋ Add</button></div></form>`); },
+  'op-hol-add': async (el) => { const f = el.closest('form'); try { await api('POST', '/api/admin/ownerplan/holiday', { date: f.elements.date.value, name: f.elements.name.value }); closeModal(); toast('Holiday added ✓'); opReload(); } catch (e) { toast(e.message, true); } },
+  'op-hol-del': async (el) => { try { await api('POST', '/api/admin/ownerplan/holiday', { remove: el.dataset.id }); closeModal(); toast('Removed'); opReload(); } catch (e) { toast(e.message, true); } },
+  'op-banner-x': () => { document.getElementById('op-banner')?.remove(); },
+});
+document.addEventListener('submit', async (e) => { const f = e.target; if (f.dataset?.form !== 'op-api') return; e.preventDefault();
+  const b = f.querySelector('button'); b.disabled = true;
+  try { const r = await api('POST', '/api/admin/ownerplan/api', { date: f.dataset.date, i: Number(f.dataset.i), domain: f.domain.value.trim(), apiKey: f.apiKey.value.trim() || undefined, status: f.status.value }); f.apiKey.value = ''; toast(`Saved ✓ · ${r.linked}/${r.goal} linked`); opReload(); } catch (er) { toast(er.message, true); b.disabled = false; } });
+// --- alerts in the panel: banner + sound N minutes before / at the start, a pending pill for unchecked activities ---
+const OPA = { data: null, at: 0 };
+async function opAlertsRefresh() { if (!state.token || !isAdminUI() || state.admin.me?.role !== 'owner') return; try { OPA.data = await api('GET', '/api/admin/ownerplan'); OPA.at = Date.now(); } catch {} opAlertsTick(); }
+function opBanner(b, kind, force = false) {
+  const n = OPA.data?.notify || {}; const per = (n.per || {})[b.id] || {}; if (!force && (n.sound === false || per.sound === false)) return;
+  try { const c = sndCfg(); if (c.on || force) playTone(kind === 'late' ? 'alarm' : 'bell', c.vol || 0.6); } catch {}
+  document.getElementById('op-banner')?.remove(); const d = document.createElement('div'); d.id = 'op-banner'; d.className = 'op-banner';
+  d.innerHTML = `<span style="font-size:26px">${esc(b.icon || '⏰')}</span><div style="flex:1"><b>${kind === 'pre' ? `In ${n.pre || 10} min` : kind === 'late' ? 'Not checked off' : 'Now'} · ${esc(b.title)}</b><div class="small">${esc(b.start || '')}${b.end ? '–' + esc(b.end) : ''}</div></div><a class="btn sm primary" data-act="atab" data-tab="ownerplan">Open</a><button class="btn sm ghost" data-act="op-banner-x">✕</button>`;
+  document.body.appendChild(d); setTimeout(() => d.remove(), 120000);
+}
+function opAlertsTick() {
+  const D = OPA.data; if (!D || state.admin.me?.role !== 'owner' || !isAdminUI()) { document.getElementById('op-pill')?.remove(); return; }
+  const now = new Date(); let p; try { p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: D.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now).map((x) => [x.type, x.value])); } catch { return; }
+  const date = `${p.year}-${p.month}-${p.day}`; const min = +p.hour * 60 + +p.minute; if (date !== D.today) { if (Date.now() - OPA.at > 60000) opAlertsRefresh(); return; }
+  const toM = (x) => { const [h, m] = x.split(':').map(Number); return h * 60 + m; }; const pre = Number(D.notify?.pre) || 0; const row = D.rows[0];
+  for (const b of row.blocks) for (const [kind, at] of [['pre', toM(b.start) - pre], ['start', toM(b.start)], ['late', toM(b.end)]]) {
+    if ((kind === 'pre' && !pre) || (kind === 'late' && b.done)) continue; if (min < at || min - at >= 3) continue;
+    const k = `op:${date}:${b.id}:${kind}`; try { if (localStorage.getItem(k)) continue; localStorage.setItem(k, '1'); } catch {} opBanner(b, kind); }
+  const pending = row.blocks.filter((b) => !b.done && toM(b.end) <= min).length; let pill = document.getElementById('op-pill');
+  if (!pending) { pill?.remove(); return; }
+  if (!pill) { pill = document.createElement('a'); pill.id = 'op-pill'; pill.className = 'op-pill'; pill.dataset.act = 'atab'; pill.dataset.tab = 'ownerplan'; document.body.appendChild(pill); }
+  pill.textContent = `⏳ ${pending} pending`; pill.title = 'Activities of today not checked off yet';
+}
+setInterval(() => { if (Date.now() - OPA.at > 5 * 60000) opAlertsRefresh(); else opAlertsTick(); }, 30000);
+setTimeout(opAlertsRefresh, 4000);

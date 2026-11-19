@@ -21,4 +21,4 @@ binding = "DB"
 id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
 
 [triggers]
-crons = ["0 2 * * *", "*/15 * * * *"]
+crons = ["0 2 * * *", "*/15 * * * *", "*/5 * * * *"]

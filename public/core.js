@@ -292,6 +292,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/guide') return null;
   if (path === '/api/admin/waiting') return 'customers_view';
   if (path.startsWith('/api/admin/holidays/')) return 'customers_view';
+  if (path.startsWith('/api/admin/ownerplan')) return 'owner'; // the owner's personal & business planning: owner only, never agents
   if (path.startsWith('/api/admin/workplan')) return null; // everyone on the team (agents check off, owner edits)
   if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/leaves')) return method === 'POST' && (path === '/api/admin/leaves' || path.startsWith('/api/admin/leaves/submit')) ? 'attendance' : 'attendance_all';
@@ -1066,11 +1067,51 @@ export const WORKPLAN_DEF = {
     'Language & translator: Arabic is on for every agent, with the built-in translator for all languages.',
     'Reminders & meetings: follow the automatic reminders for shift check-ins and holidays, and join the Management Meet Party once a month.',
   ],
-  meet: { on: true, weekday: 6, nth: 1, time: '20:00', title: 'Management Meet Party' },
+  meet: { on: true, dom: 29, weekday: 6, nth: 1, time: '20:00', title: 'Management Meet Party' },
   sheetUrl: '',
 };
 export const workPlanOf = (s) => { const w = s.workPlan || {}; return { ...WORKPLAN_DEF, ...w, meet: { ...WORKPLAN_DEF.meet, ...(w.meet || {}) }, slots: w.slots && w.slots.length ? w.slots : WORKPLAN_DEF.slots, days: w.days || WORKPLAN_DEF.days, info: w.info || WORKPLAN_DEF.info, rules: w.rules && w.rules.length ? w.rules : WORKPLAN_DEF.rules }; };
-export function meetDate(meet, y, m) { const d = new Date(Date.UTC(y, m, 1)); const wd = Number(meet.weekday); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (Math.max(1, Number(meet.nth) || 1) - 1) * 7); return d.toISOString().slice(0, 10); }
+export function meetDate(meet, y, m) { if (Number(meet.dom)) { const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); return new Date(Date.UTC(y, m, Math.min(last, Number(meet.dom)))).toISOString().slice(0, 10); } const d = new Date(Date.UTC(y, m, 1)); const wd = Number(meet.weekday); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (Math.max(1, Number(meet.nth) || 1) - 1) * 7); return d.toISOString().slice(0, 10); }
+// ---- Owner personal & business planning (owner only): recurring blocks with dated versions, day-only changes, monthly events ----
+// A block: { id, v: [{ from: '' | 'YYYY-MM-DD', start, end, title, icon, rule: 'weekly' | 'monthly', days: [0-6], dom, off }] }.
+// The version used on a date is the last one whose "from" is on or before that date, so "apply to all future weeks/months" never rewrites the past.
+const OPB = (id, start, end, title, icon, days, extra = {}) => ({ id, v: [{ from: '', start, end, title, icon, rule: 'weekly', days, ...extra }] });
+const ALLD = [0, 1, 2, 3, 4, 5, 6];
+export const OWNERPLAN_DEF = {
+  tz: 'Asia/Bangkok', apiDaily: 10,
+  blocks: [
+    OPB('wake', '08:30', '09:30', 'Wake-Up & Morning Prep', '☀️', ALLD),
+    OPB('legs', '09:30', '11:30', 'Home Gym – Legs Workout', '🏋️', [1]),
+    OPB('muay', '09:30', '11:30', 'Muay Thai Training', '🥊', [2, 3, 4, 5], { note: 'School closed on Mondays' }),
+    OPB('wkend', '09:30', '11:30', 'Weekend Recovery / Personal Time', '🧘', [6, 0]),
+    OPB('lunch', '11:30', '13:00', 'Lunch, Shower & Rest', '🍽️', ALLD),
+    OPB('support', '13:00', '15:00', 'IPTV Client Support & Order Checks', '🛟', [1, 2, 3, 4, 5]),
+    OPB('usam', '15:00', '18:00', 'US Morning Outreach (FB Groups & Renewal Emails)', '📧', ALLD),
+    OPB('dinner', '18:00', '19:00', 'Dinner Break', '🍲', ALLD),
+    OPB('uspm', '19:00', '22:00', 'US Peak Outreach (Telegram & WhatsApp Promotions/Updates)', '🚀', ALLD),
+    OPB('bank', '22:00', '22:30', 'Clear Bank Balances & Register Financial Transactions', '🏦', ALLD),
+    OPB('api', '22:30', '23:00', 'Create 10 Resend API keys & link them with domains', '🔑', ALLD, { api: true }),
+    OPB('sleep', '23:00', '23:30', 'Sleep & Night Rest', '🌙', ALLD),
+    { id: 'meet', v: [{ from: '', start: '20:00', end: '22:00', title: 'Management Meet Party & Monthly Review', icon: '🎉', rule: 'monthly', dom: 29, days: [] }] },
+  ],
+  notify: { push: true, sound: true, tg: false, pre: 10, per: {} },
+};
+const opDim = (date) => { const [y, m] = date.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+export const opVer = (b, date) => { let cur = null; for (const v of b.v || []) if (!v.from || v.from <= date) cur = v; return cur; };
+export function opOn(v, date) { // does this version happen on that date?
+  if (!v || v.off) return false; const d = new Date(date + 'T12:00:00Z');
+  if (v.rule === 'monthly') return d.getUTCDate() === Math.min(Number(v.dom) || 1, opDim(date));
+  return (v.days || []).includes(d.getUTCDay());
+}
+// the blocks of one day, with the day-only changes (ov = { add: [], del: [], edit: { id: {…} } }) applied
+export function opDay(plan, date, ov = {}) {
+  const out = [];
+  for (const b of plan.blocks || []) { const v = opVer(b, date); if (!opOn(v, date) || (ov.del || []).includes(b.id)) continue; const e = (ov.edit || {})[b.id] || {};
+    out.push({ id: b.id, start: e.start || v.start, end: e.end || v.end, title: e.title || v.title, icon: e.icon || v.icon, note: e.note ?? v.note ?? '', api: !!v.api, rule: v.rule, days: v.days, dom: v.dom, recurring: true, changed: !!(ov.edit || {})[b.id] }); }
+  for (const a of ov.add || []) out.push({ ...a, recurring: false });
+  return out.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+}
+export const ownerPlanOf = (raw) => { const r = raw || {}; return { ...OWNERPLAN_DEF, ...r, blocks: Array.isArray(r.blocks) ? r.blocks : OWNERPLAN_DEF.blocks, notify: { ...OWNERPLAN_DEF.notify, ...(r.notify || {}), per: { ...((r.notify || {}).per || {}) } } }; };
 // ---- Holiday calendar (shared by the panel and the reminders): marketing / payout planning, with the matching promotion ----
 const EASTER = (y) => { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1; return new Date(y, mo - 1, da); };
 const ISLAMIC = { 2025: [[2, 1], [2, 30], [5, 6]], 2026: [[1, 18], [2, 20], [4, 27]], 2027: [[1, 8], [2, 10], [4, 17]], 2028: [[0, 28], [1, 27], [4, 5]], 2029: [[0, 16], [1, 15], [3, 24]] }; // Ramadan, Eid al-Fitr, Eid al-Adha (approx., month 0-based)
@@ -2266,6 +2307,25 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return { day, min: Number(parts.hour) * 60 + Number(parts.minute), date: `${parts.year}-${parts.month}-${parts.day}` };
   }
   const hhmm = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  function opLocal(tz, ms) { let p; try { p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value])); } catch { return opLocal('UTC', ms); }
+    return { date: `${p.year}-${p.month}-${p.day}`, min: Number(p.hour) * 60 + Number(p.minute) }; }
+  // Owner planning alerts (every 5 minutes): N minutes before and at the start of each activity → phone/browser push and Telegram; a nudge for activities left unchecked
+  async function ownerAlerts(nowMs = Date.now()) {
+    const out = { sent: 0 }; const raw = await store.get('ownerplan'); const P = ownerPlanOf(raw); const L = opLocal(P.tz, nowMs); const ov = ((await store.get('ownerov')) || {})[L.date] || {};
+    const s = await getSettings(); const n = P.notify; const toMin = (x) => { const [h, m] = String(x).split(':').map(Number); return h * 60 + m; };
+    const chk = (((await store.get('ownerchk:' + L.date.slice(0, 7))) || {})[L.date]) || {};
+    for (const b of opDay(P, L.date, ov)) { const per = n.per[b.id] || {}; const st = toMin(b.start);
+      for (const [kind, at] of [['pre', st - (Number(n.pre) || 0)], ['start', st], ['late', toMin(b.end)]]) {
+        if (kind === 'pre' && !(Number(n.pre) > 0)) continue; if (kind === 'late' && chk[b.id]) continue;
+        const since = L.min - at; if (since < 0 || since >= 5) continue; const k = `opal:${L.date}:${b.id}:${kind}`; if (await store.get(k)) continue; await store.put(k, 1, 2 * 86400);
+        const title = kind === 'pre' ? `⏰ In ${n.pre} min · ${b.icon} ${b.title}` : kind === 'start' ? `${b.icon} Now · ${b.title}` : `⏳ Not checked off · ${b.title}`;
+        const body = kind === 'late' ? `${b.start}–${b.end} ended. Check it off in My planning.` : `${b.start}–${b.end}${b.api ? ' · today: 10 Resend keys + domains' : ''}${b.note ? ' · ' + b.note : ''}`;
+        if (n.push !== false && per.push !== false) await pushOwner(s, { title, body, url: '/intprototv?tab=ownerplan', tag: 'op-' + b.id });
+        if (n.tg && per.tg && tgOn(s) && s.telegram.adminChat) await tgSend(s, s.telegram.adminChat, `${title}\n${body}`).catch(() => {});
+        out.sent++; }
+    }
+    return out;
+  }
   async function tick() {
     const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
     try { out.ibo = await iboSendDue(s); } catch {}
@@ -3830,6 +3890,91 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.note !== undefined) e.note = cleanText(body.note, 300);
         e.edited = actorName; l.sort((a, b) => a.at - b.at); await store.put('attendance', l); await log('team', `Attendance: ${e.name} ${e.action} edited`); return ok({ ok: true });
       }
+      if (path.startsWith('/api/admin/ownerplan')) { // owner only (permFor) — personal & business planning, 10 Resend keys a day
+        if (!isOwner) return err(403, 'Only the owner can open this planning.');
+        const P = ownerPlanOf(await store.get('ownerplan')); const tz = P.tz || 'Asia/Bangkok';
+        const L = opLocal(tz, Date.now()); const today = L.date; const ISO = /^\d{4}-\d{2}-\d{2}$/;
+        const addD = (d, n) => new Date(new Date(d + 'T12:00:00Z').getTime() + n * DAYMS).toISOString().slice(0, 10);
+        const months = [0, 1, 2, 3].map((k) => { const d = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + k, 1)); return d.toISOString().slice(0, 7); });
+        const first = months[0] + '-01'; const lastDay = (m) => m + '-' + String(opDim(m + '-01')).padStart(2, '0'); const last = lastDay(months[3]);
+        const ovAll = (await store.get('ownerov')) || {}; const chkM = {}; const getChk = async (m) => (chkM[m] ??= (await store.get('ownerchk:' + m)) || {}); const apiM = {}; const getApi = async (m) => (apiM[m] ??= (await store.get('ownerapi:' + m)) || {});
+        const savePlan = async () => { await store.put('ownerplan', { blocks: P.blocks, notify: P.notify, tz: P.tz, apiDaily: P.apiDaily, since: P.since }); };
+        if (!P.since) { P.since = today; await savePlan(); } // compliance counts from the day the planning started
+        const cleanBlock = (b, base = {}) => { const hm = (x) => (/^\d{2}:\d{2}$/.test(String(x || '')) ? x : null); const rule = b.rule === 'monthly' ? 'monthly' : b.rule === 'weekly' ? 'weekly' : base.rule || 'weekly';
+          const days = Array.isArray(b.days) ? [...new Set(b.days.map(Number).filter((d) => d >= 0 && d <= 6))] : base.days || [];
+          const out = { start: hm(b.start) || base.start || '09:00', end: hm(b.end) || base.end || '10:00', title: cleanText(b.title ?? base.title, 120), icon: cleanText(b.icon ?? base.icon, 4) || '•', note: cleanText(b.note ?? base.note ?? '', 200), rule, days, dom: Math.min(31, Math.max(1, Number(b.dom ?? base.dom) || 1)) };
+          if (base.api) out.api = true; if (out.end <= out.start && out.end !== '00:00') return { error: 'The end time must be after the start time.' }; if (!out.title) return { error: 'Give the activity a title.' }; return out; };
+        const dayRows = async (from, to) => { const holi = holidayCalendar(new Date(first + 'T00:00:00Z').getTime() - 2 * DAYMS, ({ ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }).custom); const hByDate = {};
+            for (const h of holi) { const d = new Date(h.at); const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; (hByDate[k] ||= []).push({ name: h.name, region: h.region, custom: !!h.custom, id: h.id }); }
+            const rows = []; for (let d = from; d <= to; d = addD(d, 1)) { const c = (await getChk(d.slice(0, 7)))[d] || {}; const api = (await getApi(d.slice(0, 7)))[d] || [];
+              const blocks = opDay(P, d, ovAll[d]).map((b) => ({ ...b, done: c[b.id] || null, past: d >= P.since && (d < today || (d === today && b.end <= hhmm(L.min))), now: d === today && b.start <= hhmm(L.min) && hhmm(L.min) < b.end }));
+              rows.push({ date: d, wd: new Date(d + 'T12:00:00Z').getUTCDay(), blocks, done: blocks.filter((b) => b.done).length, total: blocks.length, holidays: hByDate[d] || [], apiLinked: api.filter((x) => x.status === 'linked').length }); }
+            return rows; };
+        const statsOf = (rows) => { const t = rows.reduce((a, r) => a + r.total, 0); const dn = rows.reduce((a, r) => a + r.done, 0); const due = rows.reduce((a, r) => a + r.blocks.filter((b) => b.past).length, 0); const dd = rows.reduce((a, r) => a + r.blocks.filter((b) => b.past && b.done).length, 0); const api = rows.reduce((a, r) => a + r.apiLinked, 0); return { total: t, done: dn, pct: t ? Math.round((dn / t) * 100) : 0, due, dueDone: dd, compliance: due ? Math.round((dd / due) * 100) : 100, api, apiGoal: rows.length * P.apiDaily, pending: rows.reduce((a, r) => a + r.blocks.filter((b) => b.past && !b.done).length, 0) }; };
+        if (R('GET', '/api/admin/ownerplan')) {
+          let from = ISO.test(String(query.from || '')) ? query.from : today; let to = ISO.test(String(query.to || '')) ? query.to : from;
+          if (from < first) from = first; if (to > last) to = last; if (to < from) to = from; if ((new Date(to) - new Date(from)) / DAYMS > 41) to = addD(from, 41);
+          const rows = await dayRows(from, to); const wk0 = addD(today, -((new Date(today + 'T12:00:00Z').getUTCDay() + 6) % 7));
+          const todayRows = from <= today && today <= to ? rows.filter((r) => r.date === today) : await dayRows(today, today);
+          const all = await dayRows(first, last); const pick = (a, b) => all.filter((r) => r.date >= a && r.date <= b);
+          const apiDays = {}; for (const r of rows) { const e = (await getApi(r.date.slice(0, 7)))[r.date] || []; if (e.length) apiDays[r.date] = e; }
+          return ok({ today, since: P.since, nowMin: L.min, tz, months, first, last, from, to, rows, notify: P.notify, apiDaily: P.apiDaily,
+            blocks: P.blocks.map((b) => ({ id: b.id, v: opVer(b, to) || b.v[b.v.length - 1] })),
+            stats: { today: statsOf(todayRows), week: statsOf(pick(wk0, addD(wk0, 6))), range: statsOf(rows), months: Object.fromEntries(months.map((m) => [m, statsOf(pick(m + '-01', lastDay(m)))])), all: statsOf(all) }, api: apiDays,
+            holidaysCustom: ({ ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }).custom });
+        }
+        if (R('POST', '/api/admin/ownerplan/check')) { const d = String(body.date || ''); if (!ISO.test(d) || d > today || d < first) return err(400, 'You can check off today or an earlier day of this planning.');
+          if (!opDay(P, d, ovAll[d]).some((b) => b.id === body.id)) return err(400, 'Unknown activity.');
+          const m = d.slice(0, 7); const c = await getChk(m); c[d] = c[d] || {}; if (body.done === false) delete c[d][body.id]; else c[d][body.id] = Date.now(); await store.put('ownerchk:' + m, c, 500 * 86400); return ok({ done: body.done !== false }); }
+        if (R('POST', '/api/admin/ownerplan/block')) { // add · edit · delete · duplicate, for this day only or this day and all future weeks/months
+          const op = body.op; const d = String(body.date || ''); if (!ISO.test(d) || d < first || d > last) return err(400, 'Pick a day of the planning (this month and the next 3).');
+          const future = body.scope === 'future'; const ov = (ovAll[d] ||= {}); ov.add ||= []; ov.del ||= []; ov.edit ||= {};
+          const rec = P.blocks.find((b) => b.id === body.id); const dayAdd = ov.add.find((a) => a.id === body.id);
+          if (op === 'add' || op === 'dup') { let src = body.block || {}; if (op === 'dup') { const cur = opDay(P, d, ov).find((b) => b.id === body.id); if (!cur) return err(404, 'Activity not found.'); src = { ...cur, ...(body.block || {}) }; }
+            const target = op === 'dup' && ISO.test(String(body.toDate || '')) ? body.toDate : d; if (target < first || target > last) return err(400, 'Pick a day of the planning.');
+            const v = cleanBlock(src); if (v.error) return err(400, v.error); delete v.api;
+            if (future) { if (v.rule === 'weekly' && !v.days.length) v.days = [new Date(target + 'T12:00:00Z').getUTCDay()]; if (v.rule === 'monthly' && !src.dom) v.dom = Number(target.slice(8)); P.blocks.push({ id: 'b' + uid(5), v: [{ from: target, ...v }] }); }
+            else { const o2 = (ovAll[target] ||= {}); (o2.add ||= []).push({ id: 'd' + uid(5), ...v }); }
+          } else if (op === 'edit') { if (dayAdd) Object.assign(dayAdd, cleanBlock(body.block || {}, dayAdd));
+            else if (rec) { const cur = opVer(rec, d); const v = cleanBlock(body.block || {}, cur); if (v.error) return err(400, v.error);
+              if (future) { rec.v = rec.v.filter((x) => !x.from || x.from < d); rec.v.push({ from: d, ...v }); for (const k of Object.keys(ovAll)) if (k >= d && ovAll[k].edit) delete ovAll[k].edit[rec.id]; } // the future follows the new version
+              else ov.edit[rec.id] = { start: v.start, end: v.end, title: v.title, icon: v.icon, note: v.note }; }
+            else return err(404, 'Activity not found.');
+            if (dayAdd && dayAdd.error) return err(400, dayAdd.error);
+          } else if (op === 'del') { if (dayAdd) ov.add = ov.add.filter((a) => a !== dayAdd);
+            else if (rec) { if (future) { const cur = opVer(rec, d); rec.v = rec.v.filter((x) => !x.from || x.from < d); rec.v.push({ ...cur, from: d, off: true }); } else if (!ov.del.includes(rec.id)) ov.del.push(rec.id); }
+            else return err(404, 'Activity not found.');
+          } else if (op === 'restore') { if (rec) { delete ov.edit[rec.id]; ov.del = ov.del.filter((x) => x !== rec.id); } }
+          else return err(400, 'Unknown change.');
+          for (const k of Object.keys(ovAll)) if (k < addD(first, -40)) delete ovAll[k]; // keep the store small
+          await savePlan(); await store.put('ownerov', ovAll); await log('owner', `Owner planning: ${op} ${future ? '(this day and all future)' : '(this day only)'} on ${d}`); return ok({ ok: true });
+        }
+        if (R('POST', '/api/admin/ownerplan/api')) { // one of today's 10 Resend keys: domain + key (kept in Accounts & API keys, only a hint is shown here) + status
+          const d = String(body.date || ''); if (!ISO.test(d) || d < first || d > last) return err(400, 'Pick a day of the planning.'); const i = Math.round(Number(body.i)); if (!(i >= 0 && i < P.apiDaily)) return err(400, 'Unknown row.');
+          const m = d.slice(0, 7); const a = await getApi(m); const list = (a[d] ||= []); while (list.length <= i) list.push({ domain: '', hint: '', status: 'todo' }); const e = list[i];
+          const dom = String(body.domain ?? e.domain).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); if (dom && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(dom)) return err(400, 'Write the domain like gptchat.site');
+          if (dom && dom !== e.domain && Object.values(a).flat().some((x) => x !== e && x.domain === dom)) return err(409, 'This domain is already in the routine this month.');
+          e.domain = dom; if (['todo', 'created', 'dns', 'verified', 'linked'].includes(body.status)) e.status = body.status;
+          const key = String(body.apiKey || '').trim();
+          if (key) { if (!/^re_\w{8,}/.test(key)) return err(400, 'A Resend API key starts with re_'); const accs = await getAccounts(); if (accs.some((x) => x.apiKey === key && x.id !== e.accId)) return err(409, 'This API key is already saved in Accounts & API keys.');
+            let acc = accs.find((x) => x.id === e.accId); const v = accClean({ kind: 'resend', name: 'Resend · ' + (dom || 'key ' + d), apiKey: key, domains: dom ? [dom] : [], use: 'marketing', sending: false, note: 'Daily key routine ' + d }, acc || {});
+            if (acc) Object.assign(acc, v, { updatedAt: Date.now(), by: actorName }); else { acc = { id: uid(6), ...v, createdAt: Date.now(), updatedAt: Date.now(), by: actorName }; accs.push(acc); }
+            await saveAccounts(accs); await accountsToRows(s); e.accId = acc.id; e.hint = 're_••••' + key.slice(-4); if (e.status === 'todo') e.status = 'created';
+            await log('security', `Daily key routine: Resend key for ${dom || d} saved (Accounts & API keys) by ${actorName}`); }
+          else if (e.accId && dom) { const accs = await getAccounts(); const acc = accs.find((x) => x.id === e.accId); if (acc && !(acc.domains || []).includes(dom)) { acc.domains = [...(acc.domains || []), dom]; await saveAccounts(accs); } }
+          e.at = Date.now(); await store.put('ownerapi:' + m, a, 500 * 86400);
+          const linked = list.filter((x) => x.status === 'linked').length; const c = await getChk(m); c[d] = c[d] || {};
+          if (linked >= P.apiDaily && opDay(P, d, ovAll[d]).some((b) => b.id === 'api') && !c[d].api) { c[d].api = Date.now(); await store.put('ownerchk:' + m, c, 500 * 86400); }
+          return ok({ entry: e, linked, goal: P.apiDaily });
+        }
+        if (R('PUT', '/api/admin/ownerplan/notify')) { const n = P.notify; for (const k of ['push', 'sound', 'tg']) if (body[k] !== undefined) n[k] = !!body[k]; if (body.pre !== undefined) n.pre = Math.min(60, Math.max(0, Math.round(Number(body.pre) || 0)));
+          if (isObj(body.per)) { n.per = {}; for (const [id, x] of Object.entries(body.per).slice(0, 80)) if (isObj(x)) n.per[cleanText(id, 10)] = { push: x.push !== false, sound: x.sound !== false, tg: !!x.tg }; }
+          await savePlan(); return ok(n); }
+        if (R('POST', '/api/admin/ownerplan/holiday')) { const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }; hr.custom = [...(hr.custom || [])];
+          if (body.remove) hr.custom = hr.custom.filter((c) => c.id !== String(body.remove)); else { const date = String(body.date || ''); const name = cleanText(body.name, 80); if (!ISO.test(date) || !name) return err(400, 'Give the date and the name of the holiday.'); hr.custom.push({ id: uid(5), name, date, kind: 'evergreen', region: 'Own', tip: cleanText(body.tip, 200) }); }
+          await saveSettings({ ...s, holidayRemind: hr }); return ok(hr.custom); }
+        return err(404, 'Not found');
+      }
       if (path.startsWith('/api/admin/workplan')) {
         const wp = workPlanOf(s); const team = await getTeam(); const me0 = member;
         const dayKey = (ms) => { const L = localNow(wp.tz); void L; const d = new Date(ms); const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: wp.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
@@ -3866,7 +4011,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (isObj(body.days)) { const dd = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.days[k] || {}; dd[k] = Object.fromEntries(Object.entries(v).slice(0, 16).map(([a, b]) => [cleanText(a, 8), cleanText(b, 200)]).filter(([, b]) => b)); } w.days = dd; }
           if (isObj(body.info)) { const ii = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.info[k] || {}; ii[k] = Object.fromEntries(Object.entries(v).slice(0, 16).filter(([, b]) => Array.isArray(b)).map(([a, b]) => [cleanText(a, 8), b.slice(0, 3).map((t) => cleanText(t, 160))])); } w.info = ii; }
           if (Array.isArray(body.rules)) w.rules = body.rules.map((x) => cleanText(x, 400)).filter(Boolean).slice(0, 12);
-          if (isObj(body.meet)) w.meet = { on: body.meet.on !== false, weekday: Math.min(6, Math.max(0, Number(body.meet.weekday) || 0)), nth: Math.min(4, Math.max(1, Number(body.meet.nth) || 1)), time: hm(body.meet.time) || '20:00', title: cleanText(body.meet.title, 80) || 'Management Meet Party' };
+          if (isObj(body.meet)) w.meet = { on: body.meet.on !== false, dom: Math.min(31, Math.max(0, Math.round(Number(body.meet.dom) || 0))), weekday: Math.min(6, Math.max(0, Number(body.meet.weekday) || 0)), nth: Math.min(4, Math.max(1, Number(body.meet.nth) || 1)), time: hm(body.meet.time) || '20:00', title: cleanText(body.meet.title, 80) || 'Management Meet Party' };
           if (body.tz) { try { new Intl.DateTimeFormat('en', { timeZone: body.tz }); w.tz = body.tz; } catch { return err(400, 'Unknown time zone.'); } }
           if (body.sheetUrl !== undefined) { const u = String(body.sheetUrl || '').trim(); if (u && !/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) return err(400, 'Paste the Apps Script web app link (https://script.google.com/macros/s/…/exec).'); w.sheetUrl = u; }
           await saveSettings({ ...s, workPlan: w }); await log('team', 'Work planning updated by the owner'); return ok(w);
@@ -5730,5 +5875,5 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return out;
   }
 
-  return { handle, getSettings, daily, tick };
+  return { handle, getSettings, daily, tick, ownerAlerts };
 }
