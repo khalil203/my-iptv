@@ -1,9 +1,12 @@
 import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=120';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
-import { siteHtml } from './site.js?v=102';
+import { siteHtml } from './site.js?v=121';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=120';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=121';
+import { openLangSheet, paintLangPill, langChip } from './lang.js?v=121';
+import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=121';
+import { createTranslator } from './translator.js?v=121';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -201,21 +204,26 @@ async function boot() {
   if (state.resetToken && !state.token) showReset();
 }
 
-// One language button on every customer / reseller / public page: 🌐 + flag, opens the 5 languages
-const LANG_FLAG = { en: '🇬🇧', fr: '🇫🇷', de: '🇩🇪', es: '🇪🇸', it: '🇮🇹', ar: '🇸🇦' };
-function langFab() {
-  let el = document.getElementById('lang-fab');
-  if (isAdminUI()) { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement('div'); el.id = 'lang-fab'; document.body.appendChild(el); }
-  const cur = getLang();
-  el.innerHTML = `<button type="button" class="lang-fab-btn" data-act="lang-fab" aria-haspopup="true" aria-label="${esc(t('language'))}"><span>🌐</span><b>${LANG_FLAG[cur] || ''} ${cur.toUpperCase()}</b></button>
-    <div class="lang-menu" role="menu">${LANGS.map(([k, n]) => `<a role="menuitem" tabindex="0" data-act="lang" data-lang="${k}" class="${k === cur ? 'on' : ''}"><span>${LANG_FLAG[k]}</span>${esc(n)}${k === cur ? ' ✓' : ''}</a>`).join('')}</div>`;
+// One language control on every customer / reseller / public page: a small
+// pill that opens the Language Center sheet.
+function paintPill() {
+  if (isAdminUI() || document.querySelector('.site')) { document.getElementById('lang-pill')?.remove(); return; }
+  paintLangPill(getLang());
 }
-document.addEventListener('click', (e) => { const f = document.getElementById('lang-fab'); if (f && f.classList.contains('open') && !e.target.closest('#lang-fab')) f.classList.remove('open'); });
+function openLanguageCenter() {
+  openLangSheet({ current: getLang(), onPick: applyLang, title: t('language'), subtitle: t('chooseLang') });
+}
+function applyLang(code) {
+  if (!LANGS.some(([k]) => k === code)) code = 'en';
+  setLang(code, true);
+  paintPill();
+  if (state.role === 'user' && state.token && location.pathname !== '/app') renderUser(); else route();
+  toast(`${langFlag(code)} ${langName(code)} ✓`);
+}
 function route() {
-  closeModal(); setTimeout(applyTheme); setTimeout(langFab);
+  closeModal(); setTimeout(applyTheme); setTimeout(paintPill); setTimeout(() => TR.afterRoute(), 0);
   if (isAdminUI() && location.protocol === 'http:' && !/localhost|127\.0\.0\.1/.test(location.hostname)) { location.replace('https://' + location.host + location.pathname); return; }
-  if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
+  if (isAdminUI()) { document.documentElement.dir = TR.trDir() || 'ltr'; document.documentElement.lang = TR.trDir() ? TR.trCur() : 'en'; }
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
   if (state.token) pushRelink();
@@ -273,7 +281,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       ${state.config?.trial?.enabled ? `<button class="btn block" style="margin-top:10px;border-color:var(--accent);color:var(--accent)" ${preview ? '' : 'data-act="trial"'}>🎁 ${t('startTrial', { hours: state.config.trial.hours })}</button>` : ''}
       ${preview ? '' : `<a class="btn block ghost" href="download.html" style="margin-top:8px">📲 ${t('getApp')}</a>`}
       ${preview ? '' : `<div class="login-foot"><a data-act="theme" href="#" style="cursor:pointer;text-decoration:none" title="Theme" aria-label="Change theme">🌗</a></div>`}
-      ${preview ? '' : `<div class="login-foot lang-sw">${LANGS.map(([k, n]) => `<a data-act="lang" data-lang="${k}" class="${getLang() === k ? 'on' : ''}">${n}</a>`).join(' · ')}</div>`}
+      ${preview ? '' : `<div class="login-foot">${langChip(getLang(), { label: t('language') })}</div>`}
       ${waNum(b) ? `<a class="btn block wa-btn" style="margin-top:8px" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: '' })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : b.supportUrl ? `<div class="login-foot"><a href="${esc(b.supportUrl)}" target="_blank" rel="noopener">${esc(b.supportLabel || t('support'))}</a></div>` : ''}
       ${b.footerText ? `<div class="login-foot">${esc(b.footerText)}</div>` : ''}
       ${preview || bridge() ? '' : `<div class="login-foot"><a href="#" data-act="site-page" data-page="home">${t('aboutSite', { app: esc(b.appName) })}</a></div>`}
@@ -368,7 +376,7 @@ function renderResellers() {
 // ---------------- public support page (/support) ----------------
 // Step 1 asks who the customer is (required). Only then can a ticket be opened; it lands in the agents' queue right away.
 const SUP = { step: 1, token: '', known: false, info: null, ref: '', me: null, form: {} };
-const supLangSel = () => `<select data-input="sup-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+const supLangSel = () => langChip(getLang(), { label: t('language') });
 async function renderSupport() {
   document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
   const b = state.config.branding || {};
@@ -430,7 +438,7 @@ function supDraw() {
 
 // ---------------- reseller dashboard (/rsl) ----------------
 const RSL = { d: null, tab: 'home', q: '' };
-const rslLangSel = () => `<select data-input="rsl-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+const rslLangSel = () => langChip(getLang(), { label: t('language') });
 async function renderRsl() {
   goAfterRender();
   document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
@@ -637,7 +645,7 @@ async function renderAdmin() {
   if (me.mustSetup2fa) { render2faGate(); return; }
   if (me.mustSignBylaws) { renderBylawsGate(me); return; }
   if (me.mustCheckIn) { renderCheckInGate(me); return; }
-  staffGuards(me); setTimeout(() => trAuto(me), 400);
+  staffGuards(me); setTimeout(() => TR.trAuto(me), 400);
   const tabs = ADMIN_TABS.filter((x) => {
     if (x[0] === 'api') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || ''); // panel & Resend keys are Nizar/Khalil only (spec §1)
     return can(x[3]);
@@ -652,7 +660,7 @@ async function renderAdmin() {
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <main class="main" id="main">
-      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}<button class="btn sm" data-act="tr-open" title="Translate the panel into any language" translate="no">🌐 ${esc(trCur().toUpperCase().slice(0, 2))}</button><button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}<button class="btn sm" data-act="tr-open" title="Translator — panel, text, chat, web" translate="no">🌐 ${esc(TR.trCur().toUpperCase().slice(0, 2))}</button><button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
       <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </main></div>`;
@@ -2224,7 +2232,7 @@ async function renderUserTab() {
       <div class="card" id="acc-guide"><h3>${t('userGuide')}</h3><ol class="guide-ol"><li>${t('gStep1')}</li><li>${t('gStep2')}</li><li>${t('gStep3')}</li><li>${t('gStep4')}</li></ol></div>
       ${pushBox(false)}
       ${parentalCard()}
-      <div class="card"><h3>${t('language')}</h3><div class="chips">${LANGS.map(([k, n]) => `<a class="${getLang() === k ? 'on' : ''}" data-act="lang" data-lang="${k}">${n}</a>`).join('')}</div></div>
+      <div class="card"><h3>${t('language')}</h3><div class="tr-langrow"><div><b>${langFlag(getLang())} ${langName(getLang())}</b><div class="small muted">${esc(t('chooseLang'))}</div></div><button class="btn" data-act="lang-center">🌐 ${t('language')}</button></div></div>
       ${d.allowPasswordChange ? `<form class="card" data-form="user-password"><h3>${t('changePw')}</h3>${field(t('currentPw'), 'current', '', { type: 'password', attrs: 'required' })}${field(t('newPw'), 'next', '', { type: 'password', attrs: 'required minlength="6"' })}<button class="btn primary">${t('updatePw')}</button></form>` : ''}
       <div class="row"><a class="btn" href="download.html">📲 ${t('getApp')}</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}${!waNum(b) && b.supportUrl ? `<a class="btn" href="${esc(b.supportUrl)}" target="_blank" rel="noopener">💬 ${esc(b.supportLabel || t('support'))}</a>` : ''}<button class="btn danger" data-act="logout">${t('logout')}</button></div>
       <p style="margin-top:16px"><a href="#" class="small muted" data-act="del-ask">${t('delAsk')}</a></p>`;
@@ -3136,8 +3144,8 @@ theme: () => {
     const order = ['auto', 'light', 'dark']; const next = order[(order.indexOf(themeMode()) + 1) % 3];
     localStorage.setItem('tvp_theme', next); applyTheme(); toast(t('themeLabel', { label: themeLabel() }));
   },
-lang: (el) => { setLang(el.dataset.lang, true); const f = document.getElementById('lang-fab'); if (f) f.classList.remove('open'); if (state.role === 'user' && state.token && location.pathname !== '/app') renderUser(); else route(); langFab(); },
-  'lang-fab': () => { const f = document.getElementById('lang-fab'); if (f) f.classList.toggle('open'); },
+lang: (el) => applyLang(el.dataset.lang),
+  'lang-center': () => openLanguageCenter(),
 trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
 'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
 'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast(t('deleted')); renderAdmin(); },
@@ -3639,14 +3647,12 @@ document.addEventListener('input', (e) => {
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
   if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
-  if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
   if (t.dataset.input === 'promo-wa-edit') { const a = $('#promo-wa-share'); if (a) a.href = 'https://wa.me/?text=' + encodeURIComponent(t.value); return; }
   if (t.dataset.input === 'promo-lang') { PROMO.lang = t.value; renderAdmin(); return; }
   if (t.dataset.input === 'mail-plan') { if (!t.value) return; if (t.value === 'custom') return actions['mail-plan-custom'](t);
     api('POST', '/api/admin/email/plan', { id: t.dataset.id, tier: t.value }).then(() => { toast(t.value === 'free' ? 'Set to free trial ✓' : 'Upgraded to paid ✓'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
   if (t.dataset.input === 'mail-on') { api('POST', '/api/admin/email/sending', { id: t.dataset.id, on: t.checked }).then(() => { toast(t.checked ? 'Sending switched on ✓' : 'Sending switched off'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
   if (t.dataset.input === 'key-tier') { const row = t.closest('[data-key-row]'); row.querySelectorAll('[data-k=quota],[data-k=price]').forEach((x) => { x.hidden = t.value !== 'custom'; }); return; }
-  if (t.dataset.input === 'sup-lang') { setLang(t.value, true); return supDraw(); }
   if (t.dataset.input === 'rsl-q') { RSL.q = t.value; const pos = t.selectionStart; rslDraw(); const n = $('[data-input=rsl-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'cust-sort') { state.admin.custSort = t.value; try { localStorage.setItem('tvp_cust_sort', t.value); } catch {} $('#cust-list').innerHTML = customerListHtml(); }
   if (t.dataset.input === 'cust-search') { state.admin.q = t.value; state.admin.custLimit = 60; clearTimeout(searchT); searchT = setTimeout(() => { $('#cust-list').innerHTML = customerListHtml(); }, 200); }
@@ -3783,7 +3789,7 @@ async function loadAccountExtras() {
   });
 }
 function ticketThread(x, admin) {
-  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${admin && m.emailed ? '<div class="small muted">📧 emailed to the customer</div>' : ''}${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>` : ''}</div>`).join('')}</div>`;
+  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${admin ? '<button type="button" class="tr-msg-btn" data-act="tr-msg" title="Translate this message" aria-label="Translate this message">🌐</button>' : ''}${admin && m.emailed ? '<div class="small muted">📧 emailed to the customer</div>' : ''}${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>` : ''}</div>`).join('')}</div>`;
 }
 function openTicket(id) {
   const x = (state.user.tickets || []).find((k) => k.id === id); if (!x) return;
@@ -4523,9 +4529,9 @@ Object.assign(forms, {
 // =====================================================================
 // Live chat between a customer and the dashboard
 // =====================================================================
-const chatBubbles = (msgs, mine) => msgs.length ? msgs.map((m) => `<div class="msg ${m.from === mine ? 'mine' : ''}"><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${m.by && m.from !== mine ? esc(m.by) + ' · ' : ''}${fmtDT(m.at)}</div></div>`).join('') : `<p class="muted small" style="text-align:center;margin:24px 0">${isAdminUI() ? 'No messages yet. Write the first one.' : t('chatEmpty')}</p>`;
+const chatBubbles = (msgs, mine) => msgs.length ? msgs.map((m) => `<div class="msg ${m.from === mine ? 'mine' : ''}"><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${m.by && m.from !== mine ? esc(m.by) + ' · ' : ''}${fmtDT(m.at)}${isAdminUI() ? ` <button type="button" class="tr-msg-btn" data-act="tr-msg" title="Translate this message" aria-label="Translate this message">🌐</button>` : ''}</div></div>`).join('') : `<p class="muted small" style="text-align:center;margin:24px 0">${isAdminUI() ? 'No messages yet. Write the first one.' : t('chatEmpty')}</p>`;
 const chatScroll = () => { const el = $('#chat-thread'); if (el) el.scrollTop = el.scrollHeight; };
-function chatPaint(msgs, mine) { const el = $('#chat-thread'); if (!el) return; if (Number(el.dataset.n) === msgs.length) return; const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80 || !el.dataset.n; el.dataset.n = msgs.length; el.innerHTML = chatBubbles(msgs, mine); if (atEnd) chatScroll(); }
+function chatPaint(msgs, mine) { const el = $('#chat-thread'); if (!el) return; if (Number(el.dataset.n) === msgs.length) return; const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80 || !el.dataset.n; el.dataset.n = msgs.length; el.innerHTML = chatBubbles(msgs, mine); if (atEnd) chatScroll(); setTimeout(() => TR.chatAuto(), 80); }
 // customer side
 function setChatFab(unread) {
   let el = document.getElementById('chat-fab');
@@ -4548,7 +4554,7 @@ async function adminChat() {
       <div id="chat-items">${chatItems(shown, ui.id)}</div></div>
     <div class="card chat-pane">${thread ? `<div class="row" style="margin-bottom:10px"><button class="btn sm chat-back" data-act="chat-back">←</button><div class="avatar">${esc(initials(thread.name))}</div><div style="flex:1;min-width:0"><b>${esc(thread.name)}</b><div class="small muted">${esc(thread.username)}</div></div><button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${esc(thread.id)}">Customer</button></div>
       <div class="thread chat" id="chat-thread" data-n="${thread.messages.length}">${chatBubbles(thread.messages, 's')}</div>
-      <form data-form="chat-reply" class="chat-form" data-perm="customers_edit"><input name="text" maxlength="1000" autocomplete="off" placeholder="Write a message…" aria-label="Message" required><button class="btn primary">Send</button></form>` : `<div class="empty"><span class="ic">🗨</span>${list.length ? 'Choose a chat on the left.' : 'No chats yet. Customers start one with the chat button in their app, or tap 🗨 on a customer to write first.'}</div>`}</div></div>`;
+      <form data-form="chat-reply" class="chat-form" data-perm="customers_edit"><input name="text" maxlength="1000" autocomplete="off" placeholder="Write a message…" aria-label="Message" required><button type="button" class="btn sm" data-act="tr-reply" title="Translate my reply">🌐</button><button class="btn primary">Send</button></form>` : `<div class="empty"><span class="ic">🗨</span>${list.length ? 'Choose a chat on the left.' : 'No chats yet. Customers start one with the chat button in their app, or tap 🗨 on a customer to write first.'}</div>`}</div></div>`;
 }
 const chatItems = (list, cur) => list.length ? list.map((x) => `<div class="list-item chat-item ${x.id === cur ? 'on' : ''}" data-act="chat-pick" data-id="${esc(x.id)}" tabindex="0"><div class="avatar">${esc(initials(x.name))}</div><div style="flex:1;min-width:0"><b>${esc(x.name)}</b><div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.from === 's' ? 'You: ' : ''}${esc(x.last)}</div></div><div style="text-align:end"><div class="small muted">${fmtDate(x.at)}</div>${x.ua ? `<b class="nav-badge">${x.ua}</b>` : ''}</div></div>`).join('') : '<p class="muted small">No chats.</p>';
 function chatBadge(list) { const n = list.reduce((a, x) => a + (x.ua || 0), 0); document.querySelectorAll('#chat-badge').forEach((b) => { b.hidden = !n; b.textContent = n > 99 ? '99+' : n; }); }
@@ -4991,7 +4997,7 @@ async function adminTasksPage() {
 async function adminTeamChatPage() {
   const list = await api('GET', '/api/admin/teamchat'); const me = state.admin.me;
   return `<p class="small muted">Internal channel for shift handovers and team updates. Not for customers and not for payments.</p>
-    <div class="card"><div class="thread chat" id="tc-thread" style="max-height:56vh;overflow:auto">${list.length ? list.map((m) => `<div class="msg ${m.name === me?.name ? 'mine' : ''}"><b class="small">${esc(m.name)}</b><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${fmtDT(m.at)}</div></div>`).join('') : '<p class="muted small" style="text-align:center;margin:24px 0">No messages yet. Write the first one.</p>'}</div>
+    <div class="card"><div class="thread chat" id="tc-thread" style="max-height:56vh;overflow:auto">${list.length ? list.map((m) => `<div class="msg ${m.name === me?.name ? 'mine' : ''}"><b class="small">${esc(m.name)}</b><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${fmtDT(m.at)} <button type="button" class="tr-msg-btn" data-act="tr-msg" title="Translate this message" aria-label="Translate this message">🌐</button></div></div>`).join('') : '<p class="muted small" style="text-align:center;margin:24px 0">No messages yet. Write the first one.</p>'}</div>
     <form data-form="teamchat-send" class="chat-form"><input name="text" maxlength="1000" autocomplete="off" placeholder="Write to the team…" required><button type="submit" class="btn primary">Send</button></form></div>`;
 }
 Object.assign(actions, {
@@ -5066,7 +5072,7 @@ function adminBrowserPage(s) {
   ].filter(Boolean);
   return `<p class="small muted">Work browser inside the dashboard. Google and others block embedding, so they open in a new tab — it is by design. For quick answers, use the search below (web results from DuckDuckGo).</p>
     <div class="card"><h3>🔗 Work shortcuts</h3><div class="chips" style="gap:10px;flex-wrap:wrap">${links.map(([i, n, u]) => `<a class="btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${i} ${esc(n)}</a>`).join('')}</div></div>
-    ${translatorCard()}
+    ${TR.translatorCard()}
     <div class="card"><h3>🔎 Web search (in-panel)</h3><form data-form="browser-search" class="row" style="gap:8px"><input name="q" placeholder="Search the web…" style="flex:1" autocomplete="off"><button type="submit" class="btn primary">Search</button></form>
       <div id="browser-frame" style="margin-top:14px;border:1px solid var(--line2);border-radius:12px;overflow:hidden;height:60vh"><iframe title="search results" style="width:100%;height:100%;border:0;background:#fff" src="about:blank"></iframe></div>
       <p class="small muted" style="margin-top:8px">If the results do not load, <a href="https://lite.duckduckgo.com/lite/" target="_blank" rel="noopener">open full search in a new tab →</a></p>
@@ -5253,6 +5259,16 @@ setTimeout(() => { // Watchdog: if the boot did not finish in 8s, show a clear m
     $('#app').innerHTML = `<div class="block-screen"><div class="ic">📡</div><h2>Can’t reach INTPROTO-TV right now</h2><p class="muted" style="max-width:340px">Please check your internet connection or VPN, then try again. If it keeps happening, your network may be blocking Cloudflare Workers.</p><button class="btn primary" onclick="location.reload()">Retry</button></div>`;
   }
 }, 8000);
+// Translator: the panel, a text, chat and web pages. The hub is opened from the
+// top bar; its actions are registered here so they exist before the first render.
+const TR = createTranslator({
+  toast, modal, closeModal, actions,
+  getState: () => state,
+  renderAdmin,
+  isAdmin: () => isAdminUI(),
+});
+Object.assign(actions, TR.actions);
+
 boot().catch((e) => {
   __diagSend({ kind: 'boot-throw', msg: String((e && e.message) || e || '').slice(0, 300) });
   const el = document.getElementById('app');
@@ -5469,55 +5485,6 @@ function applyLocks(root = document) {
 new MutationObserver(() => { clearTimeout(applyLocks.t); applyLocks.t = setTimeout(() => applyLocks(), 30); }).observe(document.documentElement, { childList: true, subtree: true });
 Object.assign(actions, {
   'mkt-html-save': async () => { try { await api('PUT', '/api/admin/emailmkt/settings', { html: ($('#mkt-html') || {}).value || '' }); toast('Saved: agents send this campaign ✓'); } catch (e) { toast(e.message, true); } },
-});
-
-// ---------------- In-panel translator: the whole panel (Google Translate) + a text / web-page translator, all languages ----------------
-const TR_LANGS = [['en', '🇬🇧 English'], ['ar', '🇸🇦 العربية'], ['fr', '🇫🇷 Français'], ['es', '🇪🇸 Español'], ['de', '🇩🇪 Deutsch'], ['it', '🇮🇹 Italiano'], ['pt', '🇵🇹 Português'], ['nl', '🇳🇱 Nederlands'], ['tr', '🇹🇷 Türkçe'], ['ru', '🇷🇺 Русский'], ['uk', '🇺🇦 Українська'], ['pl', '🇵🇱 Polski'], ['ro', '🇷🇴 Română'], ['el', '🇬🇷 Ελληνικά'], ['sv', '🇸🇪 Svenska'], ['th', '🇹🇭 ไทย'], ['vi', '🇻🇳 Tiếng Việt'], ['id', '🇮🇩 Indonesia'], ['ms', '🇲🇾 Melayu'], ['tl', '🇵🇭 Filipino'], ['hi', '🇮🇳 हिन्दी'], ['ur', '🇵🇰 اردو'], ['bn', '🇧🇩 বাংলা'], ['fa', '🇮🇷 فارسی'], ['he', '🇮🇱 עברית'], ['zh-CN', '🇨🇳 中文'], ['ja', '🇯🇵 日本語'], ['ko', '🇰🇷 한국어'], ['sw', '🇰🇪 Kiswahili'], ['am', '🇪🇹 አማርኛ'], ['so', '🇸🇴 Soomaali'], ['ha', '🇳🇬 Hausa']];
-const trCur = () => { try { return localStorage.getItem('tvp_tr') || 'en'; } catch { return 'en'; } };
-let trLoading = null;
-function trLoad() {
-  if (trLoading) return trLoading;
-  trLoading = new Promise((res, rej) => {
-    if (!document.getElementById('gt-el')) { const d = document.createElement('div'); d.id = 'gt-el'; d.style.cssText = 'position:fixed;left:-9999px;top:0'; document.body.appendChild(d); }
-    window.gtInit = () => { try { new window.google.translate.TranslateElement({ pageLanguage: 'en', autoDisplay: false }, 'gt-el'); res(); } catch (e) { rej(e); } };
-    const sc = document.createElement('script'); sc.src = 'https://translate.google.com/translate_a/element.js?cb=gtInit'; sc.async = true; sc.onerror = () => { trLoading = null; rej(new Error('The translator could not load (check the internet connection).')); }; document.head.appendChild(sc);
-  });
-  return trLoading;
-}
-async function trApply(lang) {
-  try { localStorage.setItem('tvp_tr', lang); } catch {}
-  const host = location.hostname; const cookie = (v) => { document.cookie = `googtrans=${v};path=/`; document.cookie = `googtrans=${v};path=/;domain=${host}`; document.cookie = `googtrans=${v};path=/;domain=.${host.split('.').slice(-2).join('.')}`; };
-  if (lang === 'en') { cookie('/en/en'); const sel = document.querySelector('.goog-te-combo'); if (sel) { sel.value = 'en'; sel.dispatchEvent(new Event('change')); } document.documentElement.classList.remove('translated-rtl'); setTimeout(() => location.reload(), 150); return; }
-  cookie('/en/' + lang); await trLoad();
-  for (let i = 0; i < 40; i++) { const sel = document.querySelector('.goog-te-combo'); if (sel && sel.options.length > 1) { sel.value = lang; sel.dispatchEvent(new Event('change')); break; } await new Promise((r) => setTimeout(r, 150)); }
-  document.documentElement.classList.toggle('translated-rtl', ['ar', 'ur', 'fa', 'he'].includes(lang));
-}
-function trAuto(me) { // the agent's language (Arabic for Arabic agents) is applied automatically; their own choice wins
-  if (!isAdminUI()) return; let saved = null; try { saved = localStorage.getItem('tvp_tr'); } catch {}
-  const lang = saved || (me && me.lang && me.lang !== 'en' ? me.lang : ''); if (lang && lang !== 'en') trApply(lang).catch(() => {});
-}
-function protectData(root = document) { document.documentElement.removeAttribute('translate'); root.querySelectorAll('#app [dir=ltr], #app code, #app .cred-v, #app .code, #app input, #app textarea, #app .tbl td:first-child b, #app .cl-card b, [data-no-tr]').forEach((e) => { if (!e.hasAttribute('translate')) e.setAttribute('translate', 'no'); }); }
-new MutationObserver(() => { clearTimeout(protectData.t); protectData.t = setTimeout(() => protectData(), 80); }).observe(document.documentElement, { childList: true, subtree: true });
-function translatorCard() {
-  const cur = trCur(); const opts = (sel) => TR_LANGS.map(([k, n]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${n}</option>`).join('');
-  return `<div class="card" id="tr-card"><h3>🌐 Translator</h3>
-    <div class="grid2" style="gap:14px;align-items:start"><div><b class="small">The whole panel</b><p class="small muted" style="margin:4px 0 8px">Shows every page of the panel in your language. Customer data (names, usernames, links, numbers) stays as it is.</p>
-      <div class="row" style="gap:8px"><select id="tr-panel" style="flex:1">${opts(cur)}</select><button class="btn primary" data-act="tr-panel-go">Translate the panel</button></div></div>
-    <div><b class="small">A text (customer message, reply…)</b><textarea id="tr-text" rows="4" placeholder="Paste or type any text, in any language" style="width:100%;margin-top:6px"></textarea>
-      <div class="row" style="gap:8px;margin-top:6px"><select id="tr-to" style="flex:1">${opts(cur === 'en' ? 'ar' : cur)}</select><button class="btn primary" data-act="tr-text-go">Translate</button></div>
-      <div id="tr-out" class="small" style="margin-top:8px;white-space:pre-wrap"></div></div></div>
-    <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><input id="tr-url" placeholder="https://… a web page to read in your language" style="flex:1;min-width:220px" dir="ltr"><button class="btn" data-act="tr-url-go">Translate this page ↗</button></div></div>`;
-}
-Object.assign(actions, {
-  'tr-open': () => { modal('🌐 Translator', translatorCard().replace('<div class="card" id="tr-card">', '<div id="tr-card">'), { wide: true }); },
-  'tr-panel-go': async (el) => { const lang = $('#tr-panel').value; closeModal(); el.disabled = true; try { await trApply(lang); document.querySelectorAll('[data-act=tr-open]').forEach((b) => { b.textContent = '🌐 ' + lang.toUpperCase().slice(0, 2); }); toast(lang === 'en' ? 'English ✓' : 'Translating the panel… ✓'); } catch (e) { toast(e.message, true); } el.disabled = false; },
-  'tr-text-go': async (el) => { const text = ($('#tr-text').value || '').trim(); const to = $('#tr-to').value; const out = $('#tr-out'); if (!text) return; el.disabled = true; out.textContent = '…';
-    try { const r = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(text.slice(0, 4500))}`); if (!r.ok) throw new Error('busy'); const j = await r.json(); const res = (j[0] || []).map((x) => x[0]).join('');
-      out.innerHTML = `<div class="notice allow-copy" dir="auto" translate="no" style="margin:0">${esc(res)}</div><div class="row" style="gap:6px;margin-top:6px"><button class="btn sm" data-act="tr-copy">📋 Copy</button><span class="small muted">From ${esc(String(j[2] || 'auto'))}</span></div>`; out.dataset.v = res; }
-    catch { out.innerHTML = `<a class="btn sm" target="_blank" rel="noopener" href="https://translate.google.com/?sl=auto&tl=${encodeURIComponent(to)}&text=${encodeURIComponent(text.slice(0, 4500))}&op=translate">Open the translation ↗</a>`; }
-    el.disabled = false; },
-  'tr-copy': async () => { const v = $('#tr-out')?.dataset.v || ''; try { await navigator.clipboard.writeText(v); toast(t('copied')); } catch {} },
-  'tr-url-go': () => { const u = ($('#tr-url').value || '').trim(); if (!/^https?:\/\//.test(u)) return toast('Paste a link starting with https://', true); window.open(`https://translate.google.com/translate?sl=auto&tl=${encodeURIComponent($('#tr-to')?.value || trCur() || 'ar')}&u=${encodeURIComponent(u)}`, '_blank', 'noopener'); },
 });
 
 // ---------------- Agent work planning: daily schedule, tasks to check off, rules (owner edits, agents check off) ----------------

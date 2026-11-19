@@ -149,6 +149,13 @@ Object.assign(D.fr, { srvCode: 'Le serveur TV n’a pas accepté cette demande (
 Object.assign(D.en, { paidTitle: 'Thank you for your payment', paidText: 'Your subscription is being activated. It usually updates within a minute; if not, send us your receipt and we activate it by hand.', paidBackTitle: 'Did you finish paying?', paidBackText: 'If you paid, your subscription updates shortly. If it does not, send us your receipt here.' });
 Object.assign(D.fr, { paidTitle: 'Merci pour votre paiement', paidText: 'Votre abonnement est en cours d’activation. La mise à jour prend généralement moins d’une minute ; sinon, envoyez-nous votre reçu et nous l’activons manuellement.', paidBackTitle: 'Avez-vous terminé le paiement ?', paidBackText: 'Si vous avez payé, votre abonnement se met à jour sous peu. Sinon, envoyez-nous votre reçu ici.' });
 
+Object.assign(D.en, { noLangMatch: 'No language matches your search.', chooseLang: 'Choose the language of the app. You can change it at any time.', searchLang: 'Search a language…', suggestedLang: 'Suggested for your device', recentLang: 'Recent', previewLang: 'Live preview', savedDevice: 'Saved on this device. Your login, links and customer data never change.' });
+Object.assign(D.fr, { noLangMatch: 'Aucune langue ne correspond à votre recherche.', chooseLang: 'Choisissez la langue de l’application. Vous pouvez la changer à tout moment.', searchLang: 'Rechercher une langue…', suggestedLang: 'Suggéré pour votre appareil', recentLang: 'Récent', previewLang: 'Aperçu', savedDevice: 'Enregistré sur cet appareil. Votre identifiant, vos liens et les données clients ne changent pas.' });
+Object.assign(D.de, { noLangMatch: 'Keine Sprache passt zu Ihrer Suche.', chooseLang: 'Wählen Sie die Sprache der App. Sie können sie jederzeit ändern.', searchLang: 'Sprache suchen…', suggestedLang: 'Für Ihr Gerät vorgeschlagen', recentLang: 'Zuletzt', previewLang: 'Vorschau', savedDevice: 'Auf diesem Gerät gespeichert. Anmeldung, Links und Kundendaten bleiben unverändert.' });
+Object.assign(D.es, { noLangMatch: 'Ningún idioma coincide con tu búsqueda.', chooseLang: 'Elige el idioma de la aplicación. Puedes cambiarlo cuando quieras.', searchLang: 'Buscar un idioma…', suggestedLang: 'Sugerido para tu dispositivo', recentLang: 'Reciente', previewLang: 'Vista previa', savedDevice: 'Guardado en este dispositivo. Tu acceso, tus enlaces y los datos de clientes no cambian.' });
+Object.assign(D.it, { noLangMatch: 'Nessuna lingua corrisponde alla ricerca.', chooseLang: 'Scegli la lingua dell’app. Puoi cambiarla in qualsiasi momento.', searchLang: 'Cerca una lingua…', suggestedLang: 'Suggerita per il tuo dispositivo', recentLang: 'Recenti', previewLang: 'Anteprima', savedDevice: 'Salvata su questo dispositivo. Accesso, link e dati dei clienti non cambiano.' });
+Object.assign(D.ar, { noLangMatch: 'لا توجد لغة تطابق بحثك.', chooseLang: 'اختر لغة التطبيق. يمكنك تغييرها في أي وقت.', searchLang: 'ابحث عن لغة…', suggestedLang: 'مقترحة لجهازك', recentLang: 'الأخيرة', previewLang: 'معاينة مباشرة', savedDevice: 'محفوظة على هذا الجهاز. تسجيل الدخول والروابط وبيانات العملاء لا تتغير.' });
+
 export const LANGS = [['en', 'English'], ['fr', 'Français'], ['de', 'Deutsch'], ['es', 'Español'], ['it', 'Italiano'], ['ar', 'العربية']];
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');
@@ -170,6 +177,12 @@ export const getLang = () => lang;
 export const locale = () => ({ fr: 'fr-FR', de: 'de-DE', es: 'es-ES', it: 'it-IT' }[lang] || 'en-GB');
 export function t(key, vars = {}) {
   const s = (D[lang] && D[lang][key]) ?? D.en[key] ?? key;
+  return String(s).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+}
+// A string in a specific language, without changing the current one. Used by
+// the Language Center's live preview.
+export function tIn(code, key, vars = {}) {
+  const s = (D[code] && D[code][key]) ?? D.en[key] ?? key;
   return String(s).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 }
 // Map English server messages to the current language

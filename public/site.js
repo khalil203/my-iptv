@@ -3,6 +3,7 @@
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
 import { ic } from './icons.js?v=102';
+import { flagOf, nameOf } from './lang-data.js?v=121';
 
 const T = {
   en: {
@@ -67,7 +68,7 @@ export function siteHtml({ config, lang, langs, page }) {
     ${page === 'home' ? `<details class="s-menu"><summary aria-label="${L.menu || 'Menu'}">☰ ${L.menu || 'Menu'}</summary><nav aria-label="${L.menu || 'Menu'}">${L.nav.map((n, i) => `<a href="#${IDS[i]}" data-act="site-jump" data-to="${IDS[i]}">${n}</a>`).join('')}</nav></details>` : ''}
     <div class="s-navbtns"><button class="btn" data-act="site-login">${L.signIn}</button>${trialOn ? `<button class="btn primary s-hide-sm" data-act="trial">${L.start}</button>` : ''}</div></header>`;
   const foot = `<footer class="s-foot"><div class="s-footrow">${['about', 'privacy', 'terms'].map((p, i) => `<a href="#" data-act="site-page" data-page="${p}">${L.foot[i]}</a>`).join('')}<a href="download.html">${L.getApp}</a></div>
-    <div class="s-footrow lang-sw">${langs.map(([k, n]) => `<a href="#" data-act="lang" data-lang="${k}" class="${lang === k ? 'on' : ''}">${n}</a>`).join('')}</div>
+    <div class="s-footrow"><button type="button" class="ls-chip ls-chip-lg" data-act="lang-center" aria-haspopup="dialog"><span aria-hidden="true">${flagOf(lang)}</span>${esc(nameOf(lang))}<span class="ls-caret" aria-hidden="true">⌄</span></button></div>
     <p class="muted small">© ${new Date().getFullYear()} ${app}. ${L.rights}</p></footer>`;
   if (page === 'about' || page === 'privacy' || page === 'terms') {
     const title = fill(page === 'about' ? L.aboutT : page === 'privacy' ? L.privT : L.termsT, { app });
