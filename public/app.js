@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=104';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=106';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=104';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=106';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -209,6 +209,10 @@ function route() {
   if (state.token) pushRelink();
   if (state.token && state.role === 'user') setTimeout(reportDevice, 1200);
   const path = location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/app') return renderAppPage();
+  takeDeepLink();
+  // Before the dashboard opens: one tap to allow notifications (customers, resellers, agents, owner)
+  if (state.token && !state.preview && notifGateDue()) return renderNotifGate();
   // Reseller dashboard: intproto-tv.store/rsl
   if (state.token && state.role === 'reseller') { if (path !== '/rsl') history.replaceState(null, '', '/rsl'); return renderRsl(); }
   if (/^\/support$/i.test(path) && !isAdminUI() && state.role !== 'admin' && state.role !== 'staff') return renderSupport();
@@ -416,6 +420,7 @@ function supDraw() {
 const RSL = { d: null, tab: 'home', q: '' };
 const rslLangSel = () => `<select data-input="rsl-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
 async function renderRsl() {
+  goAfterRender();
   document.documentElement.dir = 'ltr';
   if (state.role !== 'reseller') {
     $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>🤝 ${esc(t('rsl_title'))}</h2><p class="muted">${esc(t('rsl_custAcc'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a><div class="login-foot"><a href="/">← ${esc(state.config.branding.appName || t('home'))}</a></div></div></div>`; return;
@@ -526,6 +531,7 @@ const ADMIN_TABS = [
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['sales', '📈', 'Sales tracker', 'sales', 'Money', 'sales daily monthly revenue transactions tracker today month'],
   ['plans', '🏷️', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
+  ['promos', '🎉', 'Promotions', 'customers_view', 'Marketing', 'promotions templates christmas new year black friday cyber monday sports cinema streaming champions league ufc formula 1 evergreen all year samsung iphone smart tv whatsapp email notification'],
   ['mkt', '📣', 'Email marketing', 'marketing', 'Marketing', 'resend keys rotation bounce lists campaign send marketing newsletter'],
   ['seo', '🧵', 'SEO & social', 'seo', 'Marketing', 'reddit quora facebook posts agents results seo social'],
   ['gads', '🔎', 'Google Ads', 'ads', 'Marketing', 'google ads campaigns budget spend domain'],
@@ -650,6 +656,7 @@ async function renderAdmin() {
     else if (t === 'accounts') body.innerHTML = await adminAccounts();
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'mail') body.innerHTML = await adminMail();
+    else if (t === 'promos') body.innerHTML = await adminPromos();
     else if (t === 'wanums') body.innerHTML = waNumbersCard(s);
     else if (t === 'notify') { body.innerHTML = await adminNotify(s); pushPaint(); }
     else if (t === 'support') body.innerHTML = await adminSupport();
@@ -667,6 +674,8 @@ async function renderAdmin() {
     else if (t === 'team') body.innerHTML = await adminTeam();
     else if (t === 'dups') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminDups(); }
     animateIn(body);
+    const oa = state.admin.openAfter; if (oa && oa.tab === t) { state.admin.openAfter = null; if (t === 'support') adminTicketModal(oa.id); else if (t === 'customers' && actions['view-customer']) actions['view-customer']({ dataset: { id: oa.id } }); }
+    goAfterRender();
   } catch (e) { if (state.token) $('#admin-body').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
 }
 
@@ -698,6 +707,56 @@ async function mailStatusCard(compact, onPage) {
     <p class="small muted">Paid keys are used first, then free trial keys. A key that reaches its limit or gets an error from Resend is set aside and the next key sends the email, so no email is lost. Free trial accounts can send 100 emails a day and 3,000 a month.${d.canEdit ? ' Set the plan of each key in API settings → Resend keys, Email marketing, or Accounts & API keys.' : ' Only the owner, Khalil and Nizar can change the keys and plans.'}</p>`;
 }
 
+// ---------------- notifications before the dashboard + links from notifications ----------------
+// Browsers only allow notifications after one tap on "Allow"; a device that already allowed them is connected silently.
+function notifGateDue() {
+  try {
+    if (state.mode === 'demo' && !localStorage.getItem('tvp_ngate_test')) return false;
+    const last = Number(localStorage.getItem('tvp_ngate_' + state.role) || 0); if (Date.now() - last < 3 * 86400000) return false;
+    if (PUSH.ok) { if (Notification.permission === 'granted') { pushAutoLink(); return false; } return Notification.permission === 'default'; }
+    return isIOS() && !isStandalone(); // iPhone in Safari: show how to install the app (needed for notifications)
+  } catch { return false; }
+}
+async function pushAutoLink() { try { if (!(await pushSub())) await pushEnable(); } catch {} }
+function renderNotifGate() {
+  const A = isAdminUI(); const T = (k, en) => (A ? en : t(k)); const b = state.config.branding || {}; const ios = !PUSH.ok && isIOS() && !isStandalone();
+  document.documentElement.dir = A ? 'ltr' : document.documentElement.dir;
+  $('#app').innerHTML = `<div class="block-screen notif-gate" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px">
+    ${b.logoUrl ? `<img src="${esc(b.logoUrl)}" alt="" style="max-height:64px;margin-bottom:10px">` : ''}<div style="font-size:64px;line-height:1">🔔</div>
+    <h2 style="margin:12px 0 6px">${esc(T('ngTitle', 'Allow notifications'))}</h2>
+    <p class="muted" style="max-width:420px;margin:0 auto 18px">${esc(ios ? T('ngIos', 'On iPhone and iPad, notifications work in the app: tap Share, then “Add to Home Screen”, and open the app from your home screen.') : T('ngText', A ? 'Get support requests, free trials and shift reminders instantly on this device, even when the panel is closed.' : ''))}</p>
+    ${ios ? '' : `<button class="btn primary" data-act="ngate-allow" style="font-size:18px;padding:14px 28px;min-width:260px">🔔 ${esc(T('ngAllow', 'Allow notifications'))}</button>`}
+    <button class="btn ghost" data-act="ngate-later" style="margin-top:12px">${esc(ios ? T('ngContinue', 'Continue') : T('ngLater', 'Not now'))}</button></div>`;
+}
+// A link from a notification: ?tab=support&open=<ticket> in the panel, ?go=<section> for customers and resellers
+function takeDeepLink() {
+  const q = new URLSearchParams(location.search); const tab = q.get('tab'), open = q.get('open'), go = q.get('go'); if (!tab && !go && !open) return;
+  if (isAdminUI() && tab && state.admin) { state.admin.tab = tab; if (open) state.admin.openAfter = { tab, id: open }; }
+  if (!isAdminUI() && state.user && tab) state.user.tab = tab;
+  if (state.role === 'reseller' && tab && typeof RSL !== 'undefined') RSL.tab = tab;
+  if (go) state.goAfter = go;
+  history.replaceState(null, '', location.pathname);
+}
+function goAfterRender() {
+  const go = state.goAfter; if (!go) return; let n = 0;
+  const tick = () => { const el = document.getElementById(go) || document.querySelector(`[data-go="${go}"]`); if (el) { state.goAfter = ''; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.classList.add('flash-go'); setTimeout(() => el.classList.remove('flash-go'), 2500); } else if (++n < 30) setTimeout(tick, 200); else state.goAfter = ''; };
+  setTimeout(tick, 300);
+}
+// ---------------- /app: install the app + notifications (link in the emails) ----------------
+let installEvt = null; window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; const b = document.getElementById('app-install'); if (b) b.hidden = false; });
+function renderAppPage() {
+  const b = state.config.branding || {}; const app = b.appName || 'INTPROTO-TV'; const home = state.role === 'reseller' ? '/rsl' : state.role === 'admin' || state.role === 'staff' ? '/intprototv' : '/';
+  if (isStandalone() && state.token) { location.replace(home); return; }
+  const ios = isIOS(); const inst = isStandalone();
+  $('#app').innerHTML = `<div class="site"><main class="s-doc" style="max-width:560px;margin:0 auto;text-align:center">
+    ${b.logoUrl ? `<img src="${esc(b.logoUrl)}" alt="" style="max-height:72px;margin:10px auto">` : ''}<h1>📲 ${esc(t('appTitle', { app }))}</h1><p class="s-sub">${esc(t('appSub'))}</p>
+    <div class="card" style="text-align:left"><h3>1. ${esc(t('appStep1'))}</h3>
+      ${inst ? `<p class="pos">✓ ${esc(t('appInstalled'))}</p>` : ios ? `<p>${esc(t('appIos'))}</p>` : `<button class="btn primary block" id="app-install" data-act="app-install" ${installEvt ? '' : 'hidden'}>📲 ${esc(t('appInstallBtn', { app }))}</button><p class="small muted">${esc(t('appOther'))}</p>`}</div>
+    <div class="card" style="text-align:left"><h3>2. ${esc(t('appStep2'))}</h3><p class="small muted" style="margin-top:0">${esc(t('appStep2Text'))}</p>
+      ${state.token ? pushBox(false) : `<a class="btn primary block" href="/profile">${esc(t('appSignIn'))}</a>`}</div>
+    <div class="row" style="gap:8px;justify-content:center;margin-top:12px"><a class="btn" href="${home}">${esc(t('appOpen'))}</a><a class="btn ghost" href="/profile">👤 ${esc(t('appProfile'))}</a></div>
+  </main></div>`;
+}
 // ---------------- notifications on this device (laptops, tablets, iPhone, Android) ----------------
 const PUSH = { ok: 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window };
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -826,6 +885,26 @@ async function adminMail() {
               <button class="btn primary sm">🔗 Connect ${H ? 'Hostinger' : 'Dynu'}</button></form></div>`; }).join('')}
       </div></div>
     <p class="small muted">Everything here is the same list as 🗝️ Accounts & API keys and the Google Sheet: change it in any of the three and the sending keys follow (plan, domain, on/off). Paid keys send first; free trial keys only up to 100 a day and 3,000 a month.</p>`;
+}
+// ---------------- 🎉 Promotions: ready all-year and seasonal campaigns for Email, WhatsApp and the app ----------------
+const PROMO = { lang: 'en', data: null };
+async function adminPromos() {
+  try { PROMO.data = await api('GET', '/api/admin/promo/library'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
+  const L = PROMO.lang; const by = Object.fromEntries(PROMO.data.kinds.map((k) => [k.id, k]));
+  const card = ([k, name]) => { const x = by[k]; if (!x) return ''; const wa = x.wa[L] || x.wa.en; const desc = { holidays: 'Holiday & New Year offers on 1-Year, Multi-Device and Reseller plans.', blackfriday: 'Limited-time deal on packages and reseller credit bundles.', cybermonday: 'The online follow-up to Black Friday, packages and credits.', events: 'Live sports seasons, cinema releases and streaming line-ups: Champions League, UFC, Formula 1…', evergreen: 'An offer you can send any day of the year.', devices: 'Works on Samsung, iPhone, iPad, Android, Smart TV, Fire TV: perfect for multi-device plans.', christmas: 'Christmas only.', newyear: 'New Year only.' }[k];
+    return `<div class="card promo-card" style="margin:0"><div class="row" style="align-items:flex-start;gap:8px"><h3 style="margin:0;flex:1">${esc(name)}</h3><span class="pill">${k === 'evergreen' || k === 'events' || k === 'devices' ? 'All year' : 'Seasonal'}</span></div>
+      <p class="small muted" style="margin:6px 0 8px">${esc(desc)}</p>
+      <pre class="promo-wa" style="white-space:pre-wrap;font:inherit;font-size:13px;max-height:180px;overflow:auto;background:rgba(127,127,127,.08);border-radius:10px;padding:10px;margin:0">${esc(wa)}</pre>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn sm primary" data-act="nl-season" data-k="${k}">📧 Email to customers</button>
+        <button class="btn sm" data-act="promo-wa" data-k="${k}">💬 WhatsApp</button>
+        <button class="btn sm" data-act="promo-note" data-k="${k}">🔔 App notification</button>
+      </div></div>`; };
+  return `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
+    <label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">Preview in <select data-input="promo-lang" style="width:auto">${LANG5.map(([c, n]) => `<option value="${c}" ${c === L ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div></div>
+    <h4 style="margin:14px 0 8px">All year</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => ['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
+    <h4 style="margin:18px 0 8px">Seasonal</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => !['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
+    <p class="small muted" style="margin-top:14px">📧 opens the template in Email marketing (add a discount, code or end date, preview, then send). 💬 gives the WhatsApp text to copy for a broadcast list or your status, or use it per customer in their WhatsApp window (“📣” messages). 🔔 sends it inside the customers' app and to their phones.</p>`;
 }
 async function adminOverview() {
   const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
@@ -1905,11 +1984,11 @@ async function reportDevice() {
 function inboxCard(list) {
   const L = (list || []).slice(0, 5); if (!L.length) return '';
   const unread = L.filter((n) => !n.read).length; if (unread) setTimeout(() => api('POST', '/api/me/inbox/read').then(() => { (state.user.me.inbox || []).forEach((n) => { n.read = n.read || Date.now(); }); }).catch(() => {}), 1500);
-  return `<div class="card inbox-card" style="margin-bottom:12px"><h3 style="margin-top:0">🔔 ${esc(t('notifInbox'))}${unread ? ` <span class="pill st-expiring">${unread} ${esc(t('notifNew'))}</span>` : ''}</h3>
+  return `<div class="card inbox-card" id="inbox" style="margin-bottom:12px"><h3 style="margin-top:0">🔔 ${esc(t('notifInbox'))}${unread ? ` <span class="pill st-expiring">${unread} ${esc(t('notifNew'))}</span>` : ''}</h3>
     ${L.map((n) => `<div class="list-item" style="align-items:flex-start${n.read ? ';opacity:.75' : ''}"><div style="flex:1"><b>${esc(n.title)}</b>${n.body ? `<div class="small" style="white-space:pre-wrap">${esc(n.body)}</div>` : ''}<div class="small muted">${fmtDT(n.at)}</div></div>${n.read ? '' : '<span class="dot-new" style="width:8px;height:8px;border-radius:50%;background:var(--accent,#0ea5e9);margin-top:6px"></span>'}</div>`).join('')}</div>`;
 }
 async function renderUser() {
-  reportDevice();
+  reportDevice(); goAfterRender();
   const u = state.user;
   if (u.me && u.me.agreed === false) return renderTermsScreen();
   if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify('_stream' in u.me ? u.me._stream : u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); applySource(); } catch { return; } }
@@ -1938,7 +2017,7 @@ async function renderUser() {
 }
 
 async function renderProfile() {
-  const u = state.user; reportDevice();
+  const u = state.user; reportDevice(); goAfterRender();
   if (u.me && u.me.agreed === false) return renderTermsScreen();
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
@@ -2208,7 +2287,7 @@ function orderCard() {
     <p class="small muted" style="margin:10px 0 0">${t('buyHow')}</p><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
-  if (state.user.me.orderPackages?.length || state.user.me.resellerPackages?.length) return `<div id="acc-plans">${orderCard()}</div>`;
+  if (state.user.me.orderPackages?.length || state.user.me.resellerPackages?.length) return `<div id="acc-plans" data-go="packages">${orderCard()}</div>`;
   const me = state.user.me; if (!me.plans?.length) return '';
   const sup = me.branding.supportUrl;
   return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
@@ -2634,7 +2713,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''), custCC(c))}</div>
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...PROMO_KINDS.map(([k, n]) => ['promo_' + k, '📣 ' + n]), ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''), custCC(c))}</div>
       <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s, c.cur)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', c.cur || 'USD', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
@@ -2718,7 +2797,7 @@ const actions = {
     if (running) d = st.camp; d = { ...nlBlank(), ...(d || {}), content: { ...nlBlank().content, ...(d?.content || {}) } };
     const link = String(d.link || ''); const linkSel = ['', 'site', 'app', 'contact'].includes(link) ? link : link.startsWith('pkg:') ? 'contact' : 'url';
     const body = modal('📣 Newsletter / promotion email', `<form data-form="nl" onsubmit="return false" ${running ? `data-cid="${esc(d.id)}"` : ''} ${d.badges ? `data-badges="${esc(JSON.stringify(d.badges))}" data-badge0="${esc(d.badge || '')}"` : ''}>
-      ${running ? '' : `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px"><span class="small muted">📚 Ready templates (5 languages):</span>${[['blackfriday', '🖤 Black Friday'], ['cybermonday', '💻 Cyber Monday'], ['christmas', '🎄 Christmas'], ['newyear', '🎆 New Year']].map(([k, n]) => `<button type="button" class="btn sm" data-act="nl-season" data-k="${k}">${n}</button>`).join('')}</div>`}
+      ${running ? '' : `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px"><span class="small muted">📚 Ready templates (5 languages):</span>${PROMO_KINDS.map(([k, n]) => `<button type="button" class="btn sm" data-act="nl-season" data-k="${k}">${n}</button>`).join('')}</div>`}
       ${running ? `<div class="notice info">⏸ Your last campaign stopped with <b>${st.groups[d.group].left}</b> customers still waiting. Press <b>Send</b> to continue it, or <a data-act="nl-new" style="cursor:pointer;text-decoration:underline">start a new one</a>.</div>` : ''}
       <div class="grid2">${field('Send to', 'group', d.group, { type: 'select', options: NL_GROUPS.map(([k, l]) => [k, `${l} (${st.groups[k].total})`]) })}${field('Languages', 'split', d.split ? '1' : '0', { type: 'select', options: [['0', 'One message for everyone'], ['1', 'Different message per language (EN / FR / AR)']] })}</div>
       <div id="nl-one">${field('Email language (greeting & footer)', 'lang', d.lang || 'en', { type: 'select', options: NL_LANGS })}${nlFields('all', d.content.all)}</div>
@@ -2771,6 +2850,17 @@ const actions = {
   'wa-num-add': () => { const box = $('#wa-num-list'); box.querySelector('.wa-empty')?.remove(); box.insertAdjacentHTML('beforeend', waNumRow({ use: box.children.length ? 'other' : 'main', on: true }, Date.now() % 100000)); },
   'wa-num-del': (el) => { if (confirm('Remove this number? Press Save afterwards.')) el.closest('.wa-num').remove(); },
   'wa-num-focus': (e, ev) => { ev?.preventDefault?.(); $('#wa-numbers')?.scrollIntoView({ behavior: 'smooth' }); },
+  'promo-wa': (el) => { const x = PROMO.data.kinds.find((k) => k.id === el.dataset.k); const name = Object.fromEntries(PROMO_KINDS)[x.id];
+    modal(`💬 ${esc(name)} · WhatsApp`, `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${LANG5.map(([c, n]) => `<button class="btn sm ${c === PROMO.lang ? 'primary' : ''}" data-act="promo-wa-l" data-k="${x.id}" data-l="${c}">${n}</button>`).join('')}</div>
+      <textarea id="promo-wa-text" rows="14" style="width:100%" data-input="promo-wa-edit">${esc(x.wa[PROMO.lang] || x.wa.en)}</textarea>
+      <div class="row" style="gap:6px;justify-content:flex-end;margin-top:8px"><button class="btn" data-act="promo-copy">📋 Copy</button><a class="btn wa-btn" id="promo-wa-share" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(x.wa[PROMO.lang] || x.wa.en)}">💬 Open WhatsApp</a></div>
+      <p class="small muted">“Open WhatsApp” lets you pick a chat, a group or a broadcast list. To send it to one customer with their name, open the customer's 💬 WhatsApp window and choose “📣 ${esc(name)}”.</p>`, { wide: true }); },
+  'promo-copy': async () => { const v = $('#promo-wa-text').value; try { await navigator.clipboard.writeText(v); toast('Copied ✓'); } catch { $('#promo-wa-text').select(); document.execCommand('copy'); toast('Copied ✓'); } },
+  'promo-wa-l': (el) => { const x = PROMO.data.kinds.find((k) => k.id === el.dataset.k); const t2 = x.wa[el.dataset.l] || x.wa.en; $('#promo-wa-text').value = t2; $('#promo-wa-share').href = 'https://wa.me/?text=' + encodeURIComponent(t2); document.querySelectorAll('[data-act=promo-wa-l]').forEach((b) => b.classList.toggle('primary', b === el)); },
+  'promo-note': (el) => { const x = PROMO.data.kinds.find((k) => k.id === el.dataset.k); noteModal(null); setTimeout(() => { const f = document.querySelector('form[data-form=note-send]'); if (!f) return; const n = x.note[PROMO.lang] || x.note.en; f.title.value = n.title; f.body.value = n.body; f.audience.value = ['events', 'evergreen', 'devices'].includes(x.id) ? 'expired' : 'all'; }, 50); },
+  'ngate-allow': async (el) => { el.disabled = true; try { await pushEnable(); toast(isAdminUI() ? 'Notifications are on ✓' : t('notifIsOn')); } catch (e) { toast(e.message, true); } try { localStorage.setItem('tvp_ngate_' + state.role, String(Date.now())); } catch {} route(); },
+  'ngate-later': () => { try { localStorage.setItem('tvp_ngate_' + state.role, String(Date.now())); } catch {} route(); },
+  'app-install': async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch {} installEvt = null; renderAppPage(); },
   'exp-open': (el) => { const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) expModal(c); },
   'exp-add': (el) => expDo(el.closest('form').dataset.id, { action: 'add', days: Number(el.dataset.days) }),
   'exp-now': (el) => { if (confirm('End this subscription now?')) expDo(el.closest('form').dataset.id, { action: 'now' }); },
@@ -2786,8 +2876,8 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
       <form data-form="acc-sheet">${field('Apps Script web app link', 'url', d.sheetUrl || '', { ph: 'https://script.google.com/macros/s/…/exec', attrs: 'autocapitalize="none"' })}
       <div class="row" style="justify-content:flex-end;gap:6px"><button class="btn" data-do="save">Save link</button><button class="btn" data-do="pull" ${d.sheetUrl ? '' : 'disabled'}>⬇ Read from sheet</button><button class="btn primary" data-do="push" ${d.sheetUrl ? '' : 'disabled'}>⬆ Send to sheet</button></div></form>`, { wide: true }); },
   'acc-paste': () => modal('📋 Paste rows', `<p class="small muted" style="margin-top:0">Copy rows from your sheet (columns: ${esc(ACC.d.head.join(' · '))}) and paste them here. Existing accounts (same API key or same name) are updated.</p><form data-form="acc-paste"><textarea name="text" rows="8" style="width:100%" required></textarea><div class="row" style="justify-content:flex-end"><button class="btn primary">Add</button></div></form>`, { wide: true }),
-  'nl-season': (el) => { const k = el.dataset.k; const names = { blackfriday: '🖤 Black Friday', cybermonday: '💻 Cyber Monday', christmas: '🎄 Christmas', newyear: '🎆 New Year' }; const pr = state.admin.settings?.promo || {};
-    const y = new Date().getFullYear(); const ends = { blackfriday: pr.to || `${y}-12-01`, cybermonday: `${y}-12-02`, christmas: `${y}-12-26`, newyear: `${y + (new Date().getMonth() === 0 ? 0 : 1)}-01-07` };
+  'nl-season': (el) => { const k = el.dataset.k; const names = Object.fromEntries(PROMO_KINDS); const pr = state.admin.settings?.promo || {};
+    const ends = PROMO_ENDS();
     modal(`${names[k]} · email template`, `<form data-form="nl-season" data-k="${k}"><p class="small muted" style="margin-top:0">Ready in English, French, German, Spanish and Italian — each customer gets their language. You can edit every text after loading it.</p>
       <div class="grid3">${field('Discount (optional)', 'offer', k === 'blackfriday' ? pr.offer || '' : '', { ph: '30% OFF', help: 'Empty = a general wording without a number.' })}${field('Coupon code (optional)', 'code', k === 'blackfriday' ? pr.code || '' : '', { ph: k.toUpperCase() })}${field('Offer ends', 'end', ends[k], { type: 'date' })}</div>
       <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="nl-open">← Back</button><button class="btn primary">Load into the newsletter</button></div></form>`); },
@@ -3440,6 +3530,8 @@ document.addEventListener('input', (e) => {
   if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'rsl-lang') { setLang(t.value, true); return rslDraw(); }
+  if (t.dataset.input === 'promo-wa-edit') { const a = $('#promo-wa-share'); if (a) a.href = 'https://wa.me/?text=' + encodeURIComponent(t.value); return; }
+  if (t.dataset.input === 'promo-lang') { PROMO.lang = t.value; renderAdmin(); return; }
   if (t.dataset.input === 'mail-plan') { if (!t.value) return; if (t.value === 'custom') return actions['mail-plan-custom'](t);
     api('POST', '/api/admin/email/plan', { id: t.dataset.id, tier: t.value }).then(() => { toast(t.value === 'free' ? 'Set to free trial ✓' : 'Upgraded to paid ✓'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
   if (t.dataset.input === 'mail-on') { api('POST', '/api/admin/email/sending', { id: t.dataset.id, on: t.checked }).then(() => { toast(t.checked ? 'Sending switched on ✓' : 'Sending switched off'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
@@ -3602,6 +3694,8 @@ function showReset() {
 }
 
 // ---------------- admin: support desk ----------------
+const PROMO_KINDS = [['holidays', '🎁 Christmas & New Year'], ['blackfriday', '🖤 Black Friday'], ['cybermonday', '💻 Cyber Monday'], ['events', '🏆 Sports, cinema & streaming'], ['evergreen', '⭐ All-year offer'], ['devices', '📱 Samsung, iPhone & Smart TV'], ['christmas', '🎄 Christmas'], ['newyear', '🎆 New Year']];
+const PROMO_ENDS = () => { const y = new Date().getFullYear(), m = new Date().getMonth(); const pr = state.admin.settings?.promo || {}; return { blackfriday: pr.to || `${y}-12-01`, cybermonday: `${y}-12-02`, christmas: `${y}-12-26`, newyear: `${y + (m === 0 ? 0 : 1)}-01-07`, holidays: `${y + (m === 0 ? 0 : 1)}-01-07`, events: '', evergreen: '', devices: '' }; };
 const TK_CATS = { login: 'Login / activation', channels: 'Channels', payment: 'Payment / renewal', device: 'Device setup', other: 'Other' };
 async function adminSupport() {
   const list = await api('GET', '/api/admin/tickets'); state.admin.tickets = list;

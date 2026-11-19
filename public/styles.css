@@ -1109,3 +1109,5 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 /* customer device badges */
 .pill.dev-samsung{background:rgba(37,99,235,.14);color:#2563eb}
 .pill.dev-apple{background:rgba(100,116,139,.18)}
+/* the section a notification opens */
+.flash-go{outline:3px solid var(--accent,#0ea5e9);outline-offset:4px;border-radius:14px;transition:outline-color 2s}

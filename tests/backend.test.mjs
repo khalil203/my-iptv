@@ -2066,3 +2066,40 @@ test('device, end date controls, app notifications and WhatsApp numbers', async 
   const cfg = (await x.call('GET', '/api/config')).json; assert.equal(cfg.branding.whatsapp, '12035550143'); assert.deepEqual(cfg.waNumbers.map((w) => w.use), ['main', 'support']);
   assert.equal((await x.call('GET', '/api/support/info')).json.whatsapp, '41791234567');
 });
+
+test('promotions library, WhatsApp promos, app link in emails, notifications open the right page', async () => {
+  const x = setup(async (url) => (url.startsWith('https://push.example.com/') ? { ok: true, status: 201, json: async () => ({}) } : null)); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { appUrl: 'https://tv.example.com', resendKey: 're_test', from: 'App <no-reply@example.com>' } }, tok);
+  // 1. eight ready promotions, each in 5 languages, with the free trial and support links
+  const lib = (await x.call('GET', '/api/admin/promo/library', {}, tok)).json.kinds; const ids = lib.map((k) => k.id);
+  for (const k of ['holidays', 'blackfriday', 'cybermonday', 'events', 'evergreen', 'devices', 'christmas', 'newyear']) assert.ok(ids.includes(k), k);
+  const ev = lib.find((k) => k.id === 'events');
+  assert.match(ev.wa.en, /Never Miss a Big Game or Blockbuster Premiere!/); assert.match(ev.wa.en, /Champions League match, UFC fight night, Formula 1 race/);
+  assert.match(ev.wa.en, /https:\/\/tv\.example\.com\/freetrial/); assert.match(ev.wa.en, /https:\/\/tv\.example\.com\/support/); assert.match(ev.wa.en, /Samsung, iPhone, Smart TV/);
+  for (const k of lib) for (const l of ['en', 'fr', 'de', 'es', 'it']) { assert.ok(k.wa[l].includes('/freetrial'), k.id + ' ' + l); assert.doesNotMatch(k.wa[l], /\{\w+\}/, k.id + ' ' + l); }
+  const em = (await x.call('GET', '/api/admin/newsletter/season', {}, tok, { kind: 'holidays', offer: '30% OFF', code: 'XMAS30', end: '2027-01-07' })).json.campaign;
+  assert.match(em.content.en.body, /30% OFF/); assert.match(em.content.en.body, /XMAS30/); assert.match(em.content.en.body, /1-Year.*Multi-Device.*Reseller/); assert.match(em.content.de.body, /tv\.example\.com\/support/);
+  // 2. WhatsApp window: the promotion in the customer's language, with their name
+  const c = await addCustomer(x, tok, { username: 'promo1', email: 'promo.one@gmx.de', name: 'Anna Test', lang: 'de' });
+  const w = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'promo_events', appUrl: 'https://tv.example.com' }, tok)).json;
+  assert.equal(w.type, 'promo_events'); assert.match(w.text, /Anna/); assert.match(w.text, /Champions-League/); assert.match(w.text, /tv\.example\.com\/freetrial/);
+  // 3. the profile email keeps the login details and the profile link; its button downloads the app
+  const pm = (await x.call('GET', `/api/admin/customers/${c.id}/profilepreview`, {}, tok, { appUrl: 'https://tv.example.com' })).json.html;
+  assert.match(pm, /promo1/); assert.match(pm, /tv\.example\.com\/profile/); assert.match(pm, /href="https:\/\/tv\.example\.com\/app"/); assert.match(pm, /App herunterladen/);
+  // 4. a tap on a notification opens the right page
+  await x.call('POST', '/api/push/subscribe', { sub: { endpoint: 'https://push.example.com/owner' }, silent: true }, tok);
+  const st = await x.call('POST', '/api/support/start', { name: 'Test Person', email: 'test.person@example.com', phone: '+12025550143' });
+  const tk = await x.call('POST', '/api/support/ticket', { token: st.json.token, subject: 'No sound', text: 'There is no sound on sport channels.' });
+  const tid = (await x.call('GET', '/api/admin/tickets', {}, tok)).json.find((t) => t.ref === tk.json.ref).id;
+  const notes = (await x.call('POST', '/api/push/pull', { endpoint: 'https://push.example.com/owner' })).json.notes;
+  assert.equal(notes.find((n) => /support ticket/.test(n.title)).url, '/intprototv?tab=support&open=' + tid);
+  await x.call('PUT', '/api/admin/settings', { trial: { mode: 'agents', enabled: true } }, tok);
+  await x.call('POST', '/api/trial', { name: 'Trial Person', email: 'trial.p@example.com', phone: '+12025550144', ip: '5.5.5.5' });
+  assert.equal((await x.call('POST', '/api/push/pull', { endpoint: 'https://push.example.com/owner' })).json.notes.find((n) => /free trial/i.test(n.title)).url, '/intprototv?tab=trialq');
+  const cl = (await x.call('POST', '/api/login', { username: 'promo1', password: 'secret12' })).json.token;
+  await x.call('POST', '/api/push/subscribe', { sub: { endpoint: 'https://push.example.com/cust' }, silent: true }, cl);
+  await x.call('POST', '/api/admin/push/promo', { audience: 'customers' }, tok);
+  assert.equal((await x.call('POST', '/api/push/pull', { endpoint: 'https://push.example.com/cust' })).json.notes.at(-1).url, '/?tab=account&go=packages');
+  await x.call('POST', '/api/admin/app-notify', { audience: 'one', id: c.id, title: 'Hello' }, tok);
+  assert.equal((await x.call('POST', '/api/push/pull', { endpoint: 'https://push.example.com/cust' })).json.notes.at(-1).url, '/profile?go=inbox');
+});
