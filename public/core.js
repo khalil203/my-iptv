@@ -254,6 +254,7 @@ function permFor(method, path, body) {
     if (k.length && k.every((x) => x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts', 'waTemplates'].includes(x))) return 'plans';
     if (k.includes('notify')) return 'owner';
+    if (k.length && k.every((x) => x === 'payRoute' || x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
@@ -266,6 +267,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/accounts') || path === '/api/admin/email/plan' || path === '/api/admin/email/sending') return 'secrets';
   if (path === '/api/admin/push/promo') return 'customers_edit';
   if (path === '/api/admin/app-notify') return 'customers_edit';
+  if (path === '/api/admin/paylink' || path === '/api/admin/paylinks/check') return 'customers_view';
   if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
@@ -996,6 +998,48 @@ const OM = {
 };
 const CUR_SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 // Random pay link for a package: from enabled Stripe accounts, in the email currency
+// ---- Payment links: the Stripe link that really sells this package (duration, devices, IBO, credits), from the allowed accounts only ----
+// What a link sells, read from its name: "12 Months Subscription - 1 Devices", "1 YEAR 3 DEVICES IBO PLAYER", "1O CREDIT BASIC"…
+export function linkSpec(label) {
+  const t = String(label || '').toLowerCase().replace(/\b(\d)o\b/g, '$10');
+  const cr = t.match(/(\d+)\s*credit/); if (cr) return { credits: Number(cr[1]), ibo: false, dev: 1, days: 0 };
+  const ibo = /\bibo\b/.test(t); const dev = Number((t.match(/(\d)\s*devices?/) || [])[1] || 1);
+  let days = 0; if (/lifetime|life time|forever/.test(t)) days = 36500;
+  else { const m = t.match(/(\d+)\s*(day|week|month|year)/); if (m) { const n = Number(m[1]); days = m[2] === 'day' ? n : m[2] === 'week' ? n * 7 : m[2] === 'month' ? n * 30 : n >= 5 ? n * 30 /* "6 Year" written for 6 months */ : n * 365; } }
+  return { credits: 0, ibo, dev, days };
+}
+const pkgSpecOf = (p) => ({ credits: Number(p.credits) || 0, ibo: p.kind === 'ibo' || /^ibo/i.test(String(p.id || '')), dev: Number(p.devices) || 1, days: Number(p.days) || 0 });
+const specMatch = (a, b) => (a.credits || b.credits ? a.credits === b.credits : a.ibo === b.ibo && a.dev === b.dev && a.days > 0 && (a.days >= 36000 ? b.days >= 36000 : Math.abs(a.days - b.days) <= Math.max(6, b.days * 0.04)));
+export const PAY_ROUTE_DEF = { accounts: ['grenapp'], rotate: true };
+export function payRoute(s) { const r = { ...PAY_ROUTE_DEF, ...(s.payRoute || {}) }; const act = (s.stripeAccounts || []).filter((a) => a.status === 'active'); r.accounts = (r.accounts || []).filter((id) => act.some((a) => a.id === id)); if (!r.accounts.length && act.length) r.accounts = [act.find((a) => /green|grenapp/i.test(a.id + a.name))?.id || act[0].id]; return r; }
+// Links that cannot be trusted: the same Stripe URL is used for two different packages
+export function payLinkProblems(s) {
+  const out = [];
+  for (const a of s.stripeAccounts || []) { const byUrl = new Map();
+    for (const l of a.links || []) { if (!l.url) continue; const sp = linkSpec(l.label); const k = l.url.trim(); const o = byUrl.get(k); if (o && !specMatch(linkSpec(o.label), sp)) out.push({ acc: a.id, accName: a.name, kind: 'same-url', a: o.label, b: l.label, currency: l.currency, url: k }); else if (!o) byUrl.set(k, l); }
+    for (const l of a.links || []) { if (/\b[2-9]\s*years?\b/i.test(l.label) && /\b[5-9]\s*years?\b/i.test(l.label)) out.push({ acc: a.id, accName: a.name, kind: 'label', a: l.label, currency: l.currency, hint: 'probably "months", not "year"' }); }
+  }
+  return out;
+}
+export function payCandidates(s, pkg, cur) {
+  const r = payRoute(s); const want = pkgSpecOf(pkg); const bad = new Set(payLinkProblems(s).filter((x) => x.kind === 'same-url').map((x) => x.url));
+  const all = []; for (const id of r.accounts) { const a = (s.stripeAccounts || []).find((x) => x.id === id); for (const l of a?.links || []) if (l.url && !bad.has(l.url.trim()) && specMatch(linkSpec(l.label), want)) all.push({ url: l.url.trim(), acc: a.id, accName: a.name, label: l.label, cur: l.currency || cur }); }
+  const same = all.filter((x) => !cur || x.cur === cur); return { list: same.length ? same : all, otherCurrency: !same.length && all.length > 0 };
+}
+// ---- IBO Player offer after every new subscription and renewal (email automatically, WhatsApp from the panel) ----
+export const IBO_PROMO_DEF = { on: true, email: true, whatsapp: true, price: 5.99, pkg: 'ibo1y', everyDays: 30, delayMin: 60 }; // the email goes out an hour after the welcome / renewal email
+const IBO_TX = {
+  en: { s: '📺 Upgrade to IBO Player for {price}', t: 'Skip free app issues and problems', b: 'Skip free app issues and problems: upgrade with *IBO Player for {price}*!\n\nEnjoy high streaming quality, easy setup, and an included secure VPN.', btn: 'Get IBO Player', hi: 'Hi {name} 👋' },
+  fr: { s: '📺 Passez à IBO Player pour {price}', t: 'Fini les soucis des applis gratuites', b: 'Fini les soucis et les bugs des applications gratuites : passez à *IBO Player pour {price}* !\n\nProfitez d’une haute qualité de streaming, d’une installation facile et d’un VPN sécurisé inclus.', btn: 'Obtenir IBO Player', hi: 'Bonjour {name} 👋' },
+  de: { s: '📺 Jetzt IBO Player für {price}', t: 'Schluss mit Problemen kostenloser Apps', b: 'Schluss mit den Problemen kostenloser Apps: Steigen Sie auf *IBO Player für {price}* um!\n\nGenießen Sie hohe Streaming-Qualität, einfache Einrichtung und ein sicheres VPN inklusive.', btn: 'IBO Player holen', hi: 'Hallo {name} 👋' },
+  es: { s: '📺 Pásate a IBO Player por {price}', t: 'Olvídate de los problemas de las apps gratis', b: 'Olvídate de los fallos y problemas de las apps gratuitas: ¡pásate a *IBO Player por {price}*!\n\nDisfruta de una gran calidad de streaming, instalación fácil y una VPN segura incluida.', btn: 'Conseguir IBO Player', hi: 'Hola {name} 👋' },
+  it: { s: '📺 Passa a IBO Player per {price}', t: 'Basta problemi con le app gratuite', b: 'Basta problemi e malfunzionamenti delle app gratuite: passa a *IBO Player per {price}*!\n\nGoditi un’alta qualità di streaming, un’installazione facile e una VPN sicura inclusa.', btn: 'Ottieni IBO Player', hi: 'Ciao {name} 👋' } };
+export function iboPromoText(l, price) { const L = IBO_TX[l] || IBO_TX.en; return L.b.replace(/\{price\}/g, price); }
+export function iboPromoEmail(s, c, appUrl, link, price) {
+  const lang = okLang(c.lang); const L = IBO_TX[lang] || IBO_TX.en; const site = String(s.email.appUrl || appUrl || 'https://intproto-tv.store').replace(/\/+$/, '');
+  const camp = { split: false, lang, badge: '📺 IBO Player', content: { all: { subject: L.s.replace('{price}', price), title: L.t, body: L.b.replace(/\{price\}/g, price) + '\n\n' + PROMO_FOOT[lang].replace('{trial}', site + '/freetrial').replace('{support}', site + '/support'), button: L.btn } }, link: link || site + '/support' };
+  return newsletterEmail(s, c, camp, appUrl, '');
+}
 export function pickPayLink(s, pkg) { // only a link the admin types for one order (no stored Stripe links)
   return pkg?.link ? { url: pkg.link, acc: '' } : null;
 }
@@ -1151,6 +1195,7 @@ export function seasonWa(kind, l, o = {}) {
     .split('\n\n').filter((p) => !(p.startsWith('[code]') && !code) && !(p.startsWith('[end]') && !end)).map((p) => p.replace(/^\[(code|end)\]/, '')).filter((p) => !/reply to this email|répondez simplement|antworten sie einfach|responde a este correo|rispondi a questa email/i.test(p)).join('\n\n');
   return `${S.icon} *${L.t}*\n\n${body}`;
 }
+WA_TPL.ibo_promo = Object.fromEntries(LANG_CODES.map((l) => [l, IBO_TX[l].hi + '\n\n📺 *IBO Player · {iboPrice}*\n\n' + IBO_TX[l].b.replace(/\{price\}/g, '{iboPrice}') + '\n\n👉 {link}\n🛠️ {support}']));
 for (const k of Object.keys(SEASON)) WA_TPL['promo_' + k] = Object.fromEntries(LANG_CODES.map((l) => [l, ({ en: 'Hi {name} 👋', fr: 'Bonjour {name} 👋', de: 'Hallo {name} 👋', es: 'Hola {name} 👋', it: 'Ciao {name} 👋' })[l] + '\n\n' + seasonWa(k, l)]));
 export const SEASON_KINDS = Object.keys(SEASON).map((k) => ({ id: k, icon: SEASON[k].icon, name: SEASON[k].names.en }));
 // o = { offer, code, end: 'YYYY-MM-DD' } → a split newsletter with all 5 languages
@@ -1600,7 +1645,30 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return credits > 0 ? cost / credits : (Number(s.stock.packPrice) || 0) / (Number(s.stock.packCredits) || 1);
   }
   // Records one sale (and the money received) — used for new customers, renewals and trials.
+  const iboCfg = (s) => ({ ...IBO_PROMO_DEF, ...(s.iboPromo || {}) });
+  // Has a customer IBO Player already? Then no offer.
+  const hasIbo = (c) => !!(c.ibo && (c.ibo.key || c.ibo.mac)) || /\bibo\b/i.test(String(c.app || '')) || /^ibo/i.test(String(c.planId || ''));
+  async function iboSendDue(s) { // send the queued IBO Player offer emails that are due
+    const q = (await store.get('iboq')) || []; if (!q.length) return 0; const now = Date.now(); const due = q.filter((x) => x.due <= now); if (!due.length) return 0;
+    await store.put('iboq', q.filter((x) => x.due > now)); const cfg = iboCfg(s); if (!cfg.on || !cfg.email) return 0; const list = await getCustomers(); let n = 0;
+    for (const d of due) { const c = list.find((y) => y.id === d.id); if (!c || c.isTrial || hasIbo(c) || c.status === 'disabled') continue;
+      if (cleanEmail(c.email) && !c.unsub && !(await getBad())[cleanEmail(c.email)]) {
+        const cur = s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency || 'USD'; const price = (CUR_SIGN[cur] || '') + Number(cfg.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
+        const pk = s.orderPackages.find((p) => p.id === cfg.pkg) || s.orderPackages.find((p) => /^ibo/i.test(p.id)); const nl = pk ? await nextPayLink(s, pk, cur) : null;
+        const m = iboPromoEmail(s, c, s.email.appUrl, nl?.url ? payUrlFor(nl.url, c) : '', price); const r = await sendEmail(s, c.email, m.subject, m.html); if (r.ok) n++;
+        await log('marketing', `IBO Player offer emailed to ${c.username}${r.ok ? '' : ' — failed: ' + r.error}`);
+      }
+    }
+    return n;
+  }
+  async function iboAfterSub(s, c, appUrl) {
+    try { const cfg = iboCfg(s); if (!cfg.on || !c || c.isTrial || hasIbo(c) || c.status === 'disabled') return false;
+      const k = 'ibopromo:' + c.id; if (await store.get(k)) return false; await store.put(k, Date.now(), cfg.everyDays * 86400);
+      if (cfg.email && cleanEmail(c.email)) { const q = (await store.get('iboq')) || []; q.push({ id: c.id, due: Date.now() + Math.max(0, Number(cfg.delayMin) || 0) * 60000 }); await store.put('iboq', q.slice(-500)); if (!(Number(cfg.delayMin) > 0)) await iboSendDue(s); }
+      return true; } catch { return false; }
+  }
   async function recordSale(s, c, { type, plan, days, credits, amount, accountId, sa, at, by, currency: cur0 }) {
+    if ((type === 'new' || type === 'renew') && c && c.username) await iboAfterSub(s, c, s.email.appUrl);
     if (Number(amount) > 0) s = await refreshRates(s, false);
     const acc = s.finance.accounts.find((a) => a.id === accountId);
     const currency = acc ? acc.currency : cur0 || (s.currencyRule?.on !== false && c && type !== 'trial' ? custCurrency(s, c) : s.currency);
@@ -1781,11 +1849,17 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     l.unshift({ at: Date.now(), ...a });
     await store.put('dupAttempts', l.slice(0, 500));
   }
+  // Supplier payments for each credit batch: paid / partly paid / not paid, and which agent it is handed to.
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  function stockPays(p) { if (Array.isArray(p.payments)) return p.payments; return p.accountId && Number(p.cost) ? [{ id: 'legacy', at: p.at, amount: Number(p.cost), accountId: p.accountId }] : []; }
+  function stockView(p) { const pays = stockPays(p); const paid = r2(pays.reduce((a, x) => a + (Number(x.amount) || 0), 0)); const cost = r2(p.cost); const due = r2(Math.max(0, cost - paid));
+    return { ...p, payments: pays, paid, due, payStatus: !cost ? (p.payStatus === 'unpaid' ? 'unpaid' : 'nocost') : due <= 0.004 ? 'paid' : paid > 0 ? 'partial' : 'unpaid' }; }
   async function stockInfo(s) {
-    const st = await getStock(); const sales = await getSales();
+    const st0 = await getStock(); const sales = await getSales(); const st = st0.map(stockView);
     const purchased = st.reduce((a, x) => a + (Number(x.credits) || 0), 0);
     const used = sales.reduce((a, x) => a + (Number(x.credits) || 0), 0);
-    return { purchased, used, available: purchased - used, avgCostUsd: await creditCostUsd(s), low: purchased - used <= (Number(s.stock.lowCreditsAlert) || 0), purchases: st.slice().sort((a, b) => b.at - a.at) };
+    return { purchased, used, available: purchased - used, avgCostUsd: await creditCostUsd(s), low: purchased - used <= (Number(s.stock.lowCreditsAlert) || 0), purchases: st.slice().sort((a, b) => b.at - a.at),
+      owed: (() => { const by = {}; for (const p of st) { const k = p.supplier || 'Supplier'; const cur = p.currency || 'USD'; const o = (by[k + '|' + cur] = by[k + '|' + cur] || { supplier: k, currency: cur, cost: 0, paid: 0, due: 0, unpaidBatches: 0, credits: 0 }); o.cost = r2(o.cost + (Number(p.cost) || 0)); o.paid = r2(o.paid + p.paid); o.due = r2(o.due + p.due); o.credits += Number(p.credits) || 0; if (p.payStatus === 'unpaid' || p.payStatus === 'partial') o.unpaidBatches++; } return Object.values(by); })() };
   }
   const getTeam = async () => (await store.get('team')) || [];
   async function baseLog(type, msg, by) {
@@ -1943,6 +2017,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   async function agentIds(perm = 'customers_view') { const team = await getTeam(); return ['owner', ...team.filter((m) => m.status !== 'disabled' && (m.perms || []).includes(perm)).map((m) => 'm:' + m.id)]; }
   const AGENT_PAGE = { tickets: '/intprototv?tab=support', trials: '/intprototv?tab=trialq', receipts: '/intprototv?tab=receipts' }; // where a tap on the notification opens
   async function pushAgents(s, kind, note) { const cfg = notifyCfg(s); if (cfg[kind] === false) return; try { await pushTo(s, await agentIds(), { ...note, kind, url: note.url || AGENT_PAGE[kind] || '/intprototv' }); } catch {} }
+  // The next payment link for a package, in turn (rotation) among the allowed accounts' matching links
+  async function nextPayLink(s, pkg, cur, peek) {
+    const { list, otherCurrency } = payCandidates(s, pkg, cur); if (!list.length) return null;
+    const r = payRoute(s); let i = 0;
+    if (r.rotate && list.length > 1) { const rot = (await store.get('payrot')) || {}; const k = pkg.id + ':' + (cur || ''); i = (Number(rot[k]) || 0) % list.length; if (!peek) { rot[k] = i + 1; await store.put('payrot', rot); } }
+    return { ...list[i], options: list.length, otherCurrency };
+  }
   async function pushOwner(s, note) { try { await pushTo(s, 'owner', { url: '/intprototv', ...note }); } catch {} }
   // The owner sees what the team does (Khalil, Said, Malak…): each action of a watched member, at most one alert every 20 seconds per member.
   async function oversee(member, type, msg) {
@@ -1963,6 +2044,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   const hhmm = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
   async function tick() {
     const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
+    try { out.ibo = await iboSendDue(s); } catch {}
     try { const subs = await getSubs(); let v = null; // wake devices that still have notes waiting
       for (const sub of subs) { const q = (await store.get('pushq:' + sub.id)) || []; if (!q.length) continue; v = v || (await vapidKeys()); try { await fetchFn(sub.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'normal', Authorization: await vapidAuth(sub.endpoint, v, supportMail(s)), 'Content-Length': '0' } }); out.woken++; } catch {} } } catch {}
     if (cfg.shiftReminders === false) return out;
@@ -3683,6 +3765,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           next.orders = { prefix: pf(q.prefix, 'WLF'), iboPrefix: pf(q.iboPrefix, 'IBO'), rslPrefix: pf(q.rslPrefix, 'RLS'), pad: Math.max(1, Math.min(6, Number(q.pad) || 3)), devPad: 2 }; next.orders.series = [next.orders.prefix, next.orders.iboPrefix, next.orders.rslPrefix].join(','); }
         if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
           next.promo = { on: !!q.on, name: String(q.name || 'Black Friday').trim().slice(0, 40) || 'Black Friday', code: String(q.code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 30), offer: String(q.offer || '').trim().slice(0, 60), from: day(q.from), to: day(q.to), email: q.email !== false, whatsapp: q.whatsapp !== false, telegram: q.telegram !== false }; }
+        if (isObj(body.payRoute)) { const ids = new Set((s.stripeAccounts || []).map((a) => a.id)); next.payRoute = { accounts: (Array.isArray(body.payRoute.accounts) ? body.payRoute.accounts : []).map(String).filter((x) => ids.has(x)).slice(0, 20), rotate: body.payRoute.rotate !== false }; }
+        if (isObj(body.iboPromo)) { const q = { ...IBO_PROMO_DEF, ...(s.iboPromo || {}), ...body.iboPromo }; next.iboPromo = { on: q.on !== false, email: q.email !== false, whatsapp: q.whatsapp !== false, price: Math.max(0, Number(q.price) || 5.99), delayMin: Math.min(1440, Math.max(0, Math.round(Number(q.delayMin ?? 60) || 0))), pkg: String(q.pkg || 'ibo1y').slice(0, 30), everyDays: Math.max(1, Math.min(365, Number(q.everyDays) || 30)) }; }
         if (isObj(body.notify)) { const q = { ...notifyCfg(s), ...body.notify }; const b = (k) => q[k] !== false && q[k] !== 'false';
           next.notify = { tickets: b('tickets'), trials: b('trials'), receipts: b('receipts'), shifts: b('shifts'), shiftReminders: b('shiftReminders'), oversight: b('oversight'), customers: b('customers'), resellers: b('resellers'), autoPromo: q.autoPromo === true, promoDays: Math.max(1, Math.min(60, Math.round(Number(q.promoDays) || 7))), watch: (Array.isArray(q.watch) ? q.watch : []).map(String).filter((x) => /^[\w-]{1,20}$/.test(x)).slice(0, 50) }; }
         if (isObj(body.support)) { const q = { ...(s.support || {}), ...body.support }; const em = cleanEmail(q.email);
@@ -3739,6 +3823,16 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       // ---------- Accounts (Resend / email marketing / Hostinger / Dynu): only the owner, Khalil and Nizar (permission 'secrets') ----------
+      if (R('GET', '/api/admin/paylink')) { // the payment link the panel offers for a package (allowed accounts, rotation)
+        const pk = [...s.orderPackages, ...(s.resellerPackages || [])].find((p) => p.id === String(query.pkg || '')); if (!pk) return err(400, 'Choose a package.');
+        const n = await nextPayLink(s, pk, String(query.cur || '') || 'USD', query.peek === '1');
+        return ok(n ? { url: n.url, acc: n.acc, accName: n.accName, label: n.label, currency: n.cur, options: n.options, otherCurrency: n.otherCurrency } : { url: '', none: true });
+      }
+      if (R('GET', '/api/admin/paylinks/check')) { // for every package and currency: which link is used, and the problems to fix in Stripe
+        const r = payRoute(s); const rows = [];
+        for (const pk of [...s.orderPackages, ...(s.resellerPackages || [])]) for (const cur of ['USD', 'EUR']) { const c = payCandidates(s, pk, cur); rows.push({ pkg: pk.id, name: pk.title || pk.name, cur, links: c.list.map((x) => ({ label: x.label, acc: x.accName, cur: x.cur, url: x.url })), otherCurrency: c.otherCurrency }); }
+        return ok({ route: r, accounts: (s.stripeAccounts || []).map((a) => ({ id: a.id, name: a.name, status: a.status, links: (a.links || []).length })), rows, problems: payLinkProblems(s) });
+      }
       if (R('POST', '/api/admin/app-notify')) { // a notification in the customer's app (inbox) + on their phone if notifications are on
         const title = cleanText(body.title, 120), text = cleanText(body.body, 600); if (!title && !text) return err(400, 'Write a title or a message.');
         const aud = String(body.audience || 'one'); const list = await getCustomers(); const now = Date.now(); const warn = Number(s.userDashboard.expiryWarningDays) || 7;
@@ -4056,7 +4150,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let mail = null;
         if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); if (mail.ok) { c.loginMailAt = Date.now(); markSent(c, 'email'); await saveCustomers(list); } }
         await log('customer', `Created ${username} (${plan ? plan.name : 'custom'})${panel && !panel.skipped ? ' + panel line' : ''}${mail ? (mail.ok ? ' · email sent' : ' · email failed') : ''}`);
-        return ok({ customer: viewP(c, s), panel, mail, duplicates: dup.map((m) => ({ username: m.c.username, name: m.c.name, why: m.why })) });
+        return ok({ customer: viewP(c, s), panel, mail, iboOffer: !c.isTrial && iboCfg(s).on && iboCfg(s).whatsapp && !hasIbo(c) && !!(c.whatsapp || c.phone), duplicates: dup.map((m) => ({ username: m.c.username, name: m.c.name, why: m.why })) });
       }
 
       const m = path.match(/^\/api\/admin\/customers\/([\w-]+)(?:\/(\w+))?$/);
@@ -4209,8 +4303,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await saveCustomers(list);
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${(s.finance.accounts.find((a) => a.id === body.accountId) || {}).currency || (s.currencyRule?.on !== false ? custCurrency(s, c) : s.currency)})`);
+          const iboOffer = iboCfg(s).on && iboCfg(s).whatsapp && !hasIbo(c) && !!(c.whatsapp || c.phone);
           if (notifyCfg(s).customers) { const lg = okLang(c.lang); await pushTo(s, 'c:' + c.id, { title: tx(lg, 'pushRenewT'), body: tx(lg, 'pushRenewB', { app: (s.branding.appName || 'INTPROTO-TV'), date: new Date(c.expiresAt).toLocaleDateString(langLocale(lg), { dateStyle: 'long' }) }), url: '/profile', tag: 'renew' }).catch(() => {}); }
-          return ok({ customer: viewP(c, s), panel });
+          return ok({ customer: viewP(c, s), panel, iboOffer });
         }
         if (method === 'POST' && sub === 'email') {
           const to = String(body.to || c.email || '').trim();
@@ -4235,11 +4330,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await log('customer', `End date of ${c.username}: ${f(before)} → ${f(c.expiresAt)}`);
           return ok({ customer: viewP(c, s) });
         }
-        if (method === 'GET' && sub === 'orderpreview') { const pk0 = s.orderPackages.find((p) => p.id === query.pkg) || s.resellerPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk0) return err(400, 'No packages'); const pk = { ...pk0, title: pk0.title || pk0.name || 'Package', days: Number(pk0.days) || 0, devices: Number(pk0.devices) || 1 }; const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = s.currencyRule?.on !== false ? undefined : (query.cur && ['EUR','USD','USDT','ALL','MAD','THB'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
+        if (method === 'GET' && sub === 'orderpreview') { const pk0 = s.orderPackages.find((p) => p.id === query.pkg) || s.resellerPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk0) return err(400, 'No packages'); if (!/^https?:\/\//.test(String(query.link || ''))) { const n = await nextPayLink(s, pk0, s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency, true); if (n) query.link = n.url; } const pk = { ...pk0, title: pk0.title || pk0.name || 'Package', days: Number(pk0.days) || 0, devices: Number(pk0.devices) || 1 }; const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = s.currencyRule?.on !== false ? undefined : (query.cur && ['EUR','USD','USDT','ALL','MAD','THB'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
         if (method === 'POST' && sub === 'order') {
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
-          const fixedL = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
+          let fixedL = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
+          if (!fixedL) { const n = await nextPayLink(s, pk, s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency); if (n) fixedL = { url: n.url, acc: n.acc }; } // the matching link, GreenApp Host / rotation
           const m = orderEmail(s, c, pk, body.appUrl, fixedL); const r = await sendEmail(s, to, m.subject, m.html);
           if (r.ok) { markSent(c, 'email'); c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentLink = fixedL?.url || ''; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); await saveCustomers(list); }
           await log('customer', `Package email "${pk.title}" to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
@@ -4280,9 +4376,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
           const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL', 'MAD', 'THB'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
-          const pl = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
+          let pl = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
           const customPrice = body.price !== undefined && body.price !== null && String(body.price).trim() !== '';
           const cur = customPrice && body.currency && !['AUTO', 'ALL'].includes(body.currency) ? body.currency : s.currencyRule?.on !== false ? custCurrency(s, c) : body.currency && !['AUTO', 'ALL'].includes(body.currency) ? body.currency : st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
+          if (!pl && !customPrice && (type === 'pay' || type === 'renew' || String(type).startsWith('promo_') || type === 'ibo_promo')) { const n = await nextPayLink(s, type === 'ibo_promo' ? (s.orderPackages.find((p) => p.id === iboCfg(s).pkg) || s.orderPackages.find((p) => p.id === 'ibo1y') || pk) : pk, cur, !body.log); if (n) pl = { url: n.url, acc: n.acc }; } // matching link (GreenApp Host, rotation)
           const price = (CUR_SIGN[cur] || '') + Number(pk.price).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur);
           const dns = String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
           const lu = c.lineUsername || c.username, lp = c.linePassword || c.loginPassword || '';
@@ -4290,7 +4387,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             link: pl?.url || '', username: lu, password: lp, dns, m3u: dns && lp ? `${dns}/get.php?username=${encodeURIComponent(lu)}&password=${encodeURIComponent(lp)}&type=m3u_plus&output=ts` : '',
             expires: c.expiresAt < Date.now() - 90 * DAYMS ? new Date(c.expiresAt).toLocaleDateString(langLocale(lang), { month: 'long', year: 'numeric' }) : new Date(c.expiresAt).toLocaleDateString(langLocale(lang), { dateStyle: 'long' }), appUrl: String(s.email.appUrl || body.appUrl || '').replace(/\/+$/, ''),
             website: s.email.website || '', order: c.orderNo || '', connections: connsText(c, s, lang),
-            promo: promoLive(s, body.channel === 'telegram' ? 'telegram' : 'whatsapp') ? promoText(s, lang, s.promo) : '', support: supportUrl(s, body.appUrl), trial: (String(s.email.appUrl || body.appUrl || 'https://intproto-tv.store').replace(/\/+$/, '')) + '/freetrial', supportEmail: supportMail(s), code: promoLive(s) ? String(s.promo.code) : '',
+            promo: promoLive(s, body.channel === 'telegram' ? 'telegram' : 'whatsapp') ? promoText(s, lang, s.promo) : '', iboPrice: (() => { const ip = (s.iboPromo || IBO_PROMO_DEF).price || 5.99; return (CUR_SIGN[cur] || '') + Number(ip).toFixed(2) + (CUR_SIGN[cur] ? '' : ' ' + cur); })(), support: supportUrl(s, body.appUrl), trial: (String(s.email.appUrl || body.appUrl || 'https://intproto-tv.store').replace(/\/+$/, '')) + '/freetrial', supportEmail: supportMail(s), code: promoLive(s) ? String(s.promo.code) : '',
             ends: tx(lang, c.expiresAt < Date.now() - 90 * DAYMS ? 'inactiveSince' : c.expiresAt < Date.now() ? 'endedOn' : 'endsOn') };
           const tpl = String(body.template || (waOwn ? waOwn.text[lang] || waOwn.text.en || waOwn.text.fr || waOwn.text.ar : s.waTemplates?.[type]?.[lang] || WA_TPL[type][lang]));
           const out = []; // a line whose value is empty (e.g. no DNS yet) is left out, with its label line
@@ -4505,14 +4602,57 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!credits) return err(400, 'Enter the number of credits.');
         const acc = s.finance.accounts.find((a) => a.id === body.accountId);
         const cost = Math.abs(Number(body.cost) || 0);
-        const currency = acc ? acc.currency : 'USD';
-        const p = { id: uid(6), at: body.date ? new Date(body.date).getTime() + 12 * 3600000 : Date.now(), credits, cost, currency, costUsd: toUsd(cost, currency, s.finance.rates), accountId: acc ? acc.id : '', supplier: String(body.supplier || 'TVplus'), note: String(body.note || '') };
+        const currency = acc ? acc.currency : (/^[A-Z]{3}$/.test(String(body.currency || '')) ? body.currency : 'USD');
+        // paid: 'yes' (paid now from the account), 'no' (owed to the supplier), 'part' (paidAmount now)
+        const mode = body.paid === 'no' || body.paid === false ? 'no' : body.paid === 'part' ? 'part' : 'yes';
+        if (mode !== 'no' && cost && !acc) return err(400, 'Choose the account you paid from, or mark it Not paid.');
+        const payNow = mode === 'yes' ? cost : mode === 'part' ? Math.min(cost, Math.abs(Number(body.paidAmount) || 0)) : 0;
+        const at = body.date ? new Date(body.date).getTime() + 12 * 3600000 : Date.now();
+        const p = { id: uid(6), at, credits, cost, currency, costUsd: toUsd(cost, currency, s.finance.rates), accountId: acc ? acc.id : '', supplier: cleanText(body.supplier || 'TVplus', 60) || 'TVplus', note: cleanText(body.note, 300), handedTo: cleanText(body.handedTo, 60), payments: [], payStatus: mode === 'no' ? 'unpaid' : '', by: actorName };
+        if (payNow > 0) p.payments.push({ id: uid(6), at, amount: r2(payNow), accountId: acc.id, by: actorName });
         const st = await getStock(); st.push(p); await store.put('stock', st);
-        if (acc && cost) { const tx = await getTx(); tx.push({ id: uid(6), at: p.at, type: 'expense', accountId: acc.id, amount: cost, category: 'Credits purchase', note: `${credits} credits · ${p.supplier}`, stockId: p.id }); await store.put('tx', tx); }
-        await log('stock', `Bought ${credits} credits for ${cost} ${currency}`);
-        return ok(p);
+        if (payNow > 0) { const tx = await getTx(); tx.push({ id: uid(6), at, type: 'expense', accountId: acc.id, amount: r2(payNow), category: 'Credits purchase', note: `${credits} credits · ${p.supplier}`, stockId: p.id, payId: p.payments[0].id }); await store.put('tx', tx); }
+        await log('stock', `Bought ${credits} credits from ${p.supplier} for ${cost} ${currency} — ${payNow >= cost ? 'paid' : payNow > 0 ? `paid ${r2(payNow)}, owes ${r2(cost - payNow)}` : 'not paid yet'}`);
+        return ok(stockView(p));
       }
       const stm = path.match(/^\/api\/admin\/stock\/(\w+)$/);
+      const stp = path.match(/^\/api\/admin\/stock\/(\w+)\/pay(?:\/(\w+))?$/);
+      if (stp) {
+        const st = await getStock(); const p = st.find((x) => x.id === stp[1]); if (!p) return err(404, 'Batch not found.');
+        if (!Array.isArray(p.payments)) p.payments = stockPays(p); // move old batches to the payment list
+        if (method === 'POST' && !stp[2]) { // record a payment to the supplier
+          const v = stockView(p); const amount = r2(body.amount === 'rest' || body.amount === undefined || body.amount === '' ? v.due : Math.abs(Number(body.amount) || 0));
+          if (!(amount > 0)) return err(400, v.due > 0 ? 'Enter the amount paid.' : 'This batch is already paid. Add its cost first if it was missing.');
+          if (amount > v.due + 0.004 && Number(p.cost)) return err(400, `Only ${v.due} ${p.currency} is left to pay.`);
+          const acc = s.finance.accounts.find((a) => a.id === body.accountId) || s.finance.accounts.find((a) => a.id === p.accountId); if (!acc) return err(400, 'Choose the account you paid from.');
+          const at = body.date ? new Date(body.date).getTime() + 12 * 3600000 : Date.now(); const pay = { id: uid(6), at, amount, accountId: acc.id, by: actorName, note: cleanText(body.note, 200) };
+          p.payments.push(pay); if (!p.accountId) p.accountId = acc.id; p.payStatus = ''; await store.put('stock', st);
+          const tx = await getTx(); tx.push({ id: uid(6), at, type: 'expense', accountId: acc.id, amount, category: 'Credits purchase', note: `${p.credits} credits · ${p.supplier} (payment)`, stockId: p.id, payId: pay.id }); await store.put('tx', tx);
+          await log('stock', `Paid ${amount} ${p.currency} to ${p.supplier} for ${p.credits} credits`);
+          return ok(stockView(p));
+        }
+        if (method === 'DELETE' && stp[2]) { // undo a payment
+          const pay = p.payments.find((x) => x.id === stp[2]); if (!pay) return err(404, 'Payment not found.');
+          p.payments = p.payments.filter((x) => x !== pay); await store.put('stock', st);
+          const tx = await getTx(); await store.put('tx', tx.filter((x) => !(x.stockId === p.id && (x.payId === pay.id || (pay.id === 'legacy' && !x.payId)))));
+          await log('stock', `Payment of ${pay.amount} ${p.currency} to ${p.supplier} undone`);
+          return ok(stockView(p));
+        }
+        return err(405, 'Method not allowed');
+      }
+      if (stm && method === 'PUT') { // supplier, note, cost, who it's handed to, or mark Not paid
+        const st = await getStock(); const p = st.find((x) => x.id === stm[1]); if (!p) return err(404, 'Batch not found.');
+        if (!Array.isArray(p.payments)) p.payments = stockPays(p);
+        if (body.supplier !== undefined) p.supplier = cleanText(body.supplier, 60) || p.supplier;
+        if (body.note !== undefined) p.note = cleanText(body.note, 300);
+        if (body.handedTo !== undefined) { p.handedTo = cleanText(body.handedTo, 60); p.handedAt = p.handedTo ? Date.now() : 0; }
+        if (body.cost !== undefined) { const c = Math.abs(Number(body.cost) || 0); const paid = p.payments.reduce((a, x) => a + x.amount, 0); if (c && c + 0.004 < paid) return err(400, `Already paid ${r2(paid)} — the cost can't be less.`); p.cost = c; p.costUsd = toUsd(c, p.currency, s.finance.rates); }
+        if (body.currency && /^[A-Z]{3}$/.test(body.currency) && !p.payments.length) { p.currency = body.currency; p.costUsd = toUsd(p.cost, p.currency, s.finance.rates); }
+        if (body.payStatus === 'unpaid' && !p.payments.length) p.payStatus = 'unpaid'; else if (body.payStatus === 'nocost') p.payStatus = '';
+        await store.put('stock', st);
+        await log('stock', `Credit batch ${p.credits} (${p.supplier}) updated${body.handedTo !== undefined ? ' — handed to ' + (p.handedTo || 'nobody') : ''}`);
+        return ok(stockView(p));
+      }
       if (stm && method === 'DELETE') {
         const st = await getStock(); await store.put('stock', st.filter((x) => x.id !== stm[1]));
         const tx = await getTx(); await store.put('tx', tx.filter((x) => x.stockId !== stm[1]));
@@ -4612,7 +4752,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const pick = (c) => (body.pkg === 'random' ? pk[Math.floor(Math.random() * pk.length)] : pk.find((p) => p.id === body.pkg));
         if (body.pkg !== 'random' && !pick()) return err(400, 'Choose a package.');
         const fixedB = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
-        const batch = list.filter((c) => want.has(c.id) && cleanEmail(c.email) && !c.unsub).map((c) => { const p = pick(c); return { c, p, m: orderEmail(s, c, p, body.appUrl, fixedB) }; });
+        const batch = []; for (const c of list.filter((c) => want.has(c.id) && cleanEmail(c.email) && !c.unsub)) { const p = pick(c); let L = fixedB; if (!L && p) { const n = await nextPayLink(s, p, s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency); if (n) L = { url: n.url, acc: n.acc }; } batch.push({ c, p, m: orderEmail(s, c, p, body.appUrl, L) }); }
         if (!batch.length) return ok({ sent: 0 });
         const r = await sendBatch(s, batch.map(({ c, m }) => ({ to: c.email, subject: m.subject, html: m.html })));
         if (!r.ok) return err(502, r.error);

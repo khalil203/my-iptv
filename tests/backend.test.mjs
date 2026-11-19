@@ -2103,3 +2103,52 @@ test('promotions library, WhatsApp promos, app link in emails, notifications ope
   await x.call('POST', '/api/admin/app-notify', { audience: 'one', id: c.id, title: 'Hello' }, tok);
   assert.equal((await x.call('POST', '/api/push/pull', { endpoint: 'https://push.example.com/cust' })).json.notes.at(-1).url, '/profile?go=inbox');
 });
+
+test('payment links: GreenApp Host only, matched to the package, rotation; IBO Player offer; supplier payments', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>' } }, tok);
+  const s0 = (await x.call('GET', '/api/admin/settings', {}, tok)).json;
+  const pk12 = s0.orderPackages.find((p) => Number(p.days) >= 360 && Number(p.days) <= 370 && !/^ibo/i.test(p.id)) || s0.orderPackages[0];
+  const accs = s0.stripeAccounts.map((a) => a.id === 'grenapp' ? { ...a, status: 'active', links: [
+    { label: '12 Months', url: 'https://buy.stripe.com/g12a', currency: 'USD' }, { label: '12 Months', url: 'https://buy.stripe.com/g12b', currency: 'USD' },
+    { label: '1 Month', url: 'https://buy.stripe.com/g1', currency: 'USD' }, { label: 'IBO Player 1 Year', url: 'https://buy.stripe.com/gibo', currency: 'USD' },
+    { label: '3 Months', url: 'https://buy.stripe.com/gdup', currency: 'USD' }, { label: '6 Months', url: 'https://buy.stripe.com/gdup', currency: 'USD' }] }
+    : { ...a, status: 'active', links: [{ label: '12 Months', url: 'https://buy.stripe.com/other12', currency: 'USD' }] });
+  assert.equal((await x.call('PUT', '/api/admin/settings', { stripeAccounts: accs }, tok)).status, 200);
+  // 1. only GreenApp, the 12-month link, taking turns
+  const p1 = (await x.call('GET', '/api/admin/paylink', {}, tok, { pkg: pk12.id, cur: 'USD', peek: '1' })).json;
+  assert.equal(p1.acc, 'grenapp'); assert.equal(p1.options, 2); assert.ok(/g12[ab]$/.test(p1.url));
+  const ck = (await x.call('GET', '/api/admin/paylinks/check', {}, tok)).json;
+  assert.deepEqual(ck.route.accounts, ['grenapp']); assert.ok(ck.problems.some((p) => p.kind === 'same-url' && p.url === 'https://buy.stripe.com/gdup'));
+  const c = await addCustomer(x, tok, { username: 'iboguy', email: 'ibo.guy@example.com', whatsapp: '+12035550111' });
+  const used = [];
+  for (let i = 0; i < 2; i++) { const r = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'pay', pkg: pk12.id, lang: 'en', log: true }, tok)).json; used.push((String(r.text || r.message || '').match(/https:\/\/buy\.stripe\.com\/\w+/) || [])[0]); }
+  assert.equal(new Set(used).size, 2, 'rotation alternates: ' + used); assert.ok(used.every((u) => /g12[ab]$/.test(u)));
+  // 2. IBO Player offer: emailed after the subscription (create) once, then the panel offers WhatsApp after renewal
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(x.mails.filter((m) => /IBO Player/.test(m.subject)).length, 0, 'not together with the welcome email');
+  const q = await x.store.get('iboq'); assert.equal(q.length, 1); q[0].due = Date.now() - 1; await x.store.put('iboq', q);
+  assert.equal((await x.be.tick()).ibo, 1);
+  const ibo = x.mails.filter((m) => /IBO Player/.test(m.subject) && m.to.includes('ibo.guy@example.com'));
+  assert.equal(ibo.length, 1); assert.ok(/5\.99/.test(ibo[0].html)); assert.ok(ibo[0].html.includes('https://buy.stripe.com/gibo'));
+  const rn = (await x.call('POST', `/api/admin/customers/${c.id}/renew`, { planId: s0.plans?.[0]?.id || 'p1', price: 10 }, tok)).json; assert.equal(rn.iboOffer, true);
+  await new Promise((r) => setTimeout(r, 20)); await x.be.tick();
+  assert.equal(x.mails.filter((m) => /IBO Player/.test(m.subject)).length, 1, 'not again within 30 days');
+  assert.equal(((await x.store.get('iboq')) || []).length, 0);
+  const wa = (await x.call('POST', `/api/admin/customers/${c.id}/wamsg`, { type: 'ibo_promo', lang: 'en' }, tok)).json; assert.ok(/IBO Player/.test(wa.text || wa.message)); assert.ok(/\$5\.99/.test(wa.text || wa.message));
+  // 3. supplier payments: not paid → part payment → rest; undo; hand over
+  const acc = s0.finance.accounts.find((a) => a.currency === 'USD');
+  const b = (await x.call('POST', '/api/admin/stock', { credits: 100, cost: 80, paid: 'no', supplier: 'TVplus', accountId: acc.id }, tok)).json;
+  assert.equal(b.payStatus, 'unpaid'); assert.equal(b.due, 80);
+  let st = (await x.call('GET', '/api/admin/stock', {}, tok)).json; assert.equal(st.owed.find((o) => o.supplier === 'TVplus').due, 80);
+  assert.equal(((await x.store.get('tx')) || []).filter((t) => t.stockId === b.id).length, 0, 'no expense while unpaid');
+  let v = (await x.call('POST', `/api/admin/stock/${b.id}/pay`, { amount: 30, accountId: acc.id }, tok)).json; assert.equal(v.payStatus, 'partial'); assert.equal(v.due, 50);
+  assert.equal((await x.call('POST', `/api/admin/stock/${b.id}/pay`, { amount: 60, accountId: acc.id }, tok)).status, 400);
+  v = (await x.call('POST', `/api/admin/stock/${b.id}/pay`, { amount: 'rest', accountId: acc.id }, tok)).json; assert.equal(v.payStatus, 'paid'); assert.equal(v.paid, 80);
+  assert.equal(((await x.store.get('tx')) || []).filter((t) => t.stockId === b.id).reduce((a, t) => a + t.amount, 0), 80);
+  v = (await x.call('DELETE', `/api/admin/stock/${b.id}/pay/${v.payments[1].id}`, {}, tok)).json; assert.equal(v.payStatus, 'partial');
+  assert.equal(((await x.store.get('tx')) || []).filter((t) => t.stockId === b.id).length, 1);
+  v = (await x.call('PUT', `/api/admin/stock/${b.id}`, { handedTo: 'Mrkhalil' }, tok)).json; assert.equal(v.handedTo, 'Mrkhalil');
+  const paidNow = (await x.call('POST', '/api/admin/stock', { credits: 50, cost: 40, paid: 'yes', accountId: acc.id }, tok)).json; assert.equal(paidNow.payStatus, 'paid');
+  st = (await x.call('GET', '/api/admin/stock', {}, tok)).json; assert.equal(st.purchases.length, 2);
+});

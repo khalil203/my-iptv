@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=106';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=107';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=106';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=107';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -900,7 +900,14 @@ async function adminPromos() {
         <button class="btn sm" data-act="promo-wa" data-k="${k}">💬 WhatsApp</button>
         <button class="btn sm" data-act="promo-note" data-k="${k}">🔔 App notification</button>
       </div></div>`; };
-  return `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
+  const ip = { on: true, email: true, whatsapp: true, price: 5.99, everyDays: 30, ...(state.admin.settings.iboPromo || {}) };
+  const iboCard = `<div class="card" id="ibo-auto"><h3 style="margin-top:0">📺 IBO Player offer — automatic</h3>
+    <p class="small muted">After every <b>new subscription</b> and <b>renewal</b> (panel, Stripe payment or reseller), the customer gets: <i>“Skip free app issues and problems — upgrade with IBO Player for ${esc(String(ip.price))}! Enjoy high streaming quality, easy setup, and included secure VPN.”</i> in their language and currency, with the IBO Player payment link. Customers who already have IBO Player, trials and unsubscribed emails are skipped.</p>
+    <form data-form="ibo-auto" onsubmit="return false"><div class="row" style="gap:16px;flex-wrap:wrap">${toggle('On', 'on', ip.on)}${toggle('Send by email automatically', 'email', ip.email)}${toggle('Show the WhatsApp button after renew / create', 'whatsapp', ip.whatsapp)}</div>
+    <div class="grid3">${field('IBO Player price', 'price', ip.price, { type: 'number', attrs: 'step="0.01" min="0"' })}${field('Not more than once every (days)', 'everyDays', ip.everyDays, { type: 'number', attrs: 'min="1"' })}</div>
+    <div class="row"><span class="spacer"></span><button class="btn primary sm" data-act="ibo-auto-save">💾 Save</button></div></form>
+    <p class="small muted" style="margin-bottom:0">WhatsApp can't be sent by itself without the WhatsApp Business API, so after a renewal the panel shows a <b>💬 Send IBO Player offer on WhatsApp</b> button with the message ready.</p></div>`;
+  return iboCard + `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
     <label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">Preview in <select data-input="promo-lang" style="width:auto">${LANG5.map(([c, n]) => `<option value="${c}" ${c === L ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div></div>
     <h4 style="margin:14px 0 8px">All year</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => ['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
     <h4 style="margin:18px 0 8px">Seasonal</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => !['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
@@ -1397,18 +1404,11 @@ const packageOptions = (s, cur) => [
   ...(s.resellerPackages || []).map((p) => [p.id, `${p.name} — ${orderPrice(s, p, cur)}`]),
 ];
 
-const resolvePkgPayLink = (s, pkgId, wantCur) => {
-  const pk = (s.orderPackages || []).find((p) => p.id === pkgId) || (s.resellerPackages || []).find((p) => p.id === pkgId);
-  if (!pk) return null;
-  const cur = wantCur || s.orderCurrency || 'EUR'; // the payment link in the customer's currency first
-  const choose = (acc) => { const links = acc.links || []; return links.find((l) => l.url && (l.currency === cur || !l.currency)) || links.find((l) => l.url); };
-  const acc = pk.stripeAccount ? (s.stripeAccounts || []).find((a) => a.id === pk.stripeAccount && a.status === 'active') : null;
-  const target = acc || (s.stripeAccounts || []).find((a) => a.status === 'active' && (a.links || []).length > 0);
-  if (!target) return null;
-  const link = choose(target);
-  if (!link) return null;
-  return { url: link.url, acc: target.id, currency: link.currency || cur };
+// The panel asks the server which payment link to use: only the allowed accounts (GreenApp Host), the link that matches the package, in rotation.
+const resolvePkgPayLink = async (s, pkgId, wantCur) => {
+  try { const r = await api('GET', '/api/admin/paylink?' + new URLSearchParams({ pkg: pkgId || '', cur: wantCur || s.orderCurrency || 'USD', peek: '1' })); return r && r.url ? r : null; } catch { return null; }
 };
+const iboOfferBtn = (id) => `<button type="button" class="btn sm wa-btn" data-act="wa-one" data-id="${esc(id)}" data-type="ibo_promo">💬 Send IBO Player offer on WhatsApp</button>`;
 const opRow = (p = {}, s = {}) => `<div class="op-row card" style="padding:10px;margin-bottom:8px" data-op="${esc(p.id || '')}"><div class="grid3"><input data-k="title" value="${esc(p.title || '')}" placeholder="Name (1 Month)"><input data-k="days" type="number" value="${p.days ?? 30}" placeholder="Days"><input data-k="devices" type="number" value="${p.devices ?? 1}" placeholder="Devices"></div>
   <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><select data-k="stripeAccount" style="width:auto">${((s.stripeAccounts||[]).filter((a)=>a.status==='active')).map((a)=>`<option value="${esc(a.id)}" ${p.stripeAccount===a.id?'selected':''}>${esc(a.name||a.id)}</option>`).join('')}<option value="">— none (use any account)</option></select><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
 function adminOrderSection(s) {
@@ -1871,8 +1871,19 @@ async function adminProfits(s) {
 }
 
 // ---------------- stock ----------------
+const STOCKF = { f: 'all' };
+const payBadge = (x) => ({ paid: '<span class="badge ok">✓ Paid</span>', partial: '<span class="badge warn">◐ Partly paid</span>', unpaid: '<span class="badge bad">✗ Not paid</span>', nocost: '<span class="badge">No cost entered</span>' })[x.payStatus] || '';
 async function adminStock(s) {
-  const st = await api('GET', '/api/admin/stock?panel=1');
+  const [st, team] = await Promise.all([api('GET', '/api/admin/stock?panel=1'), api('GET', '/api/admin/team').catch(() => [])]);
+  STOCKF.team = (team || []).filter((m) => m.status !== 'disabled').map((m) => m.name || m.username); STOCKF.st = st;
+  const owed = (st.owed || []).filter((o) => o.due > 0); const flt = STOCKF.f;
+  const shown = st.purchases.filter((x) => flt === 'all' || (flt === 'unpaid' ? x.payStatus === 'unpaid' || x.payStatus === 'partial' : flt === 'paid' ? x.payStatus === 'paid' : flt === 'handed' ? !!x.handedTo : true));
+  const nUnpaid = st.purchases.filter((x) => x.payStatus === 'unpaid' || x.payStatus === 'partial').length;
+  const accName = (id) => (s.finance.accounts.find((a) => a.id === id) || {}).name || id || '—';
+  const row = (x) => `<div class="list-item" style="align-items:flex-start"><span>🎟</span><div style="flex:1;min-width:0"><div class="row" style="gap:6px;flex-wrap:wrap"><b>${x.credits} credits</b> · ${esc(x.supplier)} ${payBadge(x)}${x.handedTo ? ` <span class="badge">👤 ${esc(x.handedTo)}</span>` : ''}</div>
+      <div class="small muted">${fmtDate(x.at)} · cost ${num(x.cost, x.currency)}${x.cost ? ` (${usd(x.costUsd)})` : ''} · paid <b>${num(x.paid, x.currency)}</b>${x.due > 0 ? ` · <b style="color:var(--bad,#d33)">owed ${num(x.due, x.currency)}</b>` : ''}${x.note ? ' · ' + esc(x.note) : ''}</div>
+      ${x.payments.length ? `<div class="small" style="margin-top:4px">${x.payments.map((y) => `💵 ${fmtDate(y.at)} · ${num(y.amount, x.currency)} from ${esc(accName(y.accountId))}${y.by ? ' · ' + esc(y.by) : ''} <a href="#" data-act="stock-unpay" data-id="${x.id}" data-pay="${y.id}" class="muted">undo</a>`).join('<br>')}</div>` : ''}</div>
+      <div class="row" style="gap:4px;flex-wrap:wrap;justify-content:flex-end">${x.due > 0 || x.payStatus === 'nocost' ? `<button class="btn sm primary" data-act="stock-pay" data-id="${x.id}">💵 Pay</button>` : ''}<button class="btn sm" data-act="stock-edit" data-id="${x.id}">✏️ Edit / hand over</button><button class="btn sm ghost" data-act="del-stock" data-id="${x.id}" title="Delete purchase" aria-label="Delete purchase">🗑</button></div></div>`;
   const pk = s.stock;
   return `${st.low ? `<div class="notice warning">🎟 Stock is low: <b>${st.available}</b> credits left (alert at ${pk.lowCreditsAlert}).</div>` : ''}
     ${st.panel && st.panel.ok && Number(st.panel.credits) <= pk.lowCreditsAlert ? `<div class="notice danger">⚠️ Your TVplus panel has only <b>${esc(st.panel.credits)}</b> credits left.</div>` : ''}
@@ -1887,14 +1898,20 @@ async function adminStock(s) {
     <form class="card" data-form="stock"><h3>Buy credits from supplier</h3>
       <div class="row" style="margin-bottom:12px">${[1, 2, 5].map((n) => `<button type="button" class="btn sm" data-act="pack" data-n="${n}">${n} pack${n > 1 ? 's' : ''} · ${pk.packCredits * n} cr · $${pk.packPrice * n}</button>`).join('')}</div>
       <div class="grid2">${field('Credits', 'credits', pk.packCredits, { type: 'number', attrs: 'min="1" required' })}${field('Cost', 'cost', pk.packPrice, { type: 'number', attrs: 'step="any" min="0"', help: 'In the currency of the account below.' })}</div>
+      ${field('Payment to the supplier', 'paid', 'yes', { type: 'select', options: [['yes', '✓ Paid now'], ['no', '✗ Not paid yet (owed)'], ['part', '◐ Partly paid']] })}
+      <div id="stock-part" style="display:none">${field('Amount paid now', 'paidAmount', '', { type: 'number', attrs: 'step="any" min="0"' })}</div>
       ${accountSelect(s, 'accountId', s.finance.accounts.find((a) => a.currency !== 'MAD')?.id || '', 'Paid from (bank / wallet)')}
       <div class="grid2">${field('Supplier', 'supplier', 'TVplus')}${field('Date', 'date', isoDay(Date.now()), { type: 'date' })}</div>
+      ${field('Hand over to (agent)', 'handedTo', '', { type: 'select', options: [['', '— nobody yet —'], ...STOCKF.team.map((n) => [n, n])] })}
+      ${field('Note', 'note', '')}
       <button class="btn primary">Add to stock</button></form>
     <form class="card" data-form="settings"><h3>Stock settings</h3>
       <div class="grid2">${field('Credits per pack', 'stock.packCredits', pk.packCredits, { type: 'number' })}${field('Pack price (USD)', 'stock.packPrice', pk.packPrice, { type: 'number', attrs: 'step="any"' })}</div>
       ${field('Remind me when credits are at or below', 'stock.lowCreditsAlert', pk.lowCreditsAlert, { type: 'number', help: 'Shown on the dashboard, and emailed daily if set up in "Trial & email".' })}
       <button class="btn primary">Save</button></form></div>
-    <div class="card"><h3>Purchases</h3>${st.purchases.length ? st.purchases.map((x) => `<div class="list-item"><span>🎟</span><div style="flex:1"><b>${x.credits} credits</b> · ${esc(x.supplier)}<div class="small muted">${fmtDate(x.at)} · ${num(x.cost, x.currency)} (${usd(x.costUsd)})</div></div><button class="btn sm ghost" data-act="del-stock" data-id="${x.id}" title="Delete purchase" aria-label="Delete purchase">🗑</button></div>`).join('') : '<p class="muted">No purchases yet.</p>'}</div>`;
+    <div class="card" id="stock-owed"><h3>🧾 Supplier payments</h3>${owed.length ? owed.map((o) => `<div class="list-item"><span>🏭</span><div style="flex:1"><b>${esc(o.supplier)}</b><div class="small muted">${o.unpaidBatches} batch${o.unpaidBatches === 1 ? '' : 'es'} not fully paid · bought ${num(o.cost, o.currency)} · paid ${num(o.paid, o.currency)}</div></div><b style="color:var(--bad,#d33)">owed ${num(o.due, o.currency)}</b></div>`).join('') : '<p class="small" style="margin:0">✓ Nothing owed to suppliers.</p>'}</div>
+    <div class="card"><div class="row" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">Purchases (credit batches)</h3><span class="spacer"></span><div class="chips">${[['all', 'All ' + st.purchases.length], ['unpaid', '✗ Not paid ' + nUnpaid], ['paid', '✓ Paid'], ['handed', '👤 Handed over']].map(([k, n]) => `<a data-act="stock-filter" data-f="${k}" class="${flt === k ? 'on' : ''}">${n}</a>`).join('')}</div></div>
+    <div style="margin-top:10px">${shown.length ? shown.map(row).join('') : '<p class="muted">No purchases here.</p>'}</div></div>`;
 }
 
 // ---------------- trial & email ----------------
@@ -2630,7 +2647,7 @@ const actions = {
       ${c.buyRequest ? `<p class="small">🛒 Requested <b>${esc(c.buyRequest.title || '')}</b> on ${fmtDT(c.buyRequest.at)}${c.buyRequest.answeredAt ? ' · answered' : ''}</p>` : ''}
       ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}${c.orderSentLink ? ' · link: ' + esc(c.orderSentLink) : ''}</p>` : ''}`, { wide: true });
     const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&link=${encodeURIComponent($('#op-link').value.trim())}&cur=${encodeURIComponent(c.cur || 'USD')}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
-    const fillOpLink = () => { if ($('#op-link').value.trim()) return; const r = resolvePkgPayLink(s, $('#op-pick').value, c.cur); if (r) $('#op-link').value = r.url; }; $('#op-pick').addEventListener('change', () => { fillOpLink(); load(); }); $('#op-link').addEventListener('change', load); fillOpLink(); load();
+    const fillOpLink = async () => { if ($('#op-link').value.trim()) return; const r = await resolvePkgPayLink(s, $('#op-pick').value, c.cur); $('#op-link').placeholder = r ? `Automatic: ${r.accName || r.acc} link${r.options > 1 ? ` (rotation, ${r.options} links)` : ''}` : 'No matching link: paste one'; }; $('#op-pick').addEventListener('change', () => { fillOpLink(); load(); }); $('#op-link').addEventListener('change', load); fillOpLink(); load();
   },
   'order-send': async (el) => {
     el.disabled = true;
@@ -2713,7 +2730,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...PROMO_KINDS.map(([k, n]) => ['promo_' + k, '📣 ' + n]), ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''), custCC(c))}</div>
+      <div class="grid3">${field('Message', 'type', el.dataset.type || (c.state === 'expired' || c.state === 'expiring' ? 'renew' : 'pay'), { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ['ibo_promo', '📺 IBO Player offer'], ...PROMO_KINDS.map(([k, n]) => ['promo_' + k, '📣 ' + n]), ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''), custCC(c))}</div>
       <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s, c.cur)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', c.cur || 'USD', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
@@ -2726,8 +2743,8 @@ const actions = {
     const f = $('[data-form=wa]', body); f.dataset.id = c.id;
     const show = () => { $('#wa-pkg').style.display = f.type.value === 'login' ? 'none' : ''; };
     ['type', 'lang', 'title', 'price', 'currency', 'days', 'devices', 'link'].forEach((k) => f[k].addEventListener('change', () => { show(); waLoad(); }));
-    const fillWaLink = () => { if (f.link.value.trim()) return; const r = resolvePkgPayLink(s, f.pkg.value, c.cur); if (r) f.link.value = r.url; }; // the price stays in the customer's currency
-    f.pkg.addEventListener('change', () => { fillWaLink(); show(); waLoad(); });
+    const fillWaLink = async () => { if (f.link.value.trim()) return; const r = await resolvePkgPayLink(s, f.type.value === 'ibo_promo' ? ((s.iboPromo || {}).pkg || 'ibo1y') : f.pkg.value, c.cur); f.link.placeholder = r ? `Automatic: ${r.accName || r.acc} link${r.options > 1 ? ` (rotation, ${r.options} links)` : ''}` : 'No matching link: paste one'; }; // the price stays in the customer's currency
+    f.pkg.addEventListener('change', () => { fillWaLink(); show(); waLoad(); }); f.type.addEventListener('change', fillWaLink); fillWaLink();
     show(); waLoad();
   },
   'wa-refresh': () => waLoad(),
@@ -2928,7 +2945,7 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
       <div class="row"><button type="button" class="btn" data-act="oc-preview">👁 Preview</button><span class="spacer"></span><button type="button" class="btn primary" data-act="oc-send">📨 Send email</button></div>
       <p class="small muted" id="oc-subj"></p><iframe id="oc-pv" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none"></iframe></form>`, { wide: true });
     const f = $('[data-form=order-custom]', body);
-    f.pkg.addEventListener('change', () => { const p = s.orderPackages.find((x) => x.id === f.pkg.value) || {}; f.title.placeholder = p.title || ''; f.price.placeholder = p.price ?? ''; f.days.placeholder = p.days ?? ''; f.devices.placeholder = p.devices ?? ''; if (!f.link.value.trim()) { const r = resolvePkgPayLink(s, f.pkg.value); if (r) f.link.value = r.url; } });
+    f.pkg.addEventListener('change', () => { const p = s.orderPackages.find((x) => x.id === f.pkg.value) || {}; f.title.placeholder = p.title || ''; f.price.placeholder = p.price ?? ''; f.days.placeholder = p.days ?? ''; f.devices.placeholder = p.devices ?? ''; if (!f.link.value.trim()) resolvePkgPayLink(s, f.pkg.value).then((r) => { if (r && !f.link.value.trim()) f.link.value = r.url; }); });
   },
   'oc-preview': async () => {
     const f = $('[data-form=order-custom]'); const d = Object.fromEntries(new FormData(f));
@@ -3401,7 +3418,7 @@ async tx(f) {
     catch (e) { toast(e.message, true); }
   },
   async stock(f) {
-    try { await api('POST', '/api/admin/stock', formToObj(f)); toast(t('creditsAddedToStock')); renderAdmin(); }
+    try { const r = await api('POST', '/api/admin/stock', formToObj(f)); toast(r.payStatus === 'unpaid' ? 'Added to stock — marked Not paid' : t('creditsAddedToStock')); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
   async login(f) {
@@ -3452,7 +3469,7 @@ async tx(f) {
         const b = state.config.branding; o.username = r.customer.username || o.username; if (!o.password) o.password = r.customer.linePassword || '';
         const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${o.username}\n🔑 Password: ${o.password}\n📅 Expires: ${fmtDate(r.customer.expiresAt)}`;
         closeModal();
-        modal('Customer created 🎉', `${panelNote ? `<div class="notice warning">⚠️ The customer is saved, but <b>the panel did not create the line</b>: ${esc(panelNote)}<br>Create the line on your panel, then tap Edit on this customer and paste its M3U link.</div>` : ''}<p class="muted">Send these login details to your customer:</p><div class="code" id="newlogin">${esc(text)}</div><div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" data-act="copy-new">📋 Copy</button></div>`);
+        modal('Customer created 🎉', `${panelNote ? `<div class="notice warning">⚠️ The customer is saved, but <b>the panel did not create the line</b>: ${esc(panelNote)}<br>Create the line on your panel, then tap Edit on this customer and paste its M3U link.</div>` : ''}<p class="muted">Send these login details to your customer:</p><div class="code" id="newlogin">${esc(text)}</div><div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" data-act="copy-new">📋 Copy</button></div>${r.iboOffer ? `<div class="notice" style="margin-top:12px">📺 The IBO Player offer was emailed. Send it on WhatsApp too:<div class="row" style="margin-top:8px">${iboOfferBtn(r.customer.id)}</div></div>` : ''}`);
         actions['copy-new'] = async () => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { prompt('Copy:', text); } };
         state.admin.customers = await api('GET', '/api/admin/customers');
         if (state.admin.tab === 'customers') $('#admin-body').innerHTML = adminCustomers(); else if (state.admin.tab === 'overview') renderAdminBodyOnly();
@@ -3467,6 +3484,7 @@ async tx(f) {
     try {
       const r = await api('POST', `/api/admin/customers/${f.dataset.id}/renew`, o);
       toast(`Renewed until ${fmtDate(r.customer.expiresAt)} ✓`); closeModal(); renderAdmin();
+      if (r.iboOffer && !(r.panel && r.panel.ok === false)) modal('Renewed ✓', `<p>Renewed until <b>${esc(fmtDate(r.customer.expiresAt))}</b>.</p><div class="notice">📺 The IBO Player offer (${esc(String((state.admin.settings.iboPromo || {}).price || 5.99))}) was emailed. Send it on WhatsApp too:<div class="row" style="margin-top:8px">${iboOfferBtn(r.customer.id)}</div></div>`);
       if (r.panel && r.panel.ok === false) modal('Renewed in the app', `<div class="notice warning">⚠️ The subscription is renewed here, but <b>the panel did not renew the line</b>: ${esc(r.panel.error || 'unknown error')}<br>Renew the line on your panel too. Until then this customer is listed in Alerts → “Paid: renew on the panel”.</div><button class="btn block" data-act="close-modal">OK</button>`);
     } catch (e) { toast(e.message, true); btn.disabled = false; }
   },
@@ -4512,6 +4530,48 @@ const saRow = (a, finAccounts, rec) => `<div class="op-row card" data-sa="${esc(
   <div style="margin-top:12px"><p class="small muted" style="margin:0 0 6px">Payment links — normal / resellers / IBO</p><div class="sa-links">${(a.links || []).map(saLinkRow).join('')}</div>
     <button class="btn sm" data-act="sa-add-link">＋ Add link</button></div>
   <div class="sa-bal small muted" style="margin-top:6px"></div></div>`;
+// Which accounts the panel takes payment links from (GreenApp Host by default), rotation, and which link each package gets
+async function payRouteCard(s) {
+  const ck = await api('GET', '/api/admin/paylinks/check').catch(() => null); if (!ck) return '';
+  const on = new Set(ck.route.accounts); const canEdit = can('stripe');
+  const accs = ck.accounts.map((a) => `<label style="display:inline-flex;gap:6px;align-items:center;margin:0 16px 6px 0;text-transform:none;letter-spacing:0;font-size:14px"><input type="checkbox" style="width:auto" name="pr-acc" value="${esc(a.id)}" ${on.has(a.id) ? 'checked' : ''} ${a.status !== 'active' || !canEdit ? 'disabled' : ''}> ${esc(a.name || a.id)} <span class="muted small">(${a.links} links${a.status !== 'active' ? ', ' + esc(a.status) : ''})</span></label>`).join('');
+  const rows = ck.rows.filter((r) => !/^r/i.test(r.pkg) || r.links.length).map((r) => `<tr><td>${esc(r.name || r.pkg)}</td><td>${esc(r.cur)}</td><td>${r.links.length ? r.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="small">${esc(l.label || 'link')}</a>`).join('<br>') + (r.links.length > 1 && ck.route.rotate ? ' <span class="badge">🔁 rotation</span>' : '') + (r.otherCurrency ? ` <span class="badge warn">only ${esc(r.links[0].cur)}</span>` : '') : '<span class="badge bad">no link</span>'}</td></tr>`).join('');
+  const kinds = { 'same-url': (x) => `The same link is used for <b>${esc(x.a)}</b> and <b>${esc(x.b)}</b>${x.currency ? ' (' + esc(x.currency) + ')' : ''}. One of them charges the wrong package: create a separate link in Stripe.`, label: (x) => `Label <b>${esc(x.a)}</b>${x.currency ? ' (' + esc(x.currency) + ')' : ''}: ${esc(x.hint || '')}.` };
+  const probs = ck.problems.filter((x) => on.has(x.acc));
+  return `<div class="card" id="pay-route"><h3 style="margin-top:0">🔗 Payment links used by the panel</h3>
+    <p class="small muted">Package emails, WhatsApp messages and order links take their payment link only from the accounts ticked here. The link is matched to the package (months, credits, IBO devices) and the customer's currency. With rotation on, packages that have more than one link take turns.</p>
+    <div style="margin:8px 0">${accs}</div>
+    <div class="row">${toggle('Rotation between links', 'pr-rotate', ck.route.rotate)}<span class="spacer"></span>${canEdit ? '<button class="btn primary sm" data-act="pr-save">💾 Save</button>' : ''}</div>
+    ${probs.length ? `<div class="notice warning" style="margin-top:10px"><b>⚠️ ${probs.length} link problem${probs.length === 1 ? '' : 's'} to fix in Stripe</b> (these links are skipped until fixed):<ul style="margin:6px 0 0 18px">${probs.map((x) => `<li>${esc(x.accName || x.acc)}: ${(kinds[x.kind] || ((y) => esc(y.kind)))(x)}</li>`).join('')}</ul></div>` : '<p class="small" style="color:var(--ok,#2a2)">✓ No link problems in the selected accounts.</p>'}
+    <details style="margin-top:10px"><summary>Link for each package (${ck.rows.filter((r) => !r.links.length).length} without a link)</summary><div style="overflow:auto"><table class="table small"><thead><tr><th>Package</th><th>Currency</th><th>Payment link</th></tr></thead><tbody>${rows}</tbody></table></div></details></div>`;
+}
+Object.assign(actions, {
+  'stock-filter': (el, e) => { e && e.preventDefault(); STOCKF.f = el.dataset.f; renderAdmin(); },
+  'stock-pay': (el) => { const x = STOCKF.st.purchases.find((p) => p.id === el.dataset.id); if (!x) return; const s = state.admin.settings;
+    const body = modal('💵 Pay the supplier', `<form data-form="stock-pay" data-id="${x.id}" onsubmit="return false"><p><b>${x.credits} credits</b> · ${esc(x.supplier)} · cost ${num(x.cost, x.currency)} · paid ${num(x.paid, x.currency)}</p>
+      ${x.cost ? '' : field('Cost of this batch', 'cost', '', { type: 'number', attrs: 'step="any" min="0" required' })}
+      ${field('Amount paid', 'amount', x.due || '', { type: 'number', attrs: 'step="any" min="0"', help: x.due ? `Owed: ${num(x.due, x.currency)}` : '' })}
+      ${accountSelect(s, 'accountId', x.accountId || s.finance.accounts.find((a) => a.currency === x.currency)?.id || '', 'Paid from (bank / wallet)')}
+      ${field('Date', 'date', isoDay(Date.now()), { type: 'date' })}
+      <div class="row"><span class="spacer"></span><button class="btn primary" data-act="stock-pay-go">💵 Save payment</button></div></form>`);
+    void body; },
+  'stock-pay-go': async (el) => { const f = el.closest('form'); const o = formToObj(f); el.disabled = true;
+    try { if (o.cost !== undefined) await api('PUT', '/api/admin/stock/' + f.dataset.id, { cost: o.cost }); await api('POST', `/api/admin/stock/${f.dataset.id}/pay`, o); toast('Payment saved ✓'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'stock-unpay': async (el, e) => { e && e.preventDefault(); if (!confirm('Undo this payment? The expense is removed from finance too.')) return;
+    try { await api('DELETE', `/api/admin/stock/${el.dataset.id}/pay/${el.dataset.pay}`); toast('Payment undone'); renderAdmin(); } catch (err) { toast(err.message, true); } },
+  'stock-edit': (el) => { const x = STOCKF.st.purchases.find((p) => p.id === el.dataset.id); if (!x) return; const names = STOCKF.team.includes(x.handedTo) || !x.handedTo ? STOCKF.team : [x.handedTo, ...STOCKF.team];
+    modal('✏️ Credit batch', `<form data-form="stock-edit" data-id="${x.id}" onsubmit="return false"><p>${x.credits} credits · ${fmtDate(x.at)} ${payBadge(x)}</p>
+      <div class="grid2">${field('Supplier', 'supplier', x.supplier)}${field('Cost', 'cost', x.cost, { type: 'number', attrs: 'step="any" min="0"', help: 'In ' + x.currency })}</div>
+      ${field('Hand over to (agent)', 'handedTo', x.handedTo || '', { type: 'select', options: [['', '— nobody —'], ...names.map((n) => [n, n])] })}
+      ${!x.payments.length ? field('Status', 'payStatus', x.payStatus === 'unpaid' ? 'unpaid' : 'nocost', { type: 'select', options: [['unpaid', '✗ Not paid'], ['nocost', 'No cost / free']] }) : ''}
+      ${field('Note', 'note', x.note || '')}
+      <div class="row"><span class="spacer"></span><button class="btn primary" data-act="stock-edit-go">💾 Save</button></div></form>`); },
+  'stock-edit-go': async (el) => { const f = el.closest('form'); el.disabled = true; try { await api('PUT', '/api/admin/stock/' + f.dataset.id, formToObj(f)); toast(t('saved')); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'ibo-auto-save': async () => { const f = $('[data-form=ibo-auto]'); const o = { on: f.on.checked, email: f.email.checked, whatsapp: f.whatsapp.checked, price: Number(f.price.value) || 5.99, everyDays: Number(f.everyDays.value) || 30 };
+    try { await saveSettings({ iboPromo: o }); toast('IBO Player offer saved ✓'); } catch (e) { toast(e.message, true); } },
+  'pr-save': async () => { const box = $('#pay-route'); const accounts = [...box.querySelectorAll('input[name=pr-acc]:checked')].map((x) => x.value); if (!accounts.length) return toast('Tick at least one account.', true);
+    const rot = box.querySelector('[name=pr-rotate]'); try { await saveSettings({ payRoute: { accounts, rotate: !!(rot && rot.checked) } }); toast('Payment link routing saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
+});
 async function adminStripePage(s) {
   const finAcc = (s.finance && s.finance.accounts) || [];
   const list = s.stripeAccounts || []; const links = list.flatMap((a) => a.links || []);
@@ -4525,6 +4585,7 @@ async function adminStripePage(s) {
   (list || []).forEach((a) => { const r = bySa[a.id]; if (r) { totUsd += Number(r.usd || 0); nSales += Number(r.n || 0); } if (Number(a.balance)) nSa++; });
   return `<p class="small muted">All your Stripe accounts in one place. Track <b>status</b> (Active / Verification / Closed), the <b>payout schedule</b> and your <b>package payment links</b> in USD and EUR. Links you add here are what you can put in package emails and IBO activations — deleting a link here does not remove it from Stripe.</p>
     <div class="chips" style="margin-bottom:12px"><a class="on">${list.length} account${list.length === 1 ? '' : 's'} · ${active} active</a><a class="on">${two} with 2-day payout · ${list.length - two} with 7-day payout</a><a class="on">${links.length} link${links.length === 1 ? '' : 's'} — Normal ${byTier('Normal')} · Resellers ${byTier('Resellers')} · IBO ${byTier('IBO')}</a></div>
+    ${await payRouteCard(s)}
     <div class="card" id="sa-compare"><div class="row"><h3 style="margin:0">⚔ Account performance</h3><span class="spacer"></span><button class="btn sm" data-act="sa-compare">↻ Refresh</button></div><div id="sa-compare-body" class="small muted" style="margin-top:10px">Loading comparison…</div></div>
     <div id="sa-all-bal" class="small muted" style="margin-bottom:10px">Sales recorded in app across your Stripe accounts: <b>$${totUsd.toFixed(2)}</b> · ${nSales} sale(s).${rev && rev.unattributedN ? ` ${rev.unattributedN} legacy sale(s) have no Stripe account — they settle through banks and cannot be split between accounts.` : ''}</div>
     <div id="sa-list">${list.map((a) => saRow(a, finAcc, bySa[a.id])).join('')}</div>
@@ -5111,3 +5172,5 @@ boot().catch((e) => {
   const el = document.getElementById('app');
   if (el) el.innerHTML = `<div class="block-screen"><div class="ic">⚠️</div><h2>The app failed to start</h2><p class="muted" style="max-width:320px">${esc(String((e && e.message) || e || 'Unknown error').slice(0, 200))}</p><button class="btn primary" onclick="location.reload()">Retry</button></div>`;
 });
+// Credits stock form: show "Amount paid now" only for a partly paid batch
+document.addEventListener('change', (e) => { const el = e.target; if (el && el.name === 'paid' && el.closest('[data-form=stock]')) { const b = document.getElementById('stock-part'); if (b) b.style.display = el.value === 'part' ? '' : 'none'; } });

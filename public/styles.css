@@ -1111,3 +1111,8 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 .pill.dev-apple{background:rgba(100,116,139,.18)}
 /* the section a notification opens */
 .flash-go{outline:3px solid var(--accent,#0ea5e9);outline-offset:4px;border-radius:14px;transition:outline-color 2s}
+/* small status badges (payments, links) */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: .74rem; font-weight: 700; background: rgba(127,127,127,.15); white-space: nowrap; }
+.badge.ok { background: color-mix(in srgb, var(--ok, #2a2) 18%, transparent); color: var(--ok, #2a2); }
+.badge.warn { background: color-mix(in srgb, var(--warn, #c80) 18%, transparent); color: var(--warn, #c80); }
+.badge.bad { background: color-mix(in srgb, var(--bad, #d33) 18%, transparent); color: var(--bad, #d33); }
