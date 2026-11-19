@@ -1147,3 +1147,8 @@ body:has(.bnav) #lang-fab, body:has(.chat-fab) #lang-fab { bottom: calc(148px + 
 .plan-c b { overflow-wrap: anywhere; }
 /* agents: no text selection / copying of panel data (inputs still work) */
 body.no-copy #app :not(input):not(textarea):not(select) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* reseller client tracker */
+.cl-card { border-inline-start: 4px solid #22c55e; animation: fadeUp .35s both; }
+.cl-card.cl-expiring { border-inline-start-color: #f59e0b; }
+.cl-card.cl-expired { border-inline-start-color: #ef4444; }
+.stat.c-warn b { color: #f59e0b; } .stat.c-bad b { color: #ef4444; }

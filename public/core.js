@@ -273,6 +273,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/app-notify') return 'customers_edit';
   if (path === '/api/admin/paylink' || path === '/api/admin/paylinks/check') return 'customers_view';
   if (path.startsWith('/api/admin/renewmodels')) return 'marketing';
+  if (path === '/api/admin/appmail') return 'customers_edit';
   if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'marketing';
@@ -637,6 +638,18 @@ for (const [l, v] of Object.entries({
   de: 'Android: Bei „Unbekannte App blockiert“ Einstellungen → Sicherheit und Datenschutz → Auto Blocker ausschalten, INTPROTO-TV.apk erneut öffnen und Installieren tippen (danach wieder einschalten möglich). Oder {site}/app in Chrome öffnen → ⋮ → App installieren.',
   es: 'Android: si ves «App desconocida bloqueada», abre Ajustes → Seguridad y privacidad → Bloqueador automático, desactívalo, vuelve a abrir INTPROTO-TV.apk y toca Instalar (luego puedes reactivarlo). O abre {site}/app en Chrome → ⋮ → Instalar app.',
   it: 'Android: se vedi «App sconosciuta bloccata», apri Impostazioni → Sicurezza e privacy → Blocco automatico, disattivalo, riapri INTPROTO-TV.apk e tocca Installa (poi puoi riattivarlo). Oppure apri {site}/app in Chrome → ⋮ → Installa app.' })) TX[l].dlAbHelp = v;
+for (const [l, v] of Object.entries({
+  en: { s: '📲 Install the {app} app on all your devices', t: 'Your app, on every device', b: 'Here is how to install the {app} app on your phone, tablet, computer and TV. Sign in with your usual username and password, then allow notifications: we tell you before your subscription ends and when support answers you.' , btn: '📲 Open the download page' },
+  fr: { s: '📲 Installez l’application {app} sur tous vos appareils', t: 'Votre app, sur chaque appareil', b: 'Voici comment installer l’application {app} sur votre téléphone, tablette, ordinateur et TV. Connectez-vous avec vos identifiants habituels, puis autorisez les notifications : nous vous prévenons avant la fin de l’abonnement et quand le support vous répond.', btn: '📲 Ouvrir la page de téléchargement' },
+  de: { s: '📲 Installieren Sie die {app}-App auf all Ihren Geräten', t: 'Ihre App auf jedem Gerät', b: 'So installieren Sie die {app}-App auf Handy, Tablet, Computer und TV. Melden Sie sich mit Ihren üblichen Zugangsdaten an und erlauben Sie Benachrichtigungen: Wir informieren Sie vor Ablauf des Abos und wenn der Support antwortet.', btn: '📲 Download-Seite öffnen' },
+  es: { s: '📲 Instala la app de {app} en todos tus dispositivos', t: 'Tu app, en cada dispositivo', b: 'Así puedes instalar la app de {app} en tu móvil, tableta, ordenador y TV. Inicia sesión con tu usuario y contraseña de siempre y permite las notificaciones: te avisamos antes de que termine tu suscripción y cuando soporte te responda.', btn: '📲 Abrir la página de descarga' },
+  it: { s: '📲 Installa l’app {app} su tutti i tuoi dispositivi', t: 'La tua app, su ogni dispositivo', b: 'Ecco come installare l’app {app} su telefono, tablet, computer e TV. Accedi con il tuo nome utente e password di sempre, poi consenti le notifiche: ti avvisiamo prima della scadenza e quando il supporto risponde.', btn: '📲 Apri la pagina di download' } })) TX[l].appMail = v;
+export function appDownloadEmail(s, c, appUrl) {
+  const lang = okLang(c.lang); const M = TX[lang].appMail || TX.en.appMail; const site = String(s.email.appUrl || appUrl || 'https://intproto-tv.store').replace(/\/+$/, ''); const app = s.branding.appName || 'INTPROTO-TV';
+  const f = (x) => x.replace(/\{app\}/g, app);
+  const camp = { split: false, lang, badge: '📲 ' + app, content: { all: { subject: f(M.s), title: M.t, body: f(M.b) + '\n\n' + appLinksText(site, lang) + '\n\n📺 ' + site + '/download', button: M.btn } }, link: site + '/app' };
+  return newsletterEmail(s, c, camp, appUrl, '');
+}
 export const APP_DL = { apk: '/apk/INTPROTO-TV.apk', macArm: 'https://github.com/khalil203/my-iptv/releases/download/desktop/INTPROTO-TV-Mac-arm64.dmg' };
 // HTML block for emails: one button per device + the "open in Safari" box
 export function appLinksHtml(base, lang, dark) {
@@ -2849,6 +2862,35 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await notifyAdmin(s, `🛒 Reseller order: ${p.name} (${p.rslId}) wants ${pk.credits} credits`, `${p.name} · ${p.rslId}\n${p.email || ''}\n${p.phone || ''}\n\nPackage: ${pk.name} · ${pk.credits} credits · ${pk.price} ${cur}\nPayment: ${method || '—'}${q.note ? '\nNote: ' + q.note : ''}\n\nSend the payment link, then open the app → Customers → Resellers → this reseller → ✓ Complete. The reseller gets the confirmation email.`);
           return ok({ ok: true, request: q });
         }
+        // ---- reseller tools: own contact & shop prices, client subscription tracker, app email ----
+        const RS_PRICE_DEF = () => [['1 Month', 1, 1], ['3 Months', 3, 1], ['6 Months', 6, 1], ['1 Year', 12, 1], ['2 Devices · 1 Year', 12, 2], ['3 Devices · 1 Year', 12, 3], ['4 Devices · 1 Year', 12, 4]].map(([label, months, devices]) => ({ id: uid(4), label, months, devices, price: 0 }));
+        const getCl = async () => (await store.get('rslclients:' + p.id)) || [];
+        const clView = (x) => { const left = Math.ceil((x.endAt - Date.now()) / DAY); return { ...x, daysLeft: left, state: left <= 0 ? 'expired' : left <= 7 ? 'expiring' : 'active' }; };
+        const clClean = (b, o = {}) => { const months = Math.max(0, Math.min(60, Number(b.months ?? o.months) || 0)); const startAt = b.startAt ? new Date(b.startAt).getTime() : (o.startAt || Date.now());
+          const endAt = b.endAt ? new Date(b.endAt).getTime() + 12 * 3600000 : (o.endAt && b.months === undefined ? o.endAt : startAt + (months || 1) * 30 * DAY);
+          return { ...o, name: rsText(b.name ?? o.name, 80), phone: rsText(b.phone ?? o.phone, 30), email: cleanEmail(b.email ?? o.email) || '', username: rsText(b.username ?? o.username, 60), device: rsText(b.device ?? o.device, 60), plan: rsText(b.plan ?? o.plan, 60), months, devices: Math.max(1, Math.min(10, Number(b.devices ?? o.devices) || 1)), price: Math.max(0, Number(b.price ?? o.price) || 0), paid: b.paid !== undefined ? !!b.paid && b.paid !== 'false' : o.paid !== false, note: rsText(b.note ?? o.note, 300), startAt: isFinite(startAt) ? startAt : Date.now(), endAt: isFinite(endAt) ? endAt : Date.now() + 30 * DAY, updatedAt: Date.now() }; };
+        if (R('GET', '/api/rsl/tools')) { const cl = (await getCl()).map(clView).sort((a, b) => a.endAt - b.endAt);
+          return ok({ clients: cl, stats: { total: cl.length, active: cl.filter((x) => x.state === 'active').length, expiring: cl.filter((x) => x.state === 'expiring').length, expired: cl.filter((x) => x.state === 'expired').length, monthIncome: cl.filter((x) => x.paid && x.updatedAt >= Date.now() - 30 * DAY).reduce((a, x) => a + (x.price || 0), 0) },
+            shop: { name: p.shopName || p.org || p.name, whatsapp: p.shopWa || p.phone || '', telegram: p.shopTg || '', email: p.shopEmail || p.email || '', note: p.shopNote || '', currency: p.shopCur || cur, prices: (p.shopPrices && p.shopPrices.length ? p.shopPrices : RS_PRICE_DEF()) }, contact: { phone: p.phone || '', org: p.org || '', email: p.email || '' } }); }
+        if (R('PUT', '/api/rsl/shop')) { // contact details and the prices they charge their own clients
+          if (body.phone !== undefined) p.phone = rsText(body.phone, 30); if (body.org !== undefined) p.org = rsText(body.org, 80);
+          if (body.shopName !== undefined) p.shopName = rsText(body.shopName, 60); if (body.whatsapp !== undefined) p.shopWa = rsText(body.whatsapp, 30); if (body.telegram !== undefined) p.shopTg = rsText(body.telegram, 40).replace(/^@/, ''); if (body.shopEmail !== undefined) p.shopEmail = cleanEmail(body.shopEmail) || ''; if (body.note !== undefined) p.shopNote = rsText(body.note, 300);
+          if (body.currency && ['EUR', 'USD', 'GBP', 'MAD', 'THB', 'TND', 'CAD', 'AUD'].includes(body.currency)) p.shopCur = body.currency;
+          if (Array.isArray(body.prices)) p.shopPrices = body.prices.slice(0, 20).map((x) => ({ id: rsText(x.id, 8) || uid(4), label: rsText(x.label, 50), months: Math.max(0, Math.min(60, Number(x.months) || 0)), devices: Math.max(1, Math.min(10, Number(x.devices) || 1)), price: Math.max(0, Math.round((Number(x.price) || 0) * 100) / 100) })).filter((x) => x.label);
+          await saveResellers(rs); await log('customer', `Reseller ${p.name} (${p.rslId}) updated contact / prices`); return ok({ ok: true }); }
+        if (R('POST', '/api/rsl/clients')) { const cl = await getCl(); if (cl.length >= 2000) return err(400, 'Client list is full.'); const x = clClean(body, { id: uid(6), createdAt: Date.now() }); if (!x.name) return err(400, 'Enter the client name.'); cl.push(x); await store.put('rslclients:' + p.id, cl); return ok(clView(x)); }
+        const clm = path.match(/^\/api\/rsl\/clients\/(\w+)(\/renew)?$/);
+        if (clm) { const cl = await getCl(); const i = cl.findIndex((x) => x.id === clm[1]); if (i < 0) return err(404, 'Client not found.');
+          if (method === 'DELETE') { cl.splice(i, 1); await store.put('rslclients:' + p.id, cl); return ok({ ok: true }); }
+          if (clm[2] && method === 'POST') { const months = Math.max(1, Math.min(60, Number(body.months) || 1)); const o = cl[i]; const base = Math.max(Date.now(), o.endAt); cl[i] = { ...o, endAt: base + months * 30 * DAY, months, price: body.price !== undefined ? Math.max(0, Number(body.price) || 0) : o.price, paid: body.paid !== undefined ? !!body.paid : true, renewals: [...(o.renewals || []), { at: Date.now(), months, price: Number(body.price) || o.price || 0 }].slice(-30), updatedAt: Date.now() }; await store.put('rslclients:' + p.id, cl); return ok(clView(cl[i])); }
+          if (method === 'PUT') { cl[i] = clClean(body, cl[i]); await store.put('rslclients:' + p.id, cl); return ok(clView(cl[i])); }
+        }
+        if (R('POST', '/api/rsl/appmail')) { // app download email for the reseller or one of their clients
+          const k = 'rslmail:' + p.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0; if (n >= 30) return err(429, 'You sent 30 emails today. Try again tomorrow.');
+          let target = { name: p.name, email: p.email, lang: p.lang || 'en' }; if (body.clientId) { const x = (await getCl()).find((y) => y.id === body.clientId); if (!x) return err(404, 'Client not found.'); target = { name: x.name, email: x.email, lang: body.lang || p.lang || 'en' }; }
+          if (!cleanEmail(target.email)) return err(400, 'This client has no email address.');
+          const m = appDownloadEmail(s, target, body.appUrl); const r = await sendEmail(s, cleanEmail(target.email), m.subject, m.html); if (!r.ok) return err(502, r.error || 'Email failed');
+          await store.put(k, n + 1, 2 * 86400); await log('marketing', `Reseller ${p.rslId} sent the app email to ${target.email}`); return ok({ ok: true, to: cleanEmail(target.email) }); }
         if (R('POST', '/api/rsl/password')) {
           if ((await hashPassword(String(body.current || ''), p.login.salt)) !== p.login.hash) return err(400, 'Your current password is not right.');
           const np = String(body.password || ''); if (np.length < 6) return err(400, 'The new password needs 6 characters or more.');
@@ -4002,6 +4044,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const r = payRoute(s); const rows = [];
         for (const pk of [...s.orderPackages, ...(s.resellerPackages || [])]) for (const cur of ['USD', 'EUR']) { const c = payCandidates(s, pk, cur); rows.push({ pkg: pk.id, name: pk.title || pk.name, cur, links: c.list.map((x) => ({ label: x.label, acc: x.accName, cur: x.cur, url: x.url })), otherCurrency: c.otherCurrency }); }
         return ok({ route: r, accounts: (s.stripeAccounts || []).map((a) => ({ id: a.id, name: a.name, status: a.status, links: (a.links || []).length })), rows, problems: payLinkProblems(s) });
+      }
+      if (R('POST', '/api/admin/appmail')) { // app download email (all devices): one customer, one reseller, or a group (bulk = owner & technical service)
+        const list = await getCustomers(); const rs0 = await getResellers(); const now = Date.now(); let to = [];
+        if (body.customerId) to = list.filter((c) => c.id === body.customerId); else if (body.resellerId) to = rs0.filter((r) => r.id === body.resellerId).map((r) => ({ ...r, lang: r.lang || 'en' }));
+        else { if (!can('marketing')) return err(403, 'Only the owner and the Technical Service can email a whole group.'); const aud = String(body.audience || 'active'); to = aud === 'resellers' ? rs0.filter((r) => r.status !== 'paused') : list.filter((c) => c.status !== 'disabled' && !c.unsub && (aud === 'all' || (aud === 'trial' ? c.isTrial : c.expiresAt > now && !c.isTrial))); }
+        to = to.filter((x) => cleanEmail(x.email)); if (!to.length) return err(400, 'Nobody with an email address.'); if (to.length > 500) return err(400, 'Too many at once (max 500).');
+        let sent = 0, failed = 0; for (const x of to) { const m = appDownloadEmail(s, x, body.appUrl); const r = await sendEmail(s, cleanEmail(x.email), m.subject, m.html); if (r.ok) sent++; else failed++; }
+        await log('marketing', `App download email sent to ${sent}${failed ? ` (${failed} failed)` : ''}${to.length === 1 ? ' · ' + (to[0].username || to[0].rslId || to[0].name) : ''}`); return ok({ sent, failed });
       }
       if (R('GET', '/api/admin/renewmodels')) return ok({ cfg: renewCfg(s), code: renewCode(s), models: Object.entries(RENEW_MODELS).map(([id, m]) => ({ id, icon: m.icon, name: m.name, subject: m.en.s })) });
       if (R('GET', '/api/admin/renewmodels/preview')) { // preview of a model for one customer (or a sample), in a language

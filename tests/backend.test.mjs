@@ -2225,3 +2225,32 @@ test('agents: check in before the panel, signed out after 6 hours with auto chec
   const w = (await x.call('GET', '/api/admin/waiting', {}, tok)).json; for (const k of ['support', 'chat', 'trials', 'waitLine', 'receipts', 'buy']) assert.equal(typeof w[k], 'number', k);
   const team = (await x.call('GET', '/api/admin/team', {}, tok)).json; assert.equal((await x.call('POST', '/api/admin/attendance/add', { memberId: team[0].id, action: 'in', at: new Date().toISOString() }, tok)).status, 200);
 });
+
+test('resellers: client subscription tracker, contact & shop prices, app download email for every device', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', appUrl: 'https://tv.example.com' } }, tok);
+  const R = (await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Shop Owner', email: 'shop.owner@example.com', phone: '+27763456789', appUrl: 'https://tv.example.com' }, tok)).json.reseller;
+  const rt = (await x.call('POST', '/api/login', { username: R.rslId, password: R.login.pass })).json.token;
+  let tools = (await x.call('GET', '/api/rsl/tools', {}, rt)).json; assert.equal(tools.clients.length, 0); assert.equal(tools.shop.prices.length, 7);
+  // prices and contact
+  const prices = tools.shop.prices.map((p, i) => ({ ...p, price: [15, 35, 55, 80, 120, 160, 190][i] }));
+  assert.equal((await x.call('PUT', '/api/rsl/shop', { shopName: 'Best TV Shop', whatsapp: '+27763456000', telegram: '@besttv', currency: 'USD', prices, phone: '+27763456111' }, rt)).status, 200);
+  tools = (await x.call('GET', '/api/rsl/tools', {}, rt)).json; assert.equal(tools.shop.name, 'Best TV Shop'); assert.equal(tools.shop.telegram, 'besttv'); assert.equal(tools.shop.prices[3].price, 80); assert.equal(tools.contact.phone, '+27763456111');
+  // tracker
+  const a = (await x.call('POST', '/api/rsl/clients', { name: 'Client One', email: 'client.one@example.com', phone: '+15550001111', plan: '1 Month', months: 1, price: 15 }, rt)).json; assert.equal(a.state, 'active'); assert.ok(a.daysLeft >= 29);
+  const b = (await x.call('POST', '/api/rsl/clients', { name: 'Client Two', endAt: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10), price: 35 }, rt)).json; assert.equal(b.state, 'expiring');
+  const rn = (await x.call('POST', `/api/rsl/clients/${b.id}/renew`, { months: 3, price: 35 }, rt)).json; assert.ok(rn.daysLeft > 90); assert.equal(rn.renewals.length, 1);
+  assert.equal((await x.call('PUT', `/api/rsl/clients/${a.id}`, { note: 'pays cash' }, rt)).json.note, 'pays cash');
+  tools = (await x.call('GET', '/api/rsl/tools', {}, rt)).json; assert.equal(tools.stats.total, 2); assert.equal(tools.stats.active, 2);
+  assert.equal((await x.call('DELETE', `/api/rsl/clients/${a.id}`, {}, rt)).status, 200);
+  // app download email: to a client and to the reseller; admin to one customer
+  await x.call('POST', '/api/rsl/clients', { name: 'Client Three', email: 'client.three@example.com', months: 1 }, rt);
+  const c3 = (await x.call('GET', '/api/rsl/tools', {}, rt)).json.clients.find((y) => y.name === 'Client Three');
+  assert.equal((await x.call('POST', '/api/rsl/appmail', { clientId: c3.id }, rt)).json.to, 'client.three@example.com');
+  const m = x.mails.at(-1); assert.match(m.subject, /Install the .* app on all your devices/); for (const k of ['/apk/INTPROTO-TV.apk', '/app?os=ios', '/download#mac', 'Safari', 'Auto Blocker']) assert.ok(m.html.includes(k), k);
+  const cu = await addCustomer(x, tok, { username: 'appmail1', email: 'appmail1@example.fr', lang: 'fr' });
+  assert.equal((await x.call('POST', '/api/admin/appmail', { customerId: cu.id }, tok)).json.sent, 1); assert.match(x.mails.at(-1).subject, /Installez/);
+  // other resellers can't see these clients
+  const R2 = (await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Other Shop', email: 'other.shop@example.com', appUrl: 'https://tv.example.com' }, tok)).json.reseller;
+  const rt2 = (await x.call('POST', '/api/login', { username: R2.rslId, password: R2.login.pass })).json.token; assert.equal((await x.call('GET', '/api/rsl/tools', {}, rt2)).json.clients.length, 0);
+});
