@@ -1,7 +1,7 @@
 import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=101';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
-import { siteHtml } from './site.js?v=90';
-import { ic } from './icons.js?v=83';
+import { siteHtml } from './site.js?v=102';
+import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=94';
 
@@ -841,15 +841,15 @@ async function adminOverview() {
   const panelErr = cr.enabled && !cr.ok && can('settings') ? `<div class="notice warning">🎟 <b>Panel credits could not be read.</b> ${esc(cr.error || '')} <a data-act="atab" data-tab="api" style="cursor:pointer">Open API settings →</a></div>` : '';
   return `${pwWarn}${panelErr}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
   <div class="stats">
-    ${sd ? `<div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('card', 20)}</i><span>Sales today</span><b>${usd(sd.today)}</b><span>${sd.todayN} sale${sd.todayN === 1 ? '' : 's'}${sd.yest || sd.yest === 0 ? ' · yest ' + usd(sd.yest) : ''}</span></div>
-    <div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('crown', 20)}</i><span>This month</span><b>${usd(sd.month)}</b><span>${sd.monthN} sale${sd.monthN === 1 ? '' : 's'} · avg ${usd(sd.avg)}</span></div>` : ''}
+    ${sd ? `<div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('cash', 20)}</i><span>Sales today</span><b>${usd(sd.today)}</b><span>${sd.todayN} sale${sd.todayN === 1 ? '' : 's'}${sd.yest || sd.yest === 0 ? ' · yest ' + usd(sd.yest) : ''}</span></div>
+    <div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('calendar', 20)}</i><span>This month</span><b>${usd(sd.month)}</b><span>${sd.monthN} sale${sd.monthN === 1 ? '' : 's'} · avg ${usd(sd.avg)}</span></div>` : ''}
     <div class="stat"><i class="st-ic">${ic('user', 20)}</i><span>Customers</span><b>${st.total}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('check', 20)}</i><span>Active</span><b>${st.active}</b></div>
     <div class="stat c-warn"><i class="st-ic">${ic('clock', 20)}</i><span>Expiring soon</span><b>${st.expiring}</b></div>
     <div class="stat c-bad"><i class="st-ic">${ic('logout', 20)}</i><span>Expired</span><b>${st.expired}</b></div>
     <div class="stat"><i class="st-ic">${ic('star', 20)}</i><span>Free trials</span><b>${st.trials}</b></div>
-    ${st.revenueTotal !== null ? `<div class="stat c-acc"><i class="st-ic">${ic('card', 20)}</i><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
-    <div class="stat"><i class="st-ic">${ic('crown', 20)}</i><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
+    ${st.revenueTotal !== null ? `<div class="stat c-acc"><i class="st-ic">${ic('trend', 20)}</i><span>Revenue this month</span><b>${usd(st.revenueMonth)}</b><span>${mad(st.revenueMonth * st.madRate)}</span></div>
+    <div class="stat"><i class="st-ic">${ic('coins', 20)}</i><span>Total revenue</span><b>${usd(st.revenueTotal)}</b><span>${mad(st.revenueTotal * st.madRate)}</span></div>` : ''}
     <div class="stat ${panelLow ? 'c-bad' : ''}"><span>Panel credits (API)</span><b>${cr.enabled ? (cr.ok ? esc(cr.credits ?? '—') : cr.last ? esc(cr.last.v) : '⚠️') : 'off'}</b>${cr.enabled && !cr.ok ? `<span title="${esc(cr.error || '')}">⚠️ ${cr.last ? 'last known, ' + fmtDate(cr.last.at) : 'not connected'}</span>` : ''}</div>
     <div class="stat ${st.stock.low ? 'c-bad' : ''}"><span>Credits in stock</span><b>${st.stock.available}</b></div>
     ${st.totalBalanceUsd !== null && st.totalBalanceUsd !== undefined ? `<div class="stat c-ok" data-act="atab" data-tab="finance" style="cursor:pointer"><span>All banks (total)</span><b>${usd(st.totalBalanceUsd)}</b><span>${mad(st.totalBalanceUsd * st.madRate)}</span></div>` : ''}
@@ -1403,7 +1403,7 @@ function accPage() {
   const q = ACC.q.toLowerCase(); const list = d.rows.filter((a) => (ACC.kind === 'all' || a.kind === ACC.kind) && (!q || [a.name, a.email, (a.domains || []).join(' '), a.note].join(' ').toLowerCase().includes(q)));
   const sec = (a, k, label) => { const v = a[k]; if (!v) return '<span class="muted">—</span>'; const id = a.id + k; return `<code id="ac-${id}" style="word-break:break-all">${ACC.show[id] ? esc(v) : '••••' + esc(String(v).slice(-4))}</code> <button class="btn sm ghost" data-act="acc-eye" data-k="${id}" title="Show / hide ${label}">👁</button><button class="btn sm ghost" data-act="rsl-copy" data-v="${esc(v)}" title="Copy">📋</button>`; };
   const bar = (pct) => pct === null ? '' : `<div style="height:6px;background:var(--line,#e2e8f0);border-radius:6px;overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.min(100, pct)}%;background:${pct > 90 ? '#dc2626' : pct > 70 ? '#f59e0b' : '#16a34a'}"></div></div>`;
-  return `<div class="notice" style="margin-bottom:12px">🔐 Only the owner, Khalil and Nizar can open this page. Support agents never see these keys, passwords or domains.</div>
+  return `<div class="notice" style="margin-bottom:12px">🗝️ Only the owner, Khalil and Nizar can open this page. Support agents never see these keys, passwords or domains.</div>
   <div class="stats">
     <div class="stat c-acc"><span>Accounts</span><b>${T.accounts}</b><span>${T.keys} API keys · ${T.paid} paid</span></div>
     <div class="stat"><span>Emails sent this month</span><b>${Number(T.month).toLocaleString()}</b><span>${T.quota ? `of ${Number(T.quota).toLocaleString()} in the plans` : ''}</span></div>
@@ -1695,7 +1695,7 @@ async function loadStripe() {
   if (!r || !r.connected) return;
   if (r.error) { box.innerHTML = `<div class="notice danger">Stripe: ${esc(r.error)}</div>`; return; }
   const diff = Math.round((r.available + r.pending - r.app) * 100) / 100;
-  box.innerHTML = `<div class="card" style="border-color:#635bff55"><div class="row"><h3 style="margin:0">💳 Stripe (live)</h3><span class="spacer"></span>${diff ? `<button class="btn sm primary" data-act="stripe-match" data-target="${r.available + r.pending}" data-perm="finance_edit">Sync app to Stripe</button>` : '<span class="pill st-active">in sync</span>'}</div>
+  box.innerHTML = `<div class="card" style="border-color:#635bff55"><div class="row"><h3 style="margin:0">💠 Stripe (live)</h3><span class="spacer"></span>${diff ? `<button class="btn sm primary" data-act="stripe-match" data-target="${r.available + r.pending}" data-perm="finance_edit">Sync app to Stripe</button>` : '<span class="pill st-active">in sync</span>'}</div>
     <div class="row small" style="margin-top:8px;gap:18px"><span>Available: <b>${num(r.available, r.currency)}</b></span><span>Pending: <b>${num(r.pending, r.currency)}</b></span><span>In the app: <b>${num(r.app, r.currency)}</b></span>${diff ? `<span class="${diff > 0 ? 'pos' : 'neg'}">Difference: ${num(diff, r.currency)}</span>` : ''}</div>
     ${r.otherCurrencies.length ? `<div class="small muted" style="margin-top:6px">Other currencies in Stripe: ${esc(r.otherCurrencies.join(', '))}</div>` : ''}</div>`;
 }
