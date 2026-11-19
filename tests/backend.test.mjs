@@ -2287,7 +2287,7 @@ test('work planning: schedule for every agent, check off today only, owner-only 
   const later = new Date(new Date(wp.today + 'T12:00:00Z').getTime() + 2 * 86400000).toISOString().slice(0, 10);
   assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: later, slot: 's2' }, st)).status, 400);
   assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: wp.today, slot: 's6' }, st)).status, 400, 'the break is not a task');
-  await new Promise((r) => setTimeout(r, 20)); assert.ok(posted.some((p) => p.sheet === 'Agent Work Planning' && p.rows[0][6] === 'YES'), 'synced to Google Sheets');
+  await new Promise((r) => setTimeout(r, 20)); assert.ok(posted.some((p) => p.sheet === 'Agent Work Planning' && !p.append && p.rows.length === 49 && p.rows.some((r) => r[0] === wp.today && r[3].startsWith('IPTV') && r[6] === 'YES' && r[8] === '12 tickets answered')), 'synced to Google Sheets');
   const own = (await x.call('GET', '/api/admin/workplan', {}, tok)).json; const team = (await x.call('GET', '/api/admin/team', {}, tok)).json;
   assert.ok(own.checks[wp.today][team[0].id].s2); assert.equal(own.canEdit, true);
   assert.equal((await x.call('POST', '/api/admin/workplan/sheet', {}, tok)).json.rows, 7 * 7);

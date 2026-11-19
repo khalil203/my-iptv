@@ -3833,13 +3833,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const now = new Date(); const L = localNow(wp.tz); const meets = [0, 1].map((k) => meetDate(wp.meet, now.getUTCFullYear(), now.getUTCMonth() + k)).filter((d) => d >= today);
           return ok({ plan: wp, week, today, nowMin: L.min, checks: Object.fromEntries(week.map((d) => [d, mine(d)])), who, canEdit: isOwner, nextMeet: wp.meet.on ? meets[0] || null : null, me: me0 ? me0.id : 'owner' });
         }
+        const wpSheetPush = async (url) => { // this week's planning + every agent's check-offs, one row per agent and time slot
+          const today = dayKey(Date.now()); const r0 = new Date(today + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS); const rows = [];
+          for (let i = 0; i < 7; i++) { const d = new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10); const c = (await store.get('plancheck:' + d)) || {}; const wd = wdOf(d);
+            for (const sl of wp.slots) for (const m of team.filter((x) => x.status !== 'disabled')) { const k = (c[m.id] || {})[sl.id]; rows.push([d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wd], sl.start + '–' + sl.end, sl.title, (wp.days[wd] || {})[sl.id] || '', m.name || m.username, sl.noCheck ? '—' : k ? 'YES' : 'NO', k ? new Date(k.at).toISOString() : '', k?.note || '']); } }
+          const r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at', 'Note'], rows }) });
+          return { ok: r.ok, status: r.status, rows: rows.length };
+        };
         if (R('POST', '/api/admin/workplan/check')) { // an agent checks off one of today's tasks (or yesterday's, if forgotten)
           if (!me0) return err(400, 'The owner does not check off tasks.'); const d = String(body.date || ''); const today = dayKey(Date.now()); const yest = dayKey(Date.now() - DAYMS);
           if (d !== today && d !== yest) return err(400, 'You can check off today’s tasks (or yesterday’s).'); const sl = wp.slots.find((x) => x.id === body.slot); if (!sl || sl.noCheck) return err(400, 'Unknown task.');
           const c = (await store.get('plancheck:' + d)) || {}; c[me0.id] = c[me0.id] || {};
           if (body.done === false) delete c[me0.id][sl.id]; else c[me0.id][sl.id] = { at: Date.now(), note: cleanText(body.note, 200) };
           await store.put('plancheck:' + d, c, 400 * 86400);
-          const url = wp.sheetUrl || s.accountsSheet; if (url) { const task = (wp.days[wdOf(d)] || {})[sl.id] || ''; fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', append: true, header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at', 'Note'], rows: [[d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wdOf(d)], sl.start + '–' + sl.end, sl.title, task, me0.name || me0.username, body.done === false ? 'NO' : 'YES', new Date().toISOString(), cleanText(body.note, 200)]] }) }).catch(() => {}); }
+          const url = wp.sheetUrl || s.accountsSheet; if (url) await wpSheetPush(url).catch(() => {}); // the whole week is rewritten, so the tab always matches the panel
           return ok({ ok: true, done: body.done !== false });
         }
         if (R('PUT', '/api/admin/workplan')) { // owner only: the schedule structure, tasks per day, rules, meeting, time zone, Google Sheet
@@ -3855,11 +3862,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         if (R('POST', '/api/admin/workplan/sheet')) { // owner: send the planning + this week's check-offs to Google Sheets
           if (!isOwner) return err(403, 'Owner only.'); const url = wp.sheetUrl || s.accountsSheet; if (!url) return err(400, 'Add your Google Sheets (Apps Script) link first.');
-          const today = dayKey(Date.now()); const r0 = new Date(today + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS); const rows = [];
-          for (let i = 0; i < 7; i++) { const d = new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10); const c = (await store.get('plancheck:' + d)) || {}; const wd = wdOf(d);
-            for (const sl of wp.slots) for (const m of team.filter((x) => x.status !== 'disabled')) { const k = (c[m.id] || {})[sl.id]; rows.push([d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wd], sl.start + '–' + sl.end, sl.title, (wp.days[wd] || {})[sl.id] || '', m.name || m.username, sl.noCheck ? '—' : k ? 'YES' : 'NO', k ? new Date(k.at).toISOString() : '', k?.note || '']); } }
-          let r; try { r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at', 'Note'], rows }) }); } catch (e) { return err(502, 'Google Sheets could not be reached: ' + e.message); }
-          if (!r.ok) return err(502, 'Google Sheets answered ' + r.status + '.'); return ok({ rows: rows.length });
+          let r; try { r = await wpSheetPush(url); } catch (e) { return err(502, 'Google Sheets could not be reached: ' + e.message); }
+          if (!r.ok) return err(502, 'Google Sheets answered ' + r.status + '.'); return ok({ rows: r.rows });
         }
         return err(404, 'Not found');
       }

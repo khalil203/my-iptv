@@ -1,9 +1,9 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=117';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=118';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=117';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=118';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -5550,8 +5550,14 @@ document.addEventListener('change', (e) => { if (e.target.dataset?.input === 'wp
 Object.assign(actions, {
   'wp-check': async (el) => { const done = el.checked; try { await api('POST', '/api/admin/workplan/check', { date: el.dataset.date, slot: el.dataset.slot, done }); toast(done ? '✓ Checked off' : 'Unchecked'); renderAdmin(); } catch (e) { el.checked = !done; toast(e.message, true); } },
   'wp-week': (el) => { const d = Number(el.dataset.d); const base = state.admin.wp?.week?.[0] || new Date().toISOString().slice(0, 10); WP.week = d === 0 ? '' : new Date(new Date(base + 'T12:00:00Z').getTime() + d * 86400000).toISOString().slice(0, 10); renderAdmin(); },
-  'wp-sheet': async () => { const P = state.admin.wp.plan; const url = prompt('Google Sheets Apps Script link (https://script.google.com/macros/s/…/exec). Leave as it is to send now:', P.sheetUrl || ''); if (url === null) return;
-    try { if (url !== P.sheetUrl) await api('PUT', '/api/admin/workplan', { sheetUrl: url }); const r = await api('POST', '/api/admin/workplan/sheet'); toast(`Sent ${r.rows} rows to the "Agent Work Planning" sheet ✓`); } catch (e) { toast(e.message, true); } },
+  'wp-sheet': () => { const P = state.admin.wp.plan;
+    modal('📤 Google Sheets · Agent Work Planning', `<p class="small" style="margin-top:0">Each time an agent checks off a task, the <b>Agent Work Planning</b> tab of your Google Sheet is updated with the whole week (every agent, every time slot, YES / NO).</p>
+      <details ${P.sheetUrl ? '' : 'open'} style="margin:8px 0"><summary class="small"><b>How to connect the sheet (2 minutes, once)</b></summary><ol class="small"><li>Open your Google Sheet → <b>Extensions → Apps Script</b>.</li><li>Delete what is there, paste this code and click 💾 Save:</li></ol><textarea readonly rows="7" style="width:100%;font-family:monospace;font-size:12px" onclick="this.select()">function doPost(e){var d=JSON.parse(e.postData.contents);var ss=SpreadsheetApp.getActive();var sh=ss.getSheetByName(d.sheet)||ss.insertSheet(d.sheet);if(!d.append){sh.clear();sh.appendRow(d.header);}else if(sh.getLastRow()==0){sh.appendRow(d.header);}if(d.rows.length)sh.getRange(sh.getLastRow()+1,1,d.rows.length,d.header.length).setValues(d.rows);return ContentService.createTextOutput('ok');}
+function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter||{}).sheet||'Accounts');var v=sh?sh.getDataRange().getValues():[];return ContentService.createTextOutput(JSON.stringify({rows:v})).setMimeType(ContentService.MimeType.JSON);}</textarea><ol class="small" start="3"><li><b>Deploy → New deployment</b> → type <b>Web app</b> → Execute as <b>Me</b>, Who has access <b>Anyone</b> → Deploy → allow access.</li><li>Copy the <b>Web app URL</b> (…/exec) and paste it below.</li></ol><p class="small muted">The same link also works for 📊 Accounts → Google Sheets.</p></details>
+      <form data-form="wp-sheet">${field('Apps Script web app link', 'url', P.sheetUrl || '', { ph: 'https://script.google.com/macros/s/…/exec', attrs: 'autocapitalize="none"' })}
+      <div class="row" style="justify-content:flex-end;gap:6px"><button type="submit" class="btn primary">Save & send this week</button></div></form>`, { wide: true });
+    $('[data-form=wp-sheet]').onsubmit = async (ev) => { ev.preventDefault(); const url = ev.target.url.value.trim();
+      try { if (url !== (P.sheetUrl || '')) { await api('PUT', '/api/admin/workplan', { sheetUrl: url }); P.sheetUrl = url; } const r = await api('POST', '/api/admin/workplan/sheet'); closeModal(); toast(`Sent ${r.rows} rows to the "Agent Work Planning" sheet ✓`); } catch (e) { toast(e.message, true); } }; },
   'wp-edit': () => { const P = state.admin.wp.plan; const dayName = (k) => WD_NAMES[Number(k)];
     const slotRow = (x) => `<div class="row wp-slot" style="gap:6px;margin-bottom:6px;flex-wrap:wrap" data-id="${esc(x.id || '')}"><input data-k="icon" value="${esc(x.icon || '')}" style="width:52px"><input data-k="start" type="time" value="${esc(x.start || '')}" style="width:110px"><input data-k="end" type="time" value="${esc(x.end || '')}" style="width:110px"><input data-k="title" value="${esc(x.title || '')}" style="flex:1;min-width:200px"><label class="small" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-k="noCheck" style="width:auto" ${x.noCheck ? 'checked' : ''}> no check</label><button type="button" class="btn sm ghost" data-act="wp-slot-del">✕</button></div>`;
     modal('✏️ Edit the work planning', `<form onsubmit="return false" data-form="wp"><p class="small muted" style="margin-top:0">Only you (the owner) can change this. Agents see it and check off their tasks.</p>
