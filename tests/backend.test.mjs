@@ -2282,6 +2282,7 @@ test('work planning: schedule for every agent, check off today only, owner-only 
   // agent can't edit, owner can
   assert.equal((await x.call('PUT', '/api/admin/workplan', { rules: ['x'] }, st)).status, 403);
   assert.equal((await x.call('PUT', '/api/admin/workplan', { sheetUrl: 'https://script.google.com/macros/s/abc/exec', tz: 'Africa/Casablanca' }, tok)).status, 200);
+  wp.today = (await x.call('GET', '/api/admin/workplan', {}, st)).json.today; // today in the new time zone
   // check off today's task, not a future one
   assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: wp.today, slot: 's2', note: '12 tickets answered' }, st)).status, 200);
   const later = new Date(new Date(wp.today + 'T12:00:00Z').getTime() + 2 * 86400000).toISOString().slice(0, 10);
