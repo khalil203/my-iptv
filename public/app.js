@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=97';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=98';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -1157,7 +1157,7 @@ function customerForm(c) {
     ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
     <div class="grid2">${field('Secondary email', 'email2', c.email2 || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'Backup/reminder address' })}</div>
-    <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '')}</div>
+    <div class="grid2">${phoneField('Phone (with country code)', 'phone', false, c.phone || '', c.id ? custCC(c) : '')}${phoneField('WhatsApp (leave empty if the same)', 'whatsapp', false, c.whatsapp && c.whatsapp !== c.phone ? c.whatsapp : '', c.id ? custCC(c) : '')}</div>
     <div class="grid3">${field('Telegram handle', 'telegram', c.telegram || '', { ph: '@username or id', attrs: 'autocapitalize="none"' })}${field('App / device', 'deviceApp', c.deviceApp || '', { ph: 'IBO Player, Smarters, MAC…' })}${field('MAC address', 'macAddress', c.macAddress || '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false"' })}</div>
     <div class="grid2">${field('Customer language', 'lang', c.lang || 'en', { type: 'select', options: LANG5, help: 'Emails, WhatsApp / Telegram messages and the app use this language.' })}${field('Currency', 'curOverride', c.curOverride || '', { type: 'select', options: [['', `Automatic${c.cur ? ' (now ' + c.cur + ')' : ''}`], ['USD', 'US dollar $'], ['EUR', 'Euro €']], help: 'Automatic: $ everywhere, € for Europe (email ending like .de .ch, or phone +41 +49 …).' })}${field('Status', 'statusFlag', c.statusFlag || 'normal', { type: 'select', options: [['normal', 'Normal'], ['excellent', 'Excellent'], ['dispute', 'Dispute']] })}</div>
     <div class="grid3">${field('Order number', 'orderNo', c.orderNo || '', { ph: isNew ? 'Empty = next number automatically' : '', help: isNew ? 'Leave empty: the next number of your series is given (like WLF-143). Several devices stay on this one number: WLF-143-01, -02…' : 'Must not be used by another customer.' })}${field('Country', 'country', c.country || '')}${field('Payment method', 'paymentMethod', c.paymentMethod || '', { ph: 'Wise, USDT, bank…' })}</div>
@@ -2565,10 +2565,10 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings; const p0 = s.orderPackages[0] || {};
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
-      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''))}</div>
+      <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''), custCC(c))}</div>
       <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
-        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', s.orderCurrency || 'EUR', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
+        <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', c.cur || 'USD', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}</div>
       </details></div>
       <label class="field"><span>Message (you can edit it)</span><textarea id="wa-text" rows="12" dir="auto"></textarea></label>
@@ -4143,7 +4143,7 @@ Object.assign(forms, {
 // =====================================================================
 // Phone numbers with country code, ready trial lines, line link paste
 // =====================================================================
-const DIAL = 'MA212 DZ213 TN216 EG20 LY218 MR222 SA966 AE971 QA974 KW965 BH973 OM968 JO962 LB961 IQ964 SY963 PS970 YE967 SD249 FR33 BE32 NL31 DE49 ES34 IT39 PT351 GB44 IE353 CH41 AT43 LU352 SE46 NO47 DK45 FI358 PL48 RO40 GR30 TR90 RU7 UA380 US1 CA1 MX52 BR55 AR54 CO57 CL56 IN91 PK92 BD880 TH66 MY60 SG65 ID62 PH63 VN84 CN86 JP81 KR82 AU61 NZ64 ZA27 NG234 SN221 CI225 CM237 ML223 GH233 KE254 IL972 IR98'.split(' ').map((x) => [x.slice(0, 2), x.slice(2)]);
+const DIAL = 'MA212 DZ213 TN216 EG20 LY218 MR222 SA966 AE971 QA974 KW965 BH973 OM968 JO962 LB961 IQ964 SY963 PS970 YE967 SD249 FR33 BE32 NL31 DE49 ES34 IT39 PT351 GB44 IE353 CH41 AT43 LU352 SE46 NO47 DK45 FI358 PL48 RO40 GR30 CZ420 SK421 HU36 HR385 SI386 BG359 LT370 LV371 EE372 CY357 MT356 IS354 LI423 MC377 AD376 SM378 GI350 RS381 BA387 ME382 AL355 MK389 MD373 XK383 BY375 TR90 RU7 UA380 US1 CA1 MX52 BR55 AR54 CO57 CL56 IN91 PK92 BD880 TH66 MY60 SG65 ID62 PH63 VN84 CN86 JP81 KR82 AU61 NZ64 ZA27 NG234 SN221 CI225 CM237 ML223 GH233 KE254 IL972 IR98'.split(' ').map((x) => [x.slice(0, 2), x.slice(2)]);
 const TZ_CC = { 'Africa/Casablanca': 'MA', 'Africa/Algiers': 'DZ', 'Africa/Tunis': 'TN', 'Africa/Cairo': 'EG', 'Europe/Paris': 'FR', 'Europe/Brussels': 'BE', 'Europe/Amsterdam': 'NL', 'Europe/Berlin': 'DE', 'Europe/Madrid': 'ES', 'Europe/Rome': 'IT', 'Europe/London': 'GB', 'Europe/Istanbul': 'TR', 'Asia/Riyadh': 'SA', 'Asia/Dubai': 'AE', 'Asia/Qatar': 'QA', 'Asia/Bangkok': 'TH', 'America/New_York': 'US', 'America/Toronto': 'CA' };
 function guessCountry() {
   try { const tz = TZ_CC[Intl.DateTimeFormat().resolvedOptions().timeZone]; if (tz) return tz; } catch {}
@@ -4152,11 +4152,25 @@ function guessCountry() {
 }
 const flag = (cc) => String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 let regionNames = null; const countryName = (cc) => { try { regionNames ||= new Intl.DisplayNames([getLang()], { type: 'region' }); return regionNames.of(cc); } catch { return cc; } };
-function phoneField(label, name, required = true, value = '') {
-  // an existing number is split into its country code and the rest (longest matching code wins)
-  const digits = String(value || '').replace(/\D/g, ''); const plus = String(value || '').trim().startsWith('+');
-  const hit = plus || digits.length >= 11 ? DIAL.filter(([, d]) => digits.startsWith(d)).sort((x, y) => y[1].length - x[1].length)[0] : null;
-  const g = hit ? hit[0] : value ? '' : guessCountry(); const rest = hit ? digits.slice(hit[1].length) : String(value || '');
+// The customer's country when a saved number has no country code: Europe from the email ending (.de → +49, .ch → +41, .co.uk → +44…), otherwise USA (+1).
+const TLD_CC = { de: 'DE', ch: 'CH', at: 'AT', fr: 'FR', it: 'IT', es: 'ES', nl: 'NL', be: 'BE', uk: 'GB', gb: 'GB', ie: 'IE', pt: 'PT', se: 'SE', no: 'NO', dk: 'DK', fi: 'FI', pl: 'PL', lu: 'LU', gr: 'GR', cz: 'CZ', sk: 'SK', hu: 'HU', ro: 'RO', bg: 'BG', hr: 'HR', si: 'SI', lt: 'LT', lv: 'LV', ee: 'EE', cy: 'CY', mt: 'MT', is: 'IS', li: 'LI', mc: 'MC', rs: 'RS', ba: 'BA', al: 'AL', mk: 'MK', md: 'MD', ua: 'UA', ad: 'AD', sm: 'SM', va: 'VA', gi: 'GI' };
+const custCC = (c) => TLD_CC[String(c?.email || '').trim().toLowerCase().split('.').pop()] || 'US';
+// A number written with + or 00 keeps its own country code. Without it: the customer's country (default USA +1); a leading 0 of a local number is dropped.
+function splitPhone(value, defCC) {
+  const raw = String(value || '').trim(); let digits = raw.replace(/\D/g, ''); const intl = raw.startsWith('+') || digits.startsWith('00'); if (digits.startsWith('00')) digits = digits.slice(2);
+  const longest = () => DIAL.filter(([, d]) => digits.startsWith(d)).sort((x, y) => y[1].length - x[1].length)[0];
+  if (!digits) return { cc: '', rest: '' };
+  if (intl) { const h = longest(); return h ? { cc: h[0], rest: digits.slice(h[1].length) } : { cc: '', rest: digits }; }
+  if (defCC) { const dd = (DIAL.find((x) => x[0] === defCC) || [])[1];
+    if (dd && digits.startsWith(dd) && digits.length - dd.length >= 7) return { cc: defCC, rest: digits.slice(dd.length) };
+    if (defCC === 'US' && !(digits.length === 10 || (digits.length === 11 && digits.startsWith('1')))) { const h = longest(); if (h && digits.length - h[1].length >= 7) return { cc: h[0], rest: digits.slice(h[1].length) }; } // US numbers have 10 digits (+1); anything else already carries its country code
+    return { cc: defCC, rest: digits.replace(/^0+/, '') }; }
+  const h = digits.length >= 11 ? longest() : null; return h ? { cc: h[0], rest: digits.slice(h[1].length) } : { cc: '', rest: raw };
+}
+function phoneField(label, name, required = true, value = '', defCC = '') {
+  // an existing number is split into its country code and the rest
+  const sp = splitPhone(value, defCC); const hit = !!sp.cc;
+  const g = hit ? sp.cc : value ? '' : guessCountry(); const rest = value ? sp.rest : '';
   return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" value="${esc(rest)}" ${required ? 'required' : ''} inputmode="tel" autocomplete="tel-national" dir="ltr" placeholder="612345678"></div></label>`;
 }
 // "+212612345678" from the country code and the number typed (a leading 0 is dropped; a full +number typed by hand is kept).
