@@ -1138,3 +1138,10 @@ body:has(.bnav) #lang-fab, body:has(.chat-fab) #lang-fab { bottom: calc(148px + 
 .chips a { transition: transform .12s, background .2s; } .chips a:active { transform: scale(.95); }
 @media (max-width: 520px) { .btn, .chips a { min-height: 42px; } }
 @media (prefers-reduced-motion: reduce) { .lang-fab-btn, .lang-menu, .site .card, .s-doc .card { animation: none !important; transition: none !important; } }
+/* customer header: a clear logout button */
+.logout-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 12px; border-radius: 99px; border: 1px solid color-mix(in srgb, #ef4444 45%, transparent); color: #ef4444; background: color-mix(in srgb, #ef4444 10%, transparent); font-weight: 700; white-space: nowrap; }
+.logout-btn:hover { background: color-mix(in srgb, #ef4444 18%, transparent); }
+@media (max-width: 380px) { .logout-btn span { display: none; } }
+/* package cards: button text wraps instead of being cut */
+.plan-c .btn { white-space: normal; height: auto; min-height: 40px; line-height: 1.25; padding-top: 8px; padding-bottom: 8px; text-overflow: clip; overflow: visible; }
+.plan-c b { overflow-wrap: anywhere; }

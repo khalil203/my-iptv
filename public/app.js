@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=110';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=112';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=110';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=112';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -295,11 +295,11 @@ function trialForm() {
   </form>`;
 }
 function publicPkgCard(p, kind, b) {
-  const title = p.title || p.name || 'Package';
+  const title = pkgName(p.title || p.name || t('w_package'));
   const pr = priceTxt(p.price, p.cur);
   const meta = kind === 'reseller' ? t('pkgCreditsN', { n: p.credits }) : [p.days ? t('daysN', { n: p.days }) : '', p.devices ? t('devices', { n: p.devices }) : ''].filter(Boolean).join(' · ');
   const wa = waUrl(b, `${b.appName || 'INTPROTO-TV'}: ${title} (${pr})`);
-  return `<div class="plan-c trial-pkg">${p.badge ? `<div class="small" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${meta ? `<div class="small muted">${meta}</div>` : ''}${wa ? `<a class="btn sm wa-btn block" style="margin-top:8px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${esc(t('pkgOrderWa'))}</a>` : ''}</div>`;
+  return `<div class="plan-c trial-pkg">${p.badge ? `<div class="small" style="color:var(--accent);font-weight:700">${esc(pkgName(p.badge))}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${meta ? `<div class="small muted">${meta}</div>` : ''}${wa ? `<a class="btn sm wa-btn block" style="margin-top:8px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${esc(t('pkgOrderWa'))}</a>` : ''}</div>`;
 }
 function renderFreeTrial() {
   const b = state.config.branding || {}, tr = state.config.trial || {};
@@ -2068,7 +2068,7 @@ async function renderUser() {
   if (state.justPaid) { const how = state.justPaid; state.justPaid = null; setTimeout(() => modal(how === 'done' ? '✅ ' + t('paidTitle') : '💳 ' + t('paidBackTitle'), `<p>${how === 'done' ? t('paidText') : t('paidBackText')}</p><div class="row"><button class="btn primary" data-act="close-modal" style="flex:1">OK</button><button class="btn" data-act="rc-new" style="flex:1">🧾 ${t('rcBtn')}</button></div>`), 400); }
   const tabs = [['home', ic('home'), t('home')], ['account', ic('user'), t('account')]];
   if (u.tab !== 'home' && u.tab !== 'account') u.tab = 'home';
-  $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" aria-label="Change theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div></div>
+  $('#app').innerHTML = `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<button class="btn sm ghost" data-act="theme" title="Theme" aria-label="Change theme" style="font-size:18px">🌗</button><div class="avatar" data-act="utab" data-tab="account" style="cursor:pointer">${esc(initials(user.name))}</div>${logoutBtn()}</div>
     <main class="ubody" id="main"></main>
     <nav class="bnav">${tabs.map(([k, ic, n]) => `<a class="${u.tab === k ? 'on' : ''}" ${u.tab === k ? 'aria-current="page"' : ''} data-act="utab" data-tab="${k}"><span class="ic">${ic}</span>${n}</a>`).join('')}<div class="bnav-tail"><button class="bnav-sup" data-act="goto-acc" data-to="acc-plans"><span class="ic">${ic('card')}</span>${t('managePlan')}</button><button class="bnav-sup" data-act="ticket-new"><span class="ic">${ic('chat')}</span>${t('contactSup')}</button></div></nav></div>`;
   renderUserTab();
@@ -2091,7 +2091,7 @@ async function renderProfile() {
   applyBranding(b);
   setWaFab(b, t('waMsg', { app: b.appName, u: user.username }));
   if (user.isTrial) {
-    $('#app').innerHTML = `<div class="block-screen"><div class="ic">🎁</div><h2>Paid accounts only</h2><p class="muted" style="max-width:430px"><b>${esc(b.appName || 'INTPROTO-TV')} /profile</b> is the paid-customer area. Your free trial stays separate — open the app to see your trial line and playlists.</p><div class="row" style="justify-content:center"><a class="btn primary" href="/">Open my trial app</a>${b.supportUrl ? `<a class="btn" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">Get a paid plan</a>` : ''}</div></div>`;
+    $('#app').innerHTML = `<div class="block-screen"><div class="ic">🎁</div><h2>${t('pf_paidOnly')}</h2><p class="muted" style="max-width:430px"><b>${esc(b.appName || 'INTPROTO-TV')} /profile</b> — ${t('pf_paidOnlyTxt')}</p><div class="row" style="justify-content:center"><a class="btn primary" href="/">${t('pf_openTrial')}</a>${b.supportUrl ? `<a class="btn" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">Get a paid plan</a>` : ''}</div></div>`;
     return;
   }
   $('#app').innerHTML = profilePage();
@@ -2108,33 +2108,33 @@ function profilePage() {
   const row = (label, value, key) => `<li><span class="cred-k">${label}</span><b class="cred-v" id="pf-${key}" dir="ltr" style="word-break:break-all">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="pf-${key}" aria-label="Copy ${label}" title="Copy">⧉</button></li>`;
   const all = `Username: ${uname}\nPassword: ${pass}\nDNS: ${dns || '—'}\nM3U: ${m3u}${ibo?.mac ? `\nDevice MAC Address: ${ibo.mac}` : ''}${ibo?.key ? `\nDevice Key: ${ibo.key}` : ''}`;
   const color = user.state === 'expired' ? '#ef4444' : user.state === 'expiring' ? '#f59e0b' : '#22c55e';
-  return `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span><button class="btn sm ghost" data-act="logout" title="${t('logout')}" aria-label="${t('logout')}">⎋</button></div>
+  return `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${logoutBtn()}</div>
     <div class="ubody" style="max-width:760px;margin:0 auto;padding:14px">
       ${inboxCard(state.user.me?.inbox)}
       <div class="card">
-        <div class="row"><h2 style="margin:0">Subscription balance</h2><span class="spacer"></span>${pill(user.state)}</div>
+        <div class="row"><h2 style="margin:0">${t('pf_balance')}</h2><span class="spacer"></span>${pill(user.state)}</div>
         <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
-          <div><div class="muted small">Days left</div><b style="font-size:2.6rem;line-height:1" id="pf-days">${days}</b></div>
-          <div><div class="muted small">Plan</div><b>${esc(user.planName || 'Custom')}</b></div>
-          <div><div class="muted small">Expires</div><b>${fmtDate(user.expiresAt)}</b></div>
-          <div><div class="muted small">Devices</div><b>${esc(user.devicesTotal || user.connections || 1)}</b></div>
+          <div><div class="muted small">${t('pf_daysLeft')}</div><b style="font-size:2.6rem;line-height:1" id="pf-days">${days}</b></div>
+          <div><div class="muted small">${t('pf_plan')}</div><b>${esc(pkgName(user.planName) || t('w_custom'))}</b></div>
+          <div><div class="muted small">${t('pf_expires')}</div><b>${fmtDate(user.expiresAt)}</b></div>
+          <div><div class="muted small">${t('pf_devices')}</div><b>${esc(user.devicesTotal || user.connections || 1)}</b></div>
         </div>
         <div style="height:8px;border-radius:6px;background:var(--line,#e2e8f0);overflow:hidden;margin-top:14px"><i style="display:block;height:100%;width:${pct}%;background:${color}"></i></div>
-        ${user.state === 'expired' ? `<p class="small" style="color:#ef4444;margin:10px 0 0">Your paid subscription has expired. Renew to keep watching.</p>` : user.state === 'expiring' ? `<p class="small" style="color:#b45309;margin:10px 0 0">Your subscription is ending soon.</p>` : ''}
+        ${user.state === 'expired' ? `<p class="small" style="color:#ef4444;margin:10px 0 0">${t('pf_expired')}</p>` : user.state === 'expiring' ? `<p class="small" style="color:#b45309;margin:10px 0 0">${t('pf_ending')}</p>` : ''}
       </div>
       <div class="card" id="acc-sources" style="margin-top:14px">
-        <div class="row" style="gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">${lines.length ? 'Connection 1' : 'My Details'}</h3>${lines.length || st.lineType ? `<span class="pill st-open">${esc(connName(st.lineType))}</span>` : ''}${lines.length ? `<span class="small muted">${esc(user.connections || 1)} device(s)</span>` : ''}</div>
-        <div class="svc-box creds"><ul class="cred-list">${row('Username', uname, 'u')}${row('Password', pass, 'p')}${row('DNS', dns || '—', 'dns')}${row('M3U', m3u, 'm3u')}${ibo?.mac ? row('Device MAC Address', ibo.mac, 'mac') : ''}${ibo?.key ? row('Device Key', ibo.key, 'key') : ''}</ul>
+        <div class="row" style="gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">${lines.length ? t('pf_conn', { n: 1 }) : t('pf_details')}</h3>${lines.length || st.lineType ? `<span class="pill st-open">${esc(connName(st.lineType))}</span>` : ''}${lines.length ? `<span class="small muted">${esc(user.connections || 1)} ${t('pf_devs')}</span>` : ''}</div>
+        <div class="svc-box creds"><ul class="cred-list">${row(t('pf_user'), uname, 'u')}${row(t('pf_pass'), pass, 'p')}${row('DNS', dns || '—', 'dns')}${row('M3U', m3u, 'm3u')}${ibo?.mac ? row(t('pf_mac'), ibo.mac, 'mac') : ''}${ibo?.key ? row(t('pf_key'), ibo.key, 'key') : ''}</ul>
         <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="pf-all">${t('copyAll')}</button></div><div id="pf-all" style="display:none">${esc(all)}</div>
-        ${ibo?.mac || ibo?.key ? `<p class="small muted" style="margin:10px 0 0">📺 IBO Player device registered — enter these details in the IBO Player app to activate your subscription.</p>` : ''}
+        ${ibo?.mac || ibo?.key ? `<p class="small muted" style="margin:10px 0 0">📺 ${t('pf_iboReg')}</p>` : ''}
         </div>
       </div>
       ${lines.map((x, i) => { const k = 'c' + i; const txt = [x.u && `Username: ${x.u}`, x.p && `Password: ${x.p}`, x.dns && x.u && `DNS: ${x.dns}`, x.m3u && `M3U: ${x.m3u}`].filter(Boolean).join('\n');
-        return `<div class="card" style="margin-top:14px"><div class="row" style="gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">Connection ${i + 2}${x.label ? ' · ' + esc(x.label) : ''}</h3><span class="pill st-open">${esc(x.typeName || connName(x.type))}</span><span class="small muted">${esc(x.devices || 1)} device(s)</span></div>
-        <div class="svc-box creds"><ul class="cred-list">${x.u ? row('Username', x.u, k + 'u') + row('Password', x.p || '—', k + 'p') : ''}${x.dns && x.u ? row('DNS', x.dns, k + 'dns') : ''}${row('M3U', x.m3u || '—', k + 'm3u')}</ul>
+        return `<div class="card" style="margin-top:14px"><div class="row" style="gap:8px;margin-bottom:8px"><h3 style="margin:0;flex:1">${t('pf_conn', { n: i + 2 })}${x.label ? ' · ' + esc(x.label) : ''}</h3><span class="pill st-open">${esc(x.typeName || connName(x.type))}</span><span class="small muted">${esc(x.devices || 1)} ${t('pf_devs')}</span></div>
+        <div class="svc-box creds"><ul class="cred-list">${x.u ? row(t('pf_user'), x.u, k + 'u') + row(t('pf_pass'), x.p || '—', k + 'p') : ''}${x.dns && x.u ? row('DNS', x.dns, k + 'dns') : ''}${row('M3U', x.m3u || '—', k + 'm3u')}</ul>
         <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="pf-${k}all">${t('copyAll')}</button></div><div id="pf-${k}all" style="display:none">${esc(txt)}</div></div></div>`; }).join('')}
-      <div class="row" style="margin-top:14px"><a class="btn primary" href="/" style="flex:1">📺 Open my TV app</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener" style="flex:1">💬 ${t('whatsapp')}</a>` : ''}</div>
-      <p class="small muted" style="text-align:center;margin:14px 0 0">Signed in as <b>${esc(user.username)}</b> · <a href="#" data-act="logout">${t('logout')}</a></p>
+      <div class="row" style="margin-top:14px"><a class="btn primary" href="/" style="flex:1">📺 ${t('pf_openTv')}</a>${waNum(b) ? `<a class="btn wa-btn" href="${esc(waUrl(b, t('waMsg', { app: b.appName, u: user.username })))}" target="_blank" rel="noopener" style="flex:1">💬 ${t('whatsapp')}</a>` : ''}</div>
+      <p class="small muted" style="text-align:center;margin:14px 0 0">${t('pf_signedAs')} <b>${esc(user.username)}</b> · <a href="#" data-act="logout">${t('logout')}</a></p>
     </div></div>`;
 }
 
@@ -2165,7 +2165,7 @@ async function renderUserTab() {
       ${srcBanner()}
       ${inboxCard(u.me.inbox)}
       <div class="dash">
-        ${d.showSubscription ? `<div class="dash-plan" data-act="utab" data-tab="account" tabindex="0"><div class="dp-top"><div><span class="dp-l">${t('activePlan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="dp-r"><span class="dp-l">${t('expiresOn')}</span><b>${fmtDate(user.expiresAt)}</b></div></div>
+        ${d.showSubscription ? `<div class="dash-plan" data-act="utab" data-tab="account" tabindex="0"><div class="dp-top"><div><span class="dp-l">${t('activePlan')}</span><b>${esc(user.isTrial ? t('trial') : pkgName(user.planName))}</b></div><div class="dp-r"><span class="dp-l">${t('expiresOn')}</span><b>${fmtDate(user.expiresAt)}</b></div></div>
           <div class="dp-days"><span class="big">${user.noExpiry ? '∞' : user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</span><span class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</span><span class="spacer"></span>${pill(user.state)}</div>${progress(user)}</div>` : ''}
         <div class="dash-mini" data-act="goto-acc" data-to="acc-devices" tabindex="0"><span class="chip-ic ok">${ic('devices')}</span><div><span class="dp-l">${t('connectedDev')}</span><b id="dash-dev">– / ${esc(user.connections)}</b></div></div>
         <div class="dash-mini" data-act="goto-acc" data-to="acc-tickets" tabindex="0"><span class="chip-ic">${ic('chat')}</span><div><span class="dp-l">${t('supportT')}</span><b id="dash-tk">–</b></div></div>
@@ -2179,7 +2179,7 @@ async function renderUserTab() {
   if (u.tab === 'account') {
     el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
         ${user.email ? `<div class="list-item" style="margin-top:12px"><span style="flex:1;min-width:0;overflow-wrap:anywhere" dir="ltr">${esc(user.email)}</span>${user.emailVerified ? `<span class="pill st-active">${t('emVerified')}</span>` : `<button class="btn sm primary" data-act="em-send">${t('emVerify')}</button>`}</div>` : ''}</div>
-      <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="list-item"><span style="flex:1">${t('linesN')}</span><b>${user.connections}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div>${(state.user.me.totalPaidUsd || 0) > 0 ? `<div class="list-item"><span style="flex:1">${t('totalPaid')}</span><b>$${Number(state.user.me.totalPaidUsd).toFixed(2)}</b></div>` : ''}
+      <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : pkgName(user.planName))}</b></div><div class="list-item"><span style="flex:1">${t('linesN')}</span><b>${user.connections}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div>${(state.user.me.totalPaidUsd || 0) > 0 ? `<div class="list-item"><span style="flex:1">${t('totalPaid')}</span><b>$${Number(state.user.me.totalPaidUsd).toFixed(2)}</b></div>` : ''}
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
       ${plansCard()}
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
@@ -2313,6 +2313,20 @@ async function xtFetch(action, params = {}) {
   return (c[key] = await api('GET', '/api/xtream?' + q));
 }
 const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ', THB: 'THB ' };
+const logoutBtn = () => `<button type="button" class="btn sm logout-btn" data-act="logout" aria-label="${esc(t('logout'))}">🚪 <span>${esc(t('logout'))}</span></button>`;
+// Package names in the customer's language: "3 Months", "4 Devices · 1 Year", "IBO Player · 1 Year (2 Devices)", "IBO Player · Lifetime"
+function pkgName(title) {
+  const x = String(title || ''); const mo = (n) => t(Number(n) === 1 ? 'w_month' : 'w_months', { n }); const yr = (n) => t(Number(n) === 1 ? 'w_year' : 'w_years', { n }); const dv = (n) => t('w_devices', { n });
+  let m;
+  if ((m = x.match(/^(\d+)\s*Months?$/i))) return mo(m[1]);
+  if ((m = x.match(/^(\d+)\s*Years?$/i))) return yr(m[1]);
+  if ((m = x.match(/^(\d+)\s*Devices?\s*·\s*(\d+)\s*Years?$/i))) return dv(m[1]) + ' · ' + yr(m[2]);
+  if ((m = x.match(/^IBO Player\s*·\s*(\d+)\s*Years?(?:\s*\((\d+)\s*Devices?\))?$/i))) return 'IBO Player · ' + yr(m[1]) + (m[2] ? ' (' + dv(m[2]) + ')' : '');
+  if (/^IBO Player\s*·\s*Lifetime$/i.test(x)) return 'IBO Player · ' + t('w_lifetime');
+  if ((m = x.match(/^(\d+)\s*credits?$/i))) return t('w_credits', { n: m[1] });
+  if (/^⭐\s*Lifetime activation$/i.test(x)) return '⭐ ' + t('w_lifeAct');
+  return x;
+}
 const priceTxt = (n, c0) => { const c = (state.role === 'user' && state.myCur) || c0; return priceTxt0(n, c); };
 const priceTxt0 = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
 const WA_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" fill="#fff" aria-hidden="true"><path d="M16 3C9 3 3.3 8.6 3.3 15.6c0 2.5.7 4.8 1.9 6.8L3 29l6.8-2.2c1.9 1 4 1.6 6.2 1.6 7 0 12.7-5.7 12.7-12.7S23 3 16 3zm0 23.1c-2 0-3.9-.6-5.6-1.6l-.4-.2-4 1.3 1.3-3.9-.3-.4c-1.1-1.7-1.7-3.7-1.7-5.7C5.3 9.8 10.1 5 16 5s10.7 4.8 10.7 10.7S21.9 26.1 16 26.1zm5.9-8c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1c-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.2s0-.5.1-.6l.5-.6c.2-.2.2-.4.3-.6s0-.4 0-.6l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4s-1.2 1.1-1.2 2.7 1.2 3.2 1.4 3.4 2.4 3.6 5.7 5c.8.3 1.4.5 1.9.7.8.3 1.5.2 2.1.1.6-.1 1.9-.8 2.2-1.5s.3-1.4.2-1.5-.3-.2-.6-.4z"/></svg>';
@@ -2333,22 +2347,22 @@ function orderCard() {
   const isIbo = (p) => p.kind === 'ibo' || /^ibo/i.test(p.id || '');
   const std = op.filter((p) => !isIbo(p));
   const ibo = op.filter((p) => isIbo(p));
-  const waLink = (p, pr) => waUrl(me.branding, t('waBuy', { app, pkg: p.title || p.name, price: pr, u }));
-  const card = (p) => { const title = p.title || p.name || 'Package'; const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(p.badge)}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${p.credits} credit${p.credits === 1 ? '' : 's'}</div>` : ''}${p.days ? `<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>` : ''}
+  const waLink = (p, pr) => waUrl(me.branding, t('waBuy', { app, pkg: pkgName(p.title || p.name), price: pr, u }));
+  const card = (p) => { const title = pkgName(p.title || p.name || t('w_package')); const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(pkgName(p.badge))}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${esc(t('pkgCreditsN', { n: p.credits }))}</div>` : ''}${p.days ? `<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>` : ''}
     ${me.buyRequest?.pkg === p.id && !me.buyRequest.answeredAt ? `<div class="small pos" style="margin-top:8px">✓ ${t('requested')}</div>` : `<button class="btn sm primary block" style="margin-top:8px" data-act="buy-request" data-pkg="${esc(p.id)}">🛒 ${t('requestBuy')}</button>`}
     ${wa ? `<a class="btn sm wa-btn block" style="margin-top:6px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`; };
   const section = (title, list) => list.length ? `<h3 class="op-sec">${esc(title)}</h3><div class="plans-grid">${list.map(card).join('')}</div>` : '';
   return `<div class="card"><h3>💎 ${t('buyTitle')}</h3>
-    ${section('📡 Subscription packages', std)}
-    ${section('📺 IBO Player · activation only', ibo)}
-    ${section('🤝 Reseller credits', rp)}
+    ${section('📡 ' + t('sec_subs'), std)}
+    ${section('📺 ' + t('sec_ibo'), ibo)}
+    ${section('🤝 ' + t('sec_rsl'), rp)}
     <p class="small muted" style="margin:10px 0 0">${t('buyHow')}</p><button class="btn block" style="margin-top:12px" data-act="rc-new">🧾 ${t('rcBtn')}</button></div>`;
 }
 function plansCard() {
   if (state.user.me.orderPackages?.length || state.user.me.resellerPackages?.length) return `<div id="acc-plans" data-go="packages">${orderCard()}</div>`;
   const me = state.user.me; if (!me.plans?.length) return '';
   const sup = me.branding.supportUrl;
-  return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
+  return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(pkgName(p.name))}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
 }
 function appsCard() {
   return `<div class="card" style="text-align:center"><div style="font-size:46px">📲</div><h3>${t('apps_title')}</h3><p class="muted">${t('apps_text')}</p>
@@ -3708,7 +3722,7 @@ function devName(ua) {
   ua = String(ua || '');
   const os = /Android/.test(ua) ? (/TV|AFT|BRAVIA|SHIELD|Box|MiBOX/i.test(ua) ? 'Android TV' : 'Android') : /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
   const br = /; wv\)|Electron/.test(ua) ? 'App' : /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
-  return [os, br].filter(Boolean).join(' · ') || 'Device';
+  return [os, br].filter(Boolean).join(' · ') || t('w_device');
 }
 const tpill = (st) => `<span class="pill st-${st}">${isAdminUI() ? st : t('st_' + st)}</span>`;
 async function loadAccountExtras() {
@@ -3729,7 +3743,7 @@ async function loadAccountExtras() {
     const list = await api('GET', '/api/me/payments'); state.user.payments = list;
     if (!$('#acc-payments')) return;
     let rcs = []; try { rcs = await api('GET', '/api/me/receipts'); } catch {}
-    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${rcs.length ? rcs.slice(0, 5).map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>🧾 ${esc(x.pkgTitle)}</b><div class="small muted">${fmtDate(x.at)}${x.reason ? ' · ' + esc(x.reason) : ''}</div></div><span class="pill st-${x.status === 'approved' ? 'active' : x.status === 'rejected' ? 'expired' : 'open'}">${t('rc_' + x.status)}</span></div>`).join('') : ''}${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(x.plan)}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') + `<p style="margin:10px 0 0"><a href="#" class="small muted" data-act="refund-ask">${t('refundAsk')}</a></p>` : `<p class="muted small">${t('noPayments')}</p>`}`;
+    pm.innerHTML = `<h3>${t('paymentsT')}</h3>${rcs.length ? rcs.slice(0, 5).map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>🧾 ${esc(pkgName(x.pkgTitle))}</b><div class="small muted">${fmtDate(x.at)}${x.reason ? ' · ' + esc(x.reason) : ''}</div></div><span class="pill st-${x.status === 'approved' ? 'active' : x.status === 'rejected' ? 'expired' : 'open'}">${t('rc_' + x.status)}</span></div>`).join('') : ''}${list.length ? list.map((x) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(pkgName(x.plan))}</b><div class="small muted">${fmtDate(x.at)}</div></div><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b><button class="btn sm" data-act="receipt" data-id="${esc(x.id)}">${t('receipt')}</button></div>`).join('') + `<p style="margin:10px 0 0"><a href="#" class="small muted" data-act="refund-ask">${t('refundAsk')}</a></p>` : `<p class="muted small">${t('noPayments')}</p>`}`;
   });
 }
 function ticketThread(x, admin) {
@@ -3745,7 +3759,7 @@ function openReceipt(id) {
   modal('🧾 ' + t('receipt'), `<div class="receipt" id="receipt"><h2 style="margin:0">${esc(me.branding.appName)}</h2><p class="muted small" style="margin:2px 0 16px">${t('receipt')} · ${esc(String(x.id).toUpperCase())}</p>
     <div class="list-item"><span style="flex:1">${t('receiptFor')}</span><b>${esc(me.user.name)} (${esc(me.user.username)})</b></div>
     <div class="list-item"><span style="flex:1">${t('paidOn')}</span><b>${fmtDate(x.at)}</b></div>
-    <div class="list-item"><span style="flex:1">${t('item')}</span><b>${esc(x.plan)} · ${esc(x.days)}d</b></div>
+    <div class="list-item"><span style="flex:1">${t('item')}</span><b>${esc(pkgName(x.plan))} · ${esc(t('daysN', { n: x.days }))}</b></div>
     <div class="list-item"><span style="flex:1">${t('amount')}</span><b dir="ltr">${esc(priceTxt(x.amount, x.currency))}</b></div></div>
     <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn primary" data-act="print">🖨 ${t('print')}</button></div>`);
 }
@@ -3967,12 +3981,12 @@ function sourcesCard() {
   const svc = st ? `<div class="svc-box creds">
       ${m3uOnly ? `<p class="small muted" style="margin:0 0 4px">${t('credOwnM3u')}</p>` : ''}
       <ul class="cred-list">
-        ${credLine('Username', u, 'u')}
-        ${credLine('Password', p, 'p')}
+        ${credLine(t('pf_user'), u, 'u')}
+        ${credLine(t('pf_pass'), p, 'p')}
         ${credLine('DNS', dns || '—', 'dns')}
         ${credLine('M3U', m3uUrl, 'm3u')}
-        ${ibo?.mac ? credLine('Device MAC Address', ibo.mac, 'mac') : ''}
-        ${ibo?.key ? credLine('Device Key', ibo.key, 'key') : ''}
+        ${ibo?.mac ? credLine(t('pf_mac'), ibo.mac, 'mac') : ''}
+        ${ibo?.key ? credLine(t('pf_key'), ibo.key, 'key') : ''}
       </ul>
       <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-el" data-el="cred-all">${t('copyAll')}</button></div><div id="cred-all" style="display:none">${esc(allCreds)}</div>
       <details class="setup-steps" open><summary>📲 ${t('setupTitle')}</summary>
