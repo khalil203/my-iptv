@@ -1152,3 +1152,9 @@ body.no-copy #app :not(input):not(textarea):not(select) { -webkit-user-select: n
 .cl-card.cl-expiring { border-inline-start-color: #f59e0b; }
 .cl-card.cl-expired { border-inline-start-color: #ef4444; }
 .stat.c-warn b { color: #f59e0b; } .stat.c-bad b { color: #ef4444; }
+/* in-panel translator: hide Google's bar, keep the page where it is */
+.goog-te-banner-frame, iframe.skiptranslate, #goog-gt-tt, .goog-te-balloon-frame, .goog-tooltip, .VIpgJd-ZVi9od-ORHb-OEVmcd, .VIpgJd-ZVi9od-aZ2wEe-wOHMyf { display: none !important; }
+body { top: 0 !important; } .goog-text-highlight { background: none !important; box-shadow: none !important; }
+html.translated-rtl #admin-body { direction: rtl; text-align: start; }
+html.translated-rtl #admin-body [dir=ltr], html.translated-rtl #admin-body input, html.translated-rtl #admin-body .tbl { direction: ltr; }
+.locked-text { background: rgba(127,127,127,.08) !important; cursor: default; }

@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=115';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=116';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=115';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=116';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -557,12 +557,12 @@ const ADMIN_TABS = [
   ['trial', '🎁', 'Trial & email setup', 'settings', 'Messages', 'resend key sender free trial renewal offer'],
   ['userdash', '📱', 'User dashboard', 'settings', 'App', 'customer app sections announcement maintenance playlists'],
   ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name theme'],
-  ['wanums', '📞', 'WhatsApp numbers', 'settings', 'App', 'whatsapp numbers phone country code +1 support sales resellers'],
+  ['wanums', '📞', 'WhatsApp numbers', 'customers_view', 'App', 'whatsapp numbers phone country code +1 support sales resellers'],
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
   ['mail', '📧', 'Email sending', null, 'System', 'email sending status resend api keys domains plans free trial paid google sheets hostinger dynu accounts'],
   ['accounts', '🗝️', 'Accounts & API keys', 'secrets', 'System', 'resend email marketing hostinger dynu domains api keys passwords google sheets spend cost'],
   ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
-  ['holidays', '🏖️', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
+  ['holidays', '🏖️', 'Holidays & reminders', 'customers_view', 'Marketing', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
   ['browser', '🌐', 'In-panel browser', null, 'System', 'browser internet search google sheets drive resend stripe duckduckgo'],
   ['team', '🛡', 'Team & access', 'owner', 'System', 'staff permissions roles'],
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
@@ -635,9 +635,8 @@ async function renderAdmin() {
   if (me.mustSetup2fa) { render2faGate(); return; }
   if (me.mustSignBylaws) { renderBylawsGate(me); return; }
   if (me.mustCheckIn) { renderCheckInGate(me); return; }
-  staffGuards(me);
+  staffGuards(me); setTimeout(() => trAuto(me), 400);
   const tabs = ADMIN_TABS.filter((x) => {
-    if (x[0] === 'holidays') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || '');
     if (x[0] === 'api') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || ''); // panel & Resend keys are Nizar/Khalil only (spec §1)
     return can(x[3]);
   }).filter((x) => READY_TABS(x[0]));
@@ -651,7 +650,7 @@ async function renderAdmin() {
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <main class="main" id="main">
-      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}<button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}<button class="btn sm" data-act="tr-open" title="Translate the panel into any language" translate="no">🌐 ${esc(trCur().toUpperCase().slice(0, 2))}</button><button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
       <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </main></div>`;
@@ -707,7 +706,7 @@ async function renderAdmin() {
     else if (t === 'templates') body.innerHTML = await adminTemplates(s);
     else if (t === 'emails') body.innerHTML = await adminEmails();
     else if (t === 'browser') body.innerHTML = adminBrowserPage(s);
-    else if (t === 'holidays') body.innerHTML = adminHolidays();
+    else if (t === 'holidays') body.innerHTML = await adminHolidays();
     else if (t === 'data') body.innerHTML = await adminData(s);
     else if (t === 'activity') body.innerHTML = await adminActivity();
     else if (t === 'team') body.innerHTML = await adminTeam();
@@ -951,7 +950,7 @@ async function adminPromos() {
   try { PROMO.data = await api('GET', '/api/admin/promo/library'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
   const L = PROMO.lang; const by = Object.fromEntries(PROMO.data.kinds.map((k) => [k.id, k]));
   const card = ([k, name]) => { const x = by[k]; if (!x) return ''; const wa = x.wa[L] || x.wa.en; const desc = { holidays: 'Holiday & New Year offers on 1-Year, Multi-Device and Reseller plans.', blackfriday: 'Limited-time deal on packages and reseller credit bundles.', cybermonday: 'The online follow-up to Black Friday, packages and credits.', events: 'Live sports seasons, cinema releases and streaming line-ups: Champions League, UFC, Formula 1…', evergreen: 'An offer you can send any day of the year.', devices: 'Works on Samsung, iPhone, iPad, Android, Smart TV, Fire TV: perfect for multi-device plans.', christmas: 'Christmas only.', newyear: 'New Year only.' }[k];
-    return `<div class="card promo-card" style="margin:0"><div class="row" style="align-items:flex-start;gap:8px"><h3 style="margin:0;flex:1">${esc(name)}</h3><span class="pill">${k === 'evergreen' || k === 'events' || k === 'devices' ? 'All year' : 'Seasonal'}</span></div>
+    return `<div class="card promo-card" data-go="${esc(k)}" style="margin:0"><div class="row" style="align-items:flex-start;gap:8px"><h3 style="margin:0;flex:1">${esc(name)}</h3><span class="pill">${k === 'evergreen' || k === 'events' || k === 'devices' ? 'All year' : 'Seasonal'}</span></div>
       <p class="small muted" style="margin:6px 0 8px">${esc(desc)}</p>
       <pre class="promo-wa" style="white-space:pre-wrap;font:inherit;font-size:13px;max-height:180px;overflow:auto;background:rgba(127,127,127,.08);border-radius:10px;padding:10px;margin:0">${esc(wa)}</pre>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
@@ -997,7 +996,8 @@ async function adminOverview() {
   const creditWarn = panelLow || st.stock.low ? `<div class="notice warning">🎟 <b>Credits are low</b> — ${panelLow ? `panel has <b>${esc(cr.credits)}</b> credits` : ''}${panelLow && st.stock.low ? ' · ' : ''}${st.stock.low ? `stock has <b>${st.stock.available}</b> credits` : ''}. <a data-act="atab" data-tab="stock" style="cursor:pointer">Buy credits →</a></div>` : '';
   const pwWarn = me.isDefault ? `<div class="notice danger">🔐 You are using the default admin login (<b>Iptv / Iptv</b>). Anyone who knows it can control your app. <a data-act="atab" data-tab="security" style="cursor:pointer">Change it now →</a></div>` : '';
   const panelErr = cr.enabled && !cr.ok && can('settings') ? `<div class="notice warning">🎟 <b>Panel credits could not be read.</b> ${esc(cr.error || '')} <a data-act="atab" data-tab="api" style="cursor:pointer">Open API settings →</a></div>` : '';
-  return `${pwWarn}${panelErr}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
+  let holBanner = ''; try { const hu = await api('GET', '/api/admin/holidays/upcoming'); const h = (hu.next || [])[0]; if (h) holBanner = `<div class="notice" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-size:24px">🗓</span><div style="flex:1;min-width:200px"><b>${esc(h.name)} ${h.daysLeft === 0 ? 'today' : h.daysLeft === 1 ? 'tomorrow' : 'in ' + h.daysLeft + ' days'}</b><div class="small muted">${esc(h.tip || '')}</div></div><button class="btn sm primary" data-act="hol-promo" data-k="${esc(h.kind)}">🎉 Send the promotion</button><a class="btn sm" data-act="atab" data-tab="holidays">All dates</a></div>`; } catch {}
+  return `${holBanner}${pwWarn}${panelErr}${creditWarn}${setupTips.length ? `<div class="notice warning"><b>Finish setup</b><ul style="margin:6px 0 0;padding-left:18px">${setupTips.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
   <div class="stats">
     ${sd ? `<div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('cash', 20)}</i><span>Sales today</span><b>${usd(sd.today)}</b><span>${sd.todayN} sale${sd.todayN === 1 ? '' : 's'}${sd.yest || sd.yest === 0 ? ' · yest ' + usd(sd.yest) : ''}</span></div>
     <div class="stat c-acc" data-act="atab" data-tab="sales" style="cursor:pointer"><i class="st-ic">${ic('calendar', 20)}</i><span>This month</span><b>${usd(sd.month)}</b><span>${sd.monthN} sale${sd.monthN === 1 ? '' : 's'} · avg ${usd(sd.avg)}</span></div>` : ''}
@@ -2897,7 +2897,8 @@ const actions = {
     const st = await api('GET', '/api/admin/newsletter'); const s = state.admin.settings;
     let d; try { d = JSON.parse(localStorage.getItem('tvp_nl_draft')); } catch {}
     const running = st.camp?.id && st.groups[st.camp.group]?.left > 0 && st.groups[st.camp.group]?.left < st.groups[st.camp.group]?.total;
-    if (running) d = st.camp; d = { ...nlBlank(), ...(d || {}), content: { ...nlBlank().content, ...(d?.content || {}) } };
+    if (running) d = st.camp; if (state.admin.me?.locked) { if (!st.camp?.content) return toast('No newsletter is ready yet. The owner or the Technical Service writes it first.', true); d = st.camp; }
+    d = { ...nlBlank(), ...(d || {}), content: { ...nlBlank().content, ...(d?.content || {}) } };
     const link = String(d.link || ''); const linkSel = ['', 'site', 'app', 'contact'].includes(link) ? link : link.startsWith('pkg:') ? 'contact' : 'url';
     const body = modal('📣 Newsletter / promotion email', `<form data-form="nl" onsubmit="return false" ${running ? `data-cid="${esc(d.id)}"` : ''} ${d.badges ? `data-badges="${esc(JSON.stringify(d.badges))}" data-badge0="${esc(d.badge || '')}"` : ''}>
       ${running ? '' : `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px"><span class="small muted">📚 Ready templates (5 languages):</span>${PROMO_KINDS.map(([k, n]) => `<button type="button" class="btn sm" data-act="nl-season" data-k="${k}">${n}</button>`).join('')}</div>`}
@@ -5016,45 +5017,36 @@ const easterSunday = (y) => { // Anonymous Gregorian algorithm
   const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), month = Math.floor((h + l - 7 * m + 114) / 31) - 1, day = ((h + l - 7 * m + 114) % 31) + 1;
   return new Date(y, month, day);
 };
-function holidaysList() {
-  const now = new Date(); const y0 = now.getFullYear(); const out = []; const add = (d, name, region, tip) => out.push({ at: d.getTime(), name, region, tip });
-  const nth = (y, mo, wd, n) => { const d = new Date(y, mo, 1); d.setDate(1 + ((wd - d.getDay() + 7) % 7) + (n - 1) * 7); return d; };
-  const last = (y, mo, wd) => { const d = new Date(y, mo + 1, 0); d.setDate(d.getDate() - ((d.getDay() - wd + 7) % 7)); return d; };
-  for (const y of [y0, y0 + 1]) {
-    add(new Date(y, 0, 1), "New Year's Day", 'Intl', 'Big renew promos — "new year, new setup".');
-    add(nth(y, 0, 1, 3), 'Martin Luther King Jr. Day', 'US', 'US soft launch weekend, Reddit/Quora SEO push.');
-    add(nth(y, 1, 0, 2), 'Super Bowl (US)', 'US', 'Huge streaming peak — check line capacity, prime promos for multi-device.');
-    add(new Date(y, 1, 14), 'Valentine’s Day', 'US / EU', 'Couple packages (2 devices).');
-    add(new Date(y, 2, 17), 'St. Patrick’s Day', 'US / IE / UK', 'Small promo — renewals.');
-    add(easterSunday(y), 'Easter Sunday', 'US / EU', 'Family plans (3–4 devices).');
-    add(new Date(y, 4, 1), 'Labour Day', 'EU', 'Europe promo weekend.');
-    add(last(y, 4, 1), 'Memorial Day', 'US', 'US holiday — Stripe payouts may be delayed.');
-    add(new Date(y, 5, 1), 'Labour Day (VE/FR)', 'EU', 'May 1 — Europe capacity planning.');
-    add(new Date(y, 6, 4), 'Independence Day', 'US', 'US Stripe payouts 1–2 days late; renew promos.');
-    add(new Date(y, 6, 14), 'Bastille Day', 'FR', 'Fr-speaking EU promos.');
-    add(nth(y, 8, 1, 1), 'Labor Day', 'US', 'US holiday — Stripe payouts may be delayed.');
-    add(new Date(y, 9, 3), 'German Unity Day', 'DE', 'Germany-focused promos.');
-    add(new Date(y, 9, 12), 'Spanish National Day', 'ES', 'Spain promos.');
-    add(new Date(y, 9, 31), 'Halloween', 'US', 'Themed creative for Facebook ads.');
-    add(nth(y, 10, 4, 4), 'Thanksgiving', 'US', 'Big US weekend — pre-load credits, Stripe payouts may be delayed; Black Friday next day.');
-    add(new Date(nth(y, 10, 4, 4).getTime() + DAYMS), 'Black Friday', 'US / Intl', 'Peak sales day — caps on tickets: send trials in batches.');
-    add(new Date(y, 11, 24), "Christmas Eve", 'EU', 'Gift cards go fast — resellers restock.');
-    add(new Date(y, 11, 25), 'Christmas', 'US / EU', 'Stripe payouts delayed; minimal staffing — use the all-agents trial queue.');
-    add(new Date(y, 11, 26), 'Boxing Day / St. Stephen’s', 'EU / UK', 'EU post-Christmas promos.');
-    add(new Date(y, 11, 31), "New Year's Eve", 'Intl', 'Countdown promos, last renewal push of the year.');
-    // approximate moveable feasts — verify locally each year
-    add(new Date(y, 2, 19), 'Ramadan begins (approx.)', 'Intl', 'Night-owl viewing peaks — push night-shift coverage.');
-    add(new Date(y, 4, 27), 'Eid al-Fitr (approx.)', 'Intl', 'Multi-device gift promos.');
-    add(new Date(y, 6, 7), 'Eid al-Adha (approx.)', 'Intl', 'Family device plans.');
-  }
-  return out.filter((x) => x.at >= now.getTime() - 2 * DAYMS).sort((a, b) => a.at - b.at).slice(0, 40);
-}
-function adminHolidays() {
+function holidaysList() { return holidayCalendar(Date.now(), (state.admin.settings?.holidayRemind || {}).custom || []).slice(0, 40); }
+
+function adminHolidaysTable() {
   const list = holidaysList();
   const regionTone = { US: 'st-open', 'US / EU': 'st-active', EU: 'st-expiring', Intl: 'st-renewed' };
-  return `<p class="small muted">For <b>Nizar</b> and <b>Khalil</b> only. Use these dates to plan marketing campaigns and to expect Stripe/bank payout delays (US federal holidays delay ACH/payout by 1–2 days). Moveable feasts (Ramadan, Eid) are approximate — double-check each year.</p>
+  return `<p class="small muted">Use these dates to plan marketing campaigns and to expect Stripe/bank payout delays (US federal holidays delay ACH/payout by 1–2 days). Moveable feasts (Ramadan, Eid) are approximate — double-check each year.</p>
   <div class="card"><h3>🗓 Upcoming holidays &amp; campaign windows</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th>Region</th><th>Planning note</th></tr></thead><tbody>${list.map((h) => `<tr><td class="small">${fmtDate(h.at)}</td><td class="small">${new Date(h.at).toLocaleDateString(undefined, { weekday: 'short' })}</td><td><b>${esc(h.name)}</b>${h.at < Date.now() + 30 * DAYMS ? ' <span class="pill st-active">soon</span>' : ''}</td><td><span class="tagp">${esc(h.region)}</span></td><td class="small">${esc(h.tip)}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
+
+async function adminHolidays() {
+  let up = null; try { up = await api('GET', '/api/admin/holidays/upcoming'); } catch {}
+  const me = state.admin.me || {}; const canEdit = !me.locked || me.role === 'owner'; const cfg = up?.cfg || { on: true, days: [7, 1], custom: [] };
+  const kindName = { christmas: '🎄 Christmas', newyear: '🎆 New Year', holidays: '🎁 Christmas & New Year', blackfriday: '🖤 Black Friday', cybermonday: '💻 Cyber Monday', events: '🏆 Sports & events', evergreen: '✨ All-year', devices: '📱 Multi-device' };
+  const next = (up?.list || []).filter((h) => h.daysLeft >= 0).slice(0, 8);
+  return `<div class="card"><h3 style="margin-top:0">⏰ Holiday reminders</h3>
+    <p class="small muted" style="margin-top:0">Every agent gets a notification ${cfg.days.map((d) => d === 0 ? 'on the day' : d + ' day' + (d === 1 ? '' : 's')).join(' and ')} before each holiday, with the promotion to send. Tap “Send the promotion” to open the ready texts (email, WhatsApp, app notification).</p>
+    ${next.map((h) => `<div class="list-item" style="align-items:center"><span style="font-size:22px">${h.daysLeft <= 1 ? '🔔' : '🗓'}</span><div style="flex:1;min-width:0"><b>${esc(h.name)}</b> <span class="pill ${h.daysLeft <= 7 ? 'st-expiring' : 'st-active'}">${h.daysLeft === 0 ? 'today' : h.daysLeft === 1 ? 'tomorrow' : 'in ' + h.daysLeft + ' days'}</span>${h.custom ? ' <span class="badge">own date</span>' : ''}<div class="small muted">${fmtDate(h.at)} · ${esc(h.region)} · ${esc(h.tip || '')}</div></div><button class="btn sm primary" data-act="hol-promo" data-k="${esc(h.kind)}">${esc(kindName[h.kind] || '🎉')} · Send the promotion</button></div>`).join('') || '<p class="muted small">Nothing coming up.</p>'}
+    ${canEdit ? `<form data-form="hol" onsubmit="return false" style="margin-top:14px"><h3>⚙️ Reminder settings</h3><div class="row" style="gap:14px;flex-wrap:wrap">${toggle('Reminders on', 'on', cfg.on)}${field('Remind days before (comma)', 'days', cfg.days.join(', '), { ph: '7, 1' })}</div>
+      <h3 style="margin-top:12px">➕ Your own dates</h3><div id="hol-custom">${(cfg.custom || []).map((c) => holRow(c)).join('')}</div><button type="button" class="btn sm" data-act="hol-add">＋ Add a date</button>
+      <div class="row" style="margin-top:10px"><span class="spacer"></span><button class="btn primary" data-act="hol-save">💾 Save reminders</button></div></form>` : '<p class="small muted lock-note">🔒 The owner / Technical Service sets the reminder days and own dates.</p>'}</div>
+  ${adminHolidaysTable()}`;
+}
+const holRow = (c = {}) => `<div class="row hol-row" style="gap:6px;margin-bottom:6px;flex-wrap:wrap" data-id="${esc(c.id || '')}"><input data-k="name" placeholder="Name (e.g. Shop anniversary)" value="${esc(c.name || '')}" style="flex:2;min-width:160px"><input data-k="date" type="date" value="${esc(c.date || '')}" style="width:160px"><select data-k="kind" style="width:auto">${['evergreen', 'events', 'devices', 'holidays', 'christmas', 'newyear', 'blackfriday', 'cybermonday'].map((k) => `<option ${c.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select><input data-k="tip" placeholder="Note" value="${esc(c.tip || '')}" style="flex:2;min-width:140px"><button type="button" class="btn sm ghost" data-act="hol-del">✕</button></div>`;
+Object.assign(actions, {
+  'hol-promo': (el) => { state.goAfter = el.dataset.k; state.admin.tab = 'promos'; renderAdmin().then?.(() => goAfterRender()); setTimeout(goAfterRender, 400); },
+  'hol-add': () => document.getElementById('hol-custom').insertAdjacentHTML('beforeend', holRow({})),
+  'hol-del': (el) => el.closest('.hol-row').remove(),
+  'hol-save': async (el) => { const f = el.closest('form'); const custom = [...document.querySelectorAll('#hol-custom .hol-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.id, name: g('name'), date: g('date'), kind: g('kind'), tip: g('tip') }; }).filter((c) => c.name && c.date);
+    try { const hr = await api('PUT', '/api/admin/holidays/remind', { on: f.on.checked, days: String(f.days.value).split(/[,\s]+/).map(Number).filter((n) => !isNaN(n)), custom }); state.admin.settings.holidayRemind = hr; toast('Holiday reminders saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
+});
 
 // ---------------- In-panel browser (spec §2) ----------------
 function adminBrowserPage(s) {
@@ -5070,6 +5062,7 @@ function adminBrowserPage(s) {
   ].filter(Boolean);
   return `<p class="small muted">Work browser inside the dashboard. Google and others block embedding, so they open in a new tab — it is by design. For quick answers, use the search below (web results from DuckDuckGo).</p>
     <div class="card"><h3>🔗 Work shortcuts</h3><div class="chips" style="gap:10px;flex-wrap:wrap">${links.map(([i, n, u]) => `<a class="btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${i} ${esc(n)}</a>`).join('')}</div></div>
+    ${translatorCard()}
     <div class="card"><h3>🔎 Web search (in-panel)</h3><form data-form="browser-search" class="row" style="gap:8px"><input name="q" placeholder="Search the web…" style="flex:1" autocomplete="off"><button type="submit" class="btn primary">Search</button></form>
       <div id="browser-frame" style="margin-top:14px;border:1px solid var(--line2);border-radius:12px;overflow:hidden;height:60vh"><iframe title="search results" style="width:100%;height:100%;border:0;background:#fff" src="about:blank"></iframe></div>
       <p class="small muted" style="margin-top:8px">If the results do not load, <a href="https://lite.duckduckgo.com/lite/" target="_blank" rel="noopener">open full search in a new tab →</a></p>
@@ -5095,7 +5088,7 @@ async function adminMktPage() {
         <button type="submit" class="btn primary">💾 Save marketing settings</button></form></div>
     <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (one per line)</span><textarea name="text" rows="5" required placeholder="one email per line"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>
       ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}" title="Delete mailing list" aria-label="Delete mailing list">🗑</button></div>`).join('')}</div>
-      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select><textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message."></textarea><p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
+      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select>${state.admin.me?.locked ? `<p class="small notice" style="margin:0 0 8px">🔒 The campaign email is set by the owner / Technical Service${st.html ? '' : ' (default message for now)'}. You choose the list and send.</p>` : `<textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message.">${esc(st.html || '')}</textarea><button type="button" class="btn sm" data-act="mkt-html-save" style="margin:6px 0">💾 Save as the campaign agents send</button>`}<p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
   </div>`;
 }
 async function adminSeoPage() {
@@ -5452,4 +5445,73 @@ Object.assign(actions, {
   'rs-appdl': async (el) => { el.disabled = true; try { const r = await api('POST', '/api/admin/appmail', { resellerId: el.dataset.id, appUrl: location.origin }); toast(r.sent ? 'App download email sent ✓' : 'Not sent', !r.sent); } catch (e) { toast(e.message, true); } el.disabled = false; },
   'appdl-bulk': () => modal('📲 App download email', `<form onsubmit="return false"><p class="small muted" style="margin-top:0">Sends the download instructions for Android (APK), iPhone & iPad (Safari) and MacBook with the app link, in each person's language.</p>${field('Send to', 'aud', 'active', { type: 'select', options: [['active', 'Active customers'], ['trial', 'Free trial customers'], ['all', 'All customers'], ['resellers', 'All resellers']] })}<div class="row"><span class="spacer"></span><button class="btn primary" data-act="appdl-bulk-go">📤 Send</button></div></form>`),
   'appdl-bulk-go': async (el) => { if (!confirm('Send the app download email now?')) return; el.disabled = true; try { const r = await api('POST', '/api/admin/appmail', { audience: el.closest('form').aud.value, appUrl: location.origin }); toast(`Sent to ${r.sent}${r.failed ? ` · ${r.failed} failed` : ''} ✓`); closeModal(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+});
+
+// ---------------- agents: fixed texts, subjects and links (they choose who gets it and send) ----------------
+const LOCK_NOTE = '🔒 Texts and links are fixed by the owner / Technical Service.';
+function applyLocks(root = document) {
+  const me = state.admin?.me; if (!me || !me.locked || !isAdminUI()) return;
+  const q = (sel) => root.querySelectorAll(sel);
+  q('#wa-text').forEach((e) => { if (e.readOnly) return; e.readOnly = true; e.classList.add('locked-text'); const lab = e.closest('label')?.querySelector('span'); if (lab) lab.textContent = 'Message (ready to send) ' + '🔒'; });
+  q('[data-form=wa] [name=link], [data-form=wa] [name=title], [data-form=wa] [name=price], [data-form=wa] [name=days], [data-form=wa] [name=devices], #op-link').forEach((e) => { const f = e.closest('.field') || e; f.style.display = 'none'; e.disabled = true; });
+  q('#wa-tpl-box, [data-act^=wa-tpl], [data-act=order-custom], [data-act=promo-edit], [data-act=nl-new]').forEach((e) => { e.style.display = 'none'; });
+  q('[data-form=nl] input, [data-form=nl] textarea, [data-form=nl] select').forEach((e) => { if (!['group', 'test', 'testEmail'].includes(e.name) && !e.closest('[data-keep]')) { e.disabled = true; } });
+  q('[data-form=nl]').forEach((f) => { if (!f.querySelector('.lock-note')) f.insertAdjacentHTML('afterbegin', `<p class="small notice lock-note" style="margin-top:0">${LOCK_NOTE} You choose the group and send.</p>`); });
+  q('[data-form=rm] input, [data-form=rm] select, [data-form=ibo-auto] input, [data-form=mkt-settings] input, [data-form=mkt-settings] select, [data-form=wa-nums] input, [data-form=wa-nums] select, [data-form=wa-nums] textarea').forEach((e) => { e.disabled = true; });
+  q('[data-act=rm-save], [data-act=ibo-auto-save], [data-form=mkt-settings] button[type=submit], [data-form=mkt-settings] [data-act^=key], [data-form=wa-nums] button, [data-act^=wa-num]').forEach((e) => { e.style.display = 'none'; });
+  q('[data-form=rm], [data-form=ibo-auto], [data-form=mkt-settings], [data-form=wa-nums]').forEach((f) => { if (!f.querySelector('.lock-note')) f.insertAdjacentHTML('afterbegin', `<p class="small notice lock-note" style="margin-top:0">${f.dataset.form === 'wa-nums' ? '👁 View only. The owner / Technical Service changes these numbers.' : f.dataset.form === 'mkt-settings' ? '👁 View only: domains and senders are shown, API keys stay hidden.' : LOCK_NOTE}</p>`); });
+  q('.promo-card textarea, #admin-body textarea[data-promo]').forEach((e) => { e.readOnly = true; });
+}
+new MutationObserver(() => { clearTimeout(applyLocks.t); applyLocks.t = setTimeout(() => applyLocks(), 30); }).observe(document.documentElement, { childList: true, subtree: true });
+Object.assign(actions, {
+  'mkt-html-save': async () => { try { await api('PUT', '/api/admin/emailmkt/settings', { html: ($('#mkt-html') || {}).value || '' }); toast('Saved: agents send this campaign ✓'); } catch (e) { toast(e.message, true); } },
+});
+
+// ---------------- In-panel translator: the whole panel (Google Translate) + a text / web-page translator, all languages ----------------
+const TR_LANGS = [['en', '🇬🇧 English'], ['ar', '🇸🇦 العربية'], ['fr', '🇫🇷 Français'], ['es', '🇪🇸 Español'], ['de', '🇩🇪 Deutsch'], ['it', '🇮🇹 Italiano'], ['pt', '🇵🇹 Português'], ['nl', '🇳🇱 Nederlands'], ['tr', '🇹🇷 Türkçe'], ['ru', '🇷🇺 Русский'], ['uk', '🇺🇦 Українська'], ['pl', '🇵🇱 Polski'], ['ro', '🇷🇴 Română'], ['el', '🇬🇷 Ελληνικά'], ['sv', '🇸🇪 Svenska'], ['th', '🇹🇭 ไทย'], ['vi', '🇻🇳 Tiếng Việt'], ['id', '🇮🇩 Indonesia'], ['ms', '🇲🇾 Melayu'], ['tl', '🇵🇭 Filipino'], ['hi', '🇮🇳 हिन्दी'], ['ur', '🇵🇰 اردو'], ['bn', '🇧🇩 বাংলা'], ['fa', '🇮🇷 فارسی'], ['he', '🇮🇱 עברית'], ['zh-CN', '🇨🇳 中文'], ['ja', '🇯🇵 日本語'], ['ko', '🇰🇷 한국어'], ['sw', '🇰🇪 Kiswahili'], ['am', '🇪🇹 አማርኛ'], ['so', '🇸🇴 Soomaali'], ['ha', '🇳🇬 Hausa']];
+const trCur = () => { try { return localStorage.getItem('tvp_tr') || 'en'; } catch { return 'en'; } };
+let trLoading = null;
+function trLoad() {
+  if (trLoading) return trLoading;
+  trLoading = new Promise((res, rej) => {
+    if (!document.getElementById('gt-el')) { const d = document.createElement('div'); d.id = 'gt-el'; d.style.cssText = 'position:fixed;left:-9999px;top:0'; document.body.appendChild(d); }
+    window.gtInit = () => { try { new window.google.translate.TranslateElement({ pageLanguage: 'en', autoDisplay: false }, 'gt-el'); res(); } catch (e) { rej(e); } };
+    const sc = document.createElement('script'); sc.src = 'https://translate.google.com/translate_a/element.js?cb=gtInit'; sc.async = true; sc.onerror = () => { trLoading = null; rej(new Error('The translator could not load (check the internet connection).')); }; document.head.appendChild(sc);
+  });
+  return trLoading;
+}
+async function trApply(lang) {
+  try { localStorage.setItem('tvp_tr', lang); } catch {}
+  const host = location.hostname; const cookie = (v) => { document.cookie = `googtrans=${v};path=/`; document.cookie = `googtrans=${v};path=/;domain=${host}`; document.cookie = `googtrans=${v};path=/;domain=.${host.split('.').slice(-2).join('.')}`; };
+  if (lang === 'en') { cookie('/en/en'); const sel = document.querySelector('.goog-te-combo'); if (sel) { sel.value = 'en'; sel.dispatchEvent(new Event('change')); } document.documentElement.classList.remove('translated-rtl'); setTimeout(() => location.reload(), 150); return; }
+  cookie('/en/' + lang); await trLoad();
+  for (let i = 0; i < 40; i++) { const sel = document.querySelector('.goog-te-combo'); if (sel && sel.options.length > 1) { sel.value = lang; sel.dispatchEvent(new Event('change')); break; } await new Promise((r) => setTimeout(r, 150)); }
+  document.documentElement.classList.toggle('translated-rtl', ['ar', 'ur', 'fa', 'he'].includes(lang));
+}
+function trAuto(me) { // the agent's language (Arabic for Arabic agents) is applied automatically; their own choice wins
+  if (!isAdminUI()) return; let saved = null; try { saved = localStorage.getItem('tvp_tr'); } catch {}
+  const lang = saved || (me && me.lang && me.lang !== 'en' ? me.lang : ''); if (lang && lang !== 'en') trApply(lang).catch(() => {});
+}
+function protectData(root = document) { document.documentElement.removeAttribute('translate'); root.querySelectorAll('#app [dir=ltr], #app code, #app .cred-v, #app .code, #app input, #app textarea, #app .tbl td:first-child b, #app .cl-card b, [data-no-tr]').forEach((e) => { if (!e.hasAttribute('translate')) e.setAttribute('translate', 'no'); }); }
+new MutationObserver(() => { clearTimeout(protectData.t); protectData.t = setTimeout(() => protectData(), 80); }).observe(document.documentElement, { childList: true, subtree: true });
+function translatorCard() {
+  const cur = trCur(); const opts = (sel) => TR_LANGS.map(([k, n]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${n}</option>`).join('');
+  return `<div class="card" id="tr-card"><h3>🌐 Translator</h3>
+    <div class="grid2" style="gap:14px;align-items:start"><div><b class="small">The whole panel</b><p class="small muted" style="margin:4px 0 8px">Shows every page of the panel in your language. Customer data (names, usernames, links, numbers) stays as it is.</p>
+      <div class="row" style="gap:8px"><select id="tr-panel" style="flex:1">${opts(cur)}</select><button class="btn primary" data-act="tr-panel-go">Translate the panel</button></div></div>
+    <div><b class="small">A text (customer message, reply…)</b><textarea id="tr-text" rows="4" placeholder="Paste or type any text, in any language" style="width:100%;margin-top:6px"></textarea>
+      <div class="row" style="gap:8px;margin-top:6px"><select id="tr-to" style="flex:1">${opts(cur === 'en' ? 'ar' : cur)}</select><button class="btn primary" data-act="tr-text-go">Translate</button></div>
+      <div id="tr-out" class="small" style="margin-top:8px;white-space:pre-wrap"></div></div></div>
+    <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><input id="tr-url" placeholder="https://… a web page to read in your language" style="flex:1;min-width:220px" dir="ltr"><button class="btn" data-act="tr-url-go">Translate this page ↗</button></div></div>`;
+}
+Object.assign(actions, {
+  'tr-open': () => { modal('🌐 Translator', translatorCard().replace('<div class="card" id="tr-card">', '<div id="tr-card">'), { wide: true }); },
+  'tr-panel-go': async (el) => { const lang = $('#tr-panel').value; closeModal(); el.disabled = true; try { await trApply(lang); document.querySelectorAll('[data-act=tr-open]').forEach((b) => { b.textContent = '🌐 ' + lang.toUpperCase().slice(0, 2); }); toast(lang === 'en' ? 'English ✓' : 'Translating the panel… ✓'); } catch (e) { toast(e.message, true); } el.disabled = false; },
+  'tr-text-go': async (el) => { const text = ($('#tr-text').value || '').trim(); const to = $('#tr-to').value; const out = $('#tr-out'); if (!text) return; el.disabled = true; out.textContent = '…';
+    try { const r = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(text.slice(0, 4500))}`); if (!r.ok) throw new Error('busy'); const j = await r.json(); const res = (j[0] || []).map((x) => x[0]).join('');
+      out.innerHTML = `<div class="notice allow-copy" dir="auto" translate="no" style="margin:0">${esc(res)}</div><div class="row" style="gap:6px;margin-top:6px"><button class="btn sm" data-act="tr-copy">📋 Copy</button><span class="small muted">From ${esc(String(j[2] || 'auto'))}</span></div>`; out.dataset.v = res; }
+    catch { out.innerHTML = `<a class="btn sm" target="_blank" rel="noopener" href="https://translate.google.com/?sl=auto&tl=${encodeURIComponent(to)}&text=${encodeURIComponent(text.slice(0, 4500))}&op=translate">Open the translation ↗</a>`; }
+    el.disabled = false; },
+  'tr-copy': async () => { const v = $('#tr-out')?.dataset.v || ''; try { await navigator.clipboard.writeText(v); toast(t('copied')); } catch {} },
+  'tr-url-go': () => { const u = ($('#tr-url').value || '').trim(); if (!/^https?:\/\//.test(u)) return toast('Paste a link starting with https://', true); window.open(`https://translate.google.com/translate?sl=auto&tl=${encodeURIComponent($('#tr-to')?.value || trCur() || 'ar')}&u=${encodeURIComponent(u)}`, '_blank', 'noopener'); },
 });

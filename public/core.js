@@ -231,14 +231,16 @@ export const OWNER_ONLY = ['exports', 'calls', 'master_sheets'];
 const PERM_KEYS = PERMS.map((p) => p[0]);
 const GRANTABLE_KEYS = PERM_KEYS.filter((k) => !OWNER_ONLY.includes(k));
 const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
-// Only the owner and the Technical Service (role "Technical Manager") get these: API keys (Resend…), email marketing, list uploads, sender/subject/link editing, SEO and ads.
-export const TECH_ONLY = ['secrets', 'marketing', 'templates_edit', 'seo', 'ads'];
+// Only the owner and the Technical Service (role "Technical Manager") get these: API keys (Resend…), editing message texts, senders, subjects and links (templates), SEO and ads.
+// Agents can SEND email marketing, newsletters, promotions and renewal emails, but always with the saved texts and the automatic payment links.
+export const TECH_ONLY = ['secrets', 'templates_edit', 'seo', 'ads'];
 export const isTechRole = (role) => /technical|technique|panel manager/i.test(String(role || ''));
 
 // Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
 export const ROLE_PRESETS = {
   'Technical Manager': ['customers_view', 'customers_edit', 'customers_phone', 'disputes', 'tasks', 'attendance', 'activity', 'ibo', 'marketing', 'templates_edit', 'secrets'],
-  'Sales Agent': ['customers_view', 'customers_edit', 'customers_phone', 'tasks', 'attendance'],
+  'Sales Agent': ['customers_view', 'customers_edit', 'customers_phone', 'marketing', 'tasks', 'attendance'],
+  'Support Agent': ['customers_view', 'customers_edit', 'customers_phone', 'marketing', 'tasks', 'attendance'],
   Accountant: ['finance_view', 'finance_edit', 'profits', 'stock', 'stripe', 'tasks', 'attendance'],
   Manager: ['customers_view', 'customers_edit', 'customers_delete', 'customers_phone', 'disputes', 'finance_view', 'finance_edit', 'profits', 'stock', 'plans', 'tasks', 'attendance', 'activity'],
   'Full access': GRANTABLE_KEYS,
@@ -257,7 +259,7 @@ function permFor(method, path, body) {
     if (k.length && k.every((x) => x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts', 'waTemplates'].includes(x))) return 'plans';
     if (k.includes('notify') || k.includes('security')) return 'owner';
-    if (k.some((x) => ['email', 'promo', 'renewModels', 'iboPromo', 'mailTexts', 'renewalOffer', 'waTemplates', 'telegram'].includes(x))) return 'marketing'; // sender names, subjects, links, templates
+    if (k.some((x) => ['email', 'promo', 'renewModels', 'iboPromo', 'mailTexts', 'renewalOffer', 'waTemplates', 'telegram', 'waNumbers', 'branding'].includes(x))) return 'templates_edit'; // sender names, subjects, links, texts, WhatsApp numbers: owner & technical service
     if (k.length && k.every((x) => x === 'payRoute' || x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
@@ -289,6 +291,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/attendance')) return 'attendance';
   if (path === '/api/admin/guide') return null;
   if (path === '/api/admin/waiting') return 'customers_view';
+  if (path.startsWith('/api/admin/holidays/')) return 'customers_view';
   if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/leaves')) return method === 'POST' && (path === '/api/admin/leaves' || path.startsWith('/api/admin/leaves/submit')) ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/tasks')) return 'tasks';
@@ -296,6 +299,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/teamchat')) return null;
   if (path.startsWith('/api/admin/cc')) return 'owner';
   if (path.startsWith('/api/admin/bylaws')) return null; // every admin can read and sign their own copy
+  if (path === '/api/admin/emailmkt/settings' && method === 'PUT') return 'templates_edit'; // keys, domains, senders, subjects, campaign text
   if (path.startsWith('/api/admin/emailmkt')) return 'marketing';
   if (path.startsWith('/api/admin/seo')) return 'seo';
   if (path.startsWith('/api/admin/gads') || path.startsWith('/api/admin/fb')) return 'ads';
@@ -1022,6 +1026,47 @@ export function renewModelEmail(s, c, model, link, appUrl) {
   const camp = { split: false, lang, badge: M.icon + ' ' + app, content: { all: { subject: subj, title: T.t, body: fill(body).replace(/_\((.+?)\)_/g, '($1)'), button: (M.icon === '🎁' ? '🎟️ ' : '👉 ') + N.renew } }, link: v.link };
   return newsletterEmail(s, c, camp, appUrl, '');
 }
+// ---- Holiday calendar (shared by the panel and the reminders): marketing / payout planning, with the matching promotion ----
+const EASTER = (y) => { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1; return new Date(y, mo - 1, da); };
+const ISLAMIC = { 2025: [[2, 1], [2, 30], [5, 6]], 2026: [[1, 18], [2, 20], [4, 27]], 2027: [[1, 8], [2, 10], [4, 17]], 2028: [[0, 28], [1, 27], [4, 5]], 2029: [[0, 16], [1, 15], [3, 24]] }; // Ramadan, Eid al-Fitr, Eid al-Adha (approx., month 0-based)
+export function holidayCalendar(nowMs = Date.now(), custom = []) {
+  const now = new Date(nowMs); const y0 = now.getFullYear(); const out = [];
+  const add = (d, id, name, region, tip, kind = 'evergreen') => out.push({ id: id + '-' + d.getFullYear(), at: d.getTime(), name, region, tip, kind });
+  const nth = (y, mo, wd, n) => { const d = new Date(y, mo, 1); d.setDate(1 + ((wd - d.getDay() + 7) % 7) + (n - 1) * 7); return d; };
+  const last = (y, mo, wd) => { const d = new Date(y, mo + 1, 0); d.setDate(d.getDate() - ((d.getDay() - wd + 7) % 7)); return d; };
+  for (const y of [y0, y0 + 1]) {
+    add(new Date(y, 0, 1), 'newyear', "New Year's Day", 'Intl', 'Big renew promos — "new year, new setup".', 'newyear');
+    add(nth(y, 0, 1, 3), 'mlk', 'Martin Luther King Jr. Day', 'US', 'US soft launch weekend, Reddit/Quora SEO push.');
+    add(nth(y, 1, 0, 2), 'superbowl', 'Super Bowl (US)', 'US', 'Huge streaming peak — check line capacity, prime promos for multi-device.', 'events');
+    add(new Date(y, 1, 14), 'valentine', 'Valentine’s Day', 'US / EU', 'Couple packages (2 devices).', 'devices');
+    add(new Date(y, 2, 17), 'stpatrick', 'St. Patrick’s Day', 'US / IE / UK', 'Small promo — renewals.');
+    add(EASTER(y), 'easter', 'Easter Sunday', 'US / EU', 'Family plans (3–4 devices).', 'devices');
+    add(new Date(y, 4, 1), 'labour', 'Labour Day', 'EU', 'Europe promo weekend.');
+    add(nth(y, 4, 0, 2), 'mothers', 'Mother’s Day (US)', 'US', 'Gift a subscription — multi-device.', 'devices');
+    add(last(y, 4, 1), 'memorial', 'Memorial Day', 'US', 'US holiday — Stripe payouts may be delayed.');
+    add(last(y, 4, 6), 'uclfinal', 'Champions League final (approx.)', 'Intl', 'Sports peak — push the sports & events promotion.', 'events');
+    add(nth(y, 5, 0, 3), 'fathers', 'Father’s Day (US)', 'US', 'Sports-lover gift promo.', 'events');
+    add(new Date(y, 6, 4), 'july4', 'Independence Day', 'US', 'US Stripe payouts 1–2 days late; renew promos.');
+    add(new Date(y, 6, 14), 'bastille', 'Bastille Day', 'FR', 'Fr-speaking EU promos.');
+    add(nth(y, 8, 1, 1), 'laborus', 'Labor Day', 'US', 'US holiday — Stripe payouts may be delayed.');
+    add(new Date(y, 8, 1), 'backtoschool', 'Back to school / football season', 'US / EU', 'New season of football, series and shows.', 'events');
+    add(new Date(y, 9, 3), 'deunity', 'German Unity Day', 'DE', 'Germany-focused promos.');
+    add(new Date(y, 9, 12), 'esday', 'Spanish National Day', 'ES', 'Spain promos.');
+    add(new Date(y, 9, 31), 'halloween', 'Halloween', 'US', 'Themed creative for Facebook ads.');
+    const tg = nth(y, 10, 4, 4);
+    add(tg, 'thanksgiving', 'Thanksgiving', 'US', 'Big US weekend — pre-load credits, Stripe payouts may be delayed; Black Friday next day.', 'blackfriday');
+    add(new Date(tg.getTime() + DAYMS), 'blackfriday', 'Black Friday', 'US / Intl', 'Peak sales day — caps on tickets: send trials in batches.', 'blackfriday');
+    add(new Date(tg.getTime() + 4 * DAYMS), 'cybermonday', 'Cyber Monday', 'US / Intl', 'Last big online sales day — app & multi-device offers.', 'cybermonday');
+    add(new Date(y, 11, 24), 'xmaseve', 'Christmas Eve', 'EU', 'Gift cards go fast — resellers restock.', 'christmas');
+    add(new Date(y, 11, 25), 'christmas', 'Christmas', 'US / EU', 'Stripe payouts delayed; minimal staffing — use the all-agents trial queue.', 'christmas');
+    add(new Date(y, 11, 26), 'boxing', 'Boxing Day / St. Stephen’s', 'EU / UK', 'EU post-Christmas promos.', 'holidays');
+    add(new Date(y, 11, 31), 'nye', "New Year's Eve", 'Intl', 'Countdown promos, last renewal push of the year.', 'newyear');
+    const isl = ISLAMIC[y]; if (isl) { add(new Date(y, isl[0][0], isl[0][1]), 'ramadan', 'Ramadan begins (approx.)', 'Intl', 'Night-owl viewing peaks — push night-shift coverage.', 'evergreen'); add(new Date(y, isl[1][0], isl[1][1]), 'eidfitr', 'Eid al-Fitr (approx.)', 'Intl', 'Multi-device gift promos.', 'devices'); add(new Date(y, isl[2][0], isl[2][1]), 'eidadha', 'Eid al-Adha (approx.)', 'Intl', 'Family device plans.', 'devices'); }
+  }
+  for (const c of custom || []) { const at = new Date(c.date).getTime(); if (isFinite(at)) out.push({ id: 'c-' + c.id, at, name: c.name, region: c.region || 'Own', tip: c.tip || '', kind: c.kind || 'evergreen', custom: true }); }
+  return out.filter((x) => x.at >= nowMs - 2 * DAYMS).sort((a, b) => a.at - b.at);
+}
+export const HOLIDAY_REMIND_DEF = { on: true, days: [7, 1], custom: [] };
 // Trial waiting for a line: the customer gets their app login at once, and the line details by email as soon as it is ready
 const TW = {
   en: { s: '🎁 Your free trial is being prepared', t: 'Your free trial request is received ✅', b: 'Hi {name},\n\nThanks for trying {app}! Your {hours}-hour free trial is being activated: we are preparing your line now and you will get a second email with the TV details within a few minutes (usually under 30 minutes). Your 24 hours start when the line is ready.\n\nYou can already sign in to the app:\n\n*Username:* {user}\n*Password:* {pass}\n*Profile:* {profile}', btn: '📲 Download the app' },
@@ -3126,7 +3171,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       // 'secrets' (API keys, accounts, hosting, domains): the owner, anyone given it, and the Technical Manager (Khalil).
       const tech = !isOwner && isTechRole(member && member.role);
-      const can = (p) => isOwner || (!isOwnerOnly(p) && (TECH_ONLY.includes(p) ? tech : perms.includes(p)));
+      const can = (p) => isOwner || (!isOwnerOnly(p) && (TECH_ONLY.includes(p) ? tech : perms.includes(p) || (p === 'marketing' && (tech || perms.includes('customers_edit'))))); // anyone who serves customers can send marketing
+      const locked = !can('templates_edit'); // agents: texts, subjects and links are fixed
       const need = permFor(method, path, body);
       if (need === 'owner' && !isOwner) { await log('security', `${actorName} was blocked from ${method} ${path} (owner only)`); return err(403, 'Only the owner can do this.'); }
       if (need && need !== 'owner' && !can(need)) {
@@ -3174,7 +3220,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
         meta.sessionExp = ses.exp || 0; meta.staffHours = Number(s.security.staffHours) || 6; meta.mustCheckIn = !checkedIn; meta.noCopy = !isOwner && !tech && s.security.noCopy !== false; meta.lang = (member && member.lang) || 'en';
         if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: [...new Set([...perms.filter((p) => !TECH_ONLY.includes(p)), ...(tech ? TECH_ONLY : [])])], tech, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
+        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: [...new Set([...perms.filter((p) => !TECH_ONLY.includes(p)), ...(tech ? TECH_ONLY : []), ...(can('marketing') ? ['marketing'] : [])])], tech, locked, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -3537,7 +3583,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const m = await getMkt(); const lists = (await getMktLists()).map(({ id, name, count, createdAt, by }) => ({ id, name, count, createdAt, by }));
         return ok({ keysSet: mktRowsOf(m).filter((r) => r.key && r.on !== false).length, rowsTotal: mktRowsOf(m).length, senders: (m.senders || []).filter(Boolean).length, subjects: (m.subjects || []).filter(Boolean).length, costPerEmail: Number(m.costPerEmail) || 0.0004, lists, ...mktStats(m) });
       }
-      if (R('GET', '/api/admin/emailmkt/settings')) { const m = await getMkt(); return ok({ rows: maskRows(mktRowsOf(m)), keys: (m.keys || []).map((k) => (k ? '••••' : '')), senders: m.senders || [], subjects: m.subjects || [], costPerEmail: m.costPerEmail, ...mktStats(m) }); }
+      if (R('GET', '/api/admin/emailmkt/settings')) { const m = await getMkt(); return ok({ html: m.html || '', locked, rows: maskRows(mktRowsOf(m)), keys: (m.keys || []).map((k) => (k ? '••••' : '')), senders: m.senders || [], subjects: m.subjects || [], costPerEmail: m.costPerEmail, ...mktStats(m) }); }
       if (R('PUT', '/api/admin/emailmkt/settings')) {
         const m = await getMkt();
         if (Array.isArray(body.rows)) { m.rows = normRows(body.rows, mktRowsOf(m)); m.keys = []; m.domains = []; }
@@ -3546,6 +3592,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (Array.isArray(body.senders)) m.senders = body.senders.slice(0, 5).map((x) => cleanText(x, 80));
         if (Array.isArray(body.subjects)) m.subjects = body.subjects.slice(0, 5).map((x) => cleanText(x, 150));
         if (body.costPerEmail !== undefined) m.costPerEmail = Math.max(0, Number(body.costPerEmail) || 0.0004);
+        if (body.html !== undefined) m.html = String(body.html || '').slice(0, 200000); // the campaign email agents send (locked for them)
         await saveMkt(m); await log('marketing', 'Marketing settings updated');
         return ok({ ok: true });
       }
@@ -3589,7 +3636,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
         const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const domains = mrows.map((r) => r.domain);
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
-        const html = String(body.html || '').slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
+        const html = (locked ? String(m.html || '') : String(body.html || m.html || '')).slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
         const accts = await getAccounts(); let stopped = '';
         for (let i = 0; i < recipients.length; i += 100) { // Resend batch API, 100 at a time; paid keys first, a key at its limit or failing is skipped
@@ -3731,6 +3778,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.note !== undefined) e.note = cleanText(body.note, 300);
         e.edited = actorName; l.sort((a, b) => a.at - b.at); await store.put('attendance', l); await log('team', `Attendance: ${e.name} ${e.action} edited`); return ok({ ok: true });
       }
+      if (R('GET', '/api/admin/holidays/upcoming')) { const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }; const list = holidayCalendar(Date.now(), hr.custom).slice(0, 40).map((h) => ({ ...h, daysLeft: Math.ceil((h.at - Date.now()) / DAYMS) })); return ok({ cfg: hr, list, next: list.filter((h) => h.daysLeft >= 0 && h.daysLeft <= Math.max(...hr.days, 7)) }); }
+      if (R('PUT', '/api/admin/holidays/remind')) { // owner / technical service: reminder days and own dates
+        if (!can('templates_edit') && !can('holidays')) return err(403, 'Only the owner and the Technical Service change the holiday reminders.');
+        const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }; if (body.on !== undefined) hr.on = !!body.on;
+        if (Array.isArray(body.days)) hr.days = [...new Set(body.days.map((d) => Math.round(Number(d))).filter((d) => d >= 0 && d <= 60))].slice(0, 4);
+        if (Array.isArray(body.custom)) hr.custom = body.custom.slice(0, 40).map((c) => ({ id: cleanText(c.id, 10) || uid(5), name: cleanText(c.name, 80), date: String(c.date || '').slice(0, 10), kind: SEASON[c.kind] ? c.kind : 'evergreen', region: cleanText(c.region, 30), tip: cleanText(c.tip, 200) })).filter((c) => c.name && /^\d{4}-\d{2}-\d{2}$/.test(c.date));
+        await saveSettings({ ...s, holidayRemind: hr }); await log('marketing', 'Holiday reminders updated'); return ok(hr); }
       if (R('GET', '/api/admin/waiting')) { // who is waiting right now (sounds in the panel)
         const tk = await getTickets(); const ch = await getChats(); const rc = await getReceipts(); const tq = await getTrialQueue(); const list = await getCustomers();
         const lastFrom = (t) => { const m = t.messages || []; return m.length ? m[m.length - 1].from : ''; };
@@ -4085,7 +4139,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('POST', '/api/admin/push/promo')) { // promotion reminder for packages (customers) or credits (resellers), on their devices
         const aud = ['inactive', 'active', 'trials', 'customers', 'resellers', 'all'].includes(body.audience) ? body.audience : 'inactive';
-        const custom = body.title || body.body ? { title: cleanText(body.title, 120), body: cleanText(body.body, 300), url: /^\/[\w\/-]*$/.test(String(body.url || '')) ? body.url : '' } : null;
+        const custom = !locked && (body.title || body.body) ? { title: cleanText(body.title, 120), body: cleanText(body.body, 300), url: /^\/[\w\/-]*$/.test(String(body.url || '')) ? body.url : '' } : null;
         const r = await sendPromo(s, aud, custom); await log('marketing', `Promotion notification (${aud}) sent to ${r.people} people on ${r.devices} device(s)`); return ok(r);
       }
       if (R('GET', '/api/admin/push/devices')) { // who gets notifications (labels only)
@@ -4570,7 +4624,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (method === 'POST' && sub === 'order') {
           const pk = s.orderPackages.find((p) => p.id === body.pkg); if (!pk) return err(400, 'Choose a package.');
           const to = String(body.to || c.email || '').trim(); if (!to) return err(400, 'This customer has no email address.');
-          let fixedL = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
+          let fixedL = !locked && /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined; // agents can't change links
           if (!fixedL) { const n = await nextPayLink(s, pk, s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency); if (n) fixedL = { url: n.url, acc: n.acc }; } // the matching link, GreenApp Host / rotation
           const m = orderEmail(s, c, pk, body.appUrl, fixedL); const r = await sendEmail(s, to, m.subject, m.html);
           if (r.ok) { markSent(c, 'email'); c.orderSentAt = Date.now(); c.orderSentPkg = pk.id; c.orderSentLink = fixedL?.url || ''; if (c.buyRequest) c.buyRequest.answeredAt = Date.now(); await saveCustomers(list); }
@@ -4612,6 +4666,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
           const pk = { ...base, title: String(body.title || '').trim() || base.title, price: num(body.price, base.price), days: Math.max(1, num(body.days, base.days)), devices: Math.max(1, num(body.devices, base.devices)) };
           const st = body.currency && ['EUR', 'USD', 'USDT', 'ALL', 'MAD', 'THB'].includes(body.currency) ? { ...s, orderCurrency: body.currency } : s;
+          if (locked) { body.link = ''; body.price = undefined; body.title = ''; } // agents: ready messages, price and link from the panel
           let pl = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : null;
           const customPrice = body.price !== undefined && body.price !== null && String(body.price).trim() !== '';
           const cur = customPrice && body.currency && !['AUTO', 'ALL'].includes(body.currency) ? body.currency : s.currencyRule?.on !== false ? custCurrency(s, c) : body.currency && !['AUTO', 'ALL'].includes(body.currency) ? body.currency : st.orderCurrency === 'ALL' ? pl?.cur || 'EUR' : st.orderCurrency || 'EUR';
@@ -4987,7 +5042,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const want = new Set((body.ids || []).slice(0, 100));
         const pick = (c) => (body.pkg === 'random' ? pk[Math.floor(Math.random() * pk.length)] : pk.find((p) => p.id === body.pkg));
         if (body.pkg !== 'random' && !pick()) return err(400, 'Choose a package.');
-        const fixedB = /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
+        const fixedB = !locked && /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? { url: String(body.link).trim(), acc: '' } : undefined;
         const batch = []; for (const c of list.filter((c) => want.has(c.id) && cleanEmail(c.email) && !c.unsub)) { const p = pick(c); let L = fixedB; if (!L && p) { const n = await nextPayLink(s, p, s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency); if (n) L = { url: n.url, acc: n.acc }; } batch.push({ c, p, m: orderEmail(s, c, p, body.appUrl, L) }); }
         if (!batch.length) return ok({ sent: 0 });
         const r = await sendBatch(s, batch.map(({ c, m }) => ({ to: c.email, subject: m.subject, html: m.html })));
@@ -5009,7 +5064,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const ch = String(body.channel || s.branding.telegramChannel || '').trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
         if (!ch) return err(400, 'Add your public Telegram channel in Login & branding first.');
         if (!tgOn(s)) return err(400, 'Set up your Telegram bot first (Login & branding → Telegram).');
-        const text = String(body.text || promoChannelPost(s)).slice(0, 3800).trim();
+        const text = String((!locked && body.text) || promoChannelPost(s)).slice(0, 3800).trim();
         const r = await tgSend(s, /^-?\d+$/.test(ch) ? ch : '@' + ch, text);
         await log('marketing', `Telegram channel post @${ch}${r.ok ? '' : ' — failed: ' + r.error}`);
         if (!r.ok) return err(502, `Telegram: ${r.error || 'not sent'}. Add your bot to the channel as an admin who can post messages, then try again.`);
@@ -5020,6 +5075,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const groups = Object.fromEntries(['all', 'paying', 'active', 'expiring', 'expired', 'trial'].map((g) => { const t = nlGroup(list, g, w); return [g, { total: t.length, left: camp?.id ? t.filter((c) => c.nlLast !== camp.id).length : t.length }]; }));
         return ok({ groups, camp, unsubscribed: list.filter((c) => c.unsub).length });
       }
+      if (locked && path.startsWith('/api/admin/newsletter')) { const saved = await store.get('newsletter'); if (path === '/api/admin/newsletter/new') return err(403, 'Only the owner and the Technical Service can write a new newsletter.'); if (!saved || !saved.content) return err(400, 'No newsletter is ready yet. The owner or the Technical Service writes it first.'); body.camp = { ...saved }; } // agents send the saved newsletter as it is
+      if (R('GET', '/api/admin/newsletter/saved')) { const sv = await store.get('newsletter'); return ok(sv || {}); }
       if (R('POST', '/api/admin/newsletter/preview')) { const m = newsletterEmail(s, { name: body.name ?? 'Linko', lang: body.lang || 'en' }, body.camp || {}, body.appUrl, '#'); return ok(m); }
       if (R('POST', '/api/admin/newsletter/send')) { // body: { camp, group, test }
         const camp = body.camp || {}; if (!Object.values(camp.content || {}).some((x) => x?.subject || x?.title)) return err(400, 'Write a subject or a title first.');
@@ -5036,6 +5093,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ sent: batch.length, left: targets.length - batch.length, id: camp.id });
       }
       if (R('POST', '/api/admin/newsletter/new')) { await store.del('newsletter'); return ok({ ok: true }); }
+      if (R('POST', '/api/admin/order/custom') && locked && !body.preview) return err(403, 'Emails with your own text, price or link are for the owner and the Technical Service. Use the package email (💳), it has the right link.');
       if (R('POST', '/api/admin/order/custom')) { // manual email: any address, own details; body.preview = only build it
         const base = s.orderPackages.find((p) => p.id === body.pkg) || s.orderPackages[0] || { id: 'custom', title: 'Package', days: 30, devices: 1, price: 0, links: [] };
         const num = (x, d) => (x === '' || x == null || isNaN(Number(x)) ? d : Number(x));
@@ -5331,6 +5389,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         markSent(p, 'telegram'); await saveResellers(rs); return ok({ sent: true });
       }
       if (R('POST', '/api/admin/reseller/email')) { // an email you write yourself, to one, several or all resellers; the text can be kept as your template
+        if (locked) { const sv = s.resellerEmail; if (!sv || !sv.subject) return err(400, 'No reseller email is saved yet. The owner or the Technical Service writes it first.'); Object.assign(body, sv, { save: false }); } // agents send the saved text
         const tpl = { subject: rsText(body.subject, 160), title: rsText(body.title, 120), body: String(body.body || '').replace(/[<>]/g, '').slice(0, 6000).trim(), button: rsText(body.button, 60), link: /^https?:\/\/\S+$/.test(String(body.link || '').trim()) ? String(body.link).trim() : (['site', 'contact', 'app'].includes(body.link) ? body.link : '') };
         if (body.save) { await saveSettings({ ...s, resellerEmail: tpl }); if (body.saveOnly) return ok({ ok: true, saved: true }); }
         if (!tpl.subject || !tpl.body) return err(400, 'Write a subject and a message first.');
@@ -5523,6 +5582,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         out.alert = true;
       }
     }
+    try { // holiday reminders: tell the agents (notification) a few days before each holiday, with the promotion to send
+      const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) };
+      if (hr.on) for (const h of holidayCalendar(Date.now(), hr.custom)) { const dl = Math.ceil((h.at - Date.now()) / DAYMS); if (!hr.days.includes(dl)) continue; const k = 'holrem:' + h.id + ':' + dl; if (await store.get(k)) continue; await store.put(k, 1, 40 * 86400);
+        const when = dl === 0 ? 'today' : dl === 1 ? 'tomorrow' : `in ${dl} days`; await pushAgents(s, 'holidays', { title: `🗓 ${h.name} ${when}`, body: `${h.tip} Send the ${SEASON[h.kind]?.names?.en || 'promotion'} promotion.`, url: '/intprototv?tab=promos&go=' + h.kind, tag: 'hol-' + h.id }).catch(() => {});
+        const rl = (await store.get('holidayLog')) || []; rl.unshift({ at: Date.now(), id: h.id, name: h.name, days: dl, kind: h.kind }); await store.put('holidayLog', rl.slice(0, 50)); await log('marketing', `Holiday reminder: ${h.name} ${when}`); out.holidays = (out.holidays || 0) + 1; }
+    } catch {}
     const rcfg = renewCfg(s);
     if (rcfg.auto && s.email.resendKey) { // renewal emails: 7 days before, on the last day, and once after it ends
       const list = await getCustomers(); let changed = false; const now = Date.now(); let n = 0;

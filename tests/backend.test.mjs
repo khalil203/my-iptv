@@ -2196,7 +2196,7 @@ test('renewal emails: 5 models in 5 languages, sent automatically 7 days before,
   assert.equal((await x.call('POST', '/api/admin/renewmodels/send', { model: 'm4', test: true, to: 'owner@example.com', lang: 'de' }, tok)).json.sent, 1);
 });
 
-test('agents: check in before the panel, signed out after 6 hours with auto check-out, owner edits logs; only owner & technical service see keys and send marketing', async () => {
+test('agents: check in before the panel, signed out after 6 hours with auto check-out, owner edits logs; agents send marketing with locked texts, only owner & technical service see keys and edit texts', async () => {
   const x = setup(); const tok = await adminToken(x);
   await x.call('PUT', '/api/admin/settings', { security: { requireCheckIn: true }, email: { resendKey: 're_secret_key', from: 'App <a@example.com>' } }, tok);
   await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'marketing', 'secrets', 'settings'], lang: 'ar' }, tok);
@@ -2209,10 +2209,17 @@ test('agents: check in before the panel, signed out after 6 hours with auto chec
   assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'in' }, st)).status, 200);
   assert.equal((await x.call('GET', '/api/admin/customers', {}, st)).status, 200);
   // 2. keys and marketing: a sales agent can't, even if ticked; the technical service can
-  assert.equal((await x.call('POST', '/api/admin/newsletter/send', { subject: 'x' }, st)).status, 403);
+  assert.equal((await x.call('POST', '/api/admin/newsletter/send', { camp: { content: { all: { subject: 'Agent text' } } }, group: 'active' }, st)).status, 400, 'nothing saved yet');
+  assert.equal((await x.call('POST', '/api/admin/newsletter/new', {}, st)).status, 403);
+  assert.equal((await x.call('PUT', '/api/admin/emailmkt/settings', { senders: ['Hacked'] }, st)).status, 403);
+  await x.call('POST', '/api/admin/newsletter/send', { camp: { id: 'nlowner', content: { all: { subject: 'Owner subject', title: 'Owner title', body: 'Owner text' } } }, group: 'nobody-yet', test: 'owner@example.com' }, tok);
+  await x.store.put('newsletter', { id: 'nlowner', content: { all: { subject: 'Owner subject', title: 'Owner title', body: 'Owner text' } } });
+  await addCustomer(x, tok, { username: 'nlcust', email: 'nl.cust@example.com' });
+  const before = x.mails.length; const nls = await x.call('POST', '/api/admin/newsletter/send', { camp: { content: { all: { subject: 'Agent changed it', body: 'agent text' } } }, group: 'all' }, st);
+  assert.equal(nls.status, 200); const sent = x.mails.slice(before).flat(); assert.ok(sent.length >= 1 && sent.every((m) => m.subject === 'Owner subject'), 'agent sends the saved text, not their own');
+  const me2 = (await x.call('GET', '/api/admin/me', {}, st)).json; assert.ok(me2.perms.includes('marketing')); assert.equal(me2.locked, true);
   assert.equal((await x.call('PUT', '/api/admin/settings', { email: { from: 'Hacked <h@example.com>' } }, st)).status, 403);
   const sset = (await x.call('GET', '/api/admin/settings', {}, st)).json; assert.ok(!JSON.stringify(sset).includes('re_secret_key'));
-  assert.ok(!(await x.call('GET', '/api/admin/me', {}, st)).json.perms.includes('marketing'));
   const kt = (await x.call('POST', '/api/login', { username: 'mrkhalil', password: 'secret12' })).json.token; await signBylaws(x, kt).catch(() => {}); await x.call('POST', '/api/admin/attendance', { action: 'in' }, kt);
   const km = (await x.call('GET', '/api/admin/me', {}, kt)).json; assert.ok(km.perms.includes('marketing') && km.perms.includes('secrets')); assert.equal(km.noCopy, false);
   // 3. after 6 hours the open check-in is closed automatically
@@ -2253,4 +2260,15 @@ test('resellers: client subscription tracker, contact & shop prices, app downloa
   // other resellers can't see these clients
   const R2 = (await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Other Shop', email: 'other.shop@example.com', appUrl: 'https://tv.example.com' }, tok)).json.reseller;
   const rt2 = (await x.call('POST', '/api/login', { username: R2.rslId, password: R2.login.pass })).json.token; assert.equal((await x.call('GET', '/api/rsl/tools', {}, rt2)).json.clients.length, 0);
+});
+
+test('holiday reminders: calendar with the matching promotion, notifications a few days before, own dates', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const up = (await x.call('GET', '/api/admin/holidays/upcoming', {}, tok)).json; assert.ok(up.list.length > 10); assert.ok(up.list.every((h) => h.kind && h.name));
+  const bf = up.list.find((h) => h.name === 'Black Friday'); assert.equal(bf.kind, 'blackfriday');
+  const d = new Date(Date.now() + 7 * 86400000 + 3600000); const iso = d.toISOString().slice(0, 10);
+  assert.equal((await x.call('PUT', '/api/admin/holidays/remind', { custom: [{ name: 'Shop anniversary', date: iso, kind: 'evergreen' }], days: [7, 1] }, tok)).status, 200);
+  const up2 = (await x.call('GET', '/api/admin/holidays/upcoming', {}, tok)).json; assert.ok(up2.list.some((h) => h.name === 'Shop anniversary' && h.custom));
+  await x.be.daily(); const lg = (await x.store.get('holidayLog')) || []; assert.ok(lg.some((h) => h.name === 'Shop anniversary' && h.days === 7), JSON.stringify(lg.slice(0, 3)));
+  const n = lg.length; await x.be.daily(); assert.equal(((await x.store.get('holidayLog')) || []).length, n, 'once per holiday and day');
 });
