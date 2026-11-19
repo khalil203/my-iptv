@@ -1029,7 +1029,7 @@ export function renewModelEmail(s, c, model, link, appUrl) {
 }
 // ---- Agent work planning: the daily schedule (Monday–Sunday), tasks to check off, rules; owner edits, agents check off ----
 export const WORKPLAN_DEF = {
-  tz: 'Europe/Paris',
+  tz: 'Asia/Bangkok',
   slots: [
     { id: 's1', start: '08:30', end: '09:30', title: 'Check-In & Panel Login', icon: '🟢', tab: 'attendance' },
     { id: 's2', start: '09:30', end: '11:30', title: 'IPTV Customer Support & Order Checks', icon: '🛟', tab: 'support' },
@@ -1049,8 +1049,18 @@ export const WORKPLAN_DEF = {
     6: { s5: '[FB] Flash promos / Express activations', s7: '[TG] Live matches / Live support' },
     0: { s5: 'Week preparation & planning (calendar, visuals)', s7: '[TG] Weekend review & VOD teasing' },
   },
+  // channel, content type and goal for each outreach task (from the owner's November publishing plan)
+  info: {
+    1: { s5: ['Facebook & Email', 'Anti-buffering tips', 'Network speed optimisation tips & follow-up of prospects'], s7: ['Telegram & WhatsApp', 'Weekly programme & audit', 'Publish this week’s schedule & check stream quality'] },
+    2: { s5: ['Facebook & Email', 'App tutorial & setup', 'Install and best-setup guide for the TiviMate app'], s7: ['Telegram & WhatsApp', 'Tonight’s matches focus', 'Tonight’s fixtures & links to the dedicated channels'] },
+    3: { s5: ['Facebook & Email', 'Cinema & series VOD', 'Promote the new 4K VOD films & series'], s7: ['Telegram & WhatsApp', 'Football & Champions League', 'Announce the live channels & streams for the European nights'] },
+    4: { s5: ['Facebook & Email', 'Referral programme', 'Referral campaign: 1 month free for each new referred client'], s7: ['Telegram & WhatsApp', 'Poll & engagement', 'Interactive poll on the big fixtures of the coming weekend'] },
+    5: { s5: ['Facebook & Email', 'Weekend flash offer', 'Launch the weekend discount on 12-month subscriptions'], s7: ['Telegram & WhatsApp', 'Weekend schedule & support', 'Full weekend broadcast schedule & stability tips'] },
+    6: { s5: ['Facebook & Email', 'Flash promos & activations', 'Quick follow-up of prospects and express subscription activation'], s7: ['Telegram & WhatsApp', 'Live matches', 'Goal alerts, direct links and real-time technical support'] },
+    0: { s5: ['Facebook & Telegram', 'Planning & preparation', 'Prepare next week’s calendar and visuals'], s7: ['Telegram & WhatsApp', 'Weekend review & teasing', 'Weekend sports recap and teasing of the new VOD'] },
+  },
   rules: [
-    '100% task completion: every scheduled activity is done and checked off in the work planner (synced to Google Sheets).',
+    '100% task completion: every scheduled activity is done and checked off in the work planner (📌 Work planning).',
     'View-only schedule & data: only the owner edits the schedule, message templates, links and WhatsApp numbers. Agents upload/paste data to send messages and check off their tasks.',
     'Messaging & marketing: sales and support agents send renewal emails, WhatsApp/Telegram messages, newsletters and promotions. Domains are visible, API keys stay hidden.',
     'Language & translator: Arabic is on for every agent, with the built-in translator for all languages.',
@@ -1059,7 +1069,7 @@ export const WORKPLAN_DEF = {
   meet: { on: true, weekday: 6, nth: 1, time: '20:00', title: 'Management Meet Party' },
   sheetUrl: '',
 };
-export const workPlanOf = (s) => { const w = s.workPlan || {}; return { ...WORKPLAN_DEF, ...w, meet: { ...WORKPLAN_DEF.meet, ...(w.meet || {}) }, slots: w.slots && w.slots.length ? w.slots : WORKPLAN_DEF.slots, days: w.days || WORKPLAN_DEF.days, rules: w.rules && w.rules.length ? w.rules : WORKPLAN_DEF.rules }; };
+export const workPlanOf = (s) => { const w = s.workPlan || {}; return { ...WORKPLAN_DEF, ...w, meet: { ...WORKPLAN_DEF.meet, ...(w.meet || {}) }, slots: w.slots && w.slots.length ? w.slots : WORKPLAN_DEF.slots, days: w.days || WORKPLAN_DEF.days, info: w.info || WORKPLAN_DEF.info, rules: w.rules && w.rules.length ? w.rules : WORKPLAN_DEF.rules }; };
 export function meetDate(meet, y, m) { const d = new Date(Date.UTC(y, m, 1)); const wd = Number(meet.weekday); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (Math.max(1, Number(meet.nth) || 1) - 1) * 7); return d.toISOString().slice(0, 10); }
 // ---- Holiday calendar (shared by the panel and the reminders): marketing / payout planning, with the matching promotion ----
 const EASTER = (y) => { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1; return new Date(y, mo - 1, da); };
@@ -2262,7 +2272,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     try { // work planning: a reminder when each activity starts, and the monthly Management Meet Party
       const wp = workPlanOf(s); const L = localNow(wp.tz); const wd = Number(L.day); const toMin = (x) => { const [h, m] = String(x).split(':').map(Number); return h * 60 + m; };
       for (const sl of wp.slots) { const since = L.min - toMin(sl.start); if (since < 0 || since >= 15) continue; const k = `planrem:${L.date}:${sl.id}`; if (await store.get(k)) continue; await store.put(k, 1, 2 * 86400);
-        const task = (wp.days[wd] || {})[sl.id]; await pushAgents(s, 'plan', { title: `${sl.icon || '⏰'} ${sl.start} · ${sl.title}`, body: (task ? task + ' · ' : '') + (sl.noCheck ? 'Hand over to the next shift.' : 'Check it off in Work planning when done.'), url: '/intprototv?tab=workplan', tag: 'plan-' + sl.id }).catch(() => {}); out.plan = (out.plan || 0) + 1; }
+        const task = (wp.days[wd] || {})[sl.id]; const inf = (wp.info[wd] || {})[sl.id]; await pushAgents(s, 'plan', { title: `${sl.icon || '⏰'} ${sl.start} · ${sl.title}`, body: (task ? task + ' · ' : '') + (inf ? `${inf[0]} — ${inf[2]}. ` : '') + (sl.noCheck ? 'Hand over to the next shift.' : 'Check it off in Work planning when done.'), url: '/intprototv?tab=workplan', tag: 'plan-' + sl.id }).catch(() => {}); out.plan = (out.plan || 0) + 1; }
       if (wp.meet.on) { const md = meetDate(wp.meet, Number(L.date.slice(0, 4)), Number(L.date.slice(5, 7)) - 1); const dl = Math.round((new Date(md + 'T00:00:00Z') - new Date(L.date + 'T00:00:00Z')) / DAYMS);
         if ((dl === 3 || dl === 0) && L.min >= 9 * 60) { const k = `meetrem:${md}:${dl}`; if (!(await store.get(k))) { await store.put(k, 1, 10 * 86400); const msg = { title: `🎉 ${wp.meet.title} ${dl === 0 ? 'today' : 'in 3 days'} · ${wp.meet.time}`, body: `Monthly team meeting on ${md} at ${wp.meet.time} (${wp.tz}). Attendance is mandatory.`, url: '/intprototv?tab=workplan', tag: 'meet-' + md }; await pushAgents(s, 'plan', msg).catch(() => {}); await pushOwner(s, msg).catch(() => {}); out.meet = 1; } } }
     } catch {}
@@ -3854,6 +3864,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const w = workPlanOf(s); const hm = (x) => (/^\d{2}:\d{2}$/.test(String(x || '')) ? x : null);
           if (Array.isArray(body.slots)) { const sl = body.slots.slice(0, 16).map((x, i) => ({ id: cleanText(x.id, 8) || 's' + uid(3), start: hm(x.start) || '09:00', end: hm(x.end) || '10:00', title: cleanText(x.title, 120), icon: cleanText(x.icon, 4) || '•', tab: cleanText(x.tab, 20), noCheck: !!x.noCheck })).filter((x) => x.title); if (sl.length) w.slots = sl; }
           if (isObj(body.days)) { const dd = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.days[k] || {}; dd[k] = Object.fromEntries(Object.entries(v).slice(0, 16).map(([a, b]) => [cleanText(a, 8), cleanText(b, 200)]).filter(([, b]) => b)); } w.days = dd; }
+          if (isObj(body.info)) { const ii = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.info[k] || {}; ii[k] = Object.fromEntries(Object.entries(v).slice(0, 16).filter(([, b]) => Array.isArray(b)).map(([a, b]) => [cleanText(a, 8), b.slice(0, 3).map((t) => cleanText(t, 160))])); } w.info = ii; }
           if (Array.isArray(body.rules)) w.rules = body.rules.map((x) => cleanText(x, 400)).filter(Boolean).slice(0, 12);
           if (isObj(body.meet)) w.meet = { on: body.meet.on !== false, weekday: Math.min(6, Math.max(0, Number(body.meet.weekday) || 0)), nth: Math.min(4, Math.max(1, Number(body.meet.nth) || 1)), time: hm(body.meet.time) || '20:00', title: cleanText(body.meet.title, 80) || 'Management Meet Party' };
           if (body.tz) { try { new Intl.DateTimeFormat('en', { timeZone: body.tz }); w.tz = body.tz; } catch { return err(400, 'Unknown time zone.'); } }

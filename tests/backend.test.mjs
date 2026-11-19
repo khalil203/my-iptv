@@ -2277,7 +2277,7 @@ test('work planning: schedule for every agent, check off today only, owner-only 
   let posted = []; const x = setup((url, init) => { if (String(url).includes('script.google.com')) { posted.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; } }); const tok = await adminToken(x);
   await x.call('POST', '/api/admin/team', { name: 'Sara', username: 'sara', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'attendance'] }, tok);
   const st = (await x.call('POST', '/api/login', { username: 'sara', password: 'secret12' })).json.token; await signBylaws(x, st).catch(() => {});
-  const wp = (await x.call('GET', '/api/admin/workplan', {}, st)).json; assert.equal(wp.plan.slots.length, 7); assert.equal(wp.week.length, 7); assert.equal(wp.canEdit, false); assert.equal(wp.plan.rules.length, 5);
+  const wp = (await x.call('GET', '/api/admin/workplan', {}, st)).json; assert.equal(wp.plan.slots.length, 7); assert.equal(wp.week.length, 7); assert.equal(wp.canEdit, false); assert.equal(wp.plan.rules.length, 5); assert.equal(wp.plan.info['3'].s7[1], 'Football & Champions League'); assert.equal(wp.plan.tz, 'Asia/Bangkok');
   assert.equal(wp.plan.slots[0].title, 'Check-In & Panel Login'); assert.ok(wp.nextMeet);
   // agent can't edit, owner can
   assert.equal((await x.call('PUT', '/api/admin/workplan', { rules: ['x'] }, st)).status, 403);
