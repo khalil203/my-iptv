@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=99';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=101';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -1193,7 +1193,7 @@ function renewForm(c) {
   return `<p class="muted" style="margin-top:0"><b>${esc(c.name)}</b> (${esc(c.username)}) · currently ${pill(c.state)} · expires ${fmtDate(c.expiresAt)}</p>
   <form data-form="renew" data-id="${c.id}">
     ${field('Plan', 'planId', p0.id || '', { type: 'select', options: [...s.plans.map((p) => [p.id, `${p.name} · ${p.days} days`]), ['custom', 'Custom number of days']], attrs: 'data-renew-plan' })}
-    <div class="grid3">${field('Days to add', 'days', p0.days, { type: 'number', attrs: 'min="1"' })}${field('Credits used', 'credits', p0.credits ?? '', { type: 'number', attrs: 'min="0"' })}${field('Amount received', 'price', p0.price, { type: 'number', attrs: 'min="0" step="any"' })}</div>
+    <div class="grid3">${field('Days to add', 'days', p0.days, { type: 'number', attrs: 'min="1"' })}${field('Credits used', 'credits', p0.credits ?? '', { type: 'number', attrs: 'min="0"' })}${field(`Amount received (${c.cur === 'EUR' ? '€ EUR' : '$ USD'})`, 'price', p0.price, { type: 'number', attrs: 'min="0" step="any"', help: 'In the customer\'s currency, unless you pick a money account below.' })}</div>
     ${accountSelect(s, 'accountId', '')}
     ${stripeSelect(s, 'stripeAccountId', '')}
     <p class="small muted" id="renew-preview"></p>

@@ -1548,10 +1548,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return credits > 0 ? cost / credits : (Number(s.stock.packPrice) || 0) / (Number(s.stock.packCredits) || 1);
   }
   // Records one sale (and the money received) — used for new customers, renewals and trials.
-  async function recordSale(s, c, { type, plan, days, credits, amount, accountId, sa, at, by }) {
+  async function recordSale(s, c, { type, plan, days, credits, amount, accountId, sa, at, by, currency: cur0 }) {
     if (Number(amount) > 0) s = await refreshRates(s, false);
     const acc = s.finance.accounts.find((a) => a.id === accountId);
-    const currency = acc ? acc.currency : s.currency;
+    const currency = acc ? acc.currency : cur0 || (s.currencyRule?.on !== false && c && type !== 'trial' ? custCurrency(s, c) : s.currency);
     const amountUsd = toUsd(amount, currency, s.finance.rates);
     const costUsd = credits * (await creditCostUsd(s));
     const sale = { by: by || '', id: uid(6), at: at || Date.now(), customerId: c.id, username: c.username, name: c.name, type, planId: plan ? plan.id : (type === 'trial' ? 'trial' : 'custom'), planName: type === 'trial' ? 'Trial' : plan ? plan.name : 'Custom', days, credits, amount: Number(amount) || 0, currency, amountUsd, costUsd, accountId: acc ? acc.id : '', stripeAccountId: sa || '' };
@@ -2611,7 +2611,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const opk = (s.orderPackages || []).find((p) => p.id === body.pkg); const rpk = (s.resellerPackages || []).find((p) => p.id === body.pkg); const pk = opk || rpk; if (!pk) return err(400, 'Package not found.');
           const pkgTitle = pk.title || pk.name || 'Package';
           const pkgLine = rpk ? `${Number(rpk.credits) || 0} reseller credits` : `${Number(pk.days) || 0} days · ${Number(pk.devices) || 1} device(s)`;
-          const pkgCur = rpk ? (s.resellerCurrency || 'EUR') : (s.orderCurrency || 'EUR');
+          const pkgCur = s.currencyRule?.on !== false ? custCurrency(s, c) : rpk ? (s.resellerCurrency || 'EUR') : (s.orderCurrency || 'EUR'); // USD worldwide, EUR for Europe
           const k = 'buyreq:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
           if (n >= 5) return err(429, 'Too many requests today. Please contact us on WhatsApp.');
           await store.put(k, n + 1, 2 * 86400);
@@ -2630,7 +2630,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', kind: /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription', cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.name || p.title, name: p.name || p.title, credits: Number(p.credits) || 0, days: 0, devices: 0, price: Number(p.price) || 0, badge: '', kind: 'reseller', cur: s.resellerCurrency || 'EUR' })),
             buyRequest: c.buyRequest || null,
-            orderCurrency: s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
+            orderCurrency: s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
               server: trimSlash(c.dns || s.player.serverUrl), u: lineUsername, p: linePassword,
               useProxy: !!s.player.useProxy, proxyToken: await makeProxyToken(s.security.proxySecret, c.id, 12),
@@ -4127,7 +4127,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(body.price) || 0, credits });
           await saveCustomers(list);
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
-          await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${s.currency})`);
+          await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${(s.finance.accounts.find((a) => a.id === body.accountId) || {}).currency || (s.currencyRule?.on !== false ? custCurrency(s, c) : s.currency)})`);
           if (notifyCfg(s).customers) { const lg = okLang(c.lang); await pushTo(s, 'c:' + c.id, { title: tx(lg, 'pushRenewT'), body: tx(lg, 'pushRenewB', { app: (s.branding.appName || 'INTPROTO-TV'), date: new Date(c.expiresAt).toLocaleDateString(langLocale(lg), { dateStyle: 'long' }) }), url: '/profile', tag: 'renew' }).catch(() => {}); }
           return ok({ customer: viewP(c, s), panel });
         }

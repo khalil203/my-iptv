@@ -2017,3 +2017,18 @@ test('a US customer gets USD everywhere even if the WhatsApp window sends EUR; l
   const de = await addCustomer(x, tok, { username: 'helga', email: 'helga.test@gmx.de' });
   assert.match((await x.call('POST', `/api/admin/customers/${de.id}/wamsg`, { type: 'renew', pkg: pk.id, currency: 'USD', price: '', appUrl: 'https://tv.example.com' }, tok)).json.text, /€\d/);
 });
+
+test('payments, requests and the customer page follow the currency rule (USD worldwide, EUR for Europe)', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { orderCurrency: 'EUR', currency: 'EUR', currencyRule: { on: true } }, tok);
+  const us = await addCustomer(x, tok, { username: 'usbuyer', email: 'us.buyer@yahoo.com' }); const de = await addCustomer(x, tok, { username: 'debuyer', email: 'de.buyer@web.de' });
+  for (const c of [us, de]) await x.call('POST', `/api/admin/customers/${c.id}/renew`, { days: 30, price: 29.99 }, tok);
+  const sales = await x.store.get('sales'); const cur = (id) => sales.filter((y) => y.customerId === id && y.amount > 0).at(-1).currency;
+  assert.equal(cur(us.id), 'USD'); assert.equal(cur(de.id), 'EUR');
+  // the customer's own page and their package request
+  const lg = (await x.call('POST', '/api/login', { username: 'usbuyer', password: 'secret12' })).json.token;
+  const me = (await x.call('GET', '/api/me', {}, lg)).json; assert.equal(me.myCurrency, 'USD'); assert.equal(me.orderCurrency, 'USD');
+  const pk = (await x.call('GET', '/api/admin/settings', {}, tok)).json.orderPackages[0];
+  assert.equal((await x.call('POST', '/api/me/order', { pkg: pk.id }, lg)).status, 200);
+  const log = (await x.call('GET', '/api/admin/log', {}, tok)).json; const txt = JSON.stringify(log); assert.ok(/\$\s?\d|USD/.test(txt));
+});
