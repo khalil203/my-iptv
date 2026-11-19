@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=108';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=109';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=108';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=109';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -756,8 +756,10 @@ function devicePicker() {
   const safariBox = `<div class="notice" style="text-align:left;margin-top:10px"><b>🧭 ${esc(t('apSafariT'))}</b><p class="small" style="margin:6px 0">${esc(t('apSafariTxt'))}</p>
     <div class="code" dir="ltr" style="user-select:all;word-break:break-all;font-weight:700">${esc(link)}</div>
     <button type="button" class="btn sm primary" data-act="app-copy" style="margin-top:8px">${esc(t('apCopy'))}</button>${inAppBrowser() ? `<p class="small" style="color:var(--warn,#c80);margin:8px 0 0">⚠️ ${esc(t('apInApp'))}</p>` : ''}</div>`;
-  const body = cur === 'android' ? `<a class="btn primary block" href="/apk/INTPROTO-TV.apk" download>${esc(t('apApkBtn'))}</a><p class="small muted" style="margin:8px 0 0">${esc(t('apApkSteps'))}</p>`
-    : cur === 'ios' ? `${safariBox}<p class="small" style="margin:10px 0 0">📱 ${esc(t('apIosSteps'))}</p>`
+  const body = cur === 'android' ? `<a class="btn primary block" href="/apk/INTPROTO-TV.apk" download>${esc(t('apApkBtn'))}</a><p class="small muted" style="margin:8px 0 0">${esc(t('apApkSteps'))}</p>
+    <div class="notice warning" style="text-align:left;margin-top:10px"><b>🛡️ ${esc(t('apAbT'))}</b><ol class="small" style="margin:6px 0 0;padding-inline-start:18px;line-height:1.55"><li>${esc(t('apAb1'))}</li><li>${esc(t('apAb2'))}</li><li>${esc(t('apAb3'))}</li></ol></div>
+    <div class="notice" style="text-align:left;margin-top:10px"><b>🌐 ${esc(t('apPwaT'))}</b><p class="small" style="margin:6px 0">${esc(t('apPwa'))}</p>${installEvt ? `<button class="btn sm primary" data-act="app-install">${esc(t('apPwaBtn'))}</button>` : `<button class="btn sm" data-act="app-copy">${esc(t('apCopy'))}</button>`}</div>`
+    : cur === 'ios' ? (isIOS() && !inAppBrowser() ? `<div class="notice" style="text-align:left"><b>✓ Safari</b><p style="margin:6px 0 0">📱 ${esc(t('apIosSteps'))}</p></div><details style="margin-top:8px"><summary class="small">${esc(t('apCopy'))}</summary>${safariBox}</details>` : `${safariBox}<p class="small" style="margin:10px 0 0">📱 ${esc(t('apIosSteps'))}</p>`)
     : `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${esc(t('apMacDl'))}</a><a class="btn block" style="margin-top:6px" href="${REL}INTPROTO-TV-Mac-x64.dmg">⬇ ${esc(t('apMacIntel'))}</a><p class="small muted" style="margin:8px 0 0">💻 ${esc(t('apMacSteps'))}</p>${safariBox}`;
   return `<div class="card" id="app-dev" style="text-align:left"><h3>📲 ${esc(t('apDev'))}</h3><div class="chips" style="margin-bottom:10px;flex-wrap:wrap;overflow:visible">${tab('android', t('apAndroid'))}${tab('ios', t('apIphone'))}${tab('mac', t('apMac'))}</div>${body}</div>`;
 }
@@ -2945,7 +2947,7 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
   },
   'buy-request': async (el) => {
     el.disabled = true;
-    try { await api('POST', '/api/me/order', { pkg: el.dataset.pkg }); toast(t('requestSent')); const me = state.user.me; me.buyRequest = { pkg: el.dataset.pkg, at: Date.now() }; renderUserTab(); }
+    try { const r = await api('POST', '/api/me/order', { pkg: el.dataset.pkg }); toast(r && r.emailed ? t('requestEmailed') : t('requestSent')); const me = state.user.me; me.buyRequest = { pkg: el.dataset.pkg, at: Date.now() }; renderUserTab(); }
     catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'order-custom': async () => {

@@ -69,12 +69,12 @@ const tvShort = location.host + '/tv';
 let deferred = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; render(); });
 window.copyLink = async () => { const l = location.origin + '/app'; try { await navigator.clipboard.writeText(l); } catch { prompt('Copy:', l); return; } alert(lang === 'fr' ? 'Lien copié ✓ Ouvrez Safari et collez-le.' : 'Link copied ✓ Now open Safari and paste it.'); };
-window.installApp = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; render(); } else alert(T[lang].wSteps[1].replace(/<[^>]+>/g, '')); };
+window.installApp = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; render(); } else alert((T[lang] || T.en).wSteps[1].replace(/<[^>]+>/g, '')); };
 let apkOk = null;
 fetch(apkUrl, { method: 'HEAD' }).then((r) => { apkOk = r.ok; render(); }).catch(() => { apkOk = false; render(); });
 function render() {
-  const L = T[lang];
-  document.documentElement.lang = lang; document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  const L = { ...T.en, ...(T[lang] || {}) }; // any saved language (de, es, it, th…) falls back to English instead of a blank page
+  document.documentElement.lang = T[lang] ? lang : 'en'; document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   document.getElementById('intro').textContent = L.intro;
   document.getElementById('auto').textContent = L.auto;
   document.getElementById('back').textContent = L.back;
@@ -83,11 +83,11 @@ function render() {
   const installBtn = `<button class="btn block" onclick="installApp()" style="margin-top:8px">${L.install}</button>`;
   const card = (id, ic, title, steps, btns) => `<div id="${id}" class="plat ${me === id ? 'me' : ''}" style="order:${me === id ? 0 : 1}"><h3><span class="ic">${ic}</span>${title}${me === id ? `<span class="badge-me">${L.you}</span>` : ''}</h3>${btns}<ol>${steps.map((s) => `<li>${s.replace('{tv}', tvShort)}</li>`).join('')}</ol></div>`;
   document.getElementById('plats').innerHTML = [
-    card('android', '🤖', L.android, L.aSteps, apkBtn + installBtn),
+    card('android', '🤖', L.android, L.aSteps.concat(lang === 'fr' ? ['« Application inconnue bloquée » ? Paramètres → <b>Sécurité et confidentialité → Bloqueur automatique</b> → désactivez-le, rouvrez le fichier et touchez <b>Installer</b>. Vous pourrez le réactiver après.'] : ['“Unknown app blocked”? Settings → <b>Security and privacy → Auto Blocker</b> → turn it off, open the file again and tap <b>Install</b>. You can turn it back on after.']), apkBtn + installBtn),
     card('tv', '📺', L.androidTV, L.tvSteps, apkBtn),
     card('ios', '📱', L.iphone, L.iSteps, `<button class="btn primary block" onclick="copyLink()">📋 ${lang === 'fr' ? 'Copier le lien pour Safari' : 'Copy link for Safari'}</button><p class="small" style="margin:6px 0 0"><span class="code-url">${location.origin}/app</span></p>`),
     card('win', '🪟', L.windows, L.wSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Windows-Setup.exe">${L.winDl}</a>`),
-    card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${L.macDl} · Apple M1–M4</a><a class="btn block" style="margin-top:8px" href="${REL}INTPROTO-TV-Mac-x64.dmg">${L.macDl} · Intel</a>`),
+    card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${L.macDl} · Apple M1–M4</a><a class="btn block" style="margin-top:8px" href="${REL}INTPROTO-TV-Mac-x64.dmg">${L.macDl} · Intel</a><button class="btn block" style="margin-top:8px" onclick="copyLink()">📋 ${lang === 'fr' ? 'Copier le lien pour Safari' : 'Copy link for Safari'}</button><p class="small muted" style="margin:6px 0 0">${lang === 'fr' ? 'Safari : Fichier → Ajouter au Dock' : 'Safari: File → Add to Dock'} · <span class="code-url">${location.origin}/app</span></p>`),
   ].join('');
 }
 document.addEventListener('click', (e) => { const a = e.target.closest('[data-l]'); if (a) { lang = a.dataset.l; localStorage.setItem('tvp_lang', lang); render(); } });

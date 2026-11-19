@@ -357,7 +357,13 @@ test('free trial: never blocked by the panel; uses a ready line, else waits; pho
   const two = await call('POST', '/api/trial', { name: 'Second Person', email: 'second@example.com', phone: '+33698765432', ip: '2.2.2.2' });
   assert.equal(two.status, 200); assert.equal(two.json.pending, true); assert.ok(two.json.username && two.json.password);
   const note = mails.find((m) => m.to[0] === 'owner@example.com' && /waiting/i.test(m.subject)); assert.ok(note); assert.match(note.html, /Not enough credits/, 'the owner sees what the panel answered');
-  assert.ok(!mails.some((m) => m.to[0] === 'second@example.com'), 'no login email before the line exists');
+  const wait = mails.filter((m) => m.to[0] === 'second@example.com'); assert.equal(wait.length, 1, 'the app login is emailed at once while the line is prepared');
+  assert.match(wait[0].subject, /being prepared|en préparation/); assert.ok(wait[0].html.includes(two.json.username) && wait[0].html.includes(two.json.password)); assert.ok(wait[0].html.includes('/apk/INTPROTO-TV.apk'));
+  // a trial customer can ask for a package before accepting the terms: the package email with its payment link is sent automatically
+  const lg2 = (await call('POST', '/api/login', { username: two.json.username, password: two.json.password })).json.token;
+  const pkgs = (await call('GET', '/api/me', {}, lg2)).json.orderPackages;
+  const ord = await call('POST', '/api/me/order', { pkg: pkgs[0].id }, lg2); assert.equal(ord.status, 200); assert.equal(ord.json.emailed, true);
+  assert.equal(mails.filter((m) => m.to[0] === 'second@example.com').length, 2);
   const u2 = (await call('POST', '/api/login', { username: two.json.username, password: two.json.password })).json.token;
   const me = (await call('GET', '/api/me', {}, u2)).json; assert.ok(me.user.pendingLine); assert.equal(me.stream, null);
   const waiting = (await call('GET', '/api/admin/customers', {}, tok)).json.find((c) => c.email === 'second@example.com');
@@ -2159,7 +2165,7 @@ test('details emails link the app for Android (APK), iPhone & iPad and MacBook, 
   const c = await addCustomer(x, tok, { username: 'iosuser', email: 'ios.user@example.com' });
   const m = (await x.call('GET', `/api/admin/customers/${c.id}/emailpreview`, {}, tok)).json;
   const html = m.html || '';
-  for (const s of ['https://tv.example.com/apk/INTPROTO-TV.apk', 'https://tv.example.com/app?os=ios', 'https://tv.example.com/download.html#mac', 'Copy this link and open it in the Safari browser', 'Add to Home Screen']) assert.ok(html.includes(s), s);
+  for (const s of ['https://tv.example.com/apk/INTPROTO-TV.apk', 'https://tv.example.com/app?os=ios', 'https://tv.example.com/download#mac', 'Copy this link and open it in the Safari browser', 'Add to Home Screen']) assert.ok(html.includes(s), s);
   const fr = await addCustomer(x, tok, { username: 'frios', email: 'fr.ios@example.fr', lang: 'fr' });
   await x.call('PUT', '/api/admin/settings', { email: { lang: 'customer' } }, tok);
   assert.ok(((await x.call('GET', `/api/admin/customers/${fr.id}/emailpreview`, {}, tok)).json.html || '').includes('ouvrez-le dans le navigateur Safari'));
