@@ -2032,3 +2032,37 @@ test('payments, requests and the customer page follow the currency rule (USD wor
   assert.equal((await x.call('POST', '/api/me/order', { pkg: pk.id }, lg)).status, 200);
   const log = (await x.call('GET', '/api/admin/log', {}, tok)).json; const txt = JSON.stringify(log); assert.ok(/\$\s?\d|USD/.test(txt));
 });
+
+test('device, end date controls, app notifications and WhatsApp numbers', async () => {
+  const pushes = [];
+  const x = setup(async (url) => { if (url.startsWith('https://push.example.com/')) { pushes.push(url); return { ok: true, status: 201, json: async () => ({}) }; } return null; });
+  const tok = await adminToken(x);
+  const c = await addCustomer(x, tok, { username: 'devuser', email: 'dev.user@example.com' });
+  const lg = (await x.call('POST', '/api/login', { username: 'devuser', password: 'secret12' })).json.token;
+  // 1. the customer's phone is recorded: Samsung, then an iPhone
+  await x.call('POST', '/api/me/device', { ua: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36', model: 'SM-S918B' }, lg);
+  let v = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((y) => y.id === c.id);
+  assert.equal(v.lastDevice.brand, 'Samsung'); assert.equal(v.lastDevice.model, 'SM-S918B'); assert.equal(v.lastDevice.kind, 'phone');
+  await x.call('POST', '/api/me/device', { ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1' }, lg);
+  v = (await x.call('GET', '/api/admin/customers', {}, tok)).json.find((y) => y.id === c.id); assert.equal(v.lastDevice.name, 'iPhone'); assert.equal(v.devicesSeen.length, 2);
+  // 2. end date: set exact, add days, end now, no end date
+  const at = Date.now() + 10 * 86400000 + 3600000;
+  assert.equal((await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'set', expiresAtMs: at }, tok)).json.customer.expiresAt, at);
+  assert.equal((await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'add', days: 7 }, tok)).json.customer.expiresAt, at + 7 * 86400000);
+  assert.equal((await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'add', days: -1 }, tok)).json.customer.expiresAt, at + 6 * 86400000);
+  assert.equal((await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'now' }, tok)).json.customer.state, 'expired');
+  const none = (await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'none' }, tok)).json.customer; assert.equal(none.noExpiry, true); assert.equal(none.state, 'active');
+  assert.equal((await x.store.get('customers')).find((y) => y.id === c.id).expiryLog.length, 5);
+  assert.equal((await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'set', expiresAtMs: 'bad' }, tok)).status, 400);
+  // 3. a notification in the app: one customer, then a group; it rings the phone if notifications are on
+  await x.call('POST', '/api/push/subscribe', { sub: { endpoint: 'https://push.example.com/dev-phone' }, label: 'Samsung', silent: true }, lg);
+  const r1 = (await x.call('POST', '/api/admin/app-notify', { audience: 'one', id: c.id, title: 'Server maintenance tonight', body: 'From 02:00 to 03:00.' }, tok)).json; assert.equal(r1.people, 1); assert.equal(r1.devices, 1);
+  await addCustomer(x, tok, { username: 'other1', email: 'other1@example.com' });
+  assert.equal((await x.call('POST', '/api/admin/app-notify', { audience: 'all', title: 'New channels added' }, tok)).json.people, 2);
+  const me = (await x.call('GET', '/api/me', {}, lg)).json; assert.equal(me.inbox.length, 2); assert.equal(me.inbox[1].title, 'Server maintenance tonight'); assert.ok(me.inbox.every((n) => !n.read));
+  await x.call('POST', '/api/me/inbox/read', {}, lg); assert.ok((await x.call('GET', '/api/me', {}, lg)).json.inbox.every((n) => n.read));
+  // 4. WhatsApp numbers by purpose; the main one becomes the app's number; the support page uses the support one
+  await x.call('PUT', '/api/admin/settings', { waNumbers: [{ label: 'Main', number: '+1 (203) 555-0143', use: 'main' }, { label: 'Support', number: '+41791234567', use: 'support' }, { label: 'bad', number: '12', use: 'other' }] }, tok);
+  const cfg = (await x.call('GET', '/api/config')).json; assert.equal(cfg.branding.whatsapp, '12035550143'); assert.deepEqual(cfg.waNumbers.map((w) => w.use), ['main', 'support']);
+  assert.equal((await x.call('GET', '/api/support/info')).json.whatsapp, '41791234567');
+});

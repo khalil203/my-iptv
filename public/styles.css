@@ -1106,3 +1106,6 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 .sup-steps span.on{opacity:1;outline:2px solid var(--accent,#6366f1)}
 .sup-steps span.done{opacity:.9}
 .sup-steps span.done::before{content:'✓ '}
+/* customer device badges */
+.pill.dev-samsung{background:rgba(37,99,235,.14);color:#2563eb}
+.pill.dev-apple{background:rgba(100,116,139,.18)}

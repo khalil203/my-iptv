@@ -265,6 +265,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
   if (path.startsWith('/api/admin/accounts') || path === '/api/admin/email/plan' || path === '/api/admin/email/sending') return 'secrets';
   if (path === '/api/admin/push/promo') return 'customers_edit';
+  if (path === '/api/admin/app-notify') return 'customers_edit';
   if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
@@ -527,6 +528,35 @@ export function isEurope(c) {
 export const CUR_SYMBOL = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ', THB: '฿', GBP: '£' };
 export const fmtCur = (n, cur) => (CUR_SYMBOL[cur] && cur !== 'MAD' ? CUR_SYMBOL[cur] + Number(n || 0).toFixed(2) : Number(n || 0).toFixed(2) + ' ' + cur);
 // The currency a customer (or reseller) sees: their own choice, else USD / EUR by the rule (when it is on), else the shop currency.
+// Which phone / tablet / TV a customer uses (from the browser): Samsung, iPhone, iPad, Android, Smart TV, Fire TV, computer.
+export function deviceFrom(ua, hint = {}) {
+  const u = String(ua || ''); let model = String(hint.model || '').trim().slice(0, 40);
+  let brand = '', name = '', os = '', kind = 'phone';
+  const ver = (re) => ((u.match(re) || [])[1] || '').replace(/_/g, '.');
+  if (/iPhone/.test(u)) { brand = 'Apple'; name = 'iPhone'; os = 'iOS ' + ver(/OS (\d+[_.]\d+)/); }
+  else if (/iPad/.test(u) || (/Macintosh/.test(u) && hint.touch)) { brand = 'Apple'; name = 'iPad'; kind = 'tablet'; os = 'iPadOS ' + ver(/OS (\d+[_.]\d+)/); }
+  else if (/Tizen/i.test(u)) { brand = 'Samsung'; name = 'Samsung Smart TV'; kind = 'tv'; os = 'Tizen ' + ver(/Tizen ([\d.]+)/); }
+  else if (/Web0S|webOS/i.test(u)) { brand = 'LG'; name = 'LG Smart TV'; kind = 'tv'; os = 'webOS'; }
+  else if (/AFT[A-Z]|Fire TV|AmazonWebAppPlatform/i.test(u)) { brand = 'Amazon'; name = 'Fire TV Stick'; kind = 'tv'; os = 'Fire OS'; }
+  else if (/Android/i.test(u)) {
+    os = 'Android ' + ver(/Android (\d+(?:\.\d+)?)/);
+    if (!model || model === 'K') model = ((u.match(/Android [\d.]+;(?: [a-z]{2}[-_][a-z]{2};)? ([^;)]+?)(?: Build[/;]|\))/i) || [])[1] || '').trim();
+    if (model === 'K') model = ''; model = model.replace(/^SAMSUNG[ -]/i, '');
+    const tv = /Android TV|GoogleTV|BRAVIA|SMART-TV|AFT|MiBOX|Chromecast/i.test(u + ' ' + model);
+    if (/^SM-|SAMSUNG|Galaxy/i.test(model) || /SamsungBrowser/i.test(u)) { brand = 'Samsung'; name = 'Samsung Galaxy' + (/^SM-[TXP]/i.test(model) ? ' Tab' : ''); }
+    else if (/Pixel/i.test(model)) { brand = 'Google'; name = model; }
+    else if (/Redmi|Xiaomi|POCO|^M2\d{3}|^2\d{3}[A-Z0-9]{4}/i.test(model)) { brand = 'Xiaomi'; name = 'Xiaomi'; }
+    else if (/OnePlus|^CPH\d|^RMX\d|^V2\d{3}|HUAWEI|^(ELE|VOG|ANE|MAR)-|moto|Nokia|TECNO|Infinix|itel/i.test(model)) { brand = (model.match(/OnePlus|HUAWEI|moto|Nokia|TECNO|Infinix|itel/i) || [''])[0] || (/^CPH/.test(model) ? 'Oppo' : /^RMX/.test(model) ? 'Realme' : /^V2/.test(model) ? 'Vivo' : 'Huawei'); name = brand; }
+    else name = 'Android';
+    kind = tv ? 'tv' : /Mobile/i.test(u) ? 'phone' : 'tablet'; if (tv && !brand) name = 'Android TV box';
+  }
+  else if (/Windows/i.test(u)) { name = 'Windows PC'; kind = 'computer'; os = 'Windows'; }
+  else if (/Macintosh|Mac OS X/i.test(u)) { brand = 'Apple'; name = 'Mac'; kind = 'computer'; os = 'macOS'; }
+  else if (/CrOS/i.test(u)) { name = 'Chromebook'; kind = 'computer'; os = 'ChromeOS'; }
+  else if (/Linux/i.test(u)) { name = 'Linux computer'; kind = 'computer'; os = 'Linux'; }
+  else name = 'Unknown device';
+  return { brand, name, model, os: os.trim(), kind, app: !!hint.app };
+}
 export function custCurrency(s, c) {
   const own = String(c?.curOverride || '').toUpperCase(); if (['USD', 'EUR'].includes(own)) return own; // set by hand in the customer form (the imported 'currency' column is only history)
   if (s.currencyRule?.on !== false) return isEurope(c) ? 'EUR' : 'USD';
@@ -1806,6 +1836,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     else delete c.lineBad;
     if (auth && exp) {
       if (c.renewPending) { if (exp >= c.expiresAt - DAY) { c.expiresAt = exp; delete c.renewPending; } } // you renewed it on the panel: done
+      else if (c.noExpiry) { /* the owner chose "no end date" for this customer */ }
       else if (c.isTrial && exp > c.expiresAt) { /* a free trial keeps its own trial hours even if the line runs longer on the panel */ }
       else if (Math.abs(c.expiresAt - exp) > 60000) c.expiresAt = exp; // the panel's end date wins
     }
@@ -2237,7 +2268,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const kindOf = (p) => /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription';
         const orderPackages = (s.orderPackages || []).filter((p) => (p.title || p.name) && Number(p.price) > 0).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', cur, kind: kindOf(p) }));
         const resellerPackages = (s.resellerPackages || []).filter((p) => (p.name || p.title) && Number(p.price) > 0).map((p) => ({ id: p.id, name: p.name || p.title, title: p.name || p.title, credits: Number(p.credits) || 0, price: Number(p.price) || 0, cur: rcur, kind: 'reseller' }));
-        return ok({ branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail), captcha: s.security.captcha === false ? null : await captchaChallenge(s),
+        return ok({ waNumbers: (s.waNumbers || []).filter((w) => w.on).map((w) => ({ use: w.use, number: w.number, label: w.label })), branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail), captcha: s.security.captcha === false ? null : await captchaChallenge(s),
           telegram: tgOn(s) ? { bot: s.telegram.botUsername || '', link: tgBotLink(s) } : null,
           packages: orderPackages.filter((p) => p.kind !== 'ibo').map((p) => ({ title: p.title, days: p.days, devices: p.devices, price: p.price, badge: p.badge, cur })), orderPackages, resellerPackages });
       }
@@ -2390,7 +2421,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ notes: notes.filter((n) => Date.now() - n.at < 2 * 86400000) });
       }
       // ---------- Public support page (intproto-tv.store/support) ----------
-      if (R('GET', '/api/support/info')) return ok({ email: supportMail(s), whatsapp: String(s.branding.whatsapp || '').replace(/\D/g, ''), telegram: String(s.branding.telegram || '').replace(/^@/, ''), app: s.branding.appName || 'IPTV', logo: s.branding.logoUrl || '' });
+      if (R('GET', '/api/support/info')) return ok({ email: supportMail(s), whatsapp: String(((s.waNumbers || []).find((w) => w.on && w.use === 'support') || {}).number || s.branding.whatsapp || '').replace(/\D/g, ''), telegram: String(s.branding.telegram || '').replace(/^@/, ''), app: s.branding.appName || 'IPTV', logo: s.branding.logoUrl || '' });
       if (R('POST', '/api/support/start')) { // step 1: the customer's details (required before any ticket)
         const name = cleanText(body.name, 80), email = cleanEmail(body.email), phone = String(body.phone || '').replace(/[^\d+]/g, '').slice(0, 20);
         if (name.length < 2 || !email || phone.replace(/\D/g, '').length < 8) return err(400, 'sup_info');
@@ -2602,9 +2633,17 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (c.status === 'disabled') return err(401, 'This account is disabled.');
         if (path === '/api/me' && method === 'GET' && !c.pendingLine && (c.dns || s.player.serverUrl) && Date.now() - (lastLineCheck.get(c.id) || (c.panel && c.panel.at) || 0) > 30 * 60000) { try { if (await syncLine(s, c)) await saveCustomers(list); } catch {} }
         // Customer terms gate (spec §7): must accept the terms once before seeing the app
-        if (!c.agreedAt && path !== '/api/me' && path !== '/api/me/agree' && path !== '/api/me/password') return err(403, 'terms_required');
+        if (!c.agreedAt && path !== '/api/me' && path !== '/api/me/agree' && path !== '/api/me/password' && path !== '/api/me/device' && path !== '/api/me/inbox/read') return err(403, 'terms_required');
         const v = view(c, s);
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance && !c.pendingLine;
+        if (R('POST', '/api/me/device')) { // which phone / tablet / TV this customer uses
+          const d = deviceFrom(String(body.ua || '').slice(0, 400), { model: body.model, touch: !!body.touch, app: !!body.app }); const key = (d.name + '|' + d.model + '|' + d.os.split(' ')[0]).toLowerCase();
+          const seen = Array.isArray(c.devicesSeen) ? c.devicesSeen : []; let e = seen.find((x) => x.key === key);
+          if (!e) { e = { key, ...d, first: Date.now(), n: 0 }; seen.unshift(e); } Object.assign(e, d, { last: Date.now(), n: (e.n || 0) + 1 });
+          c.devicesSeen = seen.sort((a, b) => b.last - a.last).slice(0, 8); c.lastDevice = { name: d.name, brand: d.brand, model: d.model, os: d.os, kind: d.kind, at: Date.now() }; await saveCustomers(list);
+          return ok({ device: d });
+        }
+        if (R('POST', '/api/me/inbox/read')) { let ch = 0; for (const n of c.inbox || []) if (!n.read) { n.read = Date.now(); ch++; } if (ch) await saveCustomers(list); return ok({ ok: true }); }
         if (R('POST', '/api/me/agree')) { c.agreedAt = Date.now(); await saveCustomers(list); await log('customer', `${c.username} accepted the terms of service`); return ok({ ok: true, agreed: true }); }
 
         if (R('POST', '/api/me/order')) { // customer asks to buy a package: the admin is told and sends a payment link
@@ -2630,6 +2669,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', kind: /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription', cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.name || p.title, name: p.name || p.title, credits: Number(p.credits) || 0, days: 0, devices: 0, price: Number(p.price) || 0, badge: '', kind: 'reseller', cur: s.resellerCurrency || 'EUR' })),
             buyRequest: c.buyRequest || null,
+            inbox: (c.inbox || []).slice(0, 30).map((n) => ({ id: n.id, at: n.at, title: n.title, body: n.body, url: n.url || '', read: !!n.read })),
             orderCurrency: s.currencyRule?.on !== false ? custCurrency(s, c) : s.orderCurrency || 'EUR', hasEmail: !!cleanEmail(c.email), chatUnread: ((await getChats()).find((x) => x.id === c.id) || {}).uc || 0,
             stream: canWatch && (s.player.serverUrl || c.dns) ? {
               server: trimSlash(c.dns || s.player.serverUrl), u: lineUsername, p: linePassword,
@@ -3626,6 +3666,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           next.support = { email: em || 'contact@intproto-tv.com', waLink: q.waLink !== false, alertEmails: String(q.alertEmails || '').split(/[\s,;]+/).map(cleanEmail).filter(Boolean).slice(0, 25).join(', ') }; }
         if (newRows) { next.email.transRows = newRows; next.email.transKeys = []; next.email.transDomains = []; }
         next.security.proxySecret = s.security.proxySecret;
+        if (Array.isArray(body.waNumbers)) { // business WhatsApp numbers by purpose; the "main" one is the app's number
+          next.waNumbers = body.waNumbers.slice(0, 20).map((w) => ({ id: /^[\w-]{1,20}$/.test(String(w.id || '')) ? String(w.id) : uid(5), label: cleanText(w.label, 40), number: String(w.number || '').replace(/\D/g, '').replace(/^00/, '').slice(0, 16), use: ['main', 'support', 'sales', 'resellers', 'other'].includes(w.use) ? w.use : 'other', on: w.on !== false })).filter((w) => w.number.length >= 8);
+          const main = next.waNumbers.find((w) => w.use === 'main' && w.on) || next.waNumbers.find((w) => w.on); if (main) next.branding.whatsapp = main.number;
+        }
         next.branding.whatsapp = String(next.branding.whatsapp || '').replace(/\D/g, '');
         if (next.branding.whatsapp && (!next.branding.supportUrl || /wa\.me\//.test(next.branding.supportUrl))) { next.branding.supportUrl = 'https://wa.me/' + next.branding.whatsapp; if (!next.branding.supportLabel || next.branding.supportLabel === 'Contact support') next.branding.supportLabel = 'WhatsApp'; }
         if (Array.isArray(body.plans)) next.plans = body.plans.map((p) => ({
@@ -3672,6 +3716,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
 
       // ---------- Accounts (Resend / email marketing / Hostinger / Dynu): only the owner, Khalil and Nizar (permission 'secrets') ----------
+      if (R('POST', '/api/admin/app-notify')) { // a notification in the customer's app (inbox) + on their phone if notifications are on
+        const title = cleanText(body.title, 120), text = cleanText(body.body, 600); if (!title && !text) return err(400, 'Write a title or a message.');
+        const aud = String(body.audience || 'one'); const list = await getCustomers(); const now = Date.now(); const warn = Number(s.userDashboard.expiryWarningDays) || 7;
+        const pickF = { one: (c) => c.id === String(body.id || ''), all: (c) => c.status !== 'disabled', active: (c) => c.status !== 'disabled' && c.expiresAt >= now && !c.isTrial, expiring: (c) => c.status !== 'disabled' && c.expiresAt >= now && c.expiresAt - now <= warn * DAYMS, expired: (c) => c.status !== 'disabled' && c.expiresAt < now, trials: (c) => c.status !== 'disabled' && c.isTrial }[aud];
+        if (!pickF) return err(400, 'Choose who gets it.');
+        const to = list.filter(pickF); if (!to.length) return err(400, 'Nobody matches.'); if (to.length > 5000) return err(400, 'Too many people at once.');
+        const n0 = { title: title || (s.branding.appName || 'INTPROTO-TV'), body: text, url: /^\/[\w\/-]*$/.test(String(body.url || '')) ? body.url : '/profile' };
+        for (const c of to) { const inbox = Array.isArray(c.inbox) ? c.inbox : []; inbox.unshift({ id: uid(6), at: now, ...n0, by: actorName }); c.inbox = inbox.slice(0, 30); }
+        await saveCustomers(list);
+        const subs = await getSubs(); const want = new Set(to.map((c) => 'c:' + c.id)); let devices = 0;
+        if (subs.some((x) => want.has(x.who))) { const r = await pushTo(s, (w) => want.has(w), { ...n0, tag: 'note-' + uid(4) }); devices = r.devices; }
+        await log('customer', `App notification "${n0.title}" to ${aud === 'one' ? to[0].username : to.length + ' customers (' + aud + ')'} · ${devices} phone(s)`);
+        return ok({ people: to.length, devices });
+      }
       if (R('POST', '/api/admin/push/promo')) { // promotion reminder for packages (customers) or credits (resellers), on their devices
         const aud = ['inactive', 'active', 'trials', 'customers', 'resellers', 'all'].includes(body.audience) ? body.audience : 'inactive';
         const custom = body.title || body.body ? { title: cleanText(body.title, 120), body: cleanText(body.body, 300), url: /^\/[\w\/-]*$/.test(String(body.url || '')) ? body.url : '' } : null;
@@ -4139,6 +4197,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (r.ok) { markSent(c, 'email'); c.lineMailAt = Date.now(); await saveCustomers(list); }
           await log('customer', `Emailed login to ${c.username} <${to}>${r.ok ? '' : ' — failed: ' + r.error}`);
           return r.ok ? ok(r) : err(502, r.error || 'Email failed');
+        }
+        if (method === 'POST' && sub === 'expiry') { // set / move / end / remove the end date, with exact time
+          if (!can('customers_edit')) return err(403, 'Not allowed.');
+          const before = c.expiresAt, a = String(body.action || 'set'); const msOk = (v) => Number.isFinite(Number(v)) && Number(v) > 1e12 && Number(v) < 4102444800000;
+          if (a === 'set') { if (!msOk(body.expiresAtMs)) return err(400, 'Pick a date and time.'); c.expiresAt = Math.round(Number(body.expiresAtMs)); delete c.noExpiry; }
+          else if (a === 'add') { const d = Number(body.days); if (!d || Math.abs(d) > 3650) return err(400, 'Number of days?'); c.expiresAt = Math.max(c.expiresAt, d > 0 && c.expiresAt < Date.now() ? Date.now() : c.expiresAt) + d * DAYMS; delete c.noExpiry; }
+          else if (a === 'now') { c.expiresAt = Date.now() - 1000; delete c.noExpiry; }
+          else if (a === 'none') { c.noExpiry = true; c.expiresAt = Date.UTC(2099, 11, 31, 23, 59, 59); }
+          else return err(400, 'Unknown action.');
+          if (c.pendingLine && a !== 'now') delete c.pendingLine;
+          c.updatedAt = Date.now(); c.expiryLog = [{ at: Date.now(), by: actorName, from: before, to: c.expiresAt, a }, ...(c.expiryLog || [])].slice(0, 20); await saveCustomers(list);
+          const f = (t) => (t > Date.UTC(2099, 0, 1) ? 'no end date' : new Date(t).toISOString().slice(0, 16).replace('T', ' ') + ' UTC');
+          await log('customer', `End date of ${c.username}: ${f(before)} → ${f(c.expiresAt)}`);
+          return ok({ customer: viewP(c, s) });
         }
         if (method === 'GET' && sub === 'orderpreview') { const pk0 = s.orderPackages.find((p) => p.id === query.pkg) || s.resellerPackages.find((p) => p.id === query.pkg) || s.orderPackages[0]; if (!pk0) return err(400, 'No packages'); const pk = { ...pk0, title: pk0.title || pk0.name || 'Package', days: Number(pk0.days) || 0, devices: Number(pk0.devices) || 1 }; const fl = /^https?:\/\/\S+$/.test(String(query.link || '')) ? { url: query.link, acc: '' } : undefined; const qcur = s.currencyRule?.on !== false ? undefined : (query.cur && ['EUR','USD','USDT','ALL','MAD','THB'].includes(query.cur)) ? query.cur : undefined; return ok(orderEmail(s, c, pk, query.appUrl, fl, qcur)); }
         if (method === 'POST' && sub === 'order') {

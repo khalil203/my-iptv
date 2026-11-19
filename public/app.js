@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=101';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=104';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=94';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=104';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -207,6 +207,7 @@ function route() {
   else setLang(getLang());
   if (state.config.setupRequired) return renderSetup();
   if (state.token) pushRelink();
+  if (state.token && state.role === 'user') setTimeout(reportDevice, 1200);
   const path = location.pathname.replace(/\/+$/, '') || '/';
   // Reseller dashboard: intproto-tv.store/rsl
   if (state.token && state.role === 'reseller') { if (path !== '/rsl') history.replaceState(null, '', '/rsl'); return renderRsl(); }
@@ -287,7 +288,7 @@ function publicPkgCard(p, kind, b) {
 }
 function renderFreeTrial() {
   const b = state.config.branding || {}, tr = state.config.trial || {};
-  const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
+  const wa = waNum(b, 'sales'), tg = String(b.telegram || '').replace(/^@/, '');
   const tgInfo = state.config.telegram;
   const op = state.config.orderPackages || [], rp = state.config.resellerPackages || [];
   const std = op.filter((p) => p.kind !== 'ibo' && p.kind !== 'reseller'), ibo = op.filter((p) => p.kind === 'ibo');
@@ -328,7 +329,7 @@ function renderFreeTrial() {
 
 function renderResellers() {
   const b = state.config.branding || {};
-  const wa = waNum(b), tg = String(b.telegram || '').replace(/^@/, '');
+  const wa = waNum(b, 'resellers'), tg = String(b.telegram || '').replace(/^@/, '');
   setWaFab(b, t('waMsg', { app: b.appName || 'INTPROTO-TV', u: '' }));
   $('#app').innerHTML = `<div class="site"><main class="s-doc" id="main" style="max-width:720px;margin:0 auto">
     <a href="/" class="s-back">← ${esc(b.appName || 'INTPROTO-TV')}</a>
@@ -361,7 +362,7 @@ async function renderSupport() {
 }
 function supDraw() {
   const b = state.config.branding || {}; const I = SUP.info || {}; const me = SUP.me || {}; const F = SUP.form;
-  const wa = String(I.whatsapp || waNum(b) || '').replace(/\D/g, ''); const mail = I.email || 'contact@intproto-tv.com';
+  const wa = String(I.whatsapp || waNum(b, 'support') || '').replace(/\D/g, ''); const mail = I.email || 'contact@intproto-tv.com';
   setWaFab(b, t('waMsg', { app: b.appName || 'INTPROTO-TV', u: me.username || '' }));
   const steps = `<div class="sup-steps"><span class="${SUP.step === 1 ? 'on' : 'done'}">${esc(t('sup_step1'))}</span><span class="${SUP.step === 2 ? 'on' : SUP.step > 2 ? 'done' : ''}">${esc(t('sup_step2'))}</span></div>`;
   let body = '';
@@ -768,7 +769,7 @@ async function adminNotify(s) {
       ${tg('resellers', '🤝 Resellers: “Thank you for your order” when credits are added')}
       <div style="display:flex;align-items:flex-start;gap:10px;margin:0 0 12px"><input type="checkbox" name="autoPromo" id="nt-ap" ${N.autoPromo ? 'checked' : ''} style="width:auto;margin-top:3px"><div><b>📣 Automatic promotion reminders</b><div class="small muted">Packages to expired customers and trials, credit packages to resellers.</div><div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span class="small">Every</span><input type="number" name="promoDays" value="${esc(N.promoDays || 7)}" min="1" max="60" style="width:80px"><span class="small">days</span></div></div></div>
       <div class="row" style="justify-content:flex-end"><button class="btn primary">Save</button></div></form>` : '';
-  const promo = can('customers_edit') ? `<form class="card" data-form="push-promo"><h3>📣 Send a promotion reminder now</h3>
+  const promo = can('customers_edit') ? `<div class="card"><h3>📨 Send a notification in the customers' app</h3><p class="small muted" style="margin-top:0">Shows in the app under 🔔 Notifications for everyone you choose (all, active, expiring, expired, trials), and rings their phone if notifications are on. For one customer, use 🔔 on the customer.</p><button class="btn primary" data-act="note-all">📨 Write a notification</button></div><form class="card" data-form="push-promo"><h3>📣 Send a promotion reminder now</h3>
       <p class="small muted" style="margin-top:0">Goes to the devices of customers and resellers who turned notifications on. Leave the text empty to use the ready message in each person's language.</p>
       ${field('Who', 'audience', 'inactive', { type: 'select', options: [['inactive', 'Customers: expired + free trials (packages)'], ['active', 'Customers: active subscriptions'], ['trials', 'Customers: free trials only'], ['customers', 'All customers'], ['resellers', 'Resellers (credit packages)'], ['all', 'Everyone']] })}
       ${field('Title (optional)', 'title', '', { attrs: 'maxlength="120"', ph: 'Special offer on our packages 📺' })}
@@ -1070,8 +1071,37 @@ const sentChips = (o, act) => {
 };
 async function custRefresh() { try { state.admin.customers = await api('GET', '/api/admin/customers'); const el = $('#cust-list'); if (el) el.innerHTML = customerListHtml(); } catch {} }
 const contactChecks = (c) => (can('customers_edit') ? sentChips(c, 'contact-menu') : '');
+// ---- which device the customer uses (Samsung, iPhone…) ----
+const DEV_IC = { phone: '📱', tablet: '📲', tv: '📺', computer: '💻' };
+const devLabelOf = (d) => (d ? `${d.name}${d.model && !d.name.includes(d.model) && d.brand !== 'Apple' ? ' ' + d.model : ''}` : '');
+const devPill = (c) => { const d = c.lastDevice; if (!d) return ''; const all = (c.devicesSeen || []).map((x) => `${DEV_IC[x.kind] || '📱'} ${devLabelOf(x)}${x.os ? ' · ' + x.os : ''} · last ${fmtDT(x.last)}`).join('\n');
+  return `<span class="pill ${d.brand === 'Samsung' ? 'dev-samsung' : d.brand === 'Apple' ? 'dev-apple' : ''}" title="${esc(all || devLabelOf(d))}">${d.brand === 'Apple' ? '' : DEV_IC[d.kind] || '📱'} ${esc(d.brand === 'Samsung' ? 'Samsung' : d.name === 'iPhone' || d.name === 'iPad' ? d.name : d.name)}</span>`; };
+const endTxt = (c) => (c.noExpiry ? 'No end date' : `${new Date(c.expiresAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
+const toLocalInput = (t) => { const d = new Date(t); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+function expModal(c) {
+  modal(`📅 End date · ${esc(c.name || c.username)}`, `<form data-form="exp" data-id="${c.id}">
+    <p style="margin-top:0">Now: <b>${esc(endTxt(c))}</b> <span class="muted small">(${c.noExpiry ? 'unlimited' : esc(leftTxt(c))})</span></p>
+    <div class="grid2" style="align-items:end">${field('New end date and time', 'when', toLocalInput(c.noExpiry ? Date.now() + 30 * 86400000 : c.expiresAt), { type: 'datetime-local' })}<button class="btn primary" data-do="set">💾 Save this date</button></div>
+    <p class="small muted" style="margin:10px 0 6px">Quick change (from the current end, or from today if it already ended):</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap">${[[1, '+1 day'], [7, '+7 days'], [30, '+30 days'], [90, '+3 months'], [365, '+1 year'], [-1, '−1 day'], [-7, '−7 days']].map(([d, l]) => `<button type="button" class="btn sm" data-act="exp-add" data-days="${d}">${l}</button>`).join('')}</div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:12px"><button type="button" class="btn sm danger" data-act="exp-now">⏹ End it now</button><button type="button" class="btn sm" data-act="exp-none">♾ No end date</button></div>
+    ${(c.expiryLog || []).length ? `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Changes (${c.expiryLog.length})</summary>${c.expiryLog.map((x) => `<div class="small">${fmtDT(x.at)} · ${esc(x.by || '')}: ${x.from > 4070908800000 ? 'no end date' : fmtDT(x.from)} → ${x.to > 4070908800000 ? 'no end date' : fmtDT(x.to)}</div>`).join('')}</details>` : ''}
+  </form>`);
+}
+async function expDo(id, body) {
+  try { const r = await api('POST', `/api/admin/customers/${id}/expiry`, body); const i = state.admin.customers.findIndex((x) => x.id === id); if (i >= 0) state.admin.customers[i] = { ...state.admin.customers[i], ...r.customer };
+    toast('End date: ' + endTxt(r.customer)); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); }
+}
+function noteModal(c) {
+  modal(`🔔 Notification in the app${c ? ' · ' + esc(c.name || c.username) : ''}`, `<form data-form="note-send">${c ? `<input type="hidden" name="id" value="${c.id}"><input type="hidden" name="audience" value="one">` : field('Who', 'audience', 'all', { type: 'select', options: [['all', 'All customers'], ['active', 'Active subscriptions'], ['expiring', 'Expiring soon'], ['expired', 'Expired'], ['trials', 'Free trials']] })}
+    ${field('Title', 'title', '', { attrs: 'required maxlength="120"', ph: 'Server maintenance tonight' })}
+    ${field('Message', 'body', '', { type: 'textarea', rows: 3, attrs: 'maxlength="600"' })}
+    <p class="small muted">It appears in the customer's app under 🔔 Notifications, and on their phone too if they turned notifications on.</p>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary">Send</button></div></form>`);
+}
 function custActions(c) {
   return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<button class="btn sm" data-act="copy-text" data-text="${esc(String(c.phone))}" title="Copy phone number" aria-label="Copy phone number">📞</button>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
+    ${devPill(c)}<button class="btn sm" data-act="exp-open" data-perm="customers_edit" data-id="${c.id}" title="End date: add, change, end or remove" aria-label="End date">📅</button><button class="btn sm" data-act="note-one" data-perm="customers_edit" data-id="${c.id}" title="Send a notification in the customer's app" aria-label="Send app notification">🔔</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     ${can('customers_edit') ? waBtn('wa-one', c.id, (c.contact || {}).noWhatsapp ? 'disabled' : '', (c.contact || {}).noWhatsapp ? 'Has no WhatsApp' : 'Send a WhatsApp message') + tgBtn('tg-one', c.id, (c.contact || {}).noTelegram ? 'disabled' : '', (c.contact || {}).noTelegram ? 'Has no Telegram' : 'Send a Telegram message') : ''}
@@ -1374,16 +1404,30 @@ function adminUserDash(s) {
     <p class="small muted">To block one person, use Disable on the Customers page.</p></form>`;
 }
 
+// ---- 📞 WhatsApp numbers used across the app: main, support, sales (free trial / prices), resellers ----
+const WA_USES = [['main', 'Main number (login page, customer app)'], ['support', 'Support (support page, help)'], ['sales', 'Sales (free trial & prices pages)'], ['resellers', 'Resellers page'], ['other', 'Other / backup']];
+const waNumRow = (w = {}, i) => `<div class="card wa-num" data-wa="${esc(w.id || '')}" style="padding:10px;margin-bottom:8px">
+  <div class="grid2" style="gap:8px">${field('Name', 'label_' + i, w.label || '', { ph: 'Support team · Khalil' })}${field('Used for', 'use_' + i, w.use || 'other', { type: 'select', options: WA_USES })}</div>
+  ${phoneField('WhatsApp number', 'num_' + i, false, w.number ? '+' + w.number : '', 'US')}
+  <div class="row" style="justify-content:space-between;align-items:center"><label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0"><input type="checkbox" name="on_${i}" ${w.on !== false ? 'checked' : ''} style="width:auto"> In use</label>
+  <span>${w.number ? `<a class="btn sm wa-btn" href="https://wa.me/${esc(w.number)}" target="_blank" rel="noopener">💬 Test</a>` : ''}<button type="button" class="btn sm danger" data-act="wa-num-del">🗑</button></span></div></div>`;
+function waNumbersCard(s) {
+  const list = (s.waNumbers || []).length ? s.waNumbers : s.branding.whatsapp ? [{ id: 'main', label: 'Main', number: s.branding.whatsapp, use: 'main', on: true }] : [];
+  return `<form class="card" data-form="wa-nums" id="wa-numbers"><h3>📞 WhatsApp numbers</h3>
+    <p class="small muted" style="margin-top:0">Add, edit or remove the WhatsApp numbers customers see. Pick the country (🇺🇸 +1 for the USA, or any other code), then the number. The <b>Main</b> number is used everywhere a page has no number of its own.</p>
+    <div id="wa-num-list">${list.map(waNumRow).join('') || '<p class="muted small wa-empty">No number yet.</p>'}</div>
+    <div class="row" style="justify-content:space-between"><button type="button" class="btn" data-act="wa-num-add">＋ Add a number</button><button class="btn primary">💾 Save numbers</button></div></form>`;
+}
 function adminBranding(s) {
   const b = s.branding;
-  return `<div class="grid2" style="gap:18px;align-items:start"><form data-form="settings" class="card" data-preview="1"><h3>App identity</h3>
+  return `${can('settings') ? waNumbersCard(s) : ''}<div class="grid2" style="gap:18px;align-items:start"><form data-form="settings" class="card" data-preview="1"><h3>App identity</h3>
     ${field('App name', 'branding.appName', b.appName)}${field('Tagline', 'branding.tagline', b.tagline)}
     ${field('Logo image URL', 'branding.logoUrl', b.logoUrl, { ph: 'https://…/logo.png', help: 'Square image works best. Empty = letters badge.' })}
     <div class="grid3">${field('Main color', 'branding.primary', b.primary, { type: 'color' })}${field('Accent', 'branding.accent', b.accent, { type: 'color' })}${field('Background', 'branding.background', b.background, { type: 'color' })}</div>
     <h3>Login page</h3>
     ${field('Title', 'branding.loginTitle', b.loginTitle)}${field('Subtitle', 'branding.loginSubtitle', b.loginSubtitle, { type: 'textarea', rows: 2 })}
     ${field('Background image URL', 'branding.loginBgUrl', b.loginBgUrl, { ph: 'https://…/background.jpg' })}
-    ${field('WhatsApp number', 'branding.whatsapp', b.whatsapp, { type: 'tel', ph: '66812345678', help: 'With country code, no + or spaces (Thailand 66…, Morocco 212…). Shows a green WhatsApp button on the login page and in every customer account.' })}
+    <div class="field"><span>WhatsApp number</span><div>${b.whatsapp ? `<b>+${esc(b.whatsapp)}</b>` : '<span class="muted">none yet</span>'} <a class="small" href="#wa-numbers" data-act="wa-num-focus">📞 Manage WhatsApp numbers →</a></div></div>}
     <div class="grid2">${field('Telegram support handle', 'branding.telegram', b.telegram, { ph: 'yourid', help: 'Private support chat, without @. Payment and renewal links are sent here privately, never on the website.' })}${field('Telegram marketing channel', 'branding.telegramChannel', b.telegramChannel, { ph: 'yourchannel', help: 'Public channel for promos and announcements only — no payments here.' })}</div>
     <div class="grid2">${field('Support button text', 'branding.supportLabel', b.supportLabel)}${field('Support link', 'branding.supportUrl', b.supportUrl, { ph: 'https://line.me/ti/p/~yourid' })}</div>
     ${field('Footer text', 'branding.footerText', b.footerText, { ph: '© 2026 Your company' })}
@@ -1844,13 +1888,27 @@ async function renderTermsScreen() {
     <button class="btn primary" data-act="terms-agree" style="margin-top:10px">✓ I Agree — continue</button>
     ${closeLink}</div>`;
 }
+// ---- the customer's device (Samsung, iPhone…) is sent once per session so the team knows what they use ----
+async function reportDevice() {
+  try { if (sessionStorage.getItem('tvp_dev_sent')) return; let model = '';
+    try { if (navigator.userAgentData?.getHighEntropyValues) model = (await navigator.userAgentData.getHighEntropyValues(['model'])).model || ''; } catch {}
+    await api('POST', '/api/me/device', { ua: navigator.userAgent, model, touch: navigator.maxTouchPoints > 1, app: isStandalone() }); sessionStorage.setItem('tvp_dev_sent', '1'); } catch {}
+}
+// ---- notifications sent by the team, shown in the app (and on the phone if notifications are on) ----
+function inboxCard(list) {
+  const L = (list || []).slice(0, 5); if (!L.length) return '';
+  const unread = L.filter((n) => !n.read).length; if (unread) setTimeout(() => api('POST', '/api/me/inbox/read').then(() => { (state.user.me.inbox || []).forEach((n) => { n.read = n.read || Date.now(); }); }).catch(() => {}), 1500);
+  return `<div class="card inbox-card" style="margin-bottom:12px"><h3 style="margin-top:0">🔔 ${esc(t('notifInbox'))}${unread ? ` <span class="pill st-expiring">${unread} ${esc(t('notifNew'))}</span>` : ''}</h3>
+    ${L.map((n) => `<div class="list-item" style="align-items:flex-start${n.read ? ';opacity:.75' : ''}"><div style="flex:1"><b>${esc(n.title)}</b>${n.body ? `<div class="small" style="white-space:pre-wrap">${esc(n.body)}</div>` : ''}<div class="small muted">${fmtDT(n.at)}</div></div>${n.read ? '' : '<span class="dot-new" style="width:8px;height:8px;border-radius:50%;background:var(--accent,#0ea5e9);margin-top:6px"></span>'}</div>`).join('')}</div>`;
+}
 async function renderUser() {
+  reportDevice();
   const u = state.user;
   if (u.me && u.me.agreed === false) return renderTermsScreen();
   if (u.me && Date.now() - (u.meAt || 0) > 15000) { try { const fresh = await api('GET', '/api/me'); if (JSON.stringify(fresh.stream) !== JSON.stringify('_stream' in u.me ? u.me._stream : u.me.stream)) u.cache = {}; u.me = fresh; u.meAt = Date.now(); applySource(); } catch { return; } }
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); state.myCur = u.me.myCurrency || ''; applySource(); }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); state.myCur = u.me.myCurrency || ''; applySource(); reportDevice(); }
     catch (e) {
       const msg = String(e.message || '');
       if (msg.includes('terms_required')) return renderTermsScreen(); // first open: must accept the terms
@@ -1873,11 +1931,11 @@ async function renderUser() {
 }
 
 async function renderProfile() {
-  const u = state.user;
+  const u = state.user; reportDevice();
   if (u.me && u.me.agreed === false) return renderTermsScreen();
   if (!u.me) {
     $('#app').innerHTML = `<div class="boot"><div class="spinner"></div></div>`;
-    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); state.myCur = u.me.myCurrency || ''; }
+    try { u.me = await api('GET', '/api/me'); u.meAt = Date.now(); state.myCur = u.me.myCurrency || ''; reportDevice(); }
     catch (e) {
       const msg = String(e.message || '');
       if (msg.includes('terms_required')) return renderTermsScreen();
@@ -1901,13 +1959,14 @@ function profilePage() {
   const dns = String(st.dns || st.server || '').replace(/\/+$/, '');
   const uname = st.u || '—', pass = st.p || '—';
   const m3u = String(st.m3u || '').trim() || (dns && st.u && st.p ? dns + '/get.php?username=' + encodeURIComponent(st.u) + '&password=' + encodeURIComponent(st.p || '') + '&type=m3u_plus&output=ts' : '—');
-  const days = Math.max(0, Number(user.daysLeft) || 0);
+  const days = user.noExpiry ? '∞' : Math.max(0, Number(user.daysLeft) || 0);
   const pct = Math.max(0, Math.min(100, (Number(user.daysLeft) || 0) / (Number(user.planDays) || 30) * 100));
   const row = (label, value, key) => `<li><span class="cred-k">${label}</span><b class="cred-v" id="pf-${key}" dir="ltr" style="word-break:break-all">${esc(value)}</b><button class="btn sm ghost svc-c" data-act="copy-el" data-el="pf-${key}" aria-label="Copy ${label}" title="Copy">⧉</button></li>`;
   const all = `Username: ${uname}\nPassword: ${pass}\nDNS: ${dns || '—'}\nM3U: ${m3u}${ibo?.mac ? `\nDevice MAC Address: ${ibo.mac}` : ''}${ibo?.key ? `\nDevice Key: ${ibo.key}` : ''}`;
   const color = user.state === 'expired' ? '#ef4444' : user.state === 'expiring' ? '#f59e0b' : '#22c55e';
   return `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span><button class="btn sm ghost" data-act="logout" title="${t('logout')}" aria-label="${t('logout')}">⎋</button></div>
     <div class="ubody" style="max-width:760px;margin:0 auto;padding:14px">
+      ${inboxCard(state.user.me?.inbox)}
       <div class="card">
         <div class="row"><h2 style="margin:0">Subscription balance</h2><span class="spacer"></span>${pill(user.state)}</div>
         <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
@@ -1960,9 +2019,10 @@ async function renderUserTab() {
       ${user.state === 'expiring' && !user.isTrial ? `<div class="notice warning">⏳ ${t('expiringSoon', { n: user.daysLeft })} ${renew}</div>` : ''}
       ${user.state === 'expired' ? `<div class="notice danger">⏰ ${t('expiredOn', { date: fmtDate(user.expiresAt) })} ${renew}</div>` : ''}
       ${srcBanner()}
+      ${inboxCard(u.me.inbox)}
       <div class="dash">
         ${d.showSubscription ? `<div class="dash-plan" data-act="utab" data-tab="account" tabindex="0"><div class="dp-top"><div><span class="dp-l">${t('activePlan')}</span><b>${esc(user.isTrial ? t('trial') : user.planName)}</b></div><div class="dp-r"><span class="dp-l">${t('expiresOn')}</span><b>${fmtDate(user.expiresAt)}</b></div></div>
-          <div class="dp-days"><span class="big">${user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</span><span class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</span><span class="spacer"></span>${pill(user.state)}</div>${progress(user)}</div>` : ''}
+          <div class="dp-days"><span class="big">${user.noExpiry ? '∞' : user.isTrial ? user.hoursLeft : Math.max(0, user.daysLeft)}</span><span class="muted small">${user.isTrial ? t('hoursLeft') : t('daysLeft')}</span><span class="spacer"></span>${pill(user.state)}</div>${progress(user)}</div>` : ''}
         <div class="dash-mini" data-act="goto-acc" data-to="acc-devices" tabindex="0"><span class="chip-ic ok">${ic('devices')}</span><div><span class="dp-l">${t('connectedDev')}</span><b id="dash-dev">– / ${esc(user.connections)}</b></div></div>
         <div class="dash-mini" data-act="goto-acc" data-to="acc-tickets" tabindex="0"><span class="chip-ic">${ic('chat')}</span><div><span class="dp-l">${t('supportT')}</span><b id="dash-tk">–</b></div></div>
       </div>
@@ -2112,7 +2172,8 @@ const CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ', THB: 'THB ' };
 const priceTxt = (n, c0) => { const c = (state.role === 'user' && state.myCur) || c0; return priceTxt0(n, c); };
 const priceTxt0 = (n, c) => (c === 'MAD' ? `${n} MAD` : `${CUR[c] || ''}${Number(n).toFixed(2)}${CUR[c] ? '' : ' ' + c}`);
 const WA_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" fill="#fff" aria-hidden="true"><path d="M16 3C9 3 3.3 8.6 3.3 15.6c0 2.5.7 4.8 1.9 6.8L3 29l6.8-2.2c1.9 1 4 1.6 6.2 1.6 7 0 12.7-5.7 12.7-12.7S23 3 16 3zm0 23.1c-2 0-3.9-.6-5.6-1.6l-.4-.2-4 1.3 1.3-3.9-.3-.4c-1.1-1.7-1.7-3.7-1.7-5.7C5.3 9.8 10.1 5 16 5s10.7 4.8 10.7 10.7S21.9 26.1 16 26.1zm5.9-8c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1c-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.2s0-.5.1-.6l.5-.6c.2-.2.2-.4.3-.6s0-.4 0-.6l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4s-1.2 1.1-1.2 2.7 1.2 3.2 1.4 3.4 2.4 3.6 5.7 5c.8.3 1.4.5 1.9.7.8.3 1.5.2 2.1.1.6-.1 1.9-.8 2.2-1.5s.3-1.4.2-1.5-.3-.2-.6-.4z"/></svg>';
-const waNum = (b) => String(b?.whatsapp || (/wa\.me\/(\d+)/.exec(b?.supportUrl || '') || [])[1] || '').replace(/\D/g, '');
+const waNum = (b, use) => { const L = state.config?.waNumbers || []; const w = use && L.find((x) => x.use === use); return String((w && w.number) || b?.whatsapp || (/wa\.me\/(\d+)/.exec(b?.supportUrl || '') || [])[1] || '').replace(/\D/g, ''); };
+const waUrlFor = (b, use, text) => { const n = waNum(b, use); return n ? `https://wa.me/${n}${text ? '?text=' + encodeURIComponent(text) : ''}` : ''; };
 const waUrl = (b, text) => { const n = waNum(b); return n ? `https://wa.me/${n}${text ? '?text=' + encodeURIComponent(text) : ''}` : ''; };
 function setWaFab(b, text) {
   let el = document.getElementById('wa-fab'); const url = b ? waUrl(b, text) : '';
@@ -2700,6 +2761,15 @@ const actions = {
       $('.modal-body').innerHTML = r.domains.length ? r.domains.map((d) => `<div class="card" style="margin-bottom:10px"><div class="row"><b style="flex:1">${esc(d.name)}</b>${d.mail ? '<span class="pill st-active">Resend email records ✓</span>' : '<span class="pill st-expiring">no Resend records yet</span>'}</div>
         ${d.records.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead><tbody>${d.records.map((q) => `<tr><td>${esc(q.type)}</td><td><code>${esc(q.name)}</code></td><td><code style="word-break:break-all">${esc(String(q.value).slice(0, 120))}</code></td></tr>`).join('')}</tbody></table></div>` : '<p class="small muted">No record.</p>'}</div>`).join('') + '<p class="small muted">To add the records Resend needs, press “🌐 Add Resend DNS records”.</p>' : '<p class="muted">No domain in this Dynu account.</p>';
     } catch (e) { $('.modal-body').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } },
+  'wa-num-add': () => { const box = $('#wa-num-list'); box.querySelector('.wa-empty')?.remove(); box.insertAdjacentHTML('beforeend', waNumRow({ use: box.children.length ? 'other' : 'main', on: true }, Date.now() % 100000)); },
+  'wa-num-del': (el) => { if (confirm('Remove this number? Press Save afterwards.')) el.closest('.wa-num').remove(); },
+  'wa-num-focus': (e, ev) => { ev?.preventDefault?.(); $('#wa-numbers')?.scrollIntoView({ behavior: 'smooth' }); },
+  'exp-open': (el) => { const c = state.admin.customers.find((x) => x.id === el.dataset.id); if (c) expModal(c); },
+  'exp-add': (el) => expDo(el.closest('form').dataset.id, { action: 'add', days: Number(el.dataset.days) }),
+  'exp-now': (el) => { if (confirm('End this subscription now?')) expDo(el.closest('form').dataset.id, { action: 'now' }); },
+  'exp-none': (el) => { if (confirm('Remove the end date? The subscription will never end until you set a date again.')) expDo(el.closest('form').dataset.id, { action: 'none' }); },
+  'note-one': (el) => noteModal(state.admin.customers.find((x) => x.id === el.dataset.id)),
+  'note-all': () => noteModal(null),
   'mail-add': () => modal('＋ Add email account', accForm({ kind: 'resend', use: 'customer' }), { wide: true }),
   'mail-plan-custom': (el) => { const a = ACC.d?.rows.find((x) => x.id === el.dataset.id); if (a) modal(`✎ ${esc(a.name)}`, accForm(a), { wide: true }); },
   'acc-sheet': () => { const d = ACC.d; modal('📊 Google Sheets', `<p class="small" style="margin-top:0">Keep the same accounts in a Google Sheet: <b>Send</b> writes them to the sheet, <b>Read</b> brings changes you made in the sheet back here.</p>
@@ -3153,6 +3223,11 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async 'wa-nums'(f) { const rows = [...f.querySelectorAll('.wa-num')].map((el) => { const i = el.querySelector('[name^=label_]').name.slice(6); return { id: el.dataset.wa, label: f['label_' + i].value.trim(), use: f['use_' + i].value, number: (fullPhone(f, 'num_' + i) || '').replace(/\D/g, ''), on: f['on_' + i].checked }; });
+    const bad = rows.find((r) => r.number.length < 8); if (bad) return toast('Each number needs a country code and the number.', true);
+    await saveSettings({ waNumbers: rows }); renderAdmin(); },
+  async exp(f) { const v = f.when.value; if (!v) return toast('Pick a date and time', true); expDo(f.dataset.id, { action: 'set', expiresAtMs: new Date(v).getTime() }); },
+  async 'note-send'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { const r = await api('POST', '/api/admin/app-notify', formToObj(f)); closeModal(); toast(`Sent to ${r.people} customer${r.people === 1 ? '' : 's'}${r.devices ? ` · ${r.devices} phone${r.devices === 1 ? '' : 's'} rang` : ''} ✓`); } catch (e) { toast(e.message, true); b.disabled = false; } },
   async 'hd-connect'(f) { const k = f.dataset.k; const b = f.querySelector('button'); b.disabled = true;
     try { const r = await api('POST', '/api/admin/accounts/save', { kind: k, name: k === 'hostinger' ? 'Hostinger' + (f.email.value ? ' · ' + f.email.value : '') : 'Dynu' + (f.email.value ? ' · ' + f.email.value : ''), apiKey: f.apiKey.value.trim(), email: f.email.value.trim() });
       toast('Connected ✓ Checking…'); await renderAdmin(); actions[k === 'hostinger' ? 'acc-hostinger' : 'acc-dynu']({ dataset: { id: r.account.id } }); } catch (e) { toast(e.message, true); b.disabled = false; } },
