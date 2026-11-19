@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=107';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=108';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=107';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=108';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -744,6 +744,23 @@ function goAfterRender() {
 }
 // ---------------- /app: install the app + notifications (link in the emails) ----------------
 let installEvt = null; window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; const b = document.getElementById('app-install'); if (b) b.hidden = false; });
+// /app: one choice per device — Android (APK download), iPhone & iPad (Safari → Add to Home Screen), MacBook (download or Safari → Add to Dock)
+const APP_DEV = { pick: '' };
+const inAppBrowser = () => /FBAN|FBAV|Instagram|Line\/|WhatsApp|GSA\/|Gmail|Outlook|MicroMessenger|; wv\)/i.test(navigator.userAgent) || (isIOS() && !/Safari\//.test(navigator.userAgent));
+function devicePicker() {
+  const u = navigator.userAgent; const qs = new URLSearchParams(location.search).get('os');
+  const auto = qs === 'ios' || qs === 'android' || qs === 'mac' ? qs : isIOS() ? 'ios' : /android/i.test(u) ? 'android' : /Macintosh/.test(u) ? 'mac' : '';
+  const cur = APP_DEV.pick || auto || 'android'; const link = location.origin + '/app';
+  const tab = (k, n) => `<a data-act="app-dev" data-k="${k}" class="${cur === k ? 'on' : ''}" style="text-transform:none" tabindex="0">${esc(n)}${k === auto ? ' ✓' : ''}</a>`;
+  const REL = 'https://github.com/khalil203/my-iptv/releases/download/desktop/';
+  const safariBox = `<div class="notice" style="text-align:left;margin-top:10px"><b>🧭 ${esc(t('apSafariT'))}</b><p class="small" style="margin:6px 0">${esc(t('apSafariTxt'))}</p>
+    <div class="code" dir="ltr" style="user-select:all;word-break:break-all;font-weight:700">${esc(link)}</div>
+    <button type="button" class="btn sm primary" data-act="app-copy" style="margin-top:8px">${esc(t('apCopy'))}</button>${inAppBrowser() ? `<p class="small" style="color:var(--warn,#c80);margin:8px 0 0">⚠️ ${esc(t('apInApp'))}</p>` : ''}</div>`;
+  const body = cur === 'android' ? `<a class="btn primary block" href="/apk/INTPROTO-TV.apk" download>${esc(t('apApkBtn'))}</a><p class="small muted" style="margin:8px 0 0">${esc(t('apApkSteps'))}</p>`
+    : cur === 'ios' ? `${safariBox}<p class="small" style="margin:10px 0 0">📱 ${esc(t('apIosSteps'))}</p>`
+    : `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${esc(t('apMacDl'))}</a><a class="btn block" style="margin-top:6px" href="${REL}INTPROTO-TV-Mac-x64.dmg">⬇ ${esc(t('apMacIntel'))}</a><p class="small muted" style="margin:8px 0 0">💻 ${esc(t('apMacSteps'))}</p>${safariBox}`;
+  return `<div class="card" id="app-dev" style="text-align:left"><h3>📲 ${esc(t('apDev'))}</h3><div class="chips" style="margin-bottom:10px;flex-wrap:wrap;overflow:visible">${tab('android', t('apAndroid'))}${tab('ios', t('apIphone'))}${tab('mac', t('apMac'))}</div>${body}</div>`;
+}
 function renderAppPage() {
   const b = state.config.branding || {}; const app = b.appName || 'INTPROTO-TV'; const home = state.role === 'reseller' ? '/rsl' : state.role === 'admin' || state.role === 'staff' ? '/intprototv' : '/';
   if (isStandalone() && state.token) { location.replace(home); return; }
@@ -752,6 +769,7 @@ function renderAppPage() {
     ${b.logoUrl ? `<img src="${esc(b.logoUrl)}" alt="" style="max-height:72px;margin:10px auto">` : ''}<h1>📲 ${esc(t('appTitle', { app }))}</h1><p class="s-sub">${esc(t('appSub'))}</p>
     <div class="card" style="text-align:left"><h3>1. ${esc(t('appStep1'))}</h3>
       ${inst ? `<p class="pos">✓ ${esc(t('appInstalled'))}</p>` : ios ? `<p>${esc(t('appIos'))}</p>` : `<button class="btn primary block" id="app-install" data-act="app-install" ${installEvt ? '' : 'hidden'}>📲 ${esc(t('appInstallBtn', { app }))}</button><p class="small muted">${esc(t('appOther'))}</p>`}</div>
+    ${devicePicker()}
     <div class="card" style="text-align:left"><h3>2. ${esc(t('appStep2'))}</h3><p class="small muted" style="margin-top:0">${esc(t('appStep2Text'))}</p>
       ${state.token ? pushBox(false) : `<a class="btn primary block" href="/profile">${esc(t('appSignIn'))}</a>`}</div>
     <div class="row" style="gap:8px;justify-content:center;margin-top:12px"><a class="btn" href="${home}">${esc(t('appOpen'))}</a><a class="btn ghost" href="/profile">👤 ${esc(t('appProfile'))}</a></div>
@@ -5174,3 +5192,8 @@ boot().catch((e) => {
 });
 // Credits stock form: show "Amount paid now" only for a partly paid batch
 document.addEventListener('change', (e) => { const el = e.target; if (el && el.name === 'paid' && el.closest('[data-form=stock]')) { const b = document.getElementById('stock-part'); if (b) b.style.display = el.value === 'part' ? '' : 'none'; } });
+
+Object.assign(actions, {
+  'app-dev': (el) => { APP_DEV.pick = el.dataset.k; const box = $('#app-dev'); if (box) box.outerHTML = devicePicker(); },
+  'app-copy': async () => { const link = location.origin + '/app'; try { await navigator.clipboard.writeText(link); } catch { const ta = document.createElement('textarea'); ta.value = link; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('apCopied')); },
+});

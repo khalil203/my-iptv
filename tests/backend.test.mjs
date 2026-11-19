@@ -2152,3 +2152,15 @@ test('payment links: GreenApp Host only, matched to the package, rotation; IBO P
   const paidNow = (await x.call('POST', '/api/admin/stock', { credits: 50, cost: 40, paid: 'yes', accountId: acc.id }, tok)).json; assert.equal(paidNow.payStatus, 'paid');
   st = (await x.call('GET', '/api/admin/stock', {}, tok)).json; assert.equal(st.purchases.length, 2);
 });
+
+test('details emails link the app for Android (APK), iPhone & iPad and MacBook, with the Safari steps', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', appUrl: 'https://tv.example.com' } }, tok);
+  const c = await addCustomer(x, tok, { username: 'iosuser', email: 'ios.user@example.com' });
+  const m = (await x.call('GET', `/api/admin/customers/${c.id}/emailpreview`, {}, tok)).json;
+  const html = m.html || '';
+  for (const s of ['https://tv.example.com/apk/INTPROTO-TV.apk', 'https://tv.example.com/app?os=ios', 'https://tv.example.com/download.html#mac', 'Copy this link and open it in the Safari browser', 'Add to Home Screen']) assert.ok(html.includes(s), s);
+  const fr = await addCustomer(x, tok, { username: 'frios', email: 'fr.ios@example.fr', lang: 'fr' });
+  await x.call('PUT', '/api/admin/settings', { email: { lang: 'customer' } }, tok);
+  assert.ok(((await x.call('GET', `/api/admin/customers/${fr.id}/emailpreview`, {}, tok)).json.html || '').includes('ouvrez-le dans le navigateur Safari'));
+});

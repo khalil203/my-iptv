@@ -41,7 +41,7 @@ const T = {
     apk: '⬇ Download for Android (APK)', install: '⬇ Install the app', open: 'Open in browser',
     aSteps: ['Tap <b>Download for Android</b>.', 'Open the downloaded file and tap <b>Install</b> (allow “Install unknown apps” if asked).', 'Or tap <b>Install the app</b> to add the web app from Chrome.'],
     tvSteps: ['On your TV, install the free app <b>Downloader</b> from the Play Store / App Store.', 'Open Downloader and type: <span class="code-url">{tv}</span>', 'Install, then open <b>INTPROTO-TV</b> from your apps. Use the remote arrows and OK.'],
-    iSteps: ['Open this page in <b>Safari</b>.', 'Tap the <b>Share</b> button (square with arrow).', 'Tap <b>Add to Home Screen</b>, then <b>Add</b>.'],
+    iSteps: ['Tap <b>Copy link</b>, open <b>Safari</b> and paste it (links opened inside Gmail, Outlook or WhatsApp can’t install the app).', 'Tap the <b>Share</b> button (square with arrow).', 'Tap <b>Add to Home Screen</b>, then <b>Add</b>.'],
     wSteps: ['Open this page in <b>Chrome</b> or <b>Edge</b>.', 'Click <b>Install the app</b> (or the install icon in the address bar).', 'It opens in its own window and appears in the Start menu.'],
     mSteps: ['In <b>Chrome</b> or <b>Edge</b>: click <b>Install the app</b> or the install icon in the address bar.', 'In <b>Safari</b>: menu <b>File → Add to Dock</b>.', 'Open it from the Dock or Launchpad.'],
     auto: '✨ All versions update automatically. New features appear the next time you open the app.' },
@@ -50,7 +50,7 @@ const T = {
     apk: '⬇ Télécharger pour Android (APK)', install: "⬇ Installer l'application", open: 'Ouvrir dans le navigateur',
     aSteps: ['Appuyez sur <b>Télécharger pour Android</b>.', 'Ouvrez le fichier et appuyez sur <b>Installer</b> (autorisez « sources inconnues » si demandé).', "Ou appuyez sur <b>Installer l'application</b> depuis Chrome."],
     tvSteps: ["Sur votre TV, installez l'app gratuite <b>Downloader</b>.", 'Ouvrez Downloader et tapez : <span class="code-url">{tv}</span>', 'Installez, puis ouvrez <b>INTPROTO-TV</b>. Utilisez les flèches et OK de la télécommande.'],
-    iSteps: ['Ouvrez cette page dans <b>Safari</b>.', 'Touchez le bouton <b>Partager</b>.', "Touchez <b>Sur l'écran d'accueil</b>, puis <b>Ajouter</b>."],
+    iSteps: ['Touchez <b>Copier le lien</b>, ouvrez <b>Safari</b> et collez-le (un lien ouvert dans Gmail, Outlook ou WhatsApp ne peut pas installer l’app).', 'Touchez le bouton <b>Partager</b>.', "Touchez <b>Sur l'écran d'accueil</b>, puis <b>Ajouter</b>."],
     wSteps: ['Ouvrez cette page dans <b>Chrome</b> ou <b>Edge</b>.', "Cliquez sur <b>Installer l'application</b> (ou l'icône dans la barre d'adresse).", 'Elle s’ouvre dans sa propre fenêtre et apparaît dans le menu Démarrer.'],
     mSteps: ["Dans <b>Chrome</b> ou <b>Edge</b> : cliquez sur <b>Installer l'application</b>.", 'Dans <b>Safari</b> : menu <b>Fichier → Ajouter au Dock</b>.', 'Ouvrez-la depuis le Dock ou le Launchpad.'],
     auto: "✨ Toutes les versions se mettent à jour automatiquement à la prochaine ouverture." },
@@ -68,6 +68,7 @@ const REL = 'https://github.com/khalil203/my-iptv/releases/download/desktop/';
 const tvShort = location.host + '/tv';
 let deferred = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; render(); });
+window.copyLink = async () => { const l = location.origin + '/app'; try { await navigator.clipboard.writeText(l); } catch { prompt('Copy:', l); return; } alert(lang === 'fr' ? 'Lien copié ✓ Ouvrez Safari et collez-le.' : 'Link copied ✓ Now open Safari and paste it.'); };
 window.installApp = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; render(); } else alert(T[lang].wSteps[1].replace(/<[^>]+>/g, '')); };
 let apkOk = null;
 fetch(apkUrl, { method: 'HEAD' }).then((r) => { apkOk = r.ok; render(); }).catch(() => { apkOk = false; render(); });
@@ -80,11 +81,11 @@ function render() {
   document.getElementById('langs').innerHTML = [['en', 'English'], ['fr', 'Français']].map(([k, n]) => `<a class="${k === lang ? 'on' : ''}" data-l="${k}" tabindex="0">${n}</a>`).join(' · ');
   const apkBtn = apkOk === false ? `<a class="btn primary block" href="https://github.com/khalil203/my-iptv/releases/latest">${L.apk}</a>` : `<a class="btn primary block" href="${apkUrl}" download>${L.apk}</a>`;
   const installBtn = `<button class="btn block" onclick="installApp()" style="margin-top:8px">${L.install}</button>`;
-  const card = (id, ic, title, steps, btns) => `<div class="plat ${me === id ? 'me' : ''}" style="order:${me === id ? 0 : 1}"><h3><span class="ic">${ic}</span>${title}${me === id ? `<span class="badge-me">${L.you}</span>` : ''}</h3>${btns}<ol>${steps.map((s) => `<li>${s.replace('{tv}', tvShort)}</li>`).join('')}</ol></div>`;
+  const card = (id, ic, title, steps, btns) => `<div id="${id}" class="plat ${me === id ? 'me' : ''}" style="order:${me === id ? 0 : 1}"><h3><span class="ic">${ic}</span>${title}${me === id ? `<span class="badge-me">${L.you}</span>` : ''}</h3>${btns}<ol>${steps.map((s) => `<li>${s.replace('{tv}', tvShort)}</li>`).join('')}</ol></div>`;
   document.getElementById('plats').innerHTML = [
     card('android', '🤖', L.android, L.aSteps, apkBtn + installBtn),
     card('tv', '📺', L.androidTV, L.tvSteps, apkBtn),
-    card('ios', '📱', L.iphone, L.iSteps, ''),
+    card('ios', '📱', L.iphone, L.iSteps, `<button class="btn primary block" onclick="copyLink()">📋 ${lang === 'fr' ? 'Copier le lien pour Safari' : 'Copy link for Safari'}</button><p class="small" style="margin:6px 0 0"><span class="code-url">${location.origin}/app</span></p>`),
     card('win', '🪟', L.windows, L.wSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Windows-Setup.exe">${L.winDl}</a>`),
     card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${L.macDl} · Apple M1–M4</a><a class="btn block" style="margin-top:8px" href="${REL}INTPROTO-TV-Mac-x64.dmg">${L.macDl} · Intel</a>`),
   ].join('');
@@ -93,6 +94,7 @@ document.addEventListener('click', (e) => { const a = e.target.closest('[data-l]
 document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && document.activeElement?.dataset.l) document.activeElement.click(); });
 if ('serviceWorker' in navigator && !location.hostname.endsWith('github.io')) navigator.serviceWorker.register('sw.js').catch(() => {});
 render();
+if (location.hash) setTimeout(() => { const el = document.querySelector(location.hash); if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('me'); } }, 300);
 </script>
 </body>
 </html>
