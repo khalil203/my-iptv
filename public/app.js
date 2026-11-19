@@ -19,7 +19,7 @@ const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toL
 const mad = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 const num = (n, cur) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur || ''}`;
 // Time left, never rounded up: "23 h left", "2 days 8 h left", "29 days left", "3 days ago"
-const leftTxt = (c) => { const ms = c.expiresAt - Date.now(); if (ms <= 0) { const d = Math.floor(-ms / 86400000); return d ? d + (d === 1 ? ' day ago' : ' days ago') : 'ended today'; }
+const leftTxt = (c) => { if (c.noExpiry) return 'no end date'; const ms = c.expiresAt - Date.now(); if (ms <= 0) { const d = Math.floor(-ms / 86400000); return d ? d + (d === 1 ? ' day ago' : ' days ago') : 'ended today'; }
   const h = Math.floor(ms / 3600000); if (h < 48) return (h || '<1') + ' h left'; const d = Math.floor((ms + 3600000) / 86400000), r = Math.max(0, h - d * 24); return d + ' days' + (d < 7 && r ? ' ' + r + ' h' : '') + ' left'; };
 const isoDay = (t) => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const money = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${state.config?.currency || ''}`;
@@ -534,7 +534,8 @@ const ADMIN_TABS = [
   ['emails', '📬', 'Emails & bounces', 'customers_view', 'Messages', 'bounced spam delivered sent resend invalid'],
   ['trial', '🎁', 'Trial & email setup', 'settings', 'Messages', 'resend key sender free trial renewal offer'],
   ['userdash', '📱', 'User dashboard', 'settings', 'App', 'customer app sections announcement maintenance playlists'],
-  ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name whatsapp number theme'],
+  ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name theme'],
+  ['wanums', '📞', 'WhatsApp numbers', 'settings', 'App', 'whatsapp numbers phone country code +1 support sales resellers'],
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
   ['mail', '📧', 'Email sending', null, 'System', 'email sending status resend api keys domains plans free trial paid google sheets hostinger dynu accounts'],
   ['accounts', '🗝️', 'Accounts & API keys', 'secrets', 'System', 'resend email marketing hostinger dynu domains api keys passwords google sheets spend cost'],
@@ -649,6 +650,7 @@ async function renderAdmin() {
     else if (t === 'accounts') body.innerHTML = await adminAccounts();
     else if (t === 'security') body.innerHTML = await adminSecurity(s);
     else if (t === 'mail') body.innerHTML = await adminMail();
+    else if (t === 'wanums') body.innerHTML = waNumbersCard(s);
     else if (t === 'notify') { body.innerHTML = await adminNotify(s); pushPaint(); }
     else if (t === 'support') body.innerHTML = await adminSupport();
     else if (t === 'alerts') body.innerHTML = await adminAlerts(s);
@@ -834,7 +836,7 @@ async function adminOverview() {
   if (!s.player.serverUrl) setupTips.push('Add your streaming server URL in <a data-act="atab" data-tab="api">API settings</a> so customers can watch.');
   if (!s.reseller.enabled) setupTips.push('Connect the TVplus reseller API in <a data-act="atab" data-tab="api">API settings</a> to create and renew lines automatically.');
   }
-  const row = (c) => `<div class="list-item"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'expired ' + fmtDate(c.expiresAt) : c.daysLeft + ' days left'}</div></div><button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button></div>`;
+  const row = (c) => `<div class="list-item"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'expired ' + (c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt)) : c.daysLeft + ' days left'}</div></div><button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button></div>`;
   const lim = st.lowCreditsAlert || 0;
   const panelLow = cr.enabled && cr.ok && Number(cr.credits) <= lim;
   const creditWarn = panelLow || st.stock.low ? `<div class="notice warning">🎟 <b>Credits are low</b> — ${panelLow ? `panel has <b>${esc(cr.credits)}</b> credits` : ''}${panelLow && st.stock.low ? ' · ' : ''}${st.stock.low ? `stock has <b>${st.stock.available}</b> credits` : ''}. <a data-act="atab" data-tab="stock" style="cursor:pointer">Buy credits →</a></div>` : '';
@@ -1016,7 +1018,7 @@ function adminCustomerProfile(c) {
     <div class="card prof-side">
       <div class="prof-id"><div class="avatar xl">${esc(initials(c.name))}</div><div><h2 style="margin:0">${esc(c.name)}</h2><div class="muted">${esc(c.username)}${c.orderNo ? ' · 🧾 ' + esc(c.orderNo) : ''}${orderAt(c) ? ' · ordered ' + fmtDate(orderAt(c)) : ''}</div>${(() => { const dv = orderDevices(c); const o = parseOrderNo(c.orderNo); const same = o.num !== null ? state.admin.customers.filter((x) => x.id !== c.id && parseOrderNo(x.orderNo).main.toLowerCase() === o.main.toLowerCase()) : [];
         return (dv.length > 1 ? `<div class="small" style="margin-top:6px">${dv.map((d) => `<span class="tagp">${esc(d)}</span>`).join(' ')}</div>` : '') + (same.length ? `<div class="small" style="margin-top:6px">Same order ${esc(o.main)}: ${same.map((x) => `<button class="name-link" data-act="view-customer" data-id="${x.id}">${esc(x.name)} (${esc(x.orderNo)})</button>`).join(', ')}</div>` : ''); })()}<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${pill(c.state)}${tier[0] !== 'Regular' ? `<span class="pill ${tier[1]}">${tier[0]}</span>` : ''}${c.isReseller ? `<span class="pill st-expiring">${esc(c.rslId || 'RSL')}</span>` : ''}${c.statusFlag === 'dispute' ? '<span class="pill st-expired">dispute</span>' : c.statusFlag === 'excellent' ? '<span class="pill st-active">excellent</span>' : ''}${c.isTrial ? '<span class="pill st-expiring">trial</span>' : ''}</div></div></div>
-      <div class="prof-sub"><div><span class="dp-l">Plan</span><b>${esc(c.planName)}</b></div><div><span class="dp-l">Devices</span><b>${esc(c.connections)}</b></div><div><span class="dp-l">Started</span><b>${c.startAt ? fmtDate(c.startAt) : '—'}</b></div><div><span class="dp-l">Expires</span><b>${c.expiresAt ? fmtDate(c.expiresAt) : '—'}</b></div></div>
+      <div class="prof-sub"><div><span class="dp-l">Plan</span><b>${esc(c.planName)}</b></div><div><span class="dp-l">Devices</span><b>${esc(c.connections)}</b></div><div><span class="dp-l">Started</span><b>${c.startAt ? fmtDate(c.startAt) : '—'}</b></div><div><span class="dp-l">Expires</span><b>${c.expiresAt ? (c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt)) : '—'}</b></div></div>
       <div style="margin-top:10px">${progress(c)}<div class="small muted" style="margin-top:6px">${c.state === 'expired' ? Math.abs(c.daysLeft) + ' days expired' + (c.lastLogin ? ' · last login ' + fmtDT(c.lastLogin) : '') : c.daysLeft + ' days left'}</div></div>
       <div class="row" style="margin-top:14px"><h3 style="margin:0">Connection details</h3><span class="spacer"></span><button class="btn sm primary" data-act="paid-line" data-perm="customers_edit" data-id="${c.id}">📺 ${hasIbo ? 'Edit M3U / IBO' : 'Assign M3U / IBO'}</button></div>
       <div class="svc-box" style="margin-top:6px">${svcRow('Username', cU || '—', 'u')}${svcRow('Password', cP || '—', 'p')}${cDns ? svcRow('DNS', cDns, 'dns') : ''}${m3u ? svcRow('M3U', m3u, 'm3u') : ''}${iboHtml}<p class="small muted" style="margin:8px 2px 0">Paste the panel M3U once — it fills the four <b>My Details</b> fields on the customer's paid profile. IBO Player: save the Device MAC Address and Device Key here; the customer sees them under My Details on intproto-tv.store/profile.</p></div>
@@ -1101,7 +1103,7 @@ function noteModal(c) {
 }
 function custActions(c) {
   return `${contactChecks(c)}${c.statusFlag === 'dispute' ? '<span class="pill st-expired" title="Flagged: Dispute">⚠️</span>' : ''}${can('customers_phone') && c.phone ? `<button class="btn sm" data-act="copy-text" data-text="${esc(String(c.phone))}" title="Copy phone number" aria-label="Copy phone number">📞</button>` : ''}${c.lineBad ? `<span class="pill st-expired" title="Last checked ${c.panel ? fmtDT(c.panel.at) : ''}">📡 ${esc(c.lineBad)}</span>` : ''}${c.emailBad ? `<span class="pill st-expired" title="Emails to ${esc(c.email)} are paused: the address ${esc(c.emailBad)}. Edit the customer to correct it.">✉️ ${esc(c.emailBad === 'bounced' ? 'email bounced' : 'marked spam')}</span>` : ''}<button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button>
-    ${devPill(c)}<button class="btn sm" data-act="exp-open" data-perm="customers_edit" data-id="${c.id}" title="End date: add, change, end or remove" aria-label="End date">📅</button><button class="btn sm" data-act="note-one" data-perm="customers_edit" data-id="${c.id}" title="Send a notification in the customer's app" aria-label="Send app notification">🔔</button>
+    <button class="btn sm" data-act="exp-open" data-perm="customers_edit" data-id="${c.id}" title="Expiry date: add, change, end or remove">📅 Expiry</button><button class="btn sm" data-act="note-one" data-perm="customers_edit" data-id="${c.id}" title="Send a notification in the customer's app">🔔 Notify</button>
     <button class="btn sm" data-act="edit-customer" data-perm="customers_edit" data-id="${c.id}">Edit</button>
     <button class="btn sm" data-act="toggle-customer" data-perm="customers_edit" data-id="${c.id}">${c.status === 'disabled' ? 'Enable' : 'Disable'}</button>
     ${can('customers_edit') ? waBtn('wa-one', c.id, (c.contact || {}).noWhatsapp ? 'disabled' : '', (c.contact || {}).noWhatsapp ? 'Has no WhatsApp' : 'Send a WhatsApp message') + tgBtn('tg-one', c.id, (c.contact || {}).noTelegram ? 'disabled' : '', (c.contact || {}).noTelegram ? 'Has no Telegram' : 'Send a Telegram message') : ''}
@@ -1118,11 +1120,11 @@ function customerListHtml() {
   const list = all.slice(0, lim);
   const more = all.length > lim ? `<div style="text-align:center;margin:14px"><button class="btn" data-act="cust-more">Show more (${all.length - lim} left)</button></div>` : '';
   const narrow = matchMedia('(max-width: 760px)').matches;
-  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${orderChip(c)}${connChip(c)}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
-      <div class="small muted" style="margin:10px 0 6px">Expires ${fmtDate(c.expiresAt)} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div><div style="margin:-2px 0 6px">${updTag(c)}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
+  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${orderChip(c)}${connChip(c)}${devPill(c)}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
+      <div class="small muted" style="margin:10px 0 6px">Expires ${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div><div style="margin:-2px 0 6px">${updTag(c)}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${orderChip(c)}${connChip(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
-      <td>${fmtDate(c.expiresAt)}<div>${updTag(c)}</div><div class="small muted">${leftTxt(c)}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${orderChip(c)}${connChip(c)}${devPill(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+      <td>${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))}<div>${updTag(c)}</div><div class="small muted">${leftTxt(c)}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function adminCustomers() {
@@ -1183,6 +1185,11 @@ function customerForm(c) {
   c = c || { planId: s.plans[0]?.id, connections: s.plans[0]?.connections || 1, startAt: Date.now() };
   const planOpts = [...s.plans.map((p) => [p.id, `${p.name} · ${p.days} days · ${p.price} ${s.currency}`]), ['custom', 'Custom dates']];
   return `<form data-form="customer" data-id="${c.id || ''}">
+    ${!isNew ? `<div class="card" style="padding:10px 12px;margin:0 0 10px"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <div style="flex:1;min-width:200px"><div class="small muted">Expiry date</div><b>${esc(endTxt(c))}</b> <span class="small muted">${c.noExpiry ? '(no end date)' : '(' + esc(leftTxt(c)) + ')'}</span></div>
+      <button type="button" class="btn sm" data-act="exp-open" data-id="${c.id}">📅 Add / change / delete expiry</button><button type="button" class="btn sm" data-act="note-one" data-id="${c.id}">🔔 Send notification</button></div>
+      <div class="small" style="margin-top:8px"><span class="muted">Connected device:</span> ${c.lastDevice ? (c.devicesSeen || [c.lastDevice]).map((d) => `<b>${DEV_IC[d.kind] || '📱'} ${esc(devLabelOf(d))}</b>${d.os ? ' · ' + esc(d.os) : ''}${d.last || d.at ? ' · ' + fmtDT(d.last || d.at) : ''}`).join('<br>') : '<span class="muted">not seen yet — shows Samsung, iPhone… the next time the customer opens their app</span>'}</div></div>` : ''}
+
     ${c.pendingLine ? `<div class="notice warning">⏳ This trial is waiting for a line. Paste the M3U link from your panel below and save: the trial starts and the login email is sent.</div>` : ''}
     ${field('M3U link from your panel (optional)', 'm3u', '', { ph: 'http://your-dns.com:8080/get.php?username=…&password=…&type=m3u_plus', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr" data-input="m3u-paste"', help: 'Paste the line link and the username, password and server are filled in for you.' })}
     <div class="grid2">${field('Customer name', 'name', c.name || '', { attrs: 'required' })}${field('Email', 'email', c.email || '', { type: 'email', attrs: 'autocapitalize="none"' })}</div>
@@ -1220,7 +1227,7 @@ function customerForm(c) {
 function renewForm(c) {
   const s = state.admin.settings;
   const p0 = s.plans.find((p) => p.id === c.planId) || s.plans[0] || { days: 30, price: 0 };
-  return `<p class="muted" style="margin-top:0"><b>${esc(c.name)}</b> (${esc(c.username)}) · currently ${pill(c.state)} · expires ${fmtDate(c.expiresAt)}</p>
+  return `<p class="muted" style="margin-top:0"><b>${esc(c.name)}</b> (${esc(c.username)}) · currently ${pill(c.state)} · expires ${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))}</p>
   <form data-form="renew" data-id="${c.id}">
     ${field('Plan', 'planId', p0.id || '', { type: 'select', options: [...s.plans.map((p) => [p.id, `${p.name} · ${p.days} days`]), ['custom', 'Custom number of days']], attrs: 'data-renew-plan' })}
     <div class="grid3">${field('Days to add', 'days', p0.days, { type: 'number', attrs: 'min="1"' })}${field('Credits used', 'credits', p0.credits ?? '', { type: 'number', attrs: 'min="0"' })}${field(`Amount received (${c.cur === 'EUR' ? '€ EUR' : '$ USD'})`, 'price', p0.price, { type: 'number', attrs: 'min="0" step="any"', help: 'In the customer\'s currency, unless you pick a money account below.' })}</div>
@@ -1255,7 +1262,7 @@ async function adminSubs() {
       <select data-input="sub-days" style="width:auto">${[['7', 'Expiring in 7 days'], ['14', '14 days'], ['30', '30 days'], ['90', '90 days'], ['all', 'All subscriptions']].map(([v, t]) => `<option value="${v}" ${a.subDays === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
       <button class="btn sm" data-act="export-csv" data-perm="exports">⬇ CSV</button></div>
       ${list.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Plan</th><th>Expires</th><th style="min-width:120px">Time left</th><th>Status</th><th></th></tr></thead><tbody>
-      ${list.map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} ${c.phone ? '· ' + esc(c.phone) : ''}</div></td><td>${esc(c.planName)}</td><td>${fmtDate(c.expiresAt)}</td>
+      ${list.map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small muted">${esc(c.username)} ${c.phone ? '· ' + esc(c.phone) : ''}</div></td><td>${esc(c.planName)}</td><td>${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))}</td>
         <td><div class="small">${c.daysLeft >= 0 ? c.daysLeft + ' days' : 'expired ' + -c.daysLeft + 'd ago'}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><button class="btn sm primary" data-act="renew" data-perm="customers_edit" data-id="${c.id}">Renew</button></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted">Nothing in this range.</p>'}</div>
     <div class="grid2" style="gap:16px">
@@ -1420,14 +1427,14 @@ function waNumbersCard(s) {
 }
 function adminBranding(s) {
   const b = s.branding;
-  return `${can('settings') ? waNumbersCard(s) : ''}<div class="grid2" style="gap:18px;align-items:start"><form data-form="settings" class="card" data-preview="1"><h3>App identity</h3>
+  return `<div class="grid2" style="gap:18px;align-items:start"><form data-form="settings" class="card" data-preview="1"><h3>App identity</h3>
     ${field('App name', 'branding.appName', b.appName)}${field('Tagline', 'branding.tagline', b.tagline)}
     ${field('Logo image URL', 'branding.logoUrl', b.logoUrl, { ph: 'https://…/logo.png', help: 'Square image works best. Empty = letters badge.' })}
     <div class="grid3">${field('Main color', 'branding.primary', b.primary, { type: 'color' })}${field('Accent', 'branding.accent', b.accent, { type: 'color' })}${field('Background', 'branding.background', b.background, { type: 'color' })}</div>
     <h3>Login page</h3>
     ${field('Title', 'branding.loginTitle', b.loginTitle)}${field('Subtitle', 'branding.loginSubtitle', b.loginSubtitle, { type: 'textarea', rows: 2 })}
     ${field('Background image URL', 'branding.loginBgUrl', b.loginBgUrl, { ph: 'https://…/background.jpg' })}
-    <div class="field"><span>WhatsApp number</span><div>${b.whatsapp ? `<b>+${esc(b.whatsapp)}</b>` : '<span class="muted">none yet</span>'} <a class="small" href="#wa-numbers" data-act="wa-num-focus">📞 Manage WhatsApp numbers →</a></div></div>}
+    <div class="field"><span>WhatsApp number</span><div>${b.whatsapp ? `<b>+${esc(b.whatsapp)}</b>` : '<span class="muted">none yet</span>'} <a class="small" data-act="atab" data-tab="wanums" style="cursor:pointer">📞 Manage WhatsApp numbers →</a></div></div>}
     <div class="grid2">${field('Telegram support handle', 'branding.telegram', b.telegram, { ph: 'yourid', help: 'Private support chat, without @. Payment and renewal links are sent here privately, never on the website.' })}${field('Telegram marketing channel', 'branding.telegramChannel', b.telegramChannel, { ph: 'yourchannel', help: 'Public channel for promos and announcements only — no payments here.' })}</div>
     <div class="grid2">${field('Support button text', 'branding.supportLabel', b.supportLabel)}${field('Support link', 'branding.supportUrl', b.supportUrl, { ph: 'https://line.me/ti/p/~yourid' })}</div>
     ${field('Footer text', 'branding.footerText', b.footerText, { ph: '© 2026 Your company' })}
@@ -3046,7 +3053,7 @@ renew: async (el) => {
 'copy-login': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const b = state.config.branding;
-    const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${c.username}\n📅 Expires: ${fmtDate(c.expiresAt)}\n(Password as given when the account was created)`;
+    const text = `${b.appName}\n🌐 ${location.origin}\n👤 Username: ${c.username}\n📅 Expires: ${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))}\n(Password as given when the account was created)`;
     try { await navigator.clipboard.writeText(text); toast(t('loginDetailsCopied')); } catch { prompt('Copy:', text); }
   },
 'export-xlsx': async () => {
@@ -4017,7 +4024,7 @@ async function adminAlerts(s) {
     <div class="chips"><a class="${ui.f ? '' : 'on'}" data-act="al-f" data-f="">All · ${total}</a>${groups.map((g) => `<a class="${ui.f === g.k ? 'on' : ''}" data-act="al-f" data-f="${g.k}">${g.icn} ${g.name} · ${g.list.length}</a>`).join('')}</div>
     ${shown.length ? shown.map((g) => { const all = ui.open[g.k] || ui.f === g.k; const rows = all ? g.list : g.list.slice(0, 5);
       return `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${g.icn} ${g.name} <span class="pill ${g.list.length ? 'st-expiring' : 'st-active'}">${g.list.length}</span></h3>${g.list.length ? `<button class="btn sm" data-act="al-csv" data-perm="exports" data-k="${g.k}">⬇ CSV</button>` : ''}</div><p class="small muted" style="margin:4px 0 10px">${esc(g.why)}</p>
-        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + fmtDate(c.expiresAt) : leftTxt(c)}${c.email ? ' · ' + esc(c.email) : ''}${c.playErr && Date.now() - c.playErr.at < 3 * 86400000 ? `<br>⚠️ ${fmtDT(c.playErr.at)} · ${esc(c.playErr.action)} · code ${esc(c.playErr.status || '—')} · via ${esc(c.playErr.route)}` : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
+        ${rows.map((c) => `<div class="list-item al-row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:150px"><b>${esc(c.name)}</b> ${pill(c.state)}<div class="small muted">${esc(c.username)} · ${c.state === 'expired' ? 'ended ' + (c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt)) : leftTxt(c)}${c.email ? ' · ' + esc(c.email) : ''}${c.playErr && Date.now() - c.playErr.at < 3 * 86400000 ? `<br>⚠️ ${fmtDT(c.playErr.at)} · ${esc(c.playErr.action)} · code ${esc(c.playErr.status || '—')} · via ${esc(c.playErr.route)}` : ''}</div></div><div class="row al-acts">${custActions(c)}</div></div>`).join('') || '<p class="muted small">Nobody here right now. ✓</p>'}
         ${g.list.length > 5 && !all ? `<div style="text-align:center;margin-top:10px"><button class="btn sm" data-act="al-more" data-k="${g.k}">Show all ${g.list.length}</button></div>` : ''}</div>`; }).join('') : `<div class="empty"><span class="ic">✅</span>${q ? 'No alert matches your search.' : 'Nothing needs your attention right now.'}</div>`}`;
 }
 
@@ -4246,7 +4253,7 @@ function splitPhone(value, defCC) {
 function phoneField(label, name, required = true, value = '', defCC = '') {
   // an existing number is split into its country code and the rest
   const sp = splitPhone(value, defCC); const hit = !!sp.cc;
-  const g = hit ? sp.cc : value ? '' : guessCountry(); const rest = value ? sp.rest : '';
+  const g = hit ? sp.cc : value ? '' : defCC || guessCountry(); const rest = value ? sp.rest : '';
   return `<label class="field"><span>${label}</span><div class="phone-row"><select name="${name}_cc" aria-label="${t('countryCode')}" ${required ? 'required' : ''}><option value="">${t('countryCode')}</option>${DIAL.map(([cc, d]) => `<option value="${d}" ${cc === g ? 'selected' : ''}>${flag(cc)} ${esc(countryName(cc))} +${d}</option>`).join('')}</select><input type="tel" name="${name}" value="${esc(rest)}" ${required ? 'required' : ''} inputmode="tel" autocomplete="tel-national" dir="ltr" placeholder="612345678"></div></label>`;
 }
 // "+212612345678" from the country code and the number typed (a leading 0 is dropped; a full +number typed by hand is kept).
