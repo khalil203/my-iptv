@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=109';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=110';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=109';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=110';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -200,8 +200,19 @@ async function boot() {
   if (state.resetToken && !state.token) showReset();
 }
 
+// One language button on every customer / reseller / public page: 🌐 + flag, opens the 5 languages
+const LANG_FLAG = { en: '🇬🇧', fr: '🇫🇷', de: '🇩🇪', es: '🇪🇸', it: '🇮🇹' };
+function langFab() {
+  let el = document.getElementById('lang-fab');
+  if (isAdminUI()) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'lang-fab'; document.body.appendChild(el); }
+  const cur = getLang();
+  el.innerHTML = `<button type="button" class="lang-fab-btn" data-act="lang-fab" aria-haspopup="true" aria-label="${esc(t('language'))}"><span>🌐</span><b>${LANG_FLAG[cur] || ''} ${cur.toUpperCase()}</b></button>
+    <div class="lang-menu" role="menu">${LANGS.map(([k, n]) => `<a role="menuitem" tabindex="0" data-act="lang" data-lang="${k}" class="${k === cur ? 'on' : ''}"><span>${LANG_FLAG[k]}</span>${esc(n)}${k === cur ? ' ✓' : ''}</a>`).join('')}</div>`;
+}
+document.addEventListener('click', (e) => { const f = document.getElementById('lang-fab'); if (f && f.classList.contains('open') && !e.target.closest('#lang-fab')) f.classList.remove('open'); });
 function route() {
-  closeModal(); setTimeout(applyTheme);
+  closeModal(); setTimeout(applyTheme); setTimeout(langFab);
   if (isAdminUI() && location.protocol === 'http:' && !/localhost|127\.0\.0\.1/.test(location.hostname)) { location.replace('https://' + location.host + location.pathname); return; }
   if (isAdminUI()) { document.documentElement.dir = 'ltr'; document.documentElement.lang = 'en'; }
   else setLang(getLang());
@@ -927,7 +938,17 @@ async function adminPromos() {
     <div class="grid3">${field('IBO Player price', 'price', ip.price, { type: 'number', attrs: 'step="0.01" min="0"' })}${field('Not more than once every (days)', 'everyDays', ip.everyDays, { type: 'number', attrs: 'min="1"' })}</div>
     <div class="row"><span class="spacer"></span><button class="btn primary sm" data-act="ibo-auto-save">💾 Save</button></div></form>
     <p class="small muted" style="margin-bottom:0">WhatsApp can't be sent by itself without the WhatsApp Business API, so after a renewal the panel shows a <b>💬 Send IBO Player offer on WhatsApp</b> button with the message ready.</p></div>`;
-  return iboCard + `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
+  let rmCard = '';
+  try { const rm = await api('GET', '/api/admin/renewmodels'); const c = rm.cfg; const opts = [...rm.models.map((m) => [m.id, `${m.icon} ${m.name}`]), ['off', '— none —']];
+    rmCard = `<div class="card" id="rm-card"><h3 style="margin-top:0">🔁 Renewal emails — 5 ready models, 5 languages</h3>
+      <p class="small muted">Sent automatically in each customer's language and currency, with the plans, the promo code and the renewal payment link (GreenApp Host, matched to their plan). Each step goes once per subscription.</p>
+      <form data-form="rm" onsubmit="return false"><div class="row" style="gap:16px;flex-wrap:wrap">${toggle('Send automatically', 'auto', c.auto)}</div>
+      <div class="grid3">${field('Promo code', 'code', c.code, { ph: rm.code.code && !c.code ? rm.code.code + ' (from promotion)' : 'e.g. STAY20', help: 'Empty = the promo lines are left out.' })}${field('Discount %', 'discount', c.discount, { ph: '20' })}${field('Or amount', 'amount', c.amount, { ph: '10' })}</div>
+      <div class="grid3">${field('7 days before', 'd7', c.d7, { type: 'select', options: opts })}${field('Last day', 'today', c.today, { type: 'select', options: opts })}${field(`After it ends (up to ${c.expiredDays} days)`, 'expired', c.expired, { type: 'select', options: opts })}</div>
+      <div class="row"><span class="spacer"></span><button class="btn primary" data-act="rm-save">💾 Save</button></div></form>
+      <div class="grid2" style="gap:10px;margin-top:12px">${rm.models.map((m) => `<div class="card" style="margin:0;padding:14px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:24px">${m.icon}</span><b style="flex:1">${esc(m.name)}</b></div><p class="small muted" style="margin:6px 0 10px">${esc(m.subject)}</p>
+        <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="rm-preview" data-m="${m.id}">👁 Preview</button><button class="btn sm primary" data-act="rm-send" data-m="${m.id}">📤 Send now</button><button class="btn sm ghost" data-act="rm-test" data-m="${m.id}">🧪 Test to me</button></div></div>`).join('')}</div></div>`; } catch {}
+  return iboCard + rmCard + `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
     <label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">Preview in <select data-input="promo-lang" style="width:auto">${LANG5.map(([c, n]) => `<option value="${c}" ${c === L ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div></div>
     <h4 style="margin:14px 0 8px">All year</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => ['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
     <h4 style="margin:18px 0 8px">Seasonal</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => !['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
@@ -3065,7 +3086,8 @@ theme: () => {
     const order = ['auto', 'light', 'dark']; const next = order[(order.indexOf(themeMode()) + 1) % 3];
     localStorage.setItem('tvp_theme', next); applyTheme(); toast(t('themeLabel', { label: themeLabel() }));
   },
-lang: (el) => { setLang(el.dataset.lang, true); if (state.role === 'user' && state.token) renderUser(); else route(); },
+lang: (el) => { setLang(el.dataset.lang, true); const f = document.getElementById('lang-fab'); if (f) f.classList.remove('open'); if (state.role === 'user' && state.token && location.pathname !== '/app') renderUser(); else route(); langFab(); },
+  'lang-fab': () => { const f = document.getElementById('lang-fab'); if (f) f.classList.toggle('open'); },
 trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }), trialForm()),
 'new-tx': async (el) => { if (!state.admin.settings) state.admin.settings = await api('GET', '/api/admin/settings'); const type = el.dataset.type || 'income'; modal(type === 'income' ? 'Add income' : type === 'expense' ? 'Add expense' : 'Transfer between banks', txForm(type, el.dataset.acc)); },
 'del-tx': async (el) => { if (!confirm('Delete this transaction? If it is a sale or a credit purchase, that sale / purchase is removed too (profits and stock update).')) return; await api('DELETE', '/api/admin/tx/' + el.dataset.id); toast(t('deleted')); renderAdmin(); },
@@ -5198,4 +5220,19 @@ document.addEventListener('change', (e) => { const el = e.target; if (el && el.n
 Object.assign(actions, {
   'app-dev': (el) => { APP_DEV.pick = el.dataset.k; const box = $('#app-dev'); if (box) box.outerHTML = devicePicker(); },
   'app-copy': async () => { const link = location.origin + '/app'; try { await navigator.clipboard.writeText(link); } catch { const ta = document.createElement('textarea'); ta.value = link; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('apCopied')); },
+});
+
+Object.assign(actions, {
+  'rm-save': async () => { const f = $('[data-form=rm]'); const o = formToObj(f); o.auto = f.auto.checked; try { await saveSettings({ renewModels: o }); toast('Renewal emails saved ✓'); } catch (e) { toast(e.message, true); } },
+  'rm-preview': async (el, ev, lang) => { const m = el.dataset.m; const L = lang || getLang() || 'en';
+    try { const r = await api('GET', `/api/admin/renewmodels/preview?model=${m}&lang=${L}&appUrl=${encodeURIComponent(location.origin)}`);
+      const body = modal('👁 ' + esc(r.subject), `<div class="chips" style="margin-bottom:10px;flex-wrap:wrap">${LANGS.map(([k, n]) => `<a data-act="rm-lang" data-m="${m}" data-l="${k}" class="${k === L ? 'on' : ''}">${LANG_FLAG[k]} ${n}</a>`).join('')}</div><iframe id="rm-frame" style="width:100%;height:65vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>`, { wide: true });
+      $('#rm-frame', body).srcdoc = r.html; } catch (e) { toast(e.message, true); } },
+  'rm-lang': (el) => { closeModal(); actions['rm-preview']({ dataset: { m: el.dataset.m } }, null, el.dataset.l); },
+  'rm-send': (el) => { const m = el.dataset.m;
+    modal('📤 Send renewal email', `<form onsubmit="return false"><p class="small muted">Each customer gets it in their own language and currency, with their renewal link.</p>${field('Send to', 'aud', 'd7', { type: 'select', options: [['d7', '⏰ Ending in the next 7 days'], ['today', '⚠️ Ending in the next 24 hours'], ['expired', '🎁 Ended in the last 30 days'], ['expired90', '🎁 Ended in the last 90 days']] })}
+      <div class="row"><span class="spacer"></span><button class="btn primary" data-act="rm-send-go" data-m="${m}">📤 Send</button></div></form>`); },
+  'rm-send-go': async (el) => { const aud = el.closest('form').aud.value; if (!confirm('Send this renewal email now?')) return; el.disabled = true;
+    try { const r = await api('POST', '/api/admin/renewmodels/send', { model: el.dataset.m, audience: aud, appUrl: location.origin }); toast(`Sent to ${r.sent} customer(s)${r.failed ? ` · ${r.failed} failed` : ''} ✓`); closeModal(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'rm-test': async (el) => { try { const r = await api('POST', '/api/admin/renewmodels/send', { model: el.dataset.m, test: true, lang: getLang(), appUrl: location.origin }); toast(`Test sent to ${r.to} ✓`); } catch (e) { toast(e.message, true); } },
 });

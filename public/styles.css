@@ -1116,3 +1116,25 @@ body::after { mask-image: linear-gradient(180deg, black 55%, transparent 96%); -
 .badge.ok { background: color-mix(in srgb, var(--ok, #2a2) 18%, transparent); color: var(--ok, #2a2); }
 .badge.warn { background: color-mix(in srgb, var(--warn, #c80) 18%, transparent); color: var(--warn, #c80); }
 .badge.bad { background: color-mix(in srgb, var(--bad, #d33) 18%, transparent); color: var(--bad, #d33); }
+/* language button on customer pages */
+#lang-fab { position: fixed; inset-inline-start: 12px; bottom: calc(14px + var(--safe-b, 0px)); z-index: 30; }
+body:has(.bnav) #lang-fab, body:has(.chat-fab) #lang-fab { bottom: calc(148px + var(--safe-b, 0px)); }
+.site, .s-doc { padding-bottom: 72px; }
+.lang-fab-btn { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 12px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border, #334)); background: color-mix(in srgb, var(--elevated, #111827) 88%, transparent); color: var(--text); font: 600 14px Inter, system-ui, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.25); backdrop-filter: blur(10px); cursor: pointer; animation: pop .45s cubic-bezier(.2,.9,.3,1.2) both; transition: transform .15s, box-shadow .2s; }
+.lang-fab-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,.3); }
+.lang-fab-btn:active { transform: scale(.95); }
+.lang-fab-btn span { font-size: 18px; }
+.lang-menu { position: absolute; inset-inline-start: 0; bottom: 52px; min-width: 190px; padding: 6px; border-radius: 16px; background: var(--elevated, #111827); border: 1px solid var(--border, #334); box-shadow: 0 16px 40px rgba(0,0,0,.35); opacity: 0; transform: translateY(8px) scale(.96); transform-origin: bottom left; pointer-events: none; transition: opacity .18s, transform .22s cubic-bezier(.2,.9,.3,1.2); }
+#lang-fab.open .lang-menu { opacity: 1; transform: none; pointer-events: auto; }
+.lang-menu a { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 10px; color: var(--text); text-decoration: none; cursor: pointer; font-weight: 600; }
+.lang-menu a span { font-size: 20px; }
+.lang-menu a:hover, .lang-menu a:focus { background: color-mix(in srgb, var(--primary) 16%, transparent); outline: none; }
+.lang-menu a.on { color: var(--primary); }
+/* gentle motion on customer pages */
+.site .card, .s-doc .card, .user-main .card { animation: fadeUp .45s cubic-bezier(.2,.8,.2,1) both; }
+.site .card:nth-child(2), .s-doc .card:nth-child(2) { animation-delay: .05s; } .site .card:nth-child(3), .s-doc .card:nth-child(3) { animation-delay: .1s; } .site .card:nth-child(4), .s-doc .card:nth-child(4) { animation-delay: .15s; }
+.btn { transition: transform .12s, box-shadow .2s, background .2s, border-color .2s; }
+.btn.primary:hover { transform: translateY(-1px); box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 35%, transparent); }
+.chips a { transition: transform .12s, background .2s; } .chips a:active { transform: scale(.95); }
+@media (max-width: 520px) { .btn, .chips a { min-height: 42px; } }
+@media (prefers-reduced-motion: reduce) { .lang-fab-btn, .lang-menu, .site .card, .s-doc .card { animation: none !important; transition: none !important; } }

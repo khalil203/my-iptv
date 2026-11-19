@@ -2170,3 +2170,28 @@ test('details emails link the app for Android (APK), iPhone & iPad and MacBook, 
   await x.call('PUT', '/api/admin/settings', { email: { lang: 'customer' } }, tok);
   assert.ok(((await x.call('GET', `/api/admin/customers/${fr.id}/emailpreview`, {}, tok)).json.html || '').includes('ouvrez-le dans le navigateur Safari'));
 });
+
+test('renewal emails: 5 models in 5 languages, sent automatically 7 days before, on the last day and after the end', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', appUrl: 'https://tv.example.com' }, renewModels: { code: 'STAY20', discount: '20', amount: '' } }, tok);
+  const lib = (await x.call('GET', '/api/admin/renewmodels', {}, tok)).json; assert.equal(lib.models.length, 5); assert.equal(lib.code.code, 'STAY20');
+  for (const lang of ['en', 'fr', 'de', 'es', 'it']) for (const m of ['m1', 'm2', 'm3', 'm4', 'm5']) {
+    const p = (await x.call('GET', '/api/admin/renewmodels/preview', {}, tok, { model: m, lang })).json; assert.ok(p.subject && p.html.includes('STAY20'), m + ' ' + lang); assert.ok(!/\{\w+\}/.test(p.html.replace(/<style[\s\S]*?<\/style>/g, '')), 'no placeholder left ' + m + lang);
+  }
+  const m1 = (await x.call('GET', '/api/admin/renewmodels/preview', {}, tok, { model: 'm1', lang: 'en' })).json; assert.ok(m1.html.includes('$69.99') && m1.html.includes('(Save 20%)') && m1.html.includes('https://tv.example.com/support'));
+  const fr = (await x.call('GET', '/api/admin/renewmodels/preview', {}, tok, { model: 'm2', lang: 'fr' })).json; assert.match(fr.subject, /expire aujourd'hui/);
+  // no code: the promo lines disappear
+  await x.call('PUT', '/api/admin/settings', { renewModels: { code: '' }, renewalOffer: { coupon: '' } }, tok);
+  const nc = (await x.call('GET', '/api/admin/renewmodels/preview', {}, tok, { model: 'm2', lang: 'en' })).json; assert.ok(!/Promo Code/.test(nc.html)); assert.ok(!/inside/.test(nc.subject));
+  await x.call('PUT', '/api/admin/settings', { renewModels: { code: 'STAY20' } }, tok);
+  // automatic sending
+  const a = await addCustomer(x, tok, { username: 'rm7', email: 'rm7@example.com' }); const b = await addCustomer(x, tok, { username: 'rm0', email: 'rm0@example.com' }); const c = await addCustomer(x, tok, { username: 'rmx', email: 'rmx@example.fr', lang: 'fr' });
+  const now = Date.now(); await x.call('POST', `/api/admin/customers/${a.id}/expiry`, { action: 'set', expiresAtMs: now + 5 * 86400000 }, tok); await x.call('POST', `/api/admin/customers/${b.id}/expiry`, { action: 'set', expiresAtMs: now + 5 * 3600000 }, tok); await x.call('POST', `/api/admin/customers/${c.id}/expiry`, { action: 'set', expiresAtMs: now - 2 * 86400000 }, tok);
+  const before = x.mails.length; await x.be.daily();
+  const got = x.mails.slice(before); const sub = (to) => (got.find((m) => m.to.includes(to)) || {}).subject || '';
+  assert.match(sub('rm7@example.com'), /expires in 7 days/); assert.match(sub('rm0@example.com'), /expires today/); assert.match(sub('rmx@example.fr'), /Vous nous manquez/);
+  const n = x.mails.length; await x.be.daily(); assert.equal(x.mails.filter((m, i) => i >= n && /rm[70x]@/.test(m.to[0])).length, 0, 'each step only once');
+  // send now to a group and a test
+  assert.equal((await x.call('POST', '/api/admin/renewmodels/send', { model: 'm5', audience: 'one', id: a.id }, tok)).json.sent, 1);
+  assert.equal((await x.call('POST', '/api/admin/renewmodels/send', { model: 'm4', test: true, to: 'owner@example.com', lang: 'de' }, tok)).json.sent, 1);
+});
