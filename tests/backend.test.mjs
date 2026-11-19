@@ -2249,7 +2249,7 @@ test('resellers: client subscription tracker, contact & shop prices, app downloa
   assert.equal((await x.call('POST', '/api/rsl/appmail', { clientId: c3.id }, rt)).json.to, 'client.three@example.com');
   const m = x.mails.at(-1); assert.match(m.subject, /Install the .* app on all your devices/); for (const k of ['/apk/INTPROTO-TV.apk', '/app?os=ios', '/download#mac', 'Safari', 'Auto Blocker']) assert.ok(m.html.includes(k), k);
   const cu = await addCustomer(x, tok, { username: 'appmail1', email: 'appmail1@example.fr', lang: 'fr' });
-  assert.equal((await x.call('POST', '/api/admin/appmail', { customerId: cu.id }, tok)).json.sent, 1); assert.match(x.mails.at(-1).subject, /Installez/);
+  assert.equal((await x.call('POST', '/api/admin/appmail', { customerId: cu.id }, tok)).json.sent, 1); assert.equal((await x.call('POST', '/api/admin/appmail', {}, tok)).status, 400, 'no group without choosing one'); assert.match(x.mails.at(-1).subject, /Installez/);
   // other resellers can't see these clients
   const R2 = (await x.call('POST', '/api/admin/reseller-sale', { packageId: 'r10', name: 'Other Shop', email: 'other.shop@example.com', appUrl: 'https://tv.example.com' }, tok)).json.reseller;
   const rt2 = (await x.call('POST', '/api/login', { username: R2.rslId, password: R2.login.pass })).json.token; assert.equal((await x.call('GET', '/api/rsl/tools', {}, rt2)).json.clients.length, 0);
