@@ -3756,9 +3756,20 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const a = (await getAccounts()).find((x) => x.id === String(body.id || '')); if (!a?.apiKey) return err(400, 'Add the Hostinger API token to this account first (hPanel → Profile → API).');
         const H = { Authorization: 'Bearer ' + a.apiKey, accept: 'application/json' }; const get = async (p) => { try { const r = await fetchFn('https://developers.hostinger.com' + p, { headers: H }); const j = await r.json().catch(() => ({})); if (!r.ok) return { error: j.message || j.error || 'Hostinger answered ' + r.status, status: r.status }; return { data: Array.isArray(j) ? j : j.data || [] }; } catch (e) { return { error: e.message }; } };
         const [w, d, b] = [await get('/api/hosting/v1/websites?per_page=100'), await get('/api/domains/v1/portfolio'), await get('/api/billing/v1/subscriptions')];
-        if (w.status === 401 || d.status === 401) return err(401, 'Hostinger refused the token. Make a new API token in hPanel → Profile → API and paste it in this account.');
+        if (w.status === 401 || d.status === 401) return err(400, 'Hostinger refused the token. Make a new API token in hPanel → Profile → API and paste it in this account.');
         await log('security', `Hostinger account "${a.name}" checked by ${actorName}`);
         return ok({ websites: (w.data || []).map((x) => ({ domain: x.domain, enabled: x.is_enabled, type: x.website_type || x.vhost_type || '', username: x.username || '', created: x.created_at })), domains: (d.data || []).map((x) => ({ domain: x.domain, status: x.status, type: x.type, expires: x.expires_at })), subscriptions: (b.data || []).map((x) => ({ name: x.name, status: x.status, price: x.total_price, renew: x.renewal_price, currency: x.currency_code, expires: x.expires_at, auto: x.is_auto_renewed })), errors: [w.error, d.error, b.error].filter(Boolean) });
+      }
+      if (R('POST', '/api/admin/accounts/dynu-list')) { // the domains in the Dynu account, and their DNS records
+        const a = (await getAccounts()).find((x) => x.id === String(body.id || '')); if (!a?.apiKey) return err(400, 'Add the Dynu API key to this account first (Dynu Control Panel → API Credentials).');
+        const H = { 'API-Key': a.apiKey, accept: 'application/json' }; let r, j;
+        try { r = await fetchFn('https://api.dynu.com/v2/dns', { headers: H }); j = await r.json().catch(() => ({})); } catch (e) { return err(502, 'Dynu could not be reached: ' + e.message); }
+        if (r.status === 401 || r.status === 403) return err(400, 'Dynu refused the API key. Copy it again from Dynu → Control Panel → API Credentials.'); if (!r.ok) return err(502, 'Dynu: ' + (j.message || 'error ' + r.status));
+        const out = [];
+        for (const z of (j.domains || []).slice(0, 20)) { let recs = []; try { const x = await (await fetchFn(`https://api.dynu.com/v2/dns/${z.id}/record`, { headers: H })).json(); recs = (x.dnsRecords || []).map((q) => ({ type: q.recordType, name: q.nodeName || '@', value: q.textData || q.host || q.ipv4Address || q.content || '', on: q.state !== false })); } catch {}
+          out.push({ id: z.id, name: z.name, ipv4: z.ipv4Address || '', updated: z.updatedOn || '', records: recs, mail: recs.some((q) => /resend|amazonses|_domainkey/i.test(q.name + ' ' + q.value)) }); }
+        const list = await getAccounts(); const acc = list.find((x) => x.id === a.id); const names = out.map((d) => d.name.toLowerCase()); if (names.length && names.join() !== (acc.domains || []).join()) { acc.domains = names.slice(0, 30); await saveAccounts(list); }
+        await log('security', `Dynu account "${a.name}" checked by ${actorName}`); return ok({ domains: out });
       }
       if (R('POST', '/api/admin/accounts/hostinger-dns')) { // add the DNS records Resend asks for to a domain whose DNS is at Hostinger
         const L = await getAccounts(); const ho = L.find((x) => x.id === String(body.hostingerId || '')), re = L.find((x) => x.id === String(body.resendId || ''));
@@ -3770,7 +3781,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const rj = await (await fetchFn('https://api.resend.com/domains/' + encodeURIComponent(rdom.id), { headers: RH })).json().catch(() => ({}));
         // the zone at Hostinger is the main domain (mail.example.com lives in example.com)
         const parts = domain.split('.'); let zone = '', existing = null;
-        for (let i = 0; i <= parts.length - 2 && !zone; i++) { const z = parts.slice(i).join('.'); try { const r = await fetchFn('https://developers.hostinger.com/api/dns/v1/zones/' + encodeURIComponent(z), { headers: HH }); if (r.ok) { zone = z; existing = await r.json().catch(() => []); } else if (r.status === 401) return err(401, 'Hostinger refused the token.'); } catch {} }
+        for (let i = 0; i <= parts.length - 2 && !zone; i++) { const z = parts.slice(i).join('.'); try { const r = await fetchFn('https://developers.hostinger.com/api/dns/v1/zones/' + encodeURIComponent(z), { headers: HH }); if (r.ok) { zone = z; existing = await r.json().catch(() => []); } else if (r.status === 401) return err(400, 'Hostinger refused the token.'); } catch {} }
         if (!zone) return err(404, `${domain} is not a DNS zone in this Hostinger account (or its DNS is managed elsewhere, e.g. Dynu).`);
         const have = new Set((Array.isArray(existing) ? existing : existing.data || []).flatMap((x) => (x.records || []).map((q) => `${String(x.type).toUpperCase()}|${String(x.name || '@').toLowerCase()}|${String(q.content || '').toLowerCase().replace(/\.$/, '')}`)));
         const add = [], skipped = [];

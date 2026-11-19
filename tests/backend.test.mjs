@@ -1978,3 +1978,23 @@ test('email accounts page: keys and accounts stay in step, trial → paid switch
   assert.equal((await x.call('POST', '/api/admin/email/plan', { id: free.id, tier: 'free' }, lt)).status, 403);
   assert.equal((await x.call('POST', '/api/admin/accounts/hostinger', { id: ho.id }, lt)).status, 403);
 });
+
+test('Dynu: connect with the API key, list domains and DNS records, only for owner / Khalil / Nizar', async () => {
+  const x = setup(async (url, init = {}) => {
+    if (url === 'https://api.dynu.com/v2/dns') return init.headers['API-Key'] === 'dynu-good' ? { ok: true, status: 200, json: async () => ({ domains: [{ id: 11, name: 'example-site.com', ipv4Address: '1.2.3.4' }] }) } : { ok: false, status: 401, json: async () => ({ message: 'unauthorized' }) };
+    if (url === 'https://api.dynu.com/v2/dns/11/record') return { ok: true, status: 200, json: async () => ({ dnsRecords: [{ recordType: 'TXT', nodeName: 'resend._domainkey', textData: 'p=MIGf', state: true }, { recordType: 'A', nodeName: '', ipv4Address: '1.2.3.4', state: true }] }) };
+    return null;
+  });
+  const tok = await adminToken(x);
+  const a = (await x.call('POST', '/api/admin/accounts/save', { kind: 'dynu', name: 'Dynu', apiKey: 'dynu-good', email: 'dns@example.com' }, tok)).json.account;
+  const r = (await x.call('POST', '/api/admin/accounts/dynu-list', { id: a.id }, tok)).json; assert.equal(r.domains[0].name, 'example-site.com'); assert.equal(r.domains[0].mail, true); assert.equal(r.domains[0].records.length, 2);
+  assert.deepEqual((await x.call('GET', '/api/admin/accounts', {}, tok)).json.rows.find((y) => y.id === a.id).domains, ['example-site.com']);
+  const bad = (await x.call('POST', '/api/admin/accounts/save', { kind: 'dynu', name: 'Dynu 2', apiKey: 'dynu-bad' }, tok)).json.account;
+  assert.equal((await x.call('POST', '/api/admin/accounts/dynu-list', { id: bad.id }, tok)).status, 400);
+  // Khalil (Technical Manager) can, a support agent cannot
+  await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'khalil', password: 'secret12', role: 'Technical Manager', perms: ['customers_view'] }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Agent Amy', username: 'amy', password: 'secret12', role: 'Support Agent', perms: ['customers_view'] }, tok);
+  const lg = async (u) => { const t = (await x.call('POST', '/api/login', { username: u, password: 'secret12' })).json.token; await signBylaws(x, t); return t; };
+  assert.equal((await x.call('POST', '/api/admin/accounts/dynu-list', { id: a.id }, await lg('khalil'))).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/accounts/dynu-list', { id: a.id }, await lg('amy'))).status, 403);
+});

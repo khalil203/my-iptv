@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=96';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=97';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -811,7 +811,17 @@ async function adminMail() {
     ${await mailStatusCard(true, true)}
     <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="mail-add">＋ Add email account</button><button class="btn" data-act="acc-sheet">📊 Google Sheets ${d.sheet ? '<span class="pill st-active">linked</span>' : '<span class="pill">not linked</span>'}</button><button class="btn" data-act="acc-dns">🌐 Add Resend DNS records</button>${others.filter((a) => a.kind === 'hostinger' && a.apiKey).map((a) => `<button class="btn" data-act="acc-hostinger" data-id="${a.id}">🏠 ${esc(a.name)}</button>`).join('')}<a class="btn ghost" data-act="atab" data-tab="accounts">🔐 All accounts (Hostinger, Dynu…)</a></div>
     ${cards || '<div class="card"><p class="muted">No email account yet. Press ＋ Add email account.</p></div>'}
-    <div class="card"><h3>Hosting & domains</h3>${others.length ? others.map((a) => `<div class="list-item"><div style="flex:1"><b>${esc(a.name)}</b> <span class="pill">${a.kind === 'hostinger' ? 'Hostinger' : 'Dynu'}</span><div class="small muted">${esc(a.email || '')}${(a.domains || []).length ? ' · ' + a.domains.map(esc).join(', ') : ''}${a.apiKey ? ' · API ✓' : ' · no API key yet'}</div></div><button class="btn sm" data-act="acc-edit" data-id="${a.id}">✎</button>${a.kind === 'hostinger' && a.apiKey ? `<button class="btn sm" data-act="acc-hostinger" data-id="${a.id}">🏠 Open</button>` : ''}</div>`).join('') : '<p class="small muted">No Hostinger or Dynu account yet. Add them in <a data-act="atab" data-tab="accounts" style="cursor:pointer">🔐 Accounts & API keys</a> (type Hostinger / Dynu) with their API key.</p>'}</div>
+    <div class="card"><h3>🏠 Hostinger & 🌐 Dynu</h3>
+      <p class="small muted" style="margin-top:0">Only the owner, Khalil and Nizar see and change this. Paste the API key once: the websites, domains and DNS appear here, and Resend's email records can be added to your domains in one click.</p>
+      <div class="grid2" style="gap:12px;align-items:start">
+        ${['hostinger', 'dynu'].map((k) => { const list = others.filter((a) => a.kind === k); const H = k === 'hostinger';
+          return `<div class="card" style="margin:0"><h4 style="margin-top:0">${H ? '🏠 Hostinger — websites & apps' : '🌐 Dynu — domains & DNS'}</h4>
+            ${list.map((a) => `<div class="list-item"><div style="flex:1"><b>${esc(a.name)}</b><div class="small muted">${esc(a.email || '')}${(a.domains || []).length ? ' · ' + a.domains.map(esc).join(', ') : ''}</div></div>${a.apiKey ? `<button class="btn sm" data-act="${H ? 'acc-hostinger' : 'acc-dynu'}" data-id="${a.id}">${H ? '🏠 Websites & domains' : '🌐 Domains & DNS'}</button>` : '<span class="pill st-expiring">no API key</span>'}<button class="btn sm ghost" data-act="acc-edit" data-id="${a.id}">✎</button></div>`).join('')}
+            <form data-form="hd-connect" data-k="${k}" style="margin-top:8px">${list.length ? '<p class="small muted" style="margin:0 0 6px">Add another account:</p>' : ''}
+              ${field(H ? 'Hostinger API token' : 'Dynu API key', 'apiKey', '', { attrs: 'required autocomplete="off" autocapitalize="none" spellcheck="false"', ph: H ? 'hPanel → Profile → API → Create token' : 'Dynu → Control Panel → API Credentials', type: 'password' })}
+              ${field('Account email (login)', 'email', '', { type: 'email', attrs: 'autocapitalize="none"' })}
+              <button class="btn primary sm">🔗 Connect ${H ? 'Hostinger' : 'Dynu'}</button></form></div>`; }).join('')}
+      </div></div>
     <p class="small muted">Everything here is the same list as 🔐 Accounts & API keys and the Google Sheet: change it in any of the three and the sending keys follow (plan, domain, on/off). Paid keys send first; free trial keys only up to 100 a day and 3,000 a month.</p>`;
 }
 async function adminOverview() {
@@ -2684,6 +2694,11 @@ const actions = {
         <h3>Subscriptions (${r.subscriptions.length})</h3>${r.subscriptions.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Plan</th><th>Status</th><th>Renewal</th><th>Ends</th><th>Auto-renew</th></tr></thead><tbody>${r.subscriptions.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.status)}</td><td>${x.renew != null ? esc(String(x.renew / 100)) + ' ' + esc(x.currency || '') : '—'}</td><td>${dt(x.expires)}</td><td>${x.auto ? '✓' : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">No subscription.</p>'}
         <p class="small muted">Manage websites and files in <a href="https://hpanel.hostinger.com" target="_blank" rel="noopener">hPanel</a>. To point a domain's email records at Resend, use “🌐 Add Resend DNS records”.</p>`;
     } catch (e) { $('.modal-body').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } },
+  'acc-dynu': async (el) => { modal('🌐 Dynu domains & DNS', '<p class="muted">Asking Dynu…</p>', { wide: true });
+    try { const r = await api('POST', '/api/admin/accounts/dynu-list', { id: el.dataset.id });
+      $('.modal-body').innerHTML = r.domains.length ? r.domains.map((d) => `<div class="card" style="margin-bottom:10px"><div class="row"><b style="flex:1">${esc(d.name)}</b>${d.mail ? '<span class="pill st-active">Resend email records ✓</span>' : '<span class="pill st-expiring">no Resend records yet</span>'}</div>
+        ${d.records.length ? `<div class="tbl-wrap"><table class="tbl small"><thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead><tbody>${d.records.map((q) => `<tr><td>${esc(q.type)}</td><td><code>${esc(q.name)}</code></td><td><code style="word-break:break-all">${esc(String(q.value).slice(0, 120))}</code></td></tr>`).join('')}</tbody></table></div>` : '<p class="small muted">No record.</p>'}</div>`).join('') + '<p class="small muted">To add the records Resend needs, press “🌐 Add Resend DNS records”.</p>' : '<p class="muted">No domain in this Dynu account.</p>';
+    } catch (e) { $('.modal-body').innerHTML = `<div class="notice danger">${esc(e.message)}</div>`; } },
   'mail-add': () => modal('＋ Add email account', accForm({ kind: 'resend', use: 'customer' }), { wide: true }),
   'mail-plan-custom': (el) => { const a = ACC.d?.rows.find((x) => x.id === el.dataset.id); if (a) modal(`✎ ${esc(a.name)}`, accForm(a), { wide: true }); },
   'acc-sheet': () => { const d = ACC.d; modal('📊 Google Sheets', `<p class="small" style="margin-top:0">Keep the same accounts in a Google Sheet: <b>Send</b> writes them to the sheet, <b>Read</b> brings changes you made in the sheet back here.</p>
@@ -3137,6 +3152,9 @@ async function saveSettings(partial, quiet) {
 }
 
 const forms = {
+  async 'hd-connect'(f) { const k = f.dataset.k; const b = f.querySelector('button'); b.disabled = true;
+    try { const r = await api('POST', '/api/admin/accounts/save', { kind: k, name: k === 'hostinger' ? 'Hostinger' + (f.email.value ? ' · ' + f.email.value : '') : 'Dynu' + (f.email.value ? ' · ' + f.email.value : ''), apiKey: f.apiKey.value.trim(), email: f.email.value.trim() });
+      toast('Connected ✓ Checking…'); await renderAdmin(); actions[k === 'hostinger' ? 'acc-hostinger' : 'acc-dynu']({ dataset: { id: r.account.id } }); } catch (e) { toast(e.message, true); b.disabled = false; } },
   async acc(f) { const o = formToObj(f); o.id = f.dataset.id || undefined; try { await api('POST', '/api/admin/accounts/save', o); closeModal(); toast('Saved ✓'); renderAdmin(); } catch (e) { toast(e.message, true); } },
   async 'acc-dns'(f) { const b = f.querySelector('button.primary'); b.disabled = true; $('#dns-out').innerHTML = '<p class="muted">Working…</p>';
     try { const o = formToObj(f); const dz = ACC.d.rows.find((a) => a.id === o.dnsId); const isH = dz?.kind === 'hostinger';
