@@ -1,4 +1,4 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=98';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=99';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=90';
 import { ic } from './icons.js?v=83';
@@ -1263,7 +1263,7 @@ async function adminResellerSection(s) {
   const sales = can('customers_view') ? await api('GET', '/api/admin/reseller-sales').catch(() => []) : [];
   const rp = s.resellerPackages || [];
   const row = (p) => `<div class="rp-row" data-rp="${esc(p.id || '')}"><input data-k="name" value="${esc(p.name)}" placeholder="Name"><input data-k="credits" type="number" value="${p.credits}" placeholder="Credits"><input data-k="price" type="number" step="any" value="${p.price}" placeholder="Price"><button class="btn sm danger" data-act="del-rp" title="Remove reseller plan" aria-label="Remove reseller plan">✕</button></div>`;
-  const cur = s.resellerCurrency || 'EUR';
+  const cur = s.currencyRule?.on !== false ? 'USD' : s.resellerCurrency || 'EUR'; // USD worldwide, EUR for European resellers (shown per reseller)
   return `<div class="card"><div class="row"><h3 style="margin:0">🤝 Reseller packages</h3><span class="spacer"></span><button class="btn primary sm" data-act="sell-rp" data-perm="customers_edit">＋ Sell a package</button></div>
     <div class="plans-grid" style="margin:14px 0">${rp.map((p) => `<div class="plan-c"><b>${esc(p.name)}</b><div class="pp">${priceTxt(p.price, cur)}</div><div class="small muted">${p.credits} credits · ${priceTxt(Math.round((p.price / p.credits) * 100) / 100, cur)} each</div></div>`).join('')}</div>
     <details><summary class="small muted" style="cursor:pointer">Edit packages</summary><div style="margin-top:10px">
@@ -1274,16 +1274,17 @@ async function adminResellerSection(s) {
   </div>`;
 }
 const ORDER_CUR = { EUR: '€', USD: '$', USDT: '₮', MAD: 'DH ', THB: '฿' };
-const orderPrice = (s, p) => (s.orderCurrency === 'ALL' ? Number(p.price).toFixed(2) + ' €/$' : (ORDER_CUR[s.orderCurrency || 'EUR'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[s.orderCurrency || 'EUR'] ? '' : ' ' + s.orderCurrency));
-const packageOptions = (s) => [
-  ...(s.orderPackages || []).map((p) => [p.id, `${p.title} — ${orderPrice(s, p)}`]),
-  ...(s.resellerPackages || []).map((p) => [p.id, `${p.name} — ${Number(p.price) || 0} ${ORDER_CUR[s.resellerCurrency || "EUR"] || ""} ${s.resellerCurrency || "EUR"}`.trim()]),
+const orderPrice = (s, p, cur) => { const c = cur || (s.currencyRule?.on !== false ? 'USD' : s.orderCurrency); return c === 'ALL' ? Number(p.price).toFixed(2) + ' €/$' : (ORDER_CUR[c || 'USD'] || '') + Number(p.price).toFixed(2) + (ORDER_CUR[c || 'USD'] ? '' : ' ' + c); };
+// Package list shown for one customer (or reseller): prices in their currency — USD worldwide, EUR for Europe.
+const packageOptions = (s, cur) => [
+  ...(s.orderPackages || []).map((p) => [p.id, `${p.title} — ${orderPrice(s, p, cur)}`]),
+  ...(s.resellerPackages || []).map((p) => [p.id, `${p.name} — ${orderPrice(s, p, cur)}`]),
 ];
 
-const resolvePkgPayLink = (s, pkgId) => {
+const resolvePkgPayLink = (s, pkgId, wantCur) => {
   const pk = (s.orderPackages || []).find((p) => p.id === pkgId) || (s.resellerPackages || []).find((p) => p.id === pkgId);
   if (!pk) return null;
-  const cur = s.orderCurrency || 'EUR';
+  const cur = wantCur || s.orderCurrency || 'EUR'; // the payment link in the customer's currency first
   const choose = (acc) => { const links = acc.links || []; return links.find((l) => l.url && (l.currency === cur || !l.currency)) || links.find((l) => l.url); };
   const acc = pk.stripeAccount ? (s.stripeAccounts || []).find((a) => a.id === pk.stripeAccount && a.status === 'active') : null;
   const target = acc || (s.stripeAccounts || []).find((a) => a.status === 'active' && (a.links || []).length > 0);
@@ -1331,7 +1332,7 @@ function nlRead() {
 }
 const orderTargets = (grp) => (state.admin.customers || []).filter((c) => c.email && (grp === 'all' || (grp === 'trial' ? c.isTrial : grp === 'notrecent' ? !c.orderSentAt || Date.now() - c.orderSentAt > 7 * 86400000 : c.state === grp)));
 function resellerSaleForm(s, o = {}) {
-  const rp = s.resellerPackages || []; const cur = s.resellerCurrency || 'EUR'; const list = RS.data?.list || [];
+  const rp = s.resellerPackages || []; const cur = s.currencyRule?.on !== false ? (o.cur || 'USD') : s.resellerCurrency || 'EUR'; const list = RS.data?.list || [];
   const pk0 = rp.find((p) => p.id === o.pkg) || rp[0];
   return `<form data-form="rp-sale">${o.req ? `<input type="hidden" name="requestId" value="${esc(o.req)}">` : ''}
     ${field('Package', 'packageId', pk0?.id, { type: 'select', options: rp.map((p) => [p.id, `${p.name} · ${p.credits} credits · ${priceTxt(p.price, cur)}`]), attrs: 'data-rp-pick' })}
@@ -2475,14 +2476,14 @@ const actions = {
   },
   'order-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings;
-    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${packageOptions(s).map(([id, label]) => `<option value="${esc(id)}" ${id === (c.buyRequest?.pkg || c.orderSentPkg) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
+    const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${packageOptions(s, c.cur).map(([id, label]) => `<option value="${esc(id)}" ${id === (c.buyRequest?.pkg || c.orderSentPkg) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
       <p class="muted small" id="op-subj"></p><iframe id="mail-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <label class="field" style="margin-top:12px"><span>Payment link for this order</span><input id="op-link" placeholder="https://… (empty = button opens your WhatsApp)" autocapitalize="none"></label>
       <div class="row"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
       ${c.buyRequest ? `<p class="small">🛒 Requested <b>${esc(c.buyRequest.title || '')}</b> on ${fmtDT(c.buyRequest.at)}${c.buyRequest.answeredAt ? ' · answered' : ''}</p>` : ''}
       ${c.orderSentAt ? `<p class="small muted">Last package email: ${fmtDT(c.orderSentAt)}${c.orderSentLink ? ' · link: ' + esc(c.orderSentLink) : ''}</p>` : ''}`, { wide: true });
-    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const r = resolvePkgPayLink(s, $('#op-pick').value); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&link=${encodeURIComponent($('#op-link').value.trim())}&cur=${encodeURIComponent((r&&r.currency)||s.orderCurrency)}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
-    const fillOpLink = () => { if ($('#op-link').value.trim()) return; const r = resolvePkgPayLink(s, $('#op-pick').value); if (r) $('#op-link').value = r.url; }; $('#op-pick').addEventListener('change', () => { fillOpLink(); load(); }); $('#op-link').addEventListener('change', load); fillOpLink(); load();
+    const load = async () => { const appUrl = location.origin + location.pathname.replace(/index\.html$/, ''); const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${$('#op-pick').value}&link=${encodeURIComponent($('#op-link').value.trim())}&cur=${encodeURIComponent(c.cur || 'USD')}&appUrl=${encodeURIComponent(appUrl)}`); $('#op-subj').innerHTML = 'Subject: <b>' + esc(pv.subject) + '</b>'; $('#mail-pv', body).srcdoc = pv.html; };
+    const fillOpLink = () => { if ($('#op-link').value.trim()) return; const r = resolvePkgPayLink(s, $('#op-pick').value, c.cur); if (r) $('#op-link').value = r.url; }; $('#op-pick').addEventListener('change', () => { fillOpLink(); load(); }); $('#op-link').addEventListener('change', load); fillOpLink(); load();
   },
   'order-send': async (el) => {
     el.disabled = true;
@@ -2566,7 +2567,7 @@ const actions = {
     const pick = c.orderSentPkg && s.orderPackages.some((p) => p.id === c.orderSentPkg) ? c.orderSentPkg : p0.id;
     const body = modal('💬 WhatsApp message', `<form data-form="wa" onsubmit="return false">
       <div class="grid3">${field('Message', 'type', c.state === 'expired' || c.state === 'expiring' ? 'renew' : c.isTrial ? 'pay' : 'pay', { type: 'select', options: [['pay', '💳 Payment link (place an order)'], ['trial', '🎁 Free trial details'], ['thanks', '🙏 Thank you for your purchase'], ['renew', '🔁 Renewal reminder'], ['login', '🔑 Login details'], ['support', '🎧 Support link (24/7 help page)'], ...(state.admin.settings.waCustom || []).map((x) => ['c:' + x.id, '✍️ ' + x.name])] })}${field('Language', 'lang', LANG5_CODES.includes(c.lang) ? c.lang : 'en', { type: 'select', options: LANG5 })}${phoneField('WhatsApp number', 'phone', false, String(c.whatsapp || c.phone || ''), custCC(c))}</div>
-      <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
+      <div id="wa-pkg"><div class="grid2">${field('Package', 'pkg', c.buyRequest?.pkg || pick, { type: 'select', options: [...packageOptions(s, c.cur)] })}${field('Payment link', 'link', '', { attrs: 'autocapitalize="none"', ph: 'https://… your link for this order' })}</div>
       <details><summary class="small muted" style="cursor:pointer;margin:6px 0">✏️ Custom subscription (optional)</summary>
         <div class="grid3">${field('Package name', 'title', '', { ph: 'e.g. 1 Year + 2 months free' })}${field('Price', 'price', '', { type: 'number', attrs: 'step="any" min="0"' })}${field('Currency', 'currency', c.cur || 'USD', { type: 'select', options: [['EUR', '€ EUR'], ['USD', '$ USD'], ['USDT', '₮ USDT'], ['MAD', 'DH MAD'], ['THB', '฿ THB']] })}</div>
         <div class="grid3">${field('Days', 'days', '', { type: 'number', attrs: 'min="1"' })}${field('Devices', 'devices', '', { type: 'number', attrs: 'min="1"' })}</div>
@@ -2578,7 +2579,7 @@ const actions = {
     const f = $('[data-form=wa]', body); f.dataset.id = c.id;
     const show = () => { $('#wa-pkg').style.display = f.type.value === 'login' ? 'none' : ''; };
     ['type', 'lang', 'title', 'price', 'currency', 'days', 'devices', 'link'].forEach((k) => f[k].addEventListener('change', () => { show(); waLoad(); }));
-    const fillWaLink = () => { if (f.link.value.trim()) return; const r = resolvePkgPayLink(s, f.pkg.value); if (r) { f.link.value = r.url; f.currency.value = r.currency; } };
+    const fillWaLink = () => { if (f.link.value.trim()) return; const r = resolvePkgPayLink(s, f.pkg.value, c.cur); if (r) f.link.value = r.url; }; // the price stays in the customer's currency
     f.pkg.addEventListener('change', () => { fillWaLink(); show(); waLoad(); });
     show(); waLoad();
   },

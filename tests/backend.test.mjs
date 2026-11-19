@@ -1998,3 +1998,22 @@ test('Dynu: connect with the API key, list domains and DNS records, only for own
   assert.equal((await x.call('POST', '/api/admin/accounts/dynu-list', { id: a.id }, await lg('khalil'))).status, 200);
   assert.equal((await x.call('POST', '/api/admin/accounts/dynu-list', { id: a.id }, await lg('amy'))).status, 403);
 });
+
+test('a US customer gets USD everywhere even if the WhatsApp window sends EUR; long-expired customers read "inactive since"', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { orderCurrency: 'EUR', currency: 'EUR', currencyRule: { on: true } }, tok);
+  const us = await addCustomer(x, tok, { username: 'carol', email: 'carol.test@yahoo.com', phone: '+12035550143' });
+  const list = await x.store.get('customers'); const c = list.find((y) => y.id === us.id); c.expiresAt = Date.UTC(2024, 2, 2); await x.store.put('customers', list);
+  const pk = (await x.call('GET', '/api/admin/settings', {}, tok)).json.orderPackages[0];
+  // the window's hidden Currency box says EUR, no custom price: the customer's USD wins
+  const w = (await x.call('POST', `/api/admin/customers/${us.id}/wamsg`, { type: 'renew', pkg: pk.id, currency: 'EUR', title: '', price: '', appUrl: 'https://tv.example.com' }, tok)).json.text;
+  assert.match(w, /\$\d/); assert.doesNotMatch(w, /€/);
+  assert.match(w, /has been inactive since \*March 2024\*/);
+  // a custom price typed with a currency is kept as typed
+  const cu = await x.call('POST', `/api/admin/customers/${us.id}/wamsg`, { type: 'renew', pkg: pk.id, currency: 'EUR', price: '19', appUrl: 'https://tv.example.com' }, tok); assert.match(cu.json.text || JSON.stringify(cu.json), /€19\.00/);
+  // package email preview and the email sent use the same currency
+  const pvr = await x.call('GET', `/api/admin/customers/${us.id}/orderpreview`, {}, tok, { pkg: pk.id, cur: 'EUR' }); const pv = pvr.json.html; assert.ok(pv, JSON.stringify(pvr.json).slice(0, 300)); assert.match(pv, /\$\d/); assert.doesNotMatch(pv, /€\d/);
+  // a German customer still gets EUR
+  const de = await addCustomer(x, tok, { username: 'helga', email: 'helga.test@gmx.de' });
+  assert.match((await x.call('POST', `/api/admin/customers/${de.id}/wamsg`, { type: 'renew', pkg: pk.id, currency: 'USD', price: '', appUrl: 'https://tv.example.com' }, tok)).json.text, /€\d/);
+});
