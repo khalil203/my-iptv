@@ -1158,3 +1158,14 @@ body { top: 0 !important; } .goog-text-highlight { background: none !important; 
 html.translated-rtl #admin-body { direction: rtl; text-align: start; }
 html.translated-rtl #admin-body [dir=ltr], html.translated-rtl #admin-body input, html.translated-rtl #admin-body .tbl { direction: ltr; }
 .locked-text { background: rgba(127,127,127,.08) !important; cursor: default; }
+/* agent work planning */
+.wp-tbl td, .wp-tbl th { vertical-align: top; min-width: 120px; }
+.wp-cell.wp-done { background: color-mix(in srgb, #22c55e 12%, transparent); }
+.wp-cell.wp-now, .wp-today.wp-now { box-shadow: inset 0 0 0 2px #f59e0b; border-radius: 8px; }
+.wp-today.wp-done { opacity: .75; }
+.wp-th-today { color: var(--primary); }
+.wp-check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; font-weight: 700; min-height: 36px; }
+.wp-check input { width: 20px; height: 20px; accent-color: #22c55e; }
+.wp-bar { height: 8px; border-radius: 99px; background: rgba(127,127,127,.18); margin-top: 12px; overflow: hidden; }
+.wp-bar i { display: block; height: 100%; background: linear-gradient(90deg, #22c55e, #06b6d4); transition: width .5s; }
+.wp-tbl td:first-child, .wp-tbl th:first-child { min-width: 210px; max-width: 230px; white-space: normal !important; }

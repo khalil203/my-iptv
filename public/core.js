@@ -292,6 +292,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/guide') return null;
   if (path === '/api/admin/waiting') return 'customers_view';
   if (path.startsWith('/api/admin/holidays/')) return 'customers_view';
+  if (path.startsWith('/api/admin/workplan')) return null; // everyone on the team (agents check off, owner edits)
   if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/leaves')) return method === 'POST' && (path === '/api/admin/leaves' || path.startsWith('/api/admin/leaves/submit')) ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/tasks')) return 'tasks';
@@ -1026,6 +1027,40 @@ export function renewModelEmail(s, c, model, link, appUrl) {
   const camp = { split: false, lang, badge: M.icon + ' ' + app, content: { all: { subject: subj, title: T.t, body: fill(body).replace(/_\((.+?)\)_/g, '($1)'), button: (M.icon === '🎁' ? '🎟️ ' : '👉 ') + N.renew } }, link: v.link };
   return newsletterEmail(s, c, camp, appUrl, '');
 }
+// ---- Agent work planning: the daily schedule (Monday–Sunday), tasks to check off, rules; owner edits, agents check off ----
+export const WORKPLAN_DEF = {
+  tz: 'Europe/Paris',
+  slots: [
+    { id: 's1', start: '08:30', end: '09:30', title: 'Check-In & Panel Login', icon: '🟢', tab: 'attendance' },
+    { id: 's2', start: '09:30', end: '11:30', title: 'IPTV Customer Support & Order Checks', icon: '🛟', tab: 'support' },
+    { id: 's3', start: '11:30', end: '13:00', title: 'Renewal Emails & Client Follow-Ups', icon: '🔁', tab: 'promos' },
+    { id: 's4', start: '13:00', end: '15:00', title: 'WhatsApp & Telegram Customer Messaging', icon: '💬', tab: 'customers' },
+    { id: 's5', start: '15:00', end: '18:00', title: 'US Morning Outreach (Emails, Newsletters & Promotions)', icon: '📧', tab: 'promos' },
+    { id: 's6', start: '18:00', end: '19:00', title: 'Break / Shift Handover', icon: '☕', tab: 'teamchat', noCheck: true },
+    { id: 's7', start: '19:00', end: '22:00', title: 'US Peak Outreach (WhatsApp & Telegram Promotions / Live Support)', icon: '🚀', tab: 'promos' },
+  ],
+  // what to post / send in the outreach slots, day by day (1 = Monday … 0 = Sunday)
+  days: {
+    1: { s5: '[FB] Anti-buffering tips / Emails', s7: '[TG] Weekly programme & service audit' },
+    2: { s5: '[FB] TiviMate app tutorial / Emails', s7: '[TG] Tonight’s matches focus' },
+    3: { s5: '[FB] VOD favourite (cinema & series 4K) / Emails', s7: '[TG] Champions League night' },
+    4: { s5: '[FB] Referral programme (1 month free per referral) / Emails', s7: '[TG] Weekend match poll' },
+    5: { s5: '[FB] Weekend flash offer (12 months) / Emails', s7: '[TG] Weekend schedule & pre-weekend note' },
+    6: { s5: '[FB] Flash promos / Express activations', s7: '[TG] Live matches / Live support' },
+    0: { s5: 'Week preparation & planning (calendar, visuals)', s7: '[TG] Weekend review & VOD teasing' },
+  },
+  rules: [
+    '100% task completion: every scheduled activity is done and checked off in the work planner (synced to Google Sheets).',
+    'View-only schedule & data: only the owner edits the schedule, message templates, links and WhatsApp numbers. Agents upload/paste data to send messages and check off their tasks.',
+    'Messaging & marketing: sales and support agents send renewal emails, WhatsApp/Telegram messages, newsletters and promotions. Domains are visible, API keys stay hidden.',
+    'Language & translator: Arabic is on for every agent, with the built-in translator for all languages.',
+    'Reminders & meetings: follow the automatic reminders for shift check-ins and holidays, and join the Management Meet Party once a month.',
+  ],
+  meet: { on: true, weekday: 6, nth: 1, time: '20:00', title: 'Management Meet Party' },
+  sheetUrl: '',
+};
+export const workPlanOf = (s) => { const w = s.workPlan || {}; return { ...WORKPLAN_DEF, ...w, meet: { ...WORKPLAN_DEF.meet, ...(w.meet || {}) }, slots: w.slots && w.slots.length ? w.slots : WORKPLAN_DEF.slots, days: w.days || WORKPLAN_DEF.days, rules: w.rules && w.rules.length ? w.rules : WORKPLAN_DEF.rules }; };
+export function meetDate(meet, y, m) { const d = new Date(Date.UTC(y, m, 1)); const wd = Number(meet.weekday); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (Math.max(1, Number(meet.nth) || 1) - 1) * 7); return d.toISOString().slice(0, 10); }
 // ---- Holiday calendar (shared by the panel and the reminders): marketing / payout planning, with the matching promotion ----
 const EASTER = (y) => { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1; return new Date(y, mo - 1, da); };
 const ISLAMIC = { 2025: [[2, 1], [2, 30], [5, 6]], 2026: [[1, 18], [2, 20], [4, 27]], 2027: [[1, 8], [2, 10], [4, 17]], 2028: [[0, 28], [1, 27], [4, 5]], 2029: [[0, 16], [1, 15], [3, 24]] }; // Ramadan, Eid al-Fitr, Eid al-Adha (approx., month 0-based)
@@ -2224,6 +2259,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   async function tick() {
     const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
     try { out.ibo = await iboSendDue(s); } catch {}
+    try { // work planning: a reminder when each activity starts, and the monthly Management Meet Party
+      const wp = workPlanOf(s); const L = localNow(wp.tz); const wd = Number(L.day); const toMin = (x) => { const [h, m] = String(x).split(':').map(Number); return h * 60 + m; };
+      for (const sl of wp.slots) { const since = L.min - toMin(sl.start); if (since < 0 || since >= 15) continue; const k = `planrem:${L.date}:${sl.id}`; if (await store.get(k)) continue; await store.put(k, 1, 2 * 86400);
+        const task = (wp.days[wd] || {})[sl.id]; await pushAgents(s, 'plan', { title: `${sl.icon || '⏰'} ${sl.start} · ${sl.title}`, body: (task ? task + ' · ' : '') + (sl.noCheck ? 'Hand over to the next shift.' : 'Check it off in Work planning when done.'), url: '/intprototv?tab=workplan', tag: 'plan-' + sl.id }).catch(() => {}); out.plan = (out.plan || 0) + 1; }
+      if (wp.meet.on) { const md = meetDate(wp.meet, Number(L.date.slice(0, 4)), Number(L.date.slice(5, 7)) - 1); const dl = Math.round((new Date(md + 'T00:00:00Z') - new Date(L.date + 'T00:00:00Z')) / DAYMS);
+        if ((dl === 3 || dl === 0) && L.min >= 9 * 60) { const k = `meetrem:${md}:${dl}`; if (!(await store.get(k))) { await store.put(k, 1, 10 * 86400); const msg = { title: `🎉 ${wp.meet.title} ${dl === 0 ? 'today' : 'in 3 days'} · ${wp.meet.time}`, body: `Monthly team meeting on ${md} at ${wp.meet.time} (${wp.tz}). Attendance is mandatory.`, url: '/intprototv?tab=workplan', tag: 'meet-' + md }; await pushAgents(s, 'plan', msg).catch(() => {}); await pushOwner(s, msg).catch(() => {}); out.meet = 1; } } }
+    } catch {}
     try { // agents are signed out after 6 hours: close their open check-in so worked hours stay right
       const H = (Number(s.security.staffHours) || 6) * 3600000; const ev = await getAtt(); const team = await getTeam(); const now = Date.now(); let n = 0;
       for (const m of team) { const o = attOpen(ev, m.id); if (o && now - o.at >= H) { ev.push({ id: uid(6), by: m.id, name: m.name, at: o.at + H, action: 'out', note: 'Auto check-out: signed out after ' + (H / 3600000) + ' hours', auto: true }); n++; } }
@@ -3777,6 +3819,49 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.action && ['in', 'out', 'break_start', 'break_end', 'login'].includes(body.action)) e.action = body.action;
         if (body.note !== undefined) e.note = cleanText(body.note, 300);
         e.edited = actorName; l.sort((a, b) => a.at - b.at); await store.put('attendance', l); await log('team', `Attendance: ${e.name} ${e.action} edited`); return ok({ ok: true });
+      }
+      if (path.startsWith('/api/admin/workplan')) {
+        const wp = workPlanOf(s); const team = await getTeam(); const me0 = member;
+        const dayKey = (ms) => { const L = localNow(wp.tz); void L; const d = new Date(ms); const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: wp.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+        const wdOf = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();
+        if (R('GET', '/api/admin/workplan')) {
+          const today = dayKey(Date.now()); const ref = /^\d{4}-\d{2}-\d{2}$/.test(String(query.week || '')) ? query.week : today; const r0 = new Date(ref + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS);
+          const week = Array.from({ length: 7 }, (_, i) => new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10));
+          const checks = {}; for (const d of week) checks[d] = (await store.get('plancheck:' + d)) || {};
+          const who = isOwner || can('attendance_all') ? team.filter((m) => m.status !== 'disabled').map((m) => ({ id: m.id, name: m.name || m.username })) : [{ id: me0.id, name: me0.name }];
+          const mine = (d) => (isOwner || can('attendance_all') ? checks[d] : { [me0.id]: checks[d][me0.id] || {} });
+          const now = new Date(); const L = localNow(wp.tz); const meets = [0, 1].map((k) => meetDate(wp.meet, now.getUTCFullYear(), now.getUTCMonth() + k)).filter((d) => d >= today);
+          return ok({ plan: wp, week, today, nowMin: L.min, checks: Object.fromEntries(week.map((d) => [d, mine(d)])), who, canEdit: isOwner, nextMeet: wp.meet.on ? meets[0] || null : null, me: me0 ? me0.id : 'owner' });
+        }
+        if (R('POST', '/api/admin/workplan/check')) { // an agent checks off one of today's tasks (or yesterday's, if forgotten)
+          if (!me0) return err(400, 'The owner does not check off tasks.'); const d = String(body.date || ''); const today = dayKey(Date.now()); const yest = dayKey(Date.now() - DAYMS);
+          if (d !== today && d !== yest) return err(400, 'You can check off today’s tasks (or yesterday’s).'); const sl = wp.slots.find((x) => x.id === body.slot); if (!sl || sl.noCheck) return err(400, 'Unknown task.');
+          const c = (await store.get('plancheck:' + d)) || {}; c[me0.id] = c[me0.id] || {};
+          if (body.done === false) delete c[me0.id][sl.id]; else c[me0.id][sl.id] = { at: Date.now(), note: cleanText(body.note, 200) };
+          await store.put('plancheck:' + d, c, 400 * 86400);
+          const url = wp.sheetUrl || s.accountsSheet; if (url) { const task = (wp.days[wdOf(d)] || {})[sl.id] || ''; fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', append: true, header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at', 'Note'], rows: [[d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wdOf(d)], sl.start + '–' + sl.end, sl.title, task, me0.name || me0.username, body.done === false ? 'NO' : 'YES', new Date().toISOString(), cleanText(body.note, 200)]] }) }).catch(() => {}); }
+          return ok({ ok: true, done: body.done !== false });
+        }
+        if (R('PUT', '/api/admin/workplan')) { // owner only: the schedule structure, tasks per day, rules, meeting, time zone, Google Sheet
+          if (!isOwner) return err(403, 'Only the owner edits the work planning.');
+          const w = workPlanOf(s); const hm = (x) => (/^\d{2}:\d{2}$/.test(String(x || '')) ? x : null);
+          if (Array.isArray(body.slots)) { const sl = body.slots.slice(0, 16).map((x, i) => ({ id: cleanText(x.id, 8) || 's' + uid(3), start: hm(x.start) || '09:00', end: hm(x.end) || '10:00', title: cleanText(x.title, 120), icon: cleanText(x.icon, 4) || '•', tab: cleanText(x.tab, 20), noCheck: !!x.noCheck })).filter((x) => x.title); if (sl.length) w.slots = sl; }
+          if (isObj(body.days)) { const dd = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.days[k] || {}; dd[k] = Object.fromEntries(Object.entries(v).slice(0, 16).map(([a, b]) => [cleanText(a, 8), cleanText(b, 200)]).filter(([, b]) => b)); } w.days = dd; }
+          if (Array.isArray(body.rules)) w.rules = body.rules.map((x) => cleanText(x, 400)).filter(Boolean).slice(0, 12);
+          if (isObj(body.meet)) w.meet = { on: body.meet.on !== false, weekday: Math.min(6, Math.max(0, Number(body.meet.weekday) || 0)), nth: Math.min(4, Math.max(1, Number(body.meet.nth) || 1)), time: hm(body.meet.time) || '20:00', title: cleanText(body.meet.title, 80) || 'Management Meet Party' };
+          if (body.tz) { try { new Intl.DateTimeFormat('en', { timeZone: body.tz }); w.tz = body.tz; } catch { return err(400, 'Unknown time zone.'); } }
+          if (body.sheetUrl !== undefined) { const u = String(body.sheetUrl || '').trim(); if (u && !/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) return err(400, 'Paste the Apps Script web app link (https://script.google.com/macros/s/…/exec).'); w.sheetUrl = u; }
+          await saveSettings({ ...s, workPlan: w }); await log('team', 'Work planning updated by the owner'); return ok(w);
+        }
+        if (R('POST', '/api/admin/workplan/sheet')) { // owner: send the planning + this week's check-offs to Google Sheets
+          if (!isOwner) return err(403, 'Owner only.'); const url = wp.sheetUrl || s.accountsSheet; if (!url) return err(400, 'Add your Google Sheets (Apps Script) link first.');
+          const today = dayKey(Date.now()); const r0 = new Date(today + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS); const rows = [];
+          for (let i = 0; i < 7; i++) { const d = new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10); const c = (await store.get('plancheck:' + d)) || {}; const wd = wdOf(d);
+            for (const sl of wp.slots) for (const m of team.filter((x) => x.status !== 'disabled')) { const k = (c[m.id] || {})[sl.id]; rows.push([d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wd], sl.start + '–' + sl.end, sl.title, (wp.days[wd] || {})[sl.id] || '', m.name || m.username, sl.noCheck ? '—' : k ? 'YES' : 'NO', k ? new Date(k.at).toISOString() : '', k?.note || '']); } }
+          let r; try { r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at', 'Note'], rows }) }); } catch (e) { return err(502, 'Google Sheets could not be reached: ' + e.message); }
+          if (!r.ok) return err(502, 'Google Sheets answered ' + r.status + '.'); return ok({ rows: rows.length });
+        }
+        return err(404, 'Not found');
       }
       if (R('GET', '/api/admin/holidays/upcoming')) { const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }; const list = holidayCalendar(Date.now(), hr.custom).slice(0, 40).map((h) => ({ ...h, daysLeft: Math.ceil((h.at - Date.now()) / DAYMS) })); return ok({ cfg: hr, list, next: list.filter((h) => h.daysLeft >= 0 && h.daysLeft <= Math.max(...hr.days, 7)) }); }
       if (R('PUT', '/api/admin/holidays/remind')) { // owner / technical service: reminder days and own dates

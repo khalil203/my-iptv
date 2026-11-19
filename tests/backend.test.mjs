@@ -2272,3 +2272,25 @@ test('holiday reminders: calendar with the matching promotion, notifications a f
   await x.be.daily(); const lg = (await x.store.get('holidayLog')) || []; assert.ok(lg.some((h) => h.name === 'Shop anniversary' && h.days === 7), JSON.stringify(lg.slice(0, 3)));
   const n = lg.length; await x.be.daily(); assert.equal(((await x.store.get('holidayLog')) || []).length, n, 'once per holiday and day');
 });
+
+test('work planning: schedule for every agent, check off today only, owner-only editing, reminders and monthly meeting', async () => {
+  let posted = []; const x = setup((url, init) => { if (String(url).includes('script.google.com')) { posted.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; } }); const tok = await adminToken(x);
+  await x.call('POST', '/api/admin/team', { name: 'Sara', username: 'sara', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'attendance'] }, tok);
+  const st = (await x.call('POST', '/api/login', { username: 'sara', password: 'secret12' })).json.token; await signBylaws(x, st).catch(() => {});
+  const wp = (await x.call('GET', '/api/admin/workplan', {}, st)).json; assert.equal(wp.plan.slots.length, 7); assert.equal(wp.week.length, 7); assert.equal(wp.canEdit, false); assert.equal(wp.plan.rules.length, 5);
+  assert.equal(wp.plan.slots[0].title, 'Check-In & Panel Login'); assert.ok(wp.nextMeet);
+  // agent can't edit, owner can
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { rules: ['x'] }, st)).status, 403);
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { sheetUrl: 'https://script.google.com/macros/s/abc/exec', tz: 'Africa/Casablanca' }, tok)).status, 200);
+  // check off today's task, not a future one
+  assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: wp.today, slot: 's2', note: '12 tickets answered' }, st)).status, 200);
+  const later = new Date(new Date(wp.today + 'T12:00:00Z').getTime() + 2 * 86400000).toISOString().slice(0, 10);
+  assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: later, slot: 's2' }, st)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: wp.today, slot: 's6' }, st)).status, 400, 'the break is not a task');
+  await new Promise((r) => setTimeout(r, 20)); assert.ok(posted.some((p) => p.sheet === 'Agent Work Planning' && p.rows[0][6] === 'YES'), 'synced to Google Sheets');
+  const own = (await x.call('GET', '/api/admin/workplan', {}, tok)).json; const team = (await x.call('GET', '/api/admin/team', {}, tok)).json;
+  assert.ok(own.checks[wp.today][team[0].id].s2); assert.equal(own.canEdit, true);
+  assert.equal((await x.call('POST', '/api/admin/workplan/sheet', {}, tok)).json.rows, 7 * 7);
+  // reminders when an activity starts
+  const out = await x.be.tick(); assert.ok(out !== undefined);
+});

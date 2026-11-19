@@ -1,9 +1,9 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=116';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=117';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=116';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=117';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -525,6 +525,7 @@ function renderSetup() {
 const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
   ['guide', '🎓', 'Agent guide', null, 'Home', 'help how instructions video tutorial training'],
+  ['workplan', '📌', 'Work planning', null, 'Home', 'schedule planning planner tasks check off rules daily weekly agent work google sheets meeting'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
   ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
   ['trialq', '⏳', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
@@ -668,6 +669,7 @@ async function renderAdmin() {
     }
     const body = $('#admin-body');
     if (t === 'guide') body.innerHTML = agentGuide();
+    else if (t === 'workplan') body.innerHTML = await adminWorkPlan();
     else if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
@@ -5514,4 +5516,55 @@ Object.assign(actions, {
     el.disabled = false; },
   'tr-copy': async () => { const v = $('#tr-out')?.dataset.v || ''; try { await navigator.clipboard.writeText(v); toast(t('copied')); } catch {} },
   'tr-url-go': () => { const u = ($('#tr-url').value || '').trim(); if (!/^https?:\/\//.test(u)) return toast('Paste a link starting with https://', true); window.open(`https://translate.google.com/translate?sl=auto&tl=${encodeURIComponent($('#tr-to')?.value || trCur() || 'ar')}&u=${encodeURIComponent(u)}`, '_blank', 'noopener'); },
+});
+
+// ---------------- Agent work planning: daily schedule, tasks to check off, rules (owner edits, agents check off) ----------------
+const WP = { week: '', agent: '' };
+const WD_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+async function adminWorkPlan() {
+  const r = await api('GET', '/api/admin/workplan' + (WP.week ? '?week=' + WP.week : '')); state.admin.wp = r; const P = r.plan;
+  const me = state.admin.me || {}; const isOwn = r.canEdit; const agents = r.who; if (!WP.agent || !agents.some((a) => a.id === WP.agent)) WP.agent = isOwn ? (agents[0]?.id || '') : r.me;
+  const wdOf = (d) => new Date(d + 'T12:00:00Z').getUTCDay(); const toMin = (x) => { const [h, m] = x.split(':').map(Number); return h * 60 + m; };
+  const tasks = P.slots.filter((x) => !x.noCheck);
+  const doneOf = (d, aid) => Object.keys(((r.checks[d] || {})[aid]) || {}).filter((k) => tasks.some((x) => x.id === k)).length;
+  const pctDay = (d, aid) => Math.round((doneOf(d, aid) / tasks.length) * 100);
+  const weekDone = r.week.reduce((a, d) => a + doneOf(d, WP.agent), 0); const weekPct = Math.round((weekDone / (tasks.length * 7)) * 100);
+  const cell = (d, sl) => { const c = ((r.checks[d] || {})[WP.agent] || {})[sl.id]; const today = d === r.today; const yest = new Date(new Date(r.today + 'T12:00:00Z').getTime() - 86400000).toISOString().slice(0, 10) === d;
+    const can = !isOwn && (today || yest) && !sl.noCheck; const task = (P.days[wdOf(d)] || {})[sl.id] || '';
+    const now = today && r.nowMin >= toMin(sl.start) && r.nowMin < toMin(sl.end);
+    return `<td class="wp-cell ${c ? 'wp-done' : ''} ${now ? 'wp-now' : ''}">${task ? `<div class="small" style="margin-bottom:4px">${esc(task)}</div>` : ''}${sl.noCheck ? '<span class="muted small">—</span>' : can ? `<label class="wp-check"><input type="checkbox" data-act="wp-check" data-date="${d}" data-slot="${sl.id}" ${c ? 'checked' : ''}> <span>${c ? '✓ Done' : 'Mark done'}</span></label>` : c ? `<span class="badge ok" title="${esc(c.note || '')}">✓ ${new Date(c.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>` : d < r.today ? '<span class="badge bad">✗</span>' : '<span class="muted small">·</span>'}</td>`; };
+  const meetTxt = r.nextMeet ? `<div class="notice" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-size:24px">🎉</span><div style="flex:1"><b>${esc(P.meet.title)}</b> · ${fmtDate(new Date(r.nextMeet + 'T12:00:00Z').getTime())} at ${esc(P.meet.time)} <span class="small muted">(${esc(P.tz)})</span><div class="small muted">Once a month — attendance is mandatory. A reminder comes 3 days before and on the day.</div></div></div>` : '';
+  const todayRow = P.slots.map((sl) => { const task = (P.days[wdOf(r.today)] || {})[sl.id]; const c = ((r.checks[r.today] || {})[WP.agent] || {})[sl.id]; const now = r.nowMin >= toMin(sl.start) && r.nowMin < toMin(sl.end);
+    return `<div class="list-item wp-today ${now ? 'wp-now' : ''} ${c ? 'wp-done' : ''}"><span style="font-size:22px">${esc(sl.icon || '•')}</span><div style="flex:1;min-width:0"><b>${esc(sl.start)}–${esc(sl.end)} · ${esc(sl.title)}</b>${now ? ' <span class="pill st-expiring">now</span>' : ''}${task ? `<div class="small muted">${esc(task)}</div>` : ''}</div>${sl.tab ? `<a class="btn sm" data-act="atab" data-tab="${esc(sl.tab)}">Open →</a>` : ''}${sl.noCheck ? '' : !isOwn ? `<label class="wp-check"><input type="checkbox" data-act="wp-check" data-date="${r.today}" data-slot="${sl.id}" ${c ? 'checked' : ''}> <span>${c ? '✓ Done' : 'Done?'}</span></label>` : c ? '<span class="badge ok">✓</span>' : ''}</div>`; }).join('');
+  return `<div class="card"><div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1">📌 Agent work planning</h3>${isOwn ? `<select data-input="wp-agent" style="width:auto">${agents.map((a) => `<option value="${esc(a.id)}" ${a.id === WP.agent ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select><button class="btn sm" data-act="wp-edit">✏️ Edit the planning</button><button class="btn sm" data-act="wp-sheet">📤 Google Sheets</button>` : '<span class="badge">👁 View only · check off your tasks</span>'}</div>
+      <div class="stats" style="margin-top:12px"><div class="stat"><span>Today</span><b>${pctDay(r.today, WP.agent)}%</b></div><div class="stat"><span>This week</span><b>${weekPct}%</b></div><div class="stat"><span>Tasks done</span><b>${weekDone}/${tasks.length * 7}</b></div><div class="stat"><span>Time zone</span><b style="font-size:1rem">${esc(P.tz)}</b></div></div>
+      <div class="wp-bar"><i style="width:${weekPct}%"></i></div></div>
+    ${meetTxt}
+    <div class="card"><h3 style="margin-top:0">🕘 Today · ${esc(WD_NAMES[wdOf(r.today)])} ${fmtDate(new Date(r.today + 'T12:00:00Z').getTime())}</h3>${todayRow}</div>
+    <div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1">📅 Week</h3><button class="btn sm" data-act="wp-week" data-d="-7">← Previous</button><button class="btn sm" data-act="wp-week" data-d="0">This week</button><button class="btn sm" data-act="wp-week" data-d="7">Next →</button></div>
+      <div class="tbl-wrap" style="margin-top:10px"><table class="tbl wp-tbl"><thead><tr><th>Time</th>${r.week.map((d) => `<th class="${d === r.today ? 'wp-th-today' : ''}">${WD_NAMES[wdOf(d)].slice(0, 3)} ${d.slice(8)}<div class="small muted">${pctDay(d, WP.agent)}%</div></th>`).join('')}</tr></thead>
+      <tbody>${P.slots.map((sl) => `<tr><td style="white-space:nowrap"><b>${esc(sl.icon || '')} ${esc(sl.start)}–${esc(sl.end)}</b><div class="small muted" style="max-width:190px">${esc(sl.title)}</div></td>${r.week.map((d) => cell(d, sl)).join('')}</tr>`).join('')}</tbody></table></div></div>
+    <div class="card"><h3 style="margin-top:0">📜 Key agent rules &amp; panel permissions</h3><ol style="line-height:1.7;padding-inline-start:20px;margin:0">${P.rules.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>`;
+}
+document.addEventListener('change', (e) => { if (e.target.dataset?.input === 'wp-agent') { WP.agent = e.target.value; renderAdmin(); } });
+Object.assign(actions, {
+  'wp-check': async (el) => { const done = el.checked; try { await api('POST', '/api/admin/workplan/check', { date: el.dataset.date, slot: el.dataset.slot, done }); toast(done ? '✓ Checked off' : 'Unchecked'); renderAdmin(); } catch (e) { el.checked = !done; toast(e.message, true); } },
+  'wp-week': (el) => { const d = Number(el.dataset.d); const base = state.admin.wp?.week?.[0] || new Date().toISOString().slice(0, 10); WP.week = d === 0 ? '' : new Date(new Date(base + 'T12:00:00Z').getTime() + d * 86400000).toISOString().slice(0, 10); renderAdmin(); },
+  'wp-sheet': async () => { const P = state.admin.wp.plan; const url = prompt('Google Sheets Apps Script link (https://script.google.com/macros/s/…/exec). Leave as it is to send now:', P.sheetUrl || ''); if (url === null) return;
+    try { if (url !== P.sheetUrl) await api('PUT', '/api/admin/workplan', { sheetUrl: url }); const r = await api('POST', '/api/admin/workplan/sheet'); toast(`Sent ${r.rows} rows to the "Agent Work Planning" sheet ✓`); } catch (e) { toast(e.message, true); } },
+  'wp-edit': () => { const P = state.admin.wp.plan; const dayName = (k) => WD_NAMES[Number(k)];
+    const slotRow = (x) => `<div class="row wp-slot" style="gap:6px;margin-bottom:6px;flex-wrap:wrap" data-id="${esc(x.id || '')}"><input data-k="icon" value="${esc(x.icon || '')}" style="width:52px"><input data-k="start" type="time" value="${esc(x.start || '')}" style="width:110px"><input data-k="end" type="time" value="${esc(x.end || '')}" style="width:110px"><input data-k="title" value="${esc(x.title || '')}" style="flex:1;min-width:200px"><label class="small" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-k="noCheck" style="width:auto" ${x.noCheck ? 'checked' : ''}> no check</label><button type="button" class="btn sm ghost" data-act="wp-slot-del">✕</button></div>`;
+    modal('✏️ Edit the work planning', `<form onsubmit="return false" data-form="wp"><p class="small muted" style="margin-top:0">Only you (the owner) can change this. Agents see it and check off their tasks.</p>
+      <h3>Time slots (every day)</h3><div id="wp-slots">${P.slots.map(slotRow).join('')}</div><button type="button" class="btn sm" data-act="wp-slot-add">＋ Add a slot</button>
+      <h3 style="margin-top:14px">Day by day tasks</h3><p class="small muted" style="margin-top:0">What to post or send in each slot. Empty = the slot title only.</p>
+      ${['1', '2', '3', '4', '5', '6', '0'].map((k) => `<details ${k === '1' ? 'open' : ''}><summary><b>${dayName(k)}</b></summary>${P.slots.map((sl) => `<label class="field"><span>${esc(sl.start)} · ${esc(sl.title)}</span><input data-day="${k}" data-slot="${esc(sl.id)}" value="${esc((P.days[k] || {})[sl.id] || '')}"></label>`).join('')}</details>`).join('')}
+      <h3 style="margin-top:14px">Rules</h3><textarea name="rules" rows="7" style="width:100%">${esc(P.rules.join('\n'))}</textarea>
+      <h3 style="margin-top:14px">Monthly meeting</h3><div class="grid3">${field('Name', 'meetTitle', P.meet.title)}${field('Which', 'meetNth', P.meet.nth, { type: 'select', options: [['1', '1st'], ['2', '2nd'], ['3', '3rd'], ['4', '4th']] })}${field('Day', 'meetWd', P.meet.weekday, { type: 'select', options: WD_NAMES.map((n, i) => [String(i), n]) })}</div><div class="grid2">${field('Time', 'meetTime', P.meet.time, { type: 'time' })}${field('Time zone of the schedule', 'tz', P.tz, { ph: 'Europe/Paris' })}</div>${toggle('Meeting reminders on', 'meetOn', P.meet.on)}
+      <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" data-act="wp-save">💾 Save the planning</button></div></form>`, { wide: true }); },
+  'wp-slot-add': () => document.getElementById('wp-slots').insertAdjacentHTML('beforeend', `<div class="row wp-slot" style="gap:6px;margin-bottom:6px;flex-wrap:wrap" data-id=""><input data-k="icon" value="•" style="width:52px"><input data-k="start" type="time" style="width:110px"><input data-k="end" type="time" style="width:110px"><input data-k="title" style="flex:1;min-width:200px" placeholder="Activity"><label class="small" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-k="noCheck" style="width:auto"> no check</label><button type="button" class="btn sm ghost" data-act="wp-slot-del">✕</button></div>`),
+  'wp-slot-del': (el) => el.closest('.wp-slot').remove(),
+  'wp-save': async (el) => { const f = el.closest('form'); const P = state.admin.wp.plan;
+    const slots = [...f.querySelectorAll('.wp-slot')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`); return { id: r.dataset.id, icon: g('icon').value, start: g('start').value, end: g('end').value, title: g('title').value, noCheck: g('noCheck').checked, tab: (P.slots.find((x) => x.id === r.dataset.id) || {}).tab || '' }; });
+    const days = {}; f.querySelectorAll('[data-day]').forEach((i) => { (days[i.dataset.day] = days[i.dataset.day] || {})[i.dataset.slot] = i.value; });
+    try { await api('PUT', '/api/admin/workplan', { slots, days, rules: f.rules.value.split('\n').map((x) => x.trim()).filter(Boolean), meet: { title: f.meetTitle.value, nth: f.meetNth.value, weekday: f.meetWd.value, time: f.meetTime.value, on: f.meetOn.checked }, tz: f.tz.value.trim() }); toast('Work planning saved ✓'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); } },
 });
