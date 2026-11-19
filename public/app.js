@@ -1,9 +1,9 @@
-import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=112';
+import { createBackend, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=114';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=102';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=112';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=114';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -119,6 +119,7 @@ async function api(method, path, body) {
   if (status === 409 && path.includes('/api/xtream')) { location.reload(); }
   if (status >= 400) {
     if (status === 401 && state.token && !path.includes('/login')) { setSession(null); route(); }
+    if (status === 403 && json.error === 'checkin_required' && state.admin?.me) { state.admin.me.mustCheckIn = true; setTimeout(renderAdmin); }
     throw Object.assign(new Error(json.error || 'Error'), { status, data: json });
   }
   return json;
@@ -201,7 +202,7 @@ async function boot() {
 }
 
 // One language button on every customer / reseller / public page: 🌐 + flag, opens the 5 languages
-const LANG_FLAG = { en: '🇬🇧', fr: '🇫🇷', de: '🇩🇪', es: '🇪🇸', it: '🇮🇹' };
+const LANG_FLAG = { en: '🇬🇧', fr: '🇫🇷', de: '🇩🇪', es: '🇪🇸', it: '🇮🇹', ar: '🇸🇦' };
 function langFab() {
   let el = document.getElementById('lang-fab');
   if (isAdminUI()) { if (el) el.remove(); return; }
@@ -369,7 +370,7 @@ function renderResellers() {
 const SUP = { step: 1, token: '', known: false, info: null, ref: '', me: null, form: {} };
 const supLangSel = () => `<select data-input="sup-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
 async function renderSupport() {
-  document.documentElement.dir = 'ltr';
+  document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
   const b = state.config.branding || {};
   if (!SUP.info) { try { SUP.info = await api('GET', '/api/support/info'); } catch { SUP.info = { email: 'contact@intproto-tv.com', whatsapp: waNum(b) }; } }
   if (state.token && state.role === 'user' && !SUP.me) { try { SUP.me = (await api('GET', '/api/me')).user; } catch { SUP.me = {}; } }
@@ -432,7 +433,7 @@ const RSL = { d: null, tab: 'home', q: '' };
 const rslLangSel = () => `<select data-input="rsl-lang" aria-label="${esc(t('language'))}" style="width:auto">${LANGS.map(([k, n]) => `<option value="${k}" ${getLang() === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
 async function renderRsl() {
   goAfterRender();
-  document.documentElement.dir = 'ltr';
+  document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
   if (state.role !== 'reseller') {
     $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>🤝 ${esc(t('rsl_title'))}</h2><p class="muted">${esc(t('rsl_custAcc'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a><div class="login-foot"><a href="/">← ${esc(state.config.branding.appName || t('home'))}</a></div></div></div>`; return;
   }
@@ -520,6 +521,7 @@ function renderSetup() {
 // Admin menu: [id, icon, name, permission, group, search words]
 const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
+  ['guide', '🎓', 'Agent guide', null, 'Home', 'help how instructions video tutorial training'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
   ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
   ['trialq', '⏳', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
@@ -566,6 +568,26 @@ const ADMIN_TABS = [
 const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
 
+// Agents: check in before the panel opens (tracks working hours)
+function renderCheckInGate(me) {
+  const now = new Date();
+  $('#app').innerHTML = `<div class="login-wrap"><div class="login-card" style="text-align:center;max-width:440px">
+    <div style="font-size:54px;animation:pop .5s both">🟢</div><h2 style="margin:6px 0">Check in to start your shift</h2>
+    <p class="muted">Hi <b>${esc(me.name || me.username)}</b>. Your working hours start when you check in. You are signed out automatically after <b>${me.staffHours || 6} hours</b>.</p>
+    <div class="chips" style="justify-content:center;margin:10px 0"><a class="on">🕒 ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</a><a class="on">📅 ${now.toLocaleDateString()}</a></div>
+    <label class="field" style="text-align:left"><span>Note (optional)</span><input id="ci-note" placeholder="e.g. morning shift"></label>
+    <button class="btn primary block" data-act="checkin-go" style="min-height:52px;font-size:1.05rem">🟢 Check in &amp; open the panel</button>
+    <div class="row" style="justify-content:center;margin-top:12px;gap:8px"><a class="btn sm ghost" href="/intprototv?tab=guide" data-act="guide-open">🎓 Agent guide</a>${logoutBtn()}</div></div></div>`;
+}
+// 6-hour sign-out timer + no-copy for agents
+let staffTimer = null;
+function staffGuards(me) {
+  clearTimeout(staffTimer);
+  if (me.role !== 'owner' && me.sessionExp) { const left = me.sessionExp - Date.now(); if (left > 0) staffTimer = setTimeout(async () => { try { await api('POST', '/api/admin/attendance', { action: 'out', note: 'Auto check-out: 6-hour sign-out' }); } catch {} toast(`Signed out after ${me.staffHours || 6} hours. Sign in and check in again.`, true); setSession(null); state.admin.me = null; route(); }, Math.min(left, 2147483000)); }
+  document.body.classList.toggle('no-copy', !!me.noCopy);
+}
+const noCopyBlock = (e) => { if (!document.body.classList.contains('no-copy') || !isAdminUI()) return; const t0 = e.target; if (t0 && (t0.closest('input, textarea, [contenteditable]') || t0.closest('.allow-copy'))) return; e.preventDefault(); if (e.type === 'copy') toast('Copying is turned off for agents.', true); };
+['copy', 'cut', 'contextmenu', 'dragstart'].forEach((ev) => document.addEventListener(ev, noCopyBlock));
 async function renderBylawsGate(me) {
   setWaFab(null);
   const T = {
@@ -609,6 +631,8 @@ async function renderAdmin() {
   const me = state.admin.me;
   if (me.mustSetup2fa) { render2faGate(); return; }
   if (me.mustSignBylaws) { renderBylawsGate(me); return; }
+  if (me.mustCheckIn) { renderCheckInGate(me); return; }
+  staffGuards(me);
   const tabs = ADMIN_TABS.filter((x) => {
     if (x[0] === 'holidays') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || '');
     if (x[0] === 'api') return me.role === 'owner' || /technical|panel manager|tech\b/i.test(me.function || me.name || ''); // panel & Resend keys are Nizar/Khalil only (spec §1)
@@ -617,14 +641,14 @@ async function renderAdmin() {
   if (!tabs.some((x) => x[0] === state.admin.tab)) state.admin.tab = tabs[0][0];
   const t = state.admin.tab;
   const title = ADMIN_TABS.find((x) => x[0] === t)?.[2] || '';
-  document.body.className = (me.allPerms || []).filter(([p]) => !can(p)).map(([p]) => 'np-' + p).join(' ');
+  document.body.className = (me.allPerms || []).filter(([p]) => !can(p)).map(([p]) => 'np-' + p).join(' ') + (me.noCopy ? ' no-copy' : '');
   $('#app').innerHTML = `<div class="admin">
     <div class="side-bg" data-act="menu-close"></div>
     <aside class="side" id="side">${brandHtml(b, false)}<input class="nav-search" type="search" placeholder="🔎 Find a page…" data-input="nav-search" aria-label="Find a page" autocomplete="off"><nav class="nav" id="nav">${navHtml(tabs, t)}<div class="nav-none muted small" hidden>No page matches.</div></nav>
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <main class="main" id="main">
-      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}<button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
       <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </main></div>`;
@@ -641,7 +665,8 @@ async function renderAdmin() {
       }
     }
     const body = $('#admin-body');
-    if (t === 'overview') body.innerHTML = await adminOverview();
+    if (t === 'guide') body.innerHTML = agentGuide();
+    else if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
     else if (t === 'plans') body.innerHTML = adminPlans(s) + adminOrderSection(s) + await adminResellerSection(s);
@@ -1247,17 +1272,17 @@ function customerListHtml() {
   const list = all.slice(0, lim);
   const more = all.length > lim ? `<div style="text-align:center;margin:14px"><button class="btn" data-act="cust-more">Show more (${all.length - lim} left)</button></div>` : '';
   const narrow = matchMedia('(max-width: 760px)').matches;
-  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${orderChip(c)}${connChip(c)}${devPill(c)}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
+  if (narrow) return `<div class="cust-cards" style="display:block">${list.map((c) => `<div class="cc"><div class="row"><div class="avatar">${esc(initials(c.name))}</div><div style="flex:1;min-width:0"><button class="name-link" data-act="view-customer" data-id="${c.id}" style="font-size:1.02rem">${esc(c.name)}</button>${orderChip(c)}${connChip(c)}${devPill(c)}<div class="small muted">${esc(c.username)} · ${esc(c.planName)}${c.email ? ' · ' + esc(c.email) : ''}</div></div>${pill(c.state)}</div>
       <div class="small muted" style="margin:10px 0 6px">Expires ${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))} · ${c.daysLeft >= 0 ? c.daysLeft + ' days left' : 'expired'}</div><div style="margin:-2px 0 6px">${updTag(c)}</div>${progress(c)}<div class="row" style="margin-top:12px">${custActions(c)}</div></div>`).join('')}</div>${more}`;
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Login</th><th>Plan</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${orderChip(c)}${connChip(c)}${devPill(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}${c.orderNo ? ` <span class="tagp">${esc(c.orderNo)}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
+    ${list.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.isTrial ? ' <span class="pill st-expiring">trial</span>' : ''}${orderChip(c)}${connChip(c)}${devPill(c)}${spendTier(c.totalPaidUsd)[0] !== 'Regular' ? ' <span class="pill ' + spendTier(c.totalPaidUsd)[1] + '" title="Lifetime spend $${Number(c.totalPaidUsd||0).toFixed(2)}">' + spendTier(c.totalPaidUsd)[0] + '</span>' : ''}${c.country ? ' <span class="tagp" title="' + esc(c.country) + '">' + countryFlag(c.country) + ' ' + esc(c.country) + '</span>' : ''}${c.statusFlag === 'dispute' ? ' <span class="pill st-expired" title="Flagged: Dispute">dispute</span>' : c.statusFlag === 'excellent' ? ' <span class="pill st-active" title="Flagged: Excellent">excellent</span>' : ''}${c.buyRequest && !c.buyRequest.answeredAt ? ` <span class="pill st-active" title="Requested ${esc(c.buyRequest.title || '')}">🛒 ${esc(c.buyRequest.title || 'request')}</span>` : ''}<div class="small muted">${esc(c.phone)}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.username)}${c.lineId ? `<div class="small muted">line #${esc(c.lineId)}</div>` : ''}</td><td>${esc(c.planName)}<div class="small muted">${c.connections} device${c.connections > 1 ? 's' : ''}</div></td>
       <td>${(c.noExpiry ? '♾ No end date' : fmtDate(c.expiresAt))}<div>${updTag(c)}</div><div class="small muted">${leftTxt(c)}</div>${progress(c)}</td><td>${pill(c.state)}</td><td><div class="row" style="justify-content:flex-end">${custActions(c)}</div></td></tr>`).join('')}
     </tbody></table></div>${more}`;
 }
 function adminCustomers() {
   const a = state.admin;
   const counts = (st) => a.customers.filter((c) => custFilterOk(c, st)).length;
-  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone, order…" value="${esc(a.q)}" data-input="cust-search"><button class="btn" data-act="orders-open" title="Order numbers, duplicates and backups">🧾 Order numbers</button><button class="btn" data-act="sync-panel" data-perm="customers_edit" title="Checks every line on your panel and updates end dates, devices and broken lines">🔄 Sync with panel</button><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx" data-perm="exports">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="customers_edit">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="customers_edit">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="customers_edit">📣 Newsletter</button></div>
+  return `<div class="row" style="margin-bottom:14px"><input style="flex:1;min-width:200px" placeholder="🔎 Search name, username, phone, order…" value="${esc(a.q)}" data-input="cust-search"><button class="btn" data-act="orders-open" title="Order numbers, duplicates and backups">🧾 Order numbers</button><button class="btn" data-act="sync-panel" data-perm="customers_edit" title="Checks every line on your panel and updates end dates, devices and broken lines">🔄 Sync with panel</button><button class="btn primary" data-act="new-customer" data-perm="customers_edit">＋ Add customer</button><button class="btn" data-act="export-xlsx" data-perm="exports">⬇ Excel</button><button class="btn" data-act="renewal-bulk" data-perm="marketing">🔁 Renewal emails</button><button class="btn" data-act="order-bulk" data-perm="marketing">💳 Package emails</button><button class="btn" data-act="order-custom" data-perm="marketing">✍️ Custom email</button><button class="btn" data-act="nl-open" data-perm="marketing">📣 Newsletter</button></div>
     <div class="chips">${['all', 'active', 'expiring', 'expired', 'disabled', 'trial', 'request', 'lastmonth'].map((f) => `<a class="${a.filter === f ? 'on' : ''}" data-act="cust-filter" data-f="${f}">${f === 'request' ? '🛒 requests' : f === 'lastmonth' ? '📅 ' + ((a.nmBack ?? 1) === 1 ? 'Last month' : lastMonthRange(a.nmBack).label) : f} (${counts(f)})</a>`).join('')}</div>
     <div class="row" style="margin:-4px 0 12px;gap:8px"><span class="small muted">Order:</span><select data-input="cust-sort" style="width:auto">${CUST_SORTS.map(([k, l]) => `<option value="${k}" ${(CUST_SORTS.some((x) => x[0] === a.custSort) ? a.custSort : 'order') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     ${a.filter === 'lastmonth' ? `<div id="nm-stats" class="card" style="margin-bottom:14px"><p class="muted" style="margin:0">Loading new customers…</p></div>` : ''}
@@ -1454,7 +1479,7 @@ const opRow = (p = {}, s = {}) => `<div class="op-row card" style="padding:10px;
   <div class="grid3" style="margin-top:6px"><input data-k="price" type="number" step="any" value="${p.price ?? ''}" placeholder="Price"><input data-k="badge" value="${esc(p.badge || '')}" placeholder="Top badge (optional)"><select data-k="stripeAccount" style="width:auto">${((s.stripeAccounts||[]).filter((a)=>a.status==='active')).map((a)=>`<option value="${esc(a.id)}" ${p.stripeAccount===a.id?'selected':''}>${esc(a.name||a.id)}</option>`).join('')}<option value="">— none (use any account)</option></select><button class="btn sm danger" data-act="del-op">✕ Remove</button></div></div>`;
 function adminOrderSection(s) {
   const op = s.orderPackages || []; const cur = ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR';
-  return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="customers_edit">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="customers_edit">📨 Send to customers…</button></div>
+  return `<div class="card"><div class="row"><h3 style="margin:0">💳 Package order emails</h3><span class="spacer"></span><button class="btn sm" data-act="order-custom" data-perm="marketing">✍️ Custom email</button><button class="btn primary sm" data-act="order-bulk" data-perm="marketing">📨 Send to customers…</button></div>
     <p class="small muted">Customers see these packages in their account and tap <b>🛒 Request</b> or WhatsApp. You get an email and a 🛒 mark on the customer (filter <b>🛒 requests</b>). Then you send the package email (💳 on the customer) with <b>your own payment link</b> for that order. Without a link, the email button says "Contact us to order" and opens your WhatsApp.</p>
     <label class="row small" style="gap:8px;margin:10px 0;cursor:pointer"><input type="checkbox" data-act="cur-rule" ${s.currencyRule?.on !== false ? 'checked' : ''} style="width:auto"> <span><b>Automatic currency:</b> US dollars ($) for everyone, euros (€) for customers in Europe — found from the email ending (.de, .ch, .fr, .co.uk…) or the phone code (+41, +49…). Used in package emails, WhatsApp, renewal emails, invoices and the reseller dashboard. Same price number, only the sign changes.</span></label>
     <div class="plans-grid" style="margin:14px 0">${op.map((p) => `<div class="plan-c"><b>${esc(p.title)}</b><div class="pp">${orderPrice(s, p)}</div><div class="small muted">${p.days} days · ${p.devices} device${p.devices > 1 ? 's' : ''}</div><button class="btn sm" style="margin-top:6px" data-act="order-preview" data-pkg="${esc(p.id)}">👁 Preview</button></div>`).join('')}</div>
@@ -1773,6 +1798,8 @@ function memberForm(m) {
     <div class="grid2">${field('Name', 'name', m.name || '', { attrs: 'required' })}${field('Function', 'role', m.role || '', { ph: 'e.g. Technical Manager' })}</div>
     <div class="grid2">${field('Username', 'username', m.username || '', { attrs: (isNew ? 'required minlength="3"' : 'disabled') + ' autocapitalize="none"' })}${field(isNew ? 'Password' : 'New password (optional)', 'password', '', { type: 'password', attrs: isNew ? 'required minlength="6"' : '' })}</div>
     <div class="grid2">${field('Western alias (shown to customers)', 'alias', m.alias || '', { ph: 'e.g. Mark, Simon, Jasmin' })}${field('Payroll bank', 'bank', m.bank || '', { type: 'select', options: [['', '—'], ['CIH', 'CIH (MAD)'], ['IBAN', 'European IBAN'], ['US', 'US bank'], ['other', 'Other']] })}</div>
+    ${field('Agent language (guide & alerts)', 'lang', m.lang || 'en', { type: 'select', options: [['en', '🇬🇧 English'], ['fr', '🇫🇷 Français'], ['de', '🇩🇪 Deutsch'], ['es', '🇪🇸 Español'], ['it', '🇮🇹 Italiano'], ['ar', '🇸🇦 العربية']] })}
+    <p class="small muted" style="margin:-4px 0 10px">🔐 API keys (Resend…), email marketing, list uploads, SEO and ads open only for the owner and the <b>Technical Manager</b> role, whatever is ticked below.</p>
     ${field('Payroll account / IBAN', 'bankDetails', m.bankDetails || '', { attrs: 'autocapitalize="none"', ph: 'e.g. MA64 3508 0000 0001 2345 6789 01' })}
     ${field('Work email (support alerts & escalations)', 'notifyEmail', m.notifyEmail || '', { type: 'email', attrs: 'autocapitalize="none"', ph: 'agent@example.com', help: 'New tickets from the support page are emailed here when this member can see customers.' })}
     ${isNew ? toggle('Start as an unpaid 14-day trainee', 'trainee', true, 'Restricted to Customers (view), Attendance and Tasks until you promote them') : (m.traineeUntil && m.traineeUntil > Date.now() ? `<p class="notice warning" style="margin:6px 0">⏳ Trainee · ${Math.ceil((m.traineeUntil - Date.now()) / 86400000)} day(s) left · restricted access</p>` : '')}
@@ -4916,7 +4943,9 @@ async function adminAttendancePage() {
       <h3 style="margin-top:14px">My recent events</h3>${mine.length ? `<div style="max-height:220px;overflow:auto">${mine.slice(0, 20).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.action)}</b>${e.note ? ' · ' + esc(e.note) : ''}</span><span class="small muted">${fmtDT(e.at)}</span></div>`).join('')}</div>` : '<p class="muted small">No events yet. Check in to start your shift.</p>'}</div>
     <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
   </div>
-  ${r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>👥 Team attendance (last 30 days)</h3>${summaryRows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Logins</th><th>Check-ins</th><th>Check-outs</th><th>Worked</th><th>Breaks</th></tr></thead><tbody>${summaryRows}</tbody></table></div>` : '<p class="muted small">No attendance recorded yet — the team checks in when they start work.</p>'}</div>
+  ${r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>👥 Team attendance (last 30 days)</h3>${summaryRows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Logins</th><th>Check-ins</th><th>Check-outs</th><th>Worked</th><th>Breaks</th></tr></thead><tbody>${summaryRows}</tbody></table></div>` : '<p class="muted small">No attendance recorded yet — the team checks in when they start work.</p>'}
+    <div class="row" style="margin-top:14px"><h3 style="margin:0;flex:1">🧾 Team log (edit any entry)</h3><button class="btn sm primary" data-act="att-add">➕ Add entry</button></div>
+    <div style="max-height:360px;overflow:auto;margin-top:8px">${(r.all || []).filter((e) => e.action !== 'login').slice(0, 80).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.name || nameOf(e.by))}</b> · ${esc({ in: '🟢 check in', out: '⚪ check out', break_start: '☕ break', break_end: '▶️ back' }[e.action] || e.action)}${e.auto ? ' <span class="badge warn">auto</span>' : ''}${e.edited ? ` <span class="badge">edited by ${esc(e.edited)}</span>` : ''}${e.note ? `<div class="small muted">${esc(e.note)}</div>` : ''}</span><span class="small muted">${fmtDT(e.at)}</span>${e.id ? `<button class="btn sm ghost" data-act="att-edit" data-id="${esc(e.id)}" data-at="${e.at}" data-action="${esc(e.action)}" data-note="${esc(e.note || '')}">✏️</button>` : ''}</div>`).join('') || '<p class="muted small">No entries.</p>'}</div></div>
   <div class="card" style="margin-top:16px"><h3>🌙 Shifts, night shifts &amp; weekly rest days</h3><p class="small muted" style="margin-top:0">Day and night shifts across European and American time zones. Shifts past midnight (e.g. 22:00 → 06:00) are handled correctly. Rest days are never all on the same days for the whole team.</p>
     <div id="shifts-box"><p class="small muted">Loading members…</p></div></div>
   <div class="card" style="margin-top:16px"><h3>🗑 Leave requests (approve / reject)</h3><div id="leaves-box"><p class="small muted">Loading…</p></div></div>
@@ -5249,4 +5278,95 @@ Object.assign(actions, {
   'rm-send-go': async (el) => { const aud = el.closest('form').aud.value; if (!confirm('Send this renewal email now?')) return; el.disabled = true;
     try { const r = await api('POST', '/api/admin/renewmodels/send', { model: el.dataset.m, audience: aud, appUrl: location.origin }); toast(`Sent to ${r.sent} customer(s)${r.failed ? ` · ${r.failed} failed` : ''} ✓`); closeModal(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'rm-test': async (el) => { try { const r = await api('POST', '/api/admin/renewmodels/send', { model: el.dataset.m, test: true, lang: getLang(), appUrl: location.origin }); toast(`Test sent to ${r.to} ✓`); } catch (e) { toast(e.message, true); } },
+});
+
+Object.assign(actions, {
+  'checkin-go': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/attendance', { action: 'in', note: ($('#ci-note')?.value || '').trim() }); state.admin.me = null; toast('Checked in ✓ Have a good shift'); renderAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'att-edit': (el) => { const at = new Date(Number(el.dataset.at)); const iso = new Date(at.getTime() - at.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    modal('✏️ Edit attendance', `<form onsubmit="return false" data-id="${esc(el.dataset.id)}">${field('Action', 'action', el.dataset.action, { type: 'select', options: [['in', 'Check in'], ['out', 'Check out'], ['break_start', 'Break start'], ['break_end', 'Break end'], ['login', 'Login']] })}${field('Time', 'at', iso, { type: 'datetime-local' })}${field('Note', 'note', el.dataset.note || '')}
+      <div class="row"><button type="button" class="btn danger" data-act="att-del" data-id="${esc(el.dataset.id)}">🗑 Delete</button><span class="spacer"></span><button class="btn primary" data-act="att-save">💾 Save</button></div></form>`); },
+  'att-save': async (el) => { const f = el.closest('form'); try { await api('PUT', '/api/admin/attendance/' + f.dataset.id, { action: f.action.value, at: new Date(f.at.value).toISOString(), note: f.note.value }); toast('Saved ✓'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  'att-del': async (el) => { if (!confirm('Delete this attendance entry?')) return; try { await api('DELETE', '/api/admin/attendance/' + el.dataset.id); toast('Deleted'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); } },
+  'att-add': async () => { let team = []; try { team = await api('GET', '/api/admin/team'); } catch {} const iso = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    modal('➕ Add attendance entry', `<form onsubmit="return false">${field('Agent', 'memberId', team[0]?.id || '', { type: 'select', options: team.map((m) => [m.id, m.name]) })}${field('Action', 'action', 'in', { type: 'select', options: [['in', 'Check in'], ['out', 'Check out'], ['break_start', 'Break start'], ['break_end', 'Break end']] })}${field('Time', 'at', iso, { type: 'datetime-local' })}${field('Note', 'note', '')}<div class="row"><span class="spacer"></span><button class="btn primary" data-act="att-add-go">➕ Add</button></div></form>`); },
+  'att-add-go': async (el) => { const f = el.closest('form'); try { await api('POST', '/api/admin/attendance/add', { memberId: f.memberId.value, action: f.action.value, at: new Date(f.at.value).toISOString(), note: f.note.value }); toast('Added ✓'); closeModal(); renderAdmin(); } catch (e) { toast(e.message, true); } },
+});
+// ---------------- alert sounds for agents: support requests, waiting line (trials / lines), live chat, payments ----------------
+const SND = { last: null, lastRemind: 0, ctx: null };
+const SND_STYLES = { chime: [[659, .18], [523, .32]], rise: [[523, .12], [659, .12], [784, .26]], pop: [[880, .09]], coin: [[988, .08], [1319, .22]], alarm: [[880, .15], [660, .15], [880, .15], [660, .3]], bell: [[1047, .5]] };
+const SND_KINDS = [['support', '🛟 Support request', 'chime'], ['trials', '🎁 Free trial waiting', 'rise'], ['waitLine', '⏳ Customer waiting for a line', 'alarm'], ['chat', '💬 Live chat message', 'pop'], ['receipts', '🧾 Payment receipt', 'coin'], ['buy', '🛒 Package request', 'bell']];
+const sndCfg = () => { let c = {}; try { c = JSON.parse(localStorage.getItem('tvp_snd') || '{}'); } catch {} return { on: true, vol: 0.6, voice: true, remind: 3, ...c, kinds: { ...Object.fromEntries(SND_KINDS.map(([k, , d]) => [k, d])), ...(c.kinds || {}) } }; };
+const sndSave = (c) => { try { localStorage.setItem('tvp_snd', JSON.stringify(c)); } catch {} };
+document.addEventListener('pointerdown', () => { try { if (!SND.ctx) SND.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (SND.ctx.state === 'suspended') SND.ctx.resume(); } catch {} }, { passive: true });
+function playTone(style, vol) {
+  try { const ctx = SND.ctx || (SND.ctx = new (window.AudioContext || window.webkitAudioContext)()); let t0 = ctx.currentTime + 0.02;
+    for (const [f, d] of SND_STYLES[style] || SND_STYLES.chime) { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = style === 'alarm' ? 'square' : 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(Math.max(0.01, vol) * (style === 'alarm' ? 0.35 : 0.8), t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(g).connect(ctx.destination); o.start(t0); o.stop(t0 + d + 0.05); t0 += d * 0.9; }
+  } catch {}
+}
+const SND_SAY = { en: { support: 'New support request', trials: 'A customer is waiting for a free trial', waitLine: 'A customer is waiting for a line', chat: 'New chat message', receipts: 'New payment receipt', buy: 'New package request' },
+  fr: { support: 'Nouvelle demande de support', trials: 'Un client attend un essai gratuit', waitLine: 'Un client attend une ligne', chat: 'Nouveau message', receipts: 'Nouveau reçu de paiement', buy: 'Nouvelle demande de forfait' },
+  ar: { support: 'طلب دعم جديد', trials: 'عميل ينتظر تجربة مجانية', waitLine: 'عميل ينتظر خطاً', chat: 'رسالة دردشة جديدة', receipts: 'إيصال دفع جديد', buy: 'طلب باقة جديد' } };
+function sayAlert(kind) { try { const lang = (state.admin.me && state.admin.me.lang) || 'en'; const L = SND_SAY[lang] || SND_SAY.en; const u = new SpeechSynthesisUtterance(L[kind] || SND_SAY.en[kind]); u.lang = { fr: 'fr-FR', ar: 'ar-SA' }[lang] || 'en-US'; u.volume = sndCfg().vol; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {} }
+function sndAlert(kind, voice = true) { const c = sndCfg(); if (!c.on) return; playTone(c.kinds[kind] || 'chime', c.vol); if (c.voice && voice) setTimeout(() => sayAlert(kind), 900); }
+async function sndPoll() {
+  if (!state.token || !isAdminUI() || !state.admin.me || state.admin.me.mustCheckIn || !can('customers_view')) return;
+  let w; try { w = await api('GET', '/api/admin/waiting'); } catch { return; }
+  const prev = SND.last; SND.last = w; const c = sndCfg(); const kinds = SND_KINDS.map((k) => k[0]);
+  const waitingNow = kinds.filter((k) => (w[k] || 0) > 0); document.title = (waitingNow.length ? `(${kinds.reduce((a, k) => a + (w[k] || 0), 0)}) ` : '') + (state.config?.branding?.appName || 'INTPROTO-TV');
+  if (!prev) { if (waitingNow.length) { sndAlert(waitingNow[0], false); SND.lastRemind = Date.now(); } return; }
+  const up = kinds.find((k) => (w[k] || 0) > (prev[k] || 0));
+  if (up) { sndAlert(up); SND.lastRemind = Date.now(); toast(`${(SND_KINDS.find((x) => x[0] === up) || [])[1] || 'New'} · ${w[up]} waiting`); return; }
+  if (waitingNow.length && c.remind > 0 && Date.now() - SND.lastRemind >= c.remind * 60000 && ['support', 'trials', 'waitLine'].some((k) => w[k] > 0)) { sndAlert(['support', 'trials', 'waitLine'].find((k) => w[k] > 0)); SND.lastRemind = Date.now(); }
+}
+setInterval(sndPoll, 15000);
+Object.assign(actions, {
+  'snd-open': () => { const c = sndCfg();
+    modal('🔊 Alert sounds', `<form data-form="snd" onsubmit="return false"><p class="small muted" style="margin-top:0">Sounds play on this device when a customer is waiting. Keep this tab open (it can be in the background).</p>
+      <div class="row" style="gap:16px;flex-wrap:wrap">${toggle('Sounds on', 'on', c.on)}${toggle('Spoken alert (voice)', 'voice', c.voice)}</div>
+      <div class="grid2">${field('Volume', 'vol', Math.round(c.vol * 100), { type: 'number', attrs: 'min="5" max="100" step="5"' })}${field('Remind while customers wait (minutes, 0 = off)', 'remind', c.remind, { type: 'number', attrs: 'min="0" max="30"' })}</div>
+      ${SND_KINDS.map(([k, n]) => `<div class="row" style="gap:8px;align-items:center;margin:6px 0"><span style="flex:1">${n}</span><select name="k_${k}" style="width:auto">${Object.keys(SND_STYLES).map((st) => `<option value="${st}" ${c.kinds[k] === st ? 'selected' : ''}>${st}</option>`).join('')}</select><button type="button" class="btn sm" data-act="snd-test" data-k="${k}">▶️ Test</button></div>`).join('')}
+      <div class="row" style="margin-top:10px"><span class="spacer"></span><button class="btn primary" data-act="snd-save">💾 Save</button></div></form>`); },
+  'snd-test': (el) => { const f = el.closest('form'); const st = f['k_' + el.dataset.k].value; playTone(st, (Number(f.vol.value) || 60) / 100); if (f.voice.checked) setTimeout(() => sayAlert(el.dataset.k), 900); },
+  'snd-save': (el) => { const f = el.closest('form'); const c = { on: f.on.checked, voice: f.voice.checked, vol: Math.min(1, Math.max(0.05, (Number(f.vol.value) || 60) / 100)), remind: Math.max(0, Number(f.remind.value) || 0), kinds: Object.fromEntries(SND_KINDS.map(([k]) => [k, f['k_' + k].value])) }; sndSave(c); toast('Alert sounds saved ✓'); closeModal(); renderAdmin(); },
+});
+// ---------------- Agent guide: how the panel works (text, screenshots and short videos), in the agent's language ----------------
+const GUIDE = {
+  en: { title: 'Agent guide — how the panel works', intro: 'Read this once before your first shift. Screenshots and short videos show each step.', sec: [
+    ['🟢', 'Start and end your shift', ['Sign in with your username and password (and the 6-digit code if two-step sign-in is on).', 'Tap <b>Check in & open the panel</b>. Nothing opens before you check in: this records your working hours.', 'Take a break with <b>☕ Break</b> in Attendance, and tap <b>Check out</b> when you finish.', 'For security you are <b>signed out automatically after 6 hours</b> (the ⏱ timer at the top shows the time left). Sign in and check in again to continue.'], 'checkin.png', 'checkin.webm'],
+    ['👥', 'Find a customer', ['Open <b>Customers</b> and type in the search box: name, username, phone, email or <b>order number</b>.', 'Use the chips (Active, Expiring, Expired, Trial, 🛒 requests) to filter.', 'Tap a customer to open the profile: subscription, lines, devices and history.'], 'customers.png'],
+    ['🔁', 'Renew, change the end date, contact', ['<b>🔁 Renew</b>: pick the plan, the price and the account that received the money.', '<b>📅 Expiry</b>: set an exact end date, add days, end now, or no end date.', '<b>📧 Email</b>, <b>💬 WhatsApp</b> (Telegram is inside the same window) and <b>🔔 App notification</b> send ready messages in the customer\'s language and currency, with the right payment link.'], 'profile.png', 'renew.webm'],
+    ['🎁', 'Free trials and customers waiting for a line', ['<b>Trial queue</b>: claim a request, paste the M3U link from the panel and send. The customer gets the login by email.', '<b>Alerts → Waiting for a line</b>: tap Edit, paste the M3U link and save. The 24 hours start then.'], 'trialq.png'],
+    ['🛟', 'Support requests and live chat', ['New requests ring a sound and show a notification. Open <b>Support requests</b>, read, reply, then close the request.', 'Live chat messages appear in <b>Live chat</b> with a red badge.'], 'support.png'],
+    ['🛒', 'Package requests and payments', ['When a customer taps <b>Request</b>, the payment link is emailed to them automatically. You see it under <b>🛒 requests</b>.', 'Check payment receipts in <b>Receipts</b> and approve or reject them.'], ''],
+    ['🔊', 'Alert sounds', ['Tap <b>🔊</b> at the top to choose a sound for each alert, the volume, the spoken alert and a reminder while customers wait.', 'Keep the panel tab open (it can stay in the background) so you hear new customers.'], 'sounds.png'],
+    ['🔐', 'Rules', ['Never share customer data. Copying text from the panel is turned off for agents.', 'API keys, email marketing, list uploads, sender names, SEO and ads are managed only by the owner and the Technical Service.', 'Problem? Tap <b>🐞 Report</b> at the top.'], ''] ] },
+  fr: { title: 'Guide agent — fonctionnement du panneau', intro: 'Lisez ce guide avant votre premier service. Captures et courtes vidéos montrent chaque étape.', sec: [
+    ['🟢', 'Début et fin de service', ['Connectez-vous avec votre identifiant et mot de passe (et le code à 6 chiffres si la double authentification est active).', 'Touchez <b>Check in & open the panel</b>. Rien ne s’ouvre avant le pointage : cela enregistre vos heures.', 'Pause avec <b>☕ Break</b> dans Attendance, puis <b>Check out</b> à la fin.', 'Par sécurité vous êtes <b>déconnecté automatiquement après 6 heures</b> (le minuteur ⏱ en haut affiche le temps restant). Reconnectez-vous et pointez à nouveau.'], 'checkin.png', 'checkin.webm'],
+    ['👥', 'Trouver un client', ['Ouvrez <b>Customers</b> et tapez : nom, identifiant, téléphone, e-mail ou <b>numéro de commande</b>.', 'Les filtres (Active, Expiring, Expired, Trial, 🛒 requests) affinent la liste.', 'Touchez un client pour ouvrir sa fiche : abonnement, lignes, appareils, historique.'], 'customers.png'],
+    ['🔁', 'Renouveler, date de fin, contacter', ['<b>🔁 Renew</b> : choisissez l’offre, le prix et le compte qui a reçu l’argent.', '<b>📅 Expiry</b> : date exacte, ajouter des jours, terminer maintenant ou sans fin.', '<b>📧 Email</b>, <b>💬 WhatsApp</b> (Telegram dans la même fenêtre) et <b>🔔 notification</b> envoient des messages prêts dans la langue et la devise du client, avec le bon lien de paiement.'], 'profile.png', 'renew.webm'],
+    ['🎁', 'Essais gratuits et clients en attente', ['<b>Trial queue</b> : prenez la demande, collez le lien M3U du panel et envoyez.', '<b>Alerts → Waiting for a line</b> : Edit, collez le lien M3U et enregistrez. Les 24 h commencent alors.'], 'trialq.png'],
+    ['🛟', 'Support et chat en direct', ['Chaque nouvelle demande sonne et affiche une notification. Ouvrez <b>Support requests</b>, répondez puis fermez.', 'Les messages du chat arrivent dans <b>Live chat</b> avec un badge rouge.'], 'support.png'],
+    ['🛒', 'Demandes de forfait et paiements', ['Quand un client touche <b>Demander</b>, le lien de paiement lui est envoyé automatiquement par e-mail.', 'Vérifiez les reçus dans <b>Receipts</b> et approuvez ou refusez.'], ''],
+    ['🔊', 'Sons d’alerte', ['Touchez <b>🔊</b> en haut pour choisir un son par alerte, le volume, la voix et un rappel tant que des clients attendent.', 'Gardez l’onglet du panneau ouvert (même en arrière-plan).'], 'sounds.png'],
+    ['🔐', 'Règles', ['Ne partagez jamais les données clients. La copie de texte est désactivée pour les agents.', 'Clés API, e-mail marketing, imports de listes, noms d’expéditeur, SEO et publicités : uniquement le propriétaire et le Service technique.', 'Un problème ? Touchez <b>🐞 Report</b>.'], ''] ] },
+  ar: { title: 'دليل الموظف — كيف تعمل لوحة التحكم', intro: 'اقرأ هذا الدليل قبل أول مناوبة. الصور والفيديوهات القصيرة توضح كل خطوة.', sec: [
+    ['🟢', 'بداية ونهاية المناوبة', ['سجّل الدخول باسم المستخدم وكلمة المرور (والرمز المكوّن من 6 أرقام إذا كان التحقق بخطوتين مفعّلاً).', 'اضغط <b>Check in & open the panel</b>. لا يُفتح شيء قبل تسجيل الحضور: هكذا تُحسب ساعات عملك.', 'للاستراحة اضغط <b>☕ Break</b> في Attendance، وفي النهاية اضغط <b>Check out</b>.', 'للأمان يتم <b>تسجيل خروجك تلقائياً بعد 6 ساعات</b> (المؤقت ⏱ في الأعلى يعرض الوقت المتبقي). سجّل الدخول وسجّل الحضور من جديد للمتابعة.'], 'checkin.png', 'checkin.webm'],
+    ['👥', 'البحث عن عميل', ['افتح <b>Customers</b> واكتب في خانة البحث: الاسم أو اسم المستخدم أو الهاتف أو البريد أو <b>رقم الطلب</b>.', 'استعمل الفلاتر (Active، Expiring، Expired، Trial، 🛒 requests).', 'اضغط على العميل لفتح ملفه: الاشتراك والخطوط والأجهزة والسجل.'], 'customers.png'],
+    ['🔁', 'التجديد وتاريخ الانتهاء والتواصل', ['<b>🔁 Renew</b>: اختر الباقة والسعر والحساب الذي استلم المبلغ.', '<b>📅 Expiry</b>: تاريخ محدد، إضافة أيام، إنهاء الآن، أو بدون تاريخ انتهاء.', '<b>📧 Email</b> و<b>💬 WhatsApp</b> (تيليغرام في نفس النافذة) و<b>🔔 إشعار التطبيق</b> ترسل رسائل جاهزة بلغة العميل وعملته مع رابط الدفع الصحيح.'], 'profile.png', 'renew.webm'],
+    ['🎁', 'التجارب المجانية والعملاء المنتظرون', ['<b>Trial queue</b>: خذ الطلب، الصق رابط M3U من اللوحة وأرسل. يصل للعميل بريد بمعلومات الدخول.', '<b>Alerts → Waiting for a line</b>: اضغط Edit، الصق رابط M3U واحفظ. تبدأ الـ24 ساعة عندها.'], 'trialq.png'],
+    ['🛟', 'طلبات الدعم والدردشة المباشرة', ['كل طلب جديد يصدر صوتاً وإشعاراً. افتح <b>Support requests</b> واقرأ ورد ثم أغلق الطلب.', 'رسائل الدردشة تظهر في <b>Live chat</b> مع شارة حمراء.'], 'support.png'],
+    ['🛒', 'طلبات الباقات والمدفوعات', ['عندما يضغط العميل <b>طلب</b>، يصله رابط الدفع تلقائياً بالبريد. تجده في <b>🛒 requests</b>.', 'راجع إيصالات الدفع في <b>Receipts</b> واقبلها أو ارفضها.'], ''],
+    ['🔊', 'أصوات التنبيه', ['اضغط <b>🔊</b> في الأعلى لاختيار صوت لكل تنبيه، ومستوى الصوت، والتنبيه الصوتي المنطوق، والتذكير أثناء انتظار العملاء.', 'اترك تبويب اللوحة مفتوحاً (ولو في الخلفية) لتسمع العملاء الجدد.'], 'sounds.png'],
+    ['🔐', 'القواعد', ['لا تشارك بيانات العملاء أبداً. نسخ النصوص من اللوحة معطّل للموظفين.', 'مفاتيح API والتسويق بالبريد ورفع القوائم وأسماء المرسل وSEO والإعلانات: للمالك والخدمة التقنية فقط.', 'مشكلة؟ اضغط <b>🐞 Report</b> في الأعلى.'], ''] ] } };
+function agentGuide() {
+  const me = state.admin.me || {}; const lang = GUIDE[me.lang] ? me.lang : 'en'; const G = GUIDE[lang]; const rtl = lang === 'ar';
+  const tabs = Object.keys(GUIDE).map((k) => `<a data-act="guide-lang" data-l="${k}" class="${k === lang ? 'on' : ''}">${{ en: '🇬🇧 English', fr: '🇫🇷 Français', ar: '🇸🇦 العربية' }[k]}</a>`).join('');
+  return `<div dir="${rtl ? 'rtl' : 'ltr'}" class="guide"><div class="card"><h2 style="margin-top:0">🎓 ${esc(G.title)}</h2><p class="muted">${esc(G.intro)}</p><div class="chips">${tabs}</div>
+    <div class="chips" style="margin-top:10px;flex-wrap:wrap">${G.sec.map(([ic, h], i) => `<a href="#g${i}" class="allow-copy">${ic} ${esc(h)}</a>`).join('')}</div></div>
+    ${G.sec.map(([ic, h, steps, img, vid], i) => `<div class="card guide-sec" id="g${i}" style="margin-top:14px"><h3 style="margin-top:0">${ic} ${i + 1}. ${esc(h)}</h3><ol style="line-height:1.7;padding-inline-start:20px">${steps.map((x) => `<li>${x}</li>`).join('')}</ol>
+      ${img || vid ? `<div class="grid2" style="gap:12px;align-items:start">${img ? `<a href="/guide/${img}" target="_blank" rel="noopener"><img src="/guide/${img}" alt="${esc(h)}" loading="lazy" style="width:100%;border-radius:12px;border:1px solid var(--border)"></a>` : ''}${vid ? `<video src="/guide/${vid}" controls playsinline preload="metadata" style="width:100%;border-radius:12px;border:1px solid var(--border);background:#000"></video>` : ''}</div>` : ''}</div>`).join('')}</div>`;
+}
+Object.assign(actions, {
+  'guide-lang': async (el) => { state.admin.me = state.admin.me || {}; state.admin.me.lang = el.dataset.l; const g = el.closest('.guide'); if (g) g.outerHTML = agentGuide(); },
+  'guide-open': (el, e) => { e && e.preventDefault(); const body = modal('🎓 Agent guide', agentGuide(), { wide: true }); void body; },
 });

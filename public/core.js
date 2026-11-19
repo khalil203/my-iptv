@@ -231,6 +231,9 @@ export const OWNER_ONLY = ['exports', 'calls', 'master_sheets'];
 const PERM_KEYS = PERMS.map((p) => p[0]);
 const GRANTABLE_KEYS = PERM_KEYS.filter((k) => !OWNER_ONLY.includes(k));
 const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
+// Only the owner and the Technical Service (role "Technical Manager") get these: API keys (Resend…), email marketing, list uploads, sender/subject/link editing, SEO and ads.
+export const TECH_ONLY = ['secrets', 'marketing', 'templates_edit', 'seo', 'ads'];
+export const isTechRole = (role) => /technical|technique|panel manager/i.test(String(role || ''));
 
 // Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
 export const ROLE_PRESETS = {
@@ -253,25 +256,26 @@ function permFor(method, path, body) {
     const k = Object.keys(body || {});
     if (k.length && k.every((x) => x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => ['plans', 'currency', 'resellerPackages', 'resellerCurrency', 'renewalOffer', 'orderPackages', 'orderCurrency', 'orderAccounts', 'waTemplates'].includes(x))) return 'plans';
-    if (k.includes('notify')) return 'owner';
+    if (k.includes('notify') || k.includes('security')) return 'owner';
+    if (k.some((x) => ['email', 'promo', 'renewModels', 'iboPromo', 'mailTexts', 'renewalOffer', 'waTemplates', 'telegram'].includes(x))) return 'marketing'; // sender names, subjects, links, templates
     if (k.length && k.every((x) => x === 'payRoute' || x === 'stripeAccounts')) return 'stripe';
     if (k.length && k.every((x) => x === 'stock')) return 'stock';
     if (k.length && k.every((x) => x === 'finance')) return 'finance_edit';
     return 'settings';
   }
   if (path === '/api/admin/reseller-sale') return 'customers_edit';
-  if (path === '/api/admin/renewal/send') return 'customers_edit';
-  if (path === '/api/admin/order/send') return 'customers_edit';
+  if (path === '/api/admin/renewal/send') return 'marketing'; // bulk emails: owner & technical service only
+  if (path === '/api/admin/order/send') return 'marketing';
   if (path === '/api/admin/order/custom') return 'customers_edit';
-  if (path.startsWith('/api/admin/newsletter')) return 'customers_edit';
+  if (path.startsWith('/api/admin/newsletter')) return 'marketing';
   if (path.startsWith('/api/admin/accounts') || path === '/api/admin/email/plan' || path === '/api/admin/email/sending') return 'secrets';
-  if (path === '/api/admin/push/promo') return 'customers_edit';
+  if (path === '/api/admin/push/promo') return 'marketing';
   if (path === '/api/admin/app-notify') return 'customers_edit';
   if (path === '/api/admin/paylink' || path === '/api/admin/paylinks/check') return 'customers_view';
-  if (path.startsWith('/api/admin/renewmodels')) return 'customers_edit';
+  if (path.startsWith('/api/admin/renewmodels')) return 'marketing';
   if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
-  if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'customers_edit';
+  if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'marketing';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
@@ -280,7 +284,10 @@ function permFor(method, path, body) {
   if (path === '/api/admin/stripe/balance') return 'finance_view';
   if (path.startsWith('/api/admin/stripe/account/')) return 'stripe';
   if (path.startsWith('/api/admin/ibo')) return 'ibo';
+  if (path === '/api/admin/attendance') return null; // every agent checks in / out (needed before the panel opens)
   if (path.startsWith('/api/admin/attendance')) return 'attendance';
+  if (path === '/api/admin/guide') return null;
+  if (path === '/api/admin/waiting') return 'customers_view';
   if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/leaves')) return method === 'POST' && (path === '/api/admin/leaves' || path.startsWith('/api/admin/leaves/submit')) ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/tasks')) return 'tasks';
@@ -1982,10 +1989,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   const log = (type, msg) => baseLog(type, msg, 'system');
   // Attendance events: login, check-in/out and breaks (spec §9.1). Kept in one list, 90 days.
   const getAtt = async () => (await store.get('attendance')) || [];
+  // Is this member checked in right now? (last check-in / check-out event; a break still counts as checked in)
+  const attOpen = (events, id) => { for (let i = events.length - 1; i >= 0; i--) { const e = events[i]; if (e.by !== id) continue; if (e.action === 'out') return null; if (e.action === 'in') return e; } return null; };
   const attLog = async (by, name, action, note) => { const l = await getAtt(); l.push({ id: uid(6), by, name, at: Date.now(), action, note: cleanText(note, 300) }); if (l.length > 1500) await store.put('attendance', l.slice(-1500)); else await store.put('attendance', l); };
   async function newSession(role, id, s, meta = {}) {
     const token = uid(24); const did = uid(5);
-    const hours = Math.max(1, Number(s.security.sessionHours) || 72);
+    const hours = role === 'staff' ? Math.max(1, Math.min(Number(s.security.staffHours) || 6, Number(s.security.sessionHours) || 72)) : Math.max(1, Number(s.security.sessionHours) || 72); // agents are signed out every 6 hours
     const exp = Date.now() + hours * 3600000;
     await store.put('session:' + token, { role, id, exp, did, ua: String(meta.ua || '').slice(0, 200), ip: String(meta.ip || '').slice(0, 60), at: Date.now() }, hours * 3600);
     if (role === 'admin' || role === 'staff') { try { await attLog(role === 'admin' ? 'owner' : id, String(meta.name || (role === 'admin' ? 'Owner' : id)).slice(0, 60), 'login', (meta.ip ? 'IP ' + meta.ip : '') + (meta.ua ? ' · ' + meta.ua.slice(0, 80) : '')); } catch {} }
@@ -2157,6 +2166,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   async function tick() {
     const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
     try { out.ibo = await iboSendDue(s); } catch {}
+    try { // agents are signed out after 6 hours: close their open check-in so worked hours stay right
+      const H = (Number(s.security.staffHours) || 6) * 3600000; const ev = await getAtt(); const team = await getTeam(); const now = Date.now(); let n = 0;
+      for (const m of team) { const o = attOpen(ev, m.id); if (o && now - o.at >= H) { ev.push({ id: uid(6), by: m.id, name: m.name, at: o.at + H, action: 'out', note: 'Auto check-out: signed out after ' + (H / 3600000) + ' hours', auto: true }); n++; } }
+      if (n) { ev.sort((a, b) => a.at - b.at); await store.put('attendance', ev.slice(-1500)); out.autoOut = n; }
+    } catch {}
     try { const subs = await getSubs(); let v = null; // wake devices that still have notes waiting
       for (const sub of subs) { const q = (await store.get('pushq:' + sub.id)) || []; if (!q.length) continue; v = v || (await vapidKeys()); try { await fetchFn(sub.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'normal', Authorization: await vapidAuth(sub.endpoint, v, supportMail(s)), 'Content-Length': '0' } }); out.woken++; } catch {} } } catch {}
     if (cfg.shiftReminders === false) return out;
@@ -3069,7 +3083,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         actorName = member.name || member.username; staffMember = member;
       }
       // 'secrets' (API keys, accounts, hosting, domains): the owner, anyone given it, and the Technical Manager (Khalil).
-      const can = (p) => isOwner || (!isOwnerOnly(p) && (perms.includes(p) || (p === 'secrets' && /technical|panel manager/i.test((member && member.role) || ''))));
+      const tech = !isOwner && isTechRole(member && member.role);
+      const can = (p) => isOwner || (!isOwnerOnly(p) && (TECH_ONLY.includes(p) ? tech : perms.includes(p)));
       const need = permFor(method, path, body);
       if (need === 'owner' && !isOwner) { await log('security', `${actorName} was blocked from ${method} ${path} (owner only)`); return err(403, 'Only the owner can do this.'); }
       if (need && need !== 'owner' && !can(need)) {
@@ -3100,6 +3115,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
       }
 
+      // Check-in before the panel: an agent must start the shift (track working hours) before anything else opens.
+      let checkedIn = true;
+      if (!isOwner && member && s.security.requireCheckIn !== false) {
+        checkedIn = !!attOpen(await getAtt(), member.id);
+        const allow = path === '/api/admin/me' || path === '/api/admin/attendance' || path.startsWith('/api/admin/2fa') || path.startsWith('/api/admin/bylaws') || path === '/api/admin/me/password' || path === '/api/admin/guide';
+        if (!checkedIn && !allow) return err(403, 'checkin_required');
+      }
       if (R('GET', '/api/admin/diag')) { // owner-only: what devices reported
         if (!isOwner) return err(403, 'Only the owner can see client diagnostics.');
         const list = (await store.get('diag')) || [];
@@ -3108,8 +3130,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/admin/me')) {
         const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa === true };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
+        meta.sessionExp = ses.exp || 0; meta.staffHours = Number(s.security.staffHours) || 6; meta.mustCheckIn = !checkedIn; meta.noCopy = !isOwner && !tech && s.security.noCopy !== false; meta.lang = (member && member.lang) || 'en';
         if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: can('secrets') && !perms.includes('secrets') ? [...perms, 'secrets'] : perms, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
+        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: [...new Set([...perms.filter((p) => !TECH_ONLY.includes(p)), ...(tech ? TECH_ONLY : [])])], tech, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -3650,6 +3673,28 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await pushTo(s, to, { title: action === 'in' ? `🟢 ${me.name} started the shift` : `⚪ ${me.name} ended the shift`, body: action === 'in' ? `Checked in${body.note ? ' · ' + cleanText(body.note, 80) : ''}. Tap to see the team attendance.` : `Checked out${body.note ? ' · ' + cleanText(body.note, 80) : ''}.`, tag: 'shift-' + me.id, url: '/intprototv?tab=attendance' }).catch(() => {}); }
         return ok({ ok: true });
       }
+      const attM = path.match(/^\/api\/admin\/attendance\/(\w+)$/);
+      if ((attM || path === '/api/admin/attendance/add') && !isOwner && !can('attendance_all')) return err(403, 'Only the owner or a team manager can edit attendance.');
+      if (R('POST', '/api/admin/attendance/add')) { // owner adds a missing check-in / check-out for an agent
+        const action = ['in', 'out', 'break_start', 'break_end'].includes(body.action) ? body.action : null; const at = new Date(body.at).getTime(); if (!action || !isFinite(at)) return err(400, 'Choose the action and the time.');
+        const team = await getTeam(); const m = team.find((x) => x.id === body.memberId); if (!m) return err(400, 'Choose the agent.');
+        const l = await getAtt(); l.push({ id: uid(6), by: m.id, name: m.name, at, action, note: cleanText(body.note || 'added by ' + actorName, 300), edited: actorName }); l.sort((a, b) => a.at - b.at); await store.put('attendance', l.slice(-1500));
+        await log('team', `Attendance: ${action} added for ${m.name} at ${new Date(at).toISOString()}`); return ok({ ok: true });
+      }
+      if (attM && (method === 'PUT' || method === 'DELETE')) {
+        const l = await getAtt(); const e = l.find((x) => x.id === attM[1]); if (!e) return err(404, 'Not found');
+        if (method === 'DELETE') { await store.put('attendance', l.filter((x) => x !== e)); await log('team', `Attendance: ${e.action} of ${e.name} deleted`); return ok({ ok: true }); }
+        if (body.at !== undefined) { const at = new Date(body.at).getTime(); if (!isFinite(at)) return err(400, 'Bad time.'); e.at = at; }
+        if (body.action && ['in', 'out', 'break_start', 'break_end', 'login'].includes(body.action)) e.action = body.action;
+        if (body.note !== undefined) e.note = cleanText(body.note, 300);
+        e.edited = actorName; l.sort((a, b) => a.at - b.at); await store.put('attendance', l); await log('team', `Attendance: ${e.name} ${e.action} edited`); return ok({ ok: true });
+      }
+      if (R('GET', '/api/admin/waiting')) { // who is waiting right now (sounds in the panel)
+        const tk = await getTickets(); const ch = await getChats(); const rc = await getReceipts(); const tq = await getTrialQueue(); const list = await getCustomers();
+        const lastFrom = (t) => { const m = t.messages || []; return m.length ? m[m.length - 1].from : ''; };
+        const sup = tk.filter((t) => t.status !== 'closed' && t.status !== 'resolved' && lastFrom(t) === 'customer');
+        return ok({ support: sup.length, supportNew: sup.filter((t) => (t.messages || []).length <= 1).length, chat: ch.reduce((a, x) => a + (Number(x.ua) || 0), 0), trials: tq.filter((t) => t.status === 'pending').length, waitLine: list.filter((c) => c.pendingLine).length, receipts: rc.filter((r) => r.status === 'pending').length, buy: list.filter((c) => c.buyRequest && !c.buyRequest.answeredAt).length, at: Date.now() });
+      }
       if (R('GET', '/api/admin/shifts')) return ok((await getShifts()));
       if (R('PUT', '/api/admin/shifts')) {
         const l = await getShifts(); const memberId = String(body.memberId || '').slice(0, 20); if (!memberId) return err(400, 'memberId required.');
@@ -3817,7 +3862,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const taken = team.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getCustomers()).some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getAdmin()).username.toLowerCase() === username.toLowerCase();
         if (taken) return err(400, 'This username is already used.');
         const salt = uid(8);
-        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', alias: String(body.alias || '').slice(0, 40), bank: ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '', bankDetails: String(body.bankDetails || '').slice(0, 120), notifyEmail: String(body.notifyEmail || '').slice(0, 120), traineeUntil: body.trainee ? Date.now() + 14 * DAY : (Number(body.traineeUntil) || 0), createdAt: Date.now(), lastLogin: null };
+        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', alias: String(body.alias || '').slice(0, 40), bank: ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '', bankDetails: String(body.bankDetails || '').slice(0, 120), lang: ['en', 'fr', 'de', 'es', 'it', 'ar'].includes(body.lang) ? body.lang : 'en', notifyEmail: String(body.notifyEmail || '').slice(0, 120), traineeUntil: body.trainee ? Date.now() + 14 * DAY : (Number(body.traineeUntil) || 0), createdAt: Date.now(), lastLogin: null };
         team.push(m); await store.put('team', team);
         await log('team', `Added team member ${m.name} (${username})`);
         const { salt: _s, hash: _h, ...pub } = m; return ok(pub);
@@ -3833,6 +3878,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.alias !== undefined) m.alias = String(body.alias).slice(0, 40);
           if (body.bank !== undefined) m.bank = ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '';
           if (body.bankDetails !== undefined) m.bankDetails = String(body.bankDetails).slice(0, 120);
+          if (body.lang !== undefined && ['en', 'fr', 'de', 'es', 'it', 'ar'].includes(body.lang)) m.lang = body.lang;
           if (body.notifyEmail !== undefined) m.notifyEmail = cleanEmail(body.notifyEmail) || String(body.notifyEmail || '').trim().toLowerCase().slice(0, 120);
           if (body.promote) m.traineeUntil = 0;
           else if (body.traineeUntil !== undefined) m.traineeUntil = Number(body.traineeUntil) || 0;

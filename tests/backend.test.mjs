@@ -15,7 +15,7 @@ function setup(hook) {
     if (String(url).includes('api.telegram.org')) { tg.push(JSON.parse(init.body || '{}')); return { ok: true, status: 200, json: async () => ({ ok: true, result: { username: 'testbot' } }) }; }
     return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
   };
-  db.set('settings', { v: JSON.stringify({ security: { force2fa: false, captcha: false } }), e: 0 });
+  db.set('settings', { v: JSON.stringify({ security: { force2fa: false, captcha: false, requireCheckIn: false } }), e: 0 });
   const be = createBackend({ store, fetchFn, mode: 'server' });
   const call = (method, path, body, token, query) => be.handle({ method, path, body: body || {}, token, query: query || {} });
   return { db, store, mails, calls, tg, be, call };
@@ -267,7 +267,7 @@ test('panel credits: refused by the panel -> retried through the relay; last goo
     if (String(url).startsWith('https://relay.example/x')) return mode === 'down' ? { ok: false, status: 502, text: async () => 'upstream error' } : { ok: true, status: 200, text: async () => '{"status":"success","data":{"credits":"64"}}' };
     if (String(url).startsWith('http://panel.example')) return { ok: false, status: 403, text: async () => '<html>Access denied</html>' };
     return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
-  await store.put('settings', { security: { force2fa: false, captcha: false } });
+  await store.put('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false } });
   const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
   const t2 = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
   await call('PUT', '/api/admin/settings', { reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' }, player: { relayUrl: 'https://relay.example' } }, t2);
@@ -286,7 +286,7 @@ test('bounced emails: typos are caught, bounces are pulled from Resend, paused a
     if (url.startsWith('https://api.resend.com/emails')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm' }) }; }
     if (url.startsWith('https://cloudflare-dns.com')) return { ok: true, status: 200, json: async () => ({ Status: url.includes('nosuchdomain') ? 3 : 0 }) };
     return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
-  await store.put('settings', { security: { force2fa: false, captcha: false } });
+  await store.put('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false } });
   const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
   const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
   await call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>' }, trial: { enabled: true } }, tok);
@@ -343,7 +343,7 @@ test('free trial: never blocked by the panel; uses a ready line, else waits; pho
     if (url.startsWith('https://api.resend.com/emails')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ id: 'm' }) }; }
     if (url.startsWith('http://panel.example')) return { ok: false, status: 500, text: async () => '{"status":"error","message":"Not enough credits"}' };
     return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
-  await store.put('settings', { security: { force2fa: false, captcha: false } });
+  await store.put('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false } });
   const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
   const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
   await call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', adminEmail: 'owner@example.com' }, trial: { enabled: true }, reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' }, player: { serverUrl: 'http://tv.example.com:8080' } }, tok);
@@ -399,7 +399,7 @@ test('adding a customer is not blocked when the panel answers 404; the answer is
   const db = new Map();
   const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
   const fetchFn = async (url) => (String(url).startsWith('http://panel.example') ? { ok: false, status: 404, text: async () => '<html>Not Found</html>' } : { ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
-  await store.put('settings', { security: { force2fa: false, captcha: false } });
+  await store.put('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false } });
   const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
   const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
   await call('PUT', '/api/admin/settings', { reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' } }, tok);
@@ -416,7 +416,7 @@ test('panel sync through the line: end date and devices follow the panel, missin
     if (url.includes('player_api.php') && url.includes('username=banned1')) return { ok: true, status: 200, text: async () => JSON.stringify({ user_info: { auth: 1, status: 'Banned', exp_date: String(exp) } }) };
     if (url.includes('player_api.php')) return { ok: true, status: 200, text: async () => JSON.stringify({ user_info: { auth: 0 } }) };
     return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' }; };
-  await store.put('settings', { security: { force2fa: false, captcha: false } });
+  await store.put('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false } });
   const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
   const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
   await call('PUT', '/api/admin/settings', { player: { serverUrl: 'http://tv.example.com:8080' } }, tok);
@@ -478,7 +478,7 @@ test('renewing a customer is not blocked when the panel answers an error; the cu
   const db = new Map();
   const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
   const fetchFn = async (url) => (String(url).startsWith('http://panel.example') ? { ok: false, status: 400, text: async () => 'Bad Request' } : { ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
-  await store.put('settings', { security: { force2fa: false, captcha: false } });
+  await store.put('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false } });
   const be = createBackend({ store, fetchFn, mode: 'server' }); const call = (m, p, b, t, q) => be.handle({ method: m, path: p, body: b || {}, token: t, query: q || {} });
   const tok = (await call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).json.token;
   await call('PUT', '/api/admin/settings', { reseller: { enabled: true, baseUrl: 'http://panel.example', apiKey: 'k' } }, tok);
@@ -671,7 +671,7 @@ test('stripe panel: account list is saved, rk stays secret and round-trips maske
 
 test('stripe panel: existing installs migrate the legacy Grenapp name, balances and payout schedule', async () => {
   const x = setup();
-  const legacy = { security: { force2fa: false, captcha: false }, pricingV2: true, pricingV3: true, stripeSettleV2: true,
+  const legacy = { security: { force2fa: false, captcha: false, requireCheckIn: false }, pricingV2: true, pricingV3: true, stripeSettleV2: true,
     stripeAccounts: [
       { id: 'grenapp', name: 'Grenapp Host LLC', currency: 'USD', status: 'active', payoutDays: 7, note: '', rk: '', links: [], bankId: 'mercury', balance: 79.99, balanceAt: 1 },
       { id: 'waffim', name: 'Wafinaccounting LLC', currency: 'USD', status: 'active', payoutDays: 2, note: '', rk: '', links: [], balance: 79.99, balanceAt: 1 },
@@ -1097,7 +1097,7 @@ test('sending: bounce reading and recent emails try the transactional keys when 
   const db = new Map(); const stored = (k, v) => db.set(k, JSON.stringify(v));
   const seen = [];
   const store = { get: async (k) => (db.has(k) ? JSON.parse(db.get(k)) : null), put: async (k, v) => { db.set(k, JSON.stringify(v)); }, del: async (k) => { db.delete(k); } };
-  stored('settings', { security: { force2fa: false, captcha: false }, email: { resendKey: 're_dead', transKeys: ['re_live'], transDomains: ['intproto-tv.online'] } });
+  stored('settings', { security: { force2fa: false, captcha: false, requireCheckIn: false }, email: { resendKey: 're_dead', transKeys: ['re_live'], transDomains: ['intproto-tv.online'] } });
   const fetchFn = async (url, init) => {
     url = String(url); const auth = String((init && init.headers && init.headers.Authorization) || ''); seen.push(auth);
     if (!url.startsWith('https://api.resend.com')) return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
@@ -2194,4 +2194,34 @@ test('renewal emails: 5 models in 5 languages, sent automatically 7 days before,
   // send now to a group and a test
   assert.equal((await x.call('POST', '/api/admin/renewmodels/send', { model: 'm5', audience: 'one', id: a.id }, tok)).json.sent, 1);
   assert.equal((await x.call('POST', '/api/admin/renewmodels/send', { model: 'm4', test: true, to: 'owner@example.com', lang: 'de' }, tok)).json.sent, 1);
+});
+
+test('agents: check in before the panel, signed out after 6 hours with auto check-out, owner edits logs; only owner & technical service see keys and send marketing', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { security: { requireCheckIn: true }, email: { resendKey: 're_secret_key', from: 'App <a@example.com>' } }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Said', username: 'said', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'marketing', 'secrets', 'settings'], lang: 'ar' }, tok);
+  await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'mrkhalil', password: 'secret12', role: 'Technical Manager', perms: ['customers_view'] }, tok);
+  const st = (await x.call('POST', '/api/login', { username: 'said', password: 'secret12' })).json.token; await signBylaws(x, st).catch(() => {});
+  // 1. nothing opens before the check-in
+  let me = (await x.call('GET', '/api/admin/me', {}, st)).json; assert.equal(me.mustCheckIn, true); assert.equal(me.lang, 'ar'); assert.equal(me.noCopy, true);
+  assert.ok(me.sessionExp - Date.now() <= 6 * 3600000 + 5000, 'agent session lasts 6 hours');
+  assert.equal((await x.call('GET', '/api/admin/customers', {}, st)).json.error, 'checkin_required');
+  assert.equal((await x.call('POST', '/api/admin/attendance', { action: 'in' }, st)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/customers', {}, st)).status, 200);
+  // 2. keys and marketing: a sales agent can't, even if ticked; the technical service can
+  assert.equal((await x.call('POST', '/api/admin/newsletter/send', { subject: 'x' }, st)).status, 403);
+  assert.equal((await x.call('PUT', '/api/admin/settings', { email: { from: 'Hacked <h@example.com>' } }, st)).status, 403);
+  const sset = (await x.call('GET', '/api/admin/settings', {}, st)).json; assert.ok(!JSON.stringify(sset).includes('re_secret_key'));
+  assert.ok(!(await x.call('GET', '/api/admin/me', {}, st)).json.perms.includes('marketing'));
+  const kt = (await x.call('POST', '/api/login', { username: 'mrkhalil', password: 'secret12' })).json.token; await signBylaws(x, kt).catch(() => {}); await x.call('POST', '/api/admin/attendance', { action: 'in' }, kt);
+  const km = (await x.call('GET', '/api/admin/me', {}, kt)).json; assert.ok(km.perms.includes('marketing') && km.perms.includes('secrets')); assert.equal(km.noCopy, false);
+  // 3. after 6 hours the open check-in is closed automatically
+  const ev = await x.store.get('attendance'); ev.filter((e) => e.action === 'in').forEach((e) => { e.at -= 7 * 3600000; }); await x.store.put('attendance', ev);
+  await x.be.tick(); const ev2 = await x.store.get('attendance'); const autos = ev2.filter((e) => e.auto); assert.equal(autos.length, 2);
+  assert.equal((await x.call('GET', '/api/admin/customers', {}, st)).json.error, 'checkin_required');
+  // 4. the owner edits an agent's log
+  assert.equal((await x.call('PUT', `/api/admin/attendance/${autos[0].id}`, { note: 'left at 18:00' }, tok)).status, 200);
+  assert.equal((await x.call('PUT', `/api/admin/attendance/${autos[0].id}`, { note: 'x' }, st)).status, 403);
+  const w = (await x.call('GET', '/api/admin/waiting', {}, tok)).json; for (const k of ['support', 'chat', 'trials', 'waitLine', 'receipts', 'buy']) assert.equal(typeof w[k], 'number', k);
+  const team = (await x.call('GET', '/api/admin/team', {}, tok)).json; assert.equal((await x.call('POST', '/api/admin/attendance/add', { memberId: team[0].id, action: 'in', at: new Date().toISOString() }, tok)).status, 200);
 });

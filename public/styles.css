@@ -208,7 +208,7 @@ select option { background: var(--elevated); color: var(--text); }
 .perm-list .toggle { padding: 8px 0; }
 body.np-customers_edit [data-perm~=customers_edit], body.np-customers_delete [data-perm~=customers_delete], body.np-customers_view [data-perm~=customers_view],
 body.np-finance_edit [data-perm~=finance_edit], body.np-finance_view [data-perm~=finance_view], body.np-stock [data-perm~=stock], body.np-settings [data-perm~=settings],
-body.np-exports [data-perm~=exports], body.np-calls [data-perm~=calls], body.np-master_sheets [data-perm~=master_sheets], body.np-customers_phone [data-perm~=customers_phone] { display: none !important; }
+body.np-exports [data-perm~=exports], body.np-calls [data-perm~=calls], body.np-master_sheets [data-perm~=master_sheets], body.np-customers_phone [data-perm~=customers_phone], body.np-marketing [data-perm~=marketing], body.np-secrets [data-perm~=secrets] { display: none !important; }
 
 /* user app */
 .uapp { min-height: 100vh; padding-bottom: calc(80px + var(--safe-b)); }
@@ -1145,3 +1145,5 @@ body:has(.bnav) #lang-fab, body:has(.chat-fab) #lang-fab { bottom: calc(148px + 
 /* package cards: button text wraps instead of being cut */
 .plan-c .btn { white-space: normal; height: auto; min-height: 40px; line-height: 1.25; padding-top: 8px; padding-bottom: 8px; text-overflow: clip; overflow: visible; }
 .plan-c b { overflow-wrap: anywhere; }
+/* agents: no text selection / copying of panel data (inputs still work) */
+body.no-copy #app :not(input):not(textarea):not(select) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
