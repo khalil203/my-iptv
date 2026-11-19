@@ -505,30 +505,30 @@ const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
   ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
-  ['trialq', '⚡', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
-  ['alerts', '🔔', 'Alerts', 'customers_view', 'Customers', 'expiring expired trials attention reminders follow up'],
+  ['trialq', '⏳', 'Trial queue', 'customers_view', 'Customers', 'free trial agents claim process pending all agents'],
+  ['alerts', '🚨', 'Alerts', 'customers_view', 'Customers', 'expiring expired trials attention reminders follow up'],
   ['subs', '📅', 'Subscriptions', 'customers_view', 'Customers', 'tracker csv expiry'],
   ['dups', '🧬', 'Duplicates', 'customers_view', 'Customers', 'repeat same email phone'],
-  ['chat', '🗨', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
-  ['support', '💬', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
+  ['chat', '💬', 'Live chat', 'customers_view', 'Customers', 'messages talk conversation customer support instant'],
+  ['support', '🛟', 'Support requests', 'customers_view', 'Customers', 'tickets requests help refund'],
   ['disputes', '⚠️', 'Disputes & problems', 'disputes', 'Customers', 'disputes escalations report a problem bug complaint payment issue'],
   ['tasks', '✅', 'Tasks', 'tasks', 'Team', 'tasks daily weekly plan status priority deadline completed delayed blocked assignee'],
   ['attendance', '🕒', 'Attendance & shifts', 'attendance', 'Team', 'attendance check in out breaks night shift timezone leave days off reports weekly performance clock'],
   ['notify', '🔔', 'Notifications', null, 'Team', 'push notifications devices phone iphone android laptop tablet alerts shift reminders owner check-in promotions'],
-  ['teamchat', '💬', 'Team chat', null, 'Team', 'team chat internal handover announcements staff channel'],
+  ['teamchat', '🗣️', 'Team chat', null, 'Team', 'team chat internal handover announcements staff channel'],
   ['cc', '💳', 'CC Collection', 'owner', 'Money', 'cc collection card kast trade okx epay exchangers live declined owner'],
   ['receipts', '🧾', 'Payment receipts', 'customers_view', 'Money', 'paid proof transfer approve activate upload bank cash'],
   ['finance', '🏦', 'Banks & balances', 'finance_view', 'Money', 'stripe payments accounts transactions webhook'],
-  ['stripe', '💳', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
+  ['stripe', '💠', 'Stripe accounts', 'stripe', 'Money', 'stripe accounts payouts grenapp waffim avixcloud bussalion normal resellers ibo links'],
   ['ibo', '📺', 'IBO Player', 'ibo', 'Money', 'ibo player credits activation mac lifetime 1 year trial smart iptv'],
-  ['profits', '📈', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
+  ['profits', '💰', 'Profits', 'profits', 'Money', 'reports weekly monthly yearly'],
   ['stock', '🎟', 'Credits stock', 'stock', 'Money', 'panel credits buy low'],
   ['sales', '📈', 'Sales tracker', 'sales', 'Money', 'sales daily monthly revenue transactions tracker today month'],
-  ['plans', '💳', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
-  ['mkt', '📧', 'Email marketing', 'marketing', 'Marketing', 'resend keys rotation bounce lists campaign send marketing newsletter'],
+  ['plans', '🏷️', 'Plans & prices', 'plans', 'Money', 'packages pricing reseller pay links'],
+  ['mkt', '📣', 'Email marketing', 'marketing', 'Marketing', 'resend keys rotation bounce lists campaign send marketing newsletter'],
   ['seo', '🧵', 'SEO & social', 'seo', 'Marketing', 'reddit quora facebook posts agents results seo social'],
-  ['gads', '🎯', 'Google Ads', 'ads', 'Marketing', 'google ads campaigns budget spend domain'],
-  ['fb', '👍', 'Facebook Ads', 'ads', 'Marketing', 'facebook ads creatives description performance photo history'],
+  ['gads', '🔎', 'Google Ads', 'ads', 'Marketing', 'google ads campaigns budget spend domain'],
+  ['fb', '📘', 'Facebook Ads', 'ads', 'Marketing', 'facebook ads creatives description performance photo history'],
   ['templates', '✍️', 'Message templates', 'settings', 'Messages', 'email whatsapp trial reminder renewal order wording text'],
   ['emails', '📬', 'Emails & bounces', 'customers_view', 'Messages', 'bounced spam delivered sent resend invalid'],
   ['trial', '🎁', 'Trial & email setup', 'settings', 'Messages', 'resend key sender free trial renewal offer'],
@@ -536,13 +536,13 @@ const ADMIN_TABS = [
   ['branding', '🎨', 'Login & branding', 'settings', 'App', 'logo colours name whatsapp number theme'],
   ['api', '🔌', 'API settings', 'settings', 'App', 'tvplus panel server relay dns reseller'],
   ['mail', '📧', 'Email sending', null, 'System', 'email sending status resend api keys domains plans free trial paid google sheets hostinger dynu accounts'],
-  ['accounts', '🔐', 'Accounts & API keys', 'secrets', 'System', 'resend email marketing hostinger dynu domains api keys passwords google sheets spend cost'],
+  ['accounts', '🗝️', 'Accounts & API keys', 'secrets', 'System', 'resend email marketing hostinger dynu domains api keys passwords google sheets spend cost'],
   ['data', '🗂', 'Import & export', 'owner', 'System', 'backup restore csv json download upload edit manually'],
-  ['holidays', '🗓', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
+  ['holidays', '🏖️', 'Holidays & planning', 'holidays', 'System', 'holidays calendar europe usa campaign marketing planning thanksgiving black friday super bowl'],
   ['browser', '🌐', 'In-panel browser', null, 'System', 'browser internet search google sheets drive resend stripe duckduckgo'],
   ['team', '🛡', 'Team & access', 'owner', 'System', 'staff permissions roles'],
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
-  ['activity', '🧾', 'Activity', 'activity', 'System', 'log audit history'],
+  ['activity', '📜', 'Activity', 'activity', 'System', 'log audit history'],
 ];
 const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
@@ -809,7 +809,7 @@ async function adminMail() {
   const others = ACC.d.rows.filter((a) => a.kind === 'hostinger' || a.kind === 'dynu');
   return `<div class="notice" style="margin-bottom:12px">🔐 You see the keys, passwords and domains because you are the owner, Khalil or Nizar. Support agents see this page without them.</div>
     ${await mailStatusCard(true, true)}
-    <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="mail-add">＋ Add email account</button><button class="btn" data-act="acc-sheet">📊 Google Sheets ${d.sheet ? '<span class="pill st-active">linked</span>' : '<span class="pill">not linked</span>'}</button><button class="btn" data-act="acc-dns">🌐 Add Resend DNS records</button>${others.filter((a) => a.kind === 'hostinger' && a.apiKey).map((a) => `<button class="btn" data-act="acc-hostinger" data-id="${a.id}">🏠 ${esc(a.name)}</button>`).join('')}<a class="btn ghost" data-act="atab" data-tab="accounts">🔐 All accounts (Hostinger, Dynu…)</a></div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin:12px 0"><button class="btn primary" data-act="mail-add">＋ Add email account</button><button class="btn" data-act="acc-sheet">📊 Google Sheets ${d.sheet ? '<span class="pill st-active">linked</span>' : '<span class="pill">not linked</span>'}</button><button class="btn" data-act="acc-dns">🌐 Add Resend DNS records</button>${others.filter((a) => a.kind === 'hostinger' && a.apiKey).map((a) => `<button class="btn" data-act="acc-hostinger" data-id="${a.id}">🏠 ${esc(a.name)}</button>`).join('')}<a class="btn ghost" data-act="atab" data-tab="accounts">🗝️ All accounts (Hostinger, Dynu…)</a></div>
     ${cards || '<div class="card"><p class="muted">No email account yet. Press ＋ Add email account.</p></div>'}
     <div class="card"><h3>🏠 Hostinger & 🌐 Dynu</h3>
       <p class="small muted" style="margin-top:0">Only the owner, Khalil and Nizar see and change this. Paste the API key once: the websites, domains and DNS appear here, and Resend's email records can be added to your domains in one click.</p>
@@ -822,7 +822,7 @@ async function adminMail() {
               ${field('Account email (login)', 'email', '', { type: 'email', attrs: 'autocapitalize="none"' })}
               <button class="btn primary sm">🔗 Connect ${H ? 'Hostinger' : 'Dynu'}</button></form></div>`; }).join('')}
       </div></div>
-    <p class="small muted">Everything here is the same list as 🔐 Accounts & API keys and the Google Sheet: change it in any of the three and the sending keys follow (plan, domain, on/off). Paid keys send first; free trial keys only up to 100 a day and 3,000 a month.</p>`;
+    <p class="small muted">Everything here is the same list as 🗝️ Accounts & API keys and the Google Sheet: change it in any of the three and the sending keys follow (plan, domain, on/off). Paid keys send first; free trial keys only up to 100 a day and 3,000 a month.</p>`;
 }
 async function adminOverview() {
   const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
@@ -1391,7 +1391,7 @@ function adminBranding(s) {
     <div><h3>Live preview</h3><div class="preview-box" id="login-preview">${loginCard(b, { preview: true })}</div></div></div>`;
 }
 
-// ---------- 🔐 Accounts & API keys (owner, Khalil, Nizar) ----------
+// ---------- 🗝️ Accounts & API keys (owner, Khalil, Nizar) ----------
 const ACC = { d: null, kind: 'all', q: '', show: {} };
 async function adminAccounts() {
   try { ACC.d = await api('GET', '/api/admin/accounts'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
