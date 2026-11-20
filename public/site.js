@@ -3,7 +3,7 @@
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
 import { ic } from './icons.js?v=102';
-import { flagOf, nameOf } from './lang-data.js?v=121';
+import { flagOf, nameOf } from './lang-data.js?v=122';
 
 const T = {
   en: {

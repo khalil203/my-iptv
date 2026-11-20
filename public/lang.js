@@ -2,8 +2,8 @@
 // language of the app (login, site footer, support, reseller, account).
 // The translator hub is separate (translator.js) — it changes content, not the UI.
 
-import { APP_LANGS, flagOf, nameOf, englishOf, dirOf } from './lang-data.js?v=121';
-import { t, tIn } from './i18n.js?v=121';
+import { APP_LANGS, flagOf, nameOf, englishOf, dirOf } from './lang-data.js?v=122';
+import { t, tIn } from './i18n.js?v=122';
 
 const RECENT_KEY = 'tvp_lang_recent';
 const $ = (s, r = document) => r.querySelector(s);

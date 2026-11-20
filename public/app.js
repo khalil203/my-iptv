@@ -1,12 +1,12 @@
 import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=120';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
-import { siteHtml } from './site.js?v=121';
+import { siteHtml } from './site.js?v=122';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=121';
-import { openLangSheet, paintLangPill, langChip } from './lang.js?v=121';
-import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=121';
-import { createTranslator } from './translator.js?v=121';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=122';
+import { openLangSheet, paintLangPill, langChip } from './lang.js?v=122';
+import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=122';
+import { createTranslator } from './translator.js?v=122';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };

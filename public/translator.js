@@ -10,7 +10,7 @@ import {
   TR_LANGS, trLang, flagOf, nameOf, dirOf, isRtl, buildReadUrl,
   shield, unshield, shouldSkipText, splitLong, translateEndpoint, parseTranslateResponse,
   glossaryOf, DEFAULT_GLOSSARY, panelTarget,
-} from './lang-data.js?v=121';
+} from './lang-data.js?v=122';
 
 const LS = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -277,8 +277,12 @@ export function createTranslator(ctx) {
 
   function observe() {
     if (S.obs) return;
-    S.obs = new MutationObserver(() => {
+    S.obs = new MutationObserver((recs) => {
       if (!S.active) return;
+      if (recs.every((r) => {
+        const n = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+        return n && n.closest('#tr-status, .tr-hub, #toast, #lang-sheet, .tr-msg-alt');
+      })) return;
       clearTimeout(S.timer);
       S.timer = setTimeout(() => { runPanel(); chatAuto(); }, 180);
     });
@@ -344,6 +348,9 @@ export function createTranslator(ctx) {
     }
     const busy = S.running && S.progress.total > 0;
     const text = busy ? `Translating ${Math.min(S.progress.done, S.progress.total)}/${S.progress.total}` : (err ? 'Translator busy' : `${nameOf(S.target)} ✓`);
+    const key = `${busy}|${text}`;
+    if (el.dataset.k === key) return;
+    el.dataset.k = key;
     el.classList.toggle('busy', !!busy);
     el.innerHTML = `<button type="button" class="tr-status-main" data-act="tr-open" title="Translator">${flagOf(S.target)}<b>${esc(text)}</b>${busy ? '<i class="tr-dot"></i>' : ''}</button><button type="button" class="tr-status-x" data-act="tr-off" aria-label="Show the original English" title="Show original">×</button>`;
   }
@@ -619,8 +626,12 @@ export function createTranslator(ctx) {
 
   // Chat bubbles appear in modals and in the dashboard; watch for them even when
   // the panel itself is not translated.
-  const chatObs = new MutationObserver(() => {
+  const chatObs = new MutationObserver((recs) => {
     if (!S.chatOn) return;
+    if (recs.every((r) => {
+      const n = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+      return n && n.closest('.tr-msg-alt, .tr-hub, #tr-status, #toast, #lang-sheet');
+    })) return;
     clearTimeout(S.chatT);
     S.chatT = setTimeout(chatAuto, 160);
   });
