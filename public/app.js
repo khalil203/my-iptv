@@ -5577,10 +5577,10 @@ function mktDraftHtml(d) {
 async function adminMktPage() {
   const m = await api('GET', '/api/admin/emailmkt'); const st = await api('GET', '/api/admin/emailmkt/settings');
   state.admin.mkt = m; state.admin.mktSettings = st;
-  const composer = state.admin.mktComposer || {};
   const lists = m.lists || [];
   const input = (k, val, ph) => `<input name="${k}" data-k="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}" dir="ltr" autocomplete="off">`;
   const msCard = await mailStatusCard(true);
+  const composer = state.admin.mktComposer || {};
   const aiComposer = `<h3 style="margin-top:14px">✨ Draft Email &amp; WhatsApp messages</h3><p class="small muted">Describe the campaign without customer-specific data. Drafting does not save or send. The WhatsApp result is plain text; copy it into WhatsApp and review it before sending.</p>
     <form data-form="mkt-ai"><div class="grid2">${field('Audience (optional)', 'audience', '', { ph: 'e.g. existing subscribers' })}${field('Tone (optional)', 'tone', '', { ph: 'e.g. warm and concise' })}</div>${field('Campaign brief', 'brief', '', { type: 'textarea', rows: 3, attrs: 'required maxlength="1200"', ph: 'What should the message say? Include only claims, prices or offers you have verified.' })}<button type="submit" class="btn">✨ Generate drafts</button></form><div id="mkt-ai-output">${mktDraftHtml(state.admin.mktDraft)}</div>`;
   return `${msCard}<p class="small muted">Marketing email lists are isolated from customer emails. Keys, sender names and subjects rotate batch by batch. Bounced/dead addresses are removed at upload and excluded at send. Sender is <b>noreply@<domain></b> — auto-generated from the domain paired with each key.</p>
