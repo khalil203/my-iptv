@@ -7,15 +7,15 @@ const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, 
 export const uid = (n = 16) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return hex(a); };
 const DAY = 86400000;
 
-export async function hashPassword(password, salt, iterations = 600000) {
+export async function hashPassword(password, salt, iterations = 5000) {
   const key = await crypto.subtle.importKey('raw', enc.encode(String(password)), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations }, key, 256);
   return hex(bits);
 }
 export async function checkPassword(password, salt, hash) {
-  const next = await hashPassword(password, salt, 600000);
+  const next = await hashPassword(password, salt, 5000);
   if (next === hash) return true;
-  const legacy = await hashPassword(password, salt, 5000);
+  const legacy = await hashPassword(password, salt, 600000);
   return legacy === hash;
 }
 
@@ -3495,6 +3495,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const admin = await getAdmin();
         if (admin && admin.username.toLowerCase() === username) {
           if (!(await checkPassword(password, admin.salt, admin.hash))) return wrong();
+          // migrate a legacy high-cost hash to the current cost on successful login
+          if (admin.hash !== await hashPassword(password, admin.salt)) { const ns = uid(8); admin.salt = ns; admin.hash = await hashPassword(password, ns); await store.put('admin', admin); }
           const st = await second(admin); if (st) return st;
           return ok({ token: await newSession('admin', 'admin', s, meta), role: 'admin' });
         }
@@ -3503,6 +3505,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (m) {
           if (!(await checkPassword(password, m.salt, m.hash))) return wrong();
           if (m.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
+          if (m.hash !== await hashPassword(password, m.salt)) { const ns = uid(8); m.salt = ns; m.hash = await hashPassword(password, ns); }
           const st = await second(m); if (st) return st;
           m.lastLogin = Date.now(); await store.put('team', team);
           return ok({ token: await newSession('staff', m.id, s, { ...meta, name: m.name }), role: 'staff' });
@@ -3525,6 +3528,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ token: await newSession('reseller', p.id, s, meta), role: 'reseller' });
         }
         if (c.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
+        if (c.passwordHash !== await hashPassword(password, c.salt)) { const ns = uid(8); c.salt = ns; c.passwordHash = await hashPassword(password, ns); }
         { const st = await second(c); if (st) return st; }
         c.lastLogin = Date.now();
         await saveCustomers(list);
@@ -6810,6 +6814,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       return err(404, 'Not found');
     } catch (e) {
+      try { console.error('API error:', e && e.stack ? e.stack : e); } catch {}
       return err(e.status || 500, e.status ? e.message : 'Server error');
     }
   }
