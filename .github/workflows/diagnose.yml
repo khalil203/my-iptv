@@ -23,7 +23,7 @@ jobs:
           mkdir -p /tmp/diag
           ID=$(npx wrangler kv namespace list | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const l=JSON.parse(s);const n=l.find(x=>x.title==='my-iptv-db')||l.find(x=>/my-iptv/.test(x.title));console.log(n?n.id:'')})")
           test -n "$ID" || { echo "storage not found"; exit 1; }
-          for k in settings customers log; do npx wrangler kv key get "$k" --namespace-id "$ID" --remote > /tmp/diag/$k.json 2>/dev/null || echo "null" > /tmp/diag/$k.json; done
+          for k in settings customers admin team log; do npx wrangler kv key get "$k" --namespace-id "$ID" --remote > /tmp/diag/$k.json 2>/dev/null || echo "null" > /tmp/diag/$k.json; done
           wc -c /tmp/diag/*.json
       - name: Diagnose
         run: node tools/diagnose.mjs
