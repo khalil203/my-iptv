@@ -275,7 +275,7 @@ function loginCard(b, { preview = false, error = '' } = {}) {
       ${brandHero(b)}
       <h2>${esc(b.loginTitle)}</h2>
       <p class="muted" style="margin-top:0">${esc(b.loginSubtitle)}</p>
-      ${error ? `<div class="err-box">${esc(error)}</div>` : ''}
+      ${error ? `<div class="err-box" role="alert" aria-live="assertive">${esc(error)}</div>` : ''}
       <form ${preview ? '' : 'data-form="login"'}>
         ${field(t('username'), 'username', '', { attrs: 'autocomplete="username" autocapitalize="none" required' })}
         <label class="field"><span>${t('password')}</span><div class="pw"><input name="password" type="password" autocomplete="current-password" required><button type="button" data-act="pw-eye" title="Show password" aria-label="Show password">👁</button></div></label>
@@ -1262,7 +1262,7 @@ function rsEmailForm(id) {
     <p class="small muted" style="margin-top:-6px">You can use: {name} {fullname} {rsl} {url} {username} {password} {credits} {orders} {spent} {last} {org} {server}. *text* = bold. Empty line = new paragraph.</p>
     <div class="grid3">${field('Button text (optional)', 'button', tp.button || '')}${field('Button opens', 'linkSel', sel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['contact', 'Contact / WhatsApp'], ['app', 'The app'], ['url', 'A link…']] })}${field('Link', 'linkUrl', sel === 'url' ? link : '', { ph: 'https://…', attrs: 'autocapitalize="none"' })}</div>
     <div class="row"><button type="button" class="btn" data-act="rs-mail-pv">👁 Preview</button><button type="button" class="btn" data-act="rs-mail-save">💾 Save as my template</button><span class="spacer"></span><button type="button" class="btn primary" data-act="rs-mail-send">📨 Send</button></div>
-    <iframe id="rs-mail-frame" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe></form>`;
+    <iframe id="rs-mail-frame" sandbox="" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe></form>`;
 }
 const rsMailBody = () => { const f = $('[data-form=rs-mail]'); const d = Object.fromEntries(new FormData(f)); return { subject: d.subject, title: d.title, body: d.body, button: d.button, link: d.linkSel === 'url' ? d.linkUrl : d.linkSel, ...(f.dataset.id ? { ids: [f.dataset.id] } : { all: true }), appUrl: location.origin }; };
 document.addEventListener('input', (e) => {
@@ -2420,7 +2420,7 @@ function goHttp(tab) {
 const bridge = () => window.IPTVBridge;
 const isDirect = () => state.user.me?.stream?.mode === 'direct' || (!!bridge() && !!state.user.me?.stream);
 window.__bcb = {};
-window.addEventListener('message', (e) => { if (e.data && e.data.__iptv && window.__bridgeCb) window.__bridgeCb(e.data.id, e.data.status, e.data.body); });
+window.addEventListener('message', (e) => { if (e.origin !== location.origin && e.origin !== 'null') return; if (e.data && e.data.__iptv && window.__bridgeCb) window.__bridgeCb(e.data.id, e.data.status, e.data.body); });
 window.__bridgeCb = (id, status, body) => { const p = window.__bcb[id]; delete window.__bcb[id]; if (!p) return; status >= 200 && status < 300 ? p.res(body) : p.rej(Object.assign(new Error(status === 403 ? 'The server refused the connection (403).' : t('srvCode', { n: status })), { status })); };
 const bridgeFetch = (url, ua) => new Promise((res, rej) => { const id = Math.random().toString(36).slice(2); window.__bcb[id] = { res, rej }; bridge().fetch(id, url, ua); });
 const XT_TTL = 6 * 3600000;
@@ -2890,13 +2890,13 @@ const actions = {
     const c = state.admin.customers.find((x) => x.email) || state.admin.customers[0];
     if (!c) return toast('Add a customer first to preview.', true);
     const pv = await api('GET', `/api/admin/customers/${c.id}/orderpreview?pkg=${el.dataset.pkg}&appUrl=${encodeURIComponent(appUrl)}`);
-    const body = modal('👁 ' + pv.subject, `<iframe id="mail-pv" style="width:100%;height:65vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>`, { wide: true });
+    const body = modal('👁 ' + pv.subject, `<iframe id="mail-pv" sandbox="" style="width:100%;height:65vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>`, { wide: true });
     $('#mail-pv', body).srcdoc = pv.html;
   },
   'order-one': async (el) => {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id); const s = state.admin.settings;
     const body = modal('💳 Send a package email', `<div class="row"><select id="op-pick" style="flex:1">${packageOptions(s, c.cur).map(([id, label]) => `<option value="${esc(id)}" ${id === (c.buyRequest?.pkg || c.orderSentPkg) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
-      <p class="muted small" id="op-subj"></p><iframe id="mail-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+      <p class="muted small" id="op-subj"></p><iframe id="mail-pv" sandbox="" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <label class="field" style="margin-top:12px"><span>Payment link for this order</span><input id="op-link" placeholder="https://… (empty = button opens your WhatsApp)" autocapitalize="none"></label>
       <div class="row"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="order-send" data-id="${c.id}">Send</button></div>
       ${c.buyRequest ? `<p class="small">🛒 Requested <b>${esc(c.buyRequest.title || '')}</b> on ${fmtDT(c.buyRequest.at)}${c.buyRequest.answeredAt ? ' · answered' : ''}</p>` : ''}
@@ -2936,7 +2936,7 @@ const actions = {
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin;
     const pv = await api('GET', `/api/admin/customers/${c.id}/profilepreview?appUrl=${encodeURIComponent(appUrl)}`);
-    const body = modal('👤 Profile details email', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b></p><iframe id="mail-pv" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+    const body = modal('👤 Profile details email', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b></p><iframe id="mail-pv" sandbox="" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="mail-profile-send" data-id="${c.id}">Send email</button></div>`, { wide: true });
     $('#mail-pv', body).srcdoc = pv.html;
   },
@@ -3079,7 +3079,7 @@ const actions = {
       <div class="grid3">${field('Top badge (optional)', 'badge', d.badge, { ph: '🔥 Limited offer' })}${field('Coupon code (optional)', 'coupon', d.coupon, { ph: 'LION001' })}${field('Image URL (optional)', 'image', d.image, { attrs: 'autocapitalize="none"', ph: 'https://…/banner.jpg' })}</div>
       <div class="grid2">${field('Button opens', 'link', linkSel, { type: 'select', options: [['', 'No button'], ['site', 'Your website'], ['app', 'The INTPROTO-TV app'], ['contact', 'Contact us (WhatsApp)'], ['url', 'Other link (e.g. a payment link)…']] })}${field('Other link', 'linkUrl', linkSel === 'url' ? link : '', { attrs: 'autocapitalize="none"', ph: 'https://…' })}</div>
       <div class="row"><select id="nl-pvlang" style="width:auto">${NL_LANGS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button type="button" class="btn" data-act="nl-preview">👁 Preview</button><input id="nl-test" value="${esc(s.email.adminEmail || '')}" placeholder="test@email.com" style="flex:1;min-width:150px" autocapitalize="none"><button type="button" class="btn" data-act="nl-test">Send test</button></div>
-      <iframe id="nl-pv" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe>
+      <iframe id="nl-pv" sandbox="" style="width:100%;height:55vh;border:0;border-radius:12px;background:#f4f7fa;display:none;margin-top:10px"></iframe>
       <div class="row" style="margin-top:12px"><span class="small muted" style="flex:1">Every email has an "Unsubscribe" link; unsubscribed customers are skipped${st.unsubscribed ? ` (${st.unsubscribed} so far)` : ''}. Sent 100 at a time. If Resend's daily limit stops it, open this again tomorrow and press Send to continue — nobody gets it twice.</span><button type="button" class="btn primary" data-act="nl-send">📨 Send</button></div>
       <div id="nl-out"></div></form>`, { wide: true });
     const f = $('[data-form=nl]', body);
@@ -3200,7 +3200,7 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
       </details>
       ${field('Personal message', 'note', '', { type: 'textarea', ph: 'Optional — shown in the email under the greeting' })}
       <div class="row"><button type="button" class="btn" data-act="oc-preview">👁 Preview</button><span class="spacer"></span><button type="button" class="btn primary" data-act="oc-send">📨 Send email</button></div>
-      <p class="small muted" id="oc-subj"></p><iframe id="oc-pv" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none"></iframe></form>`, { wide: true });
+      <p class="small muted" id="oc-subj"></p><iframe id="oc-pv" sandbox="" style="width:100%;height:50vh;border:0;border-radius:12px;background:#f4f7fa;display:none"></iframe></form>`, { wide: true });
     const f = $('[data-form=order-custom]', body);
     f.pkg.addEventListener('change', () => { const p = s.orderPackages.find((x) => x.id === f.pkg.value) || {}; f.title.placeholder = p.title || ''; f.price.placeholder = p.price ?? ''; f.days.placeholder = p.days ?? ''; f.devices.placeholder = p.devices ?? ''; if (!f.link.value.trim()) resolvePkgPayLink(s, f.pkg.value).then((r) => { if (r && !f.link.value.trim()) f.link.value = r.url; }); });
   },
@@ -3243,7 +3243,7 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
     const pv = await api('GET', `/api/admin/customers/${c.id}/renewalpreview?appUrl=${encodeURIComponent(appUrl)}`);
-    const body = modal('🔁 Renewal offer', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b>${c.renewalSentAt ? ` · already sent ${fmtDate(c.renewalSentAt)}` : ''}</p><iframe id="mail-pv" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+    const body = modal('🔁 Renewal offer', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b>${c.renewalSentAt ? ` · already sent ${fmtDate(c.renewalSentAt)}` : ''}</p><iframe id="mail-pv" sandbox="" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="renewal-send" data-id="${c.id}">Send renewal email</button></div>`, { wide: true });
     $('#mail-pv', body).srcdoc = pv.html;
   },
@@ -3281,7 +3281,7 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
     const c = state.admin.customers.find((x) => x.id === el.dataset.id);
     const appUrl = location.origin + location.pathname.replace(/index\.html$/, '');
     const pv = await api('GET', `/api/admin/customers/${c.id}/emailpreview?appUrl=${encodeURIComponent(appUrl)}`);
-    const body = modal('✉️ Email login details', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b></p><iframe id="mail-pv" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
+    const body = modal('✉️ Email login details', `<p class="muted small" style="margin-top:0">Subject: <b>${esc(pv.subject)}</b></p><iframe id="mail-pv" sandbox="" style="width:100%;height:60vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>
       <div class="row" style="margin-top:12px"><input id="mail-to" value="${esc(c.email || '')}" style="flex:1" autocapitalize="none"><button class="btn primary" data-act="email-send" data-id="${c.id}">Send email</button></div>`, { wide: true });
     $('#mail-pv', body).srcdoc = pv.html;
   },
@@ -5553,7 +5553,7 @@ Object.assign(actions, {
   'rm-save': async () => { const f = $('[data-form=rm]'); const o = formToObj(f); o.auto = f.auto.checked; try { await saveSettings({ renewModels: o }); toast('Renewal emails saved ✓'); } catch (e) { toast(e.message, true); } },
   'rm-preview': async (el, ev, lang) => { const m = el.dataset.m; const L = lang || getLang() || 'en';
     try { const r = await api('GET', `/api/admin/renewmodels/preview?model=${m}&lang=${L}&appUrl=${encodeURIComponent(location.origin)}`);
-      const body = modal('👁 ' + esc(r.subject), `<div class="chips" style="margin-bottom:10px;flex-wrap:wrap">${LANGS.map(([k, n]) => `<a data-act="rm-lang" data-m="${m}" data-l="${k}" class="${k === L ? 'on' : ''}">${LANG_FLAG[k]} ${n}</a>`).join('')}</div><iframe id="rm-frame" style="width:100%;height:65vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>`, { wide: true });
+      const body = modal('👁 ' + esc(r.subject), `<div class="chips" style="margin-bottom:10px;flex-wrap:wrap">${LANGS.map(([k, n]) => `<a data-act="rm-lang" data-m="${m}" data-l="${k}" class="${k === L ? 'on' : ''}">${LANG_FLAG[k]} ${n}</a>`).join('')}</div><iframe id="rm-frame" sandbox="" style="width:100%;height:65vh;border:0;border-radius:12px;background:#f4f7fa"></iframe>`, { wide: true });
       $('#rm-frame', body).srcdoc = r.html; } catch (e) { toast(e.message, true); } },
   'rm-lang': (el) => { closeModal(); actions['rm-preview']({ dataset: { m: el.dataset.m } }, null, el.dataset.l); },
   'rm-send': (el) => { const m = el.dataset.m;

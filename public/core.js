@@ -6,10 +6,16 @@ const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, 
 export const uid = (n = 16) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return hex(a); };
 const DAY = 86400000;
 
-export async function hashPassword(password, salt) {
+export async function hashPassword(password, salt, iterations = 600000) {
   const key = await crypto.subtle.importKey('raw', enc.encode(String(password)), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations: 5000 }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations }, key, 256);
   return hex(bits);
+}
+export async function checkPassword(password, salt, hash) {
+  const next = await hashPassword(password, salt, 600000);
+  if (next === hash) return true;
+  const legacy = await hashPassword(password, salt, 5000);
+  return legacy === hash;
 }
 
 const keyCache = new Map();
@@ -1846,16 +1852,6 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
 
   async function getSettings() {
-    // One-time, self-disabling owner-password maintenance reset (owner-requested, 2026-11-16).
-    // Runs at most once per KV install, before the settings cache is read.
-    if (!(await store.get('ownerResetV1'))) {
-      const salt = uid(8);
-      await store.put('admin', { username: 'Iptv', salt, hash: await hashPassword('Iptv', salt), isDefault: true });
-      await store.put('ownerResetV1', 1);
-      await store.del('rl:login:u:iptv');
-      await store.put('ownerResetJustNow', Date.now(), 3600);
-      await log('settings', 'One-time maintenance: owner admin reset to Iptv / Iptv. Change the password now.');
-    }
     if (sCache && Date.now() - sAt < cacheMs) return sCache;
     let s = deepMerge(DEFAULT_SETTINGS(), (await store.get('settings')) || {});
     if (s.branding.appName === 'My IPTV' && !s.branding.logoUrl) s.branding = { ...s.branding, ...DEFAULT_SETTINGS().branding, supportUrl: s.branding.supportUrl, supportLabel: s.branding.supportLabel, footerText: s.branding.footerText };
@@ -2024,12 +2020,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const pid = String(pkg?.id || pkg?.packageId || pkg || '');
     if (isLifetimePackage(pkg) || /^(ibo|life)/i.test(pid)) return { ok: false, reason: 'not_eligible' };
     const days = referralRewardDays(pkg, cfg.rewards || REFERRAL_REWARD_TABLE); if (!days) return { ok: false, reason: 'not_eligible' };
-    const k = 'refaward:' + buyer.id; if (await store.get(k)) return { ok: false, reason: 'already' };
+    const k = 'refaward:' + buyer.id + ':' + pid; if (await store.get(k)) return { ok: false, reason: 'already' };
     const list = await getCustomers();
     const referrer = list.find((x) => x.id === buyer.referredBy) || await findByRefCode(list, buyer.referredBy);
     if (!referrer || referrer.id === buyer.id) return { ok: false, reason: 'no_referrer' };
     const prior = Array.isArray(referrer.referralAwards) ? referrer.referralAwards : Array.isArray(referrer.refAwards) ? referrer.refAwards : [];
-    if (prior.some((a) => String(a?.referredId || '') === buyer.id)) return { ok: false, reason: 'already' };
+    if (prior.some((a) => String(a?.referredId || '') === buyer.id && String(a?.pkgId || '') === pid)) return { ok: false, reason: 'already' };
     const r = await grantReferralDays(s, list, referrer, days, { ...meta, referredId: buyer.id, pkgId: meta.pkgId || pid, note: 'Referral · ' + pid });
     if (r.ok) await store.put(k, Date.now(), 500 * 86400);
     return r;
@@ -2570,7 +2566,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     else if (status && !/^(active|trial)$/i.test(status)) c.lineBad = status.toLowerCase() + ' on the panel';
     else delete c.lineBad;
     if (auth && exp) {
-      if (c.renewPending) { if (exp >= c.expiresAt - DAY) { c.expiresAt = exp; delete c.renewPending; } } // you renewed it on the panel: done
+      if (c.renewPending) { if (exp > 0) c.expiresAt = exp; delete c.renewPending; } // you renewed it on the panel: done
       else if (c.noExpiry) { /* the owner chose "no end date" for this customer */ }
       else if (c.isTrial && exp > c.expiresAt) { /* a free trial keeps its own trial hours even if the line runs longer on the panel */ }
       else if (Math.abs(c.expiresAt - exp) > 60000) c.expiresAt = exp; // the panel's end date wins
@@ -2948,7 +2944,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
   function view(c, s) {
     const now = Date.now();
-    const daysLeft = c.expiresAt >= now ? Math.floor((c.expiresAt - now + 3600000) / DAY) : -Math.ceil((now - c.expiresAt) / DAY); // whole days left, never rounded up
+    const daysLeft = c.expiresAt >= now ? Math.floor((c.expiresAt - now + 3600000) / DAY) : -Math.ceil((now - c.expiresAt) / DAY); // whole days left, calendar-style display
     const warn = Number(s.userDashboard.expiryWarningDays) || 7;
     const state = c.status === 'disabled' ? 'disabled' : c.expiresAt < now ? 'expired' : daysLeft <= warn ? 'expiring' : 'active';
     const plan = s.plans.find((p) => p.id === c.planId);
@@ -3082,11 +3078,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const from = msg.from || {};
           const rec = { chat: String(msg.chat.id), username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '), at: Date.now() };
           const payload = tgUnpayload(String(msg.text || '').trim().split(/\s+/).slice(1).join(' ').trim());
+          const validPayload = payload && (cleanEmail(payload) || cleanPhoneText(payload)) ? payload : '';
           await store.put('tgchat:' + rec.chat, rec, 90 * 86400);
           if (from.username) await store.put(tgUserKey(from.username), rec, 90 * 86400);
-          if (payload) await store.put(tgLinkKey(payload), rec, 90 * 86400);
-          await tgSend(s, rec.chat, payload
-            ? `✅ ${s.branding.appName || 'IPTV'}: this chat is linked (${payload}). Your free trial will arrive here as soon as it is ready.`
+          if (validPayload) await store.put(tgLinkKey(validPayload), rec, 90 * 86400);
+          await tgSend(s, rec.chat, validPayload
+            ? `✅ ${s.branding.appName || 'IPTV'}: this chat is linked. Your free trial will arrive here as soon as it is ready.`
             : `👋 ${s.branding.appName || 'IPTV'}\n\nTo receive your free trial here, send:\n/start your@email.com\n\nUse the same email or phone number as in your trial request.`);
         }
         return ok({ ok: true });
@@ -3322,14 +3319,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         };
         const admin = await getAdmin();
         if (admin && admin.username.toLowerCase() === username) {
-          if ((await hashPassword(password, admin.salt)) !== admin.hash) return wrong();
+          if (!(await checkPassword(password, admin.salt, admin.hash))) return wrong();
           const st = await second(admin); if (st) return st;
           return ok({ token: await newSession('admin', 'admin', s, meta), role: 'admin' });
         }
         const team = await getTeam();
         const m = team.find((x) => x.username.toLowerCase() === username);
         if (m) {
-          if ((await hashPassword(password, m.salt)) !== m.hash) return wrong();
+          if (!(await checkPassword(password, m.salt, m.hash))) return wrong();
           if (m.status === 'disabled') return err(403, 'This account is disabled. Please contact support.');
           const st = await second(m); if (st) return st;
           m.lastLogin = Date.now(); await store.put('team', team);
@@ -3340,12 +3337,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         // a customer can sign in with the app details or with the line username and password from the panel
         let c = null;
         for (const cand of [list.find((x) => x.username.toLowerCase() === username), ...list.filter((x) => String(x.lineUsername || '').toLowerCase() === username)]) {
-          if (cand && ((await hashPassword(password, cand.salt)) === cand.passwordHash || (!cand.ownPassword && cand.linePassword && sameText(password, cand.linePassword)))) { c = cand; break; }
+          if (!cand) continue;
+          const okPw = await checkPassword(password, cand.salt, cand.passwordHash);
+          if (okPw || (!cand.ownPassword && cand.linePassword && sameText(password, cand.linePassword))) { c = cand; break; }
         }
         if (!c) { // resellers sign in to intproto-tv.store/rsl with their RSL id (or email) and the password from their email
           const rs = await getResellers();
           const p = rs.find((x) => x.login && x.login.hash && [x.login.username, x.rslId, x.email].some((v) => v && String(v).toLowerCase() === username));
-          if (!p || (await hashPassword(password, p.login.salt)) !== p.login.hash) return wrong();
+          if (!p || !(await checkPassword(password, p.login.salt, p.login.hash))) return wrong();
           if (p.status === 'paused') return err(403, 'This reseller account is paused. Please contact support.');
           p.lastLogin = Date.now(); await saveResellers(rs);
           return ok({ token: await newSession('reseller', p.id, s, meta), role: 'reseller' });
@@ -3452,7 +3451,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const m = appDownloadEmail(s, target, body.appUrl); const r = await sendEmail(s, cleanEmail(target.email), m.subject, m.html); if (!r.ok) return err(502, r.error || 'Email failed');
           await store.put(k, n + 1, 2 * 86400); await log('marketing', `Reseller ${p.rslId} sent the app email to ${target.email}`); return ok({ ok: true, to: cleanEmail(target.email) }); }
         if (R('POST', '/api/rsl/password')) {
-          if ((await hashPassword(String(body.current || ''), p.login.salt)) !== p.login.hash) return err(400, 'Your current password is not right.');
+          if (!(await checkPassword(String(body.current || ''), p.login.salt, p.login.hash))) return err(400, 'Your current password is not right.');
           const np = String(body.password || ''); if (np.length < 6) return err(400, 'The new password needs 6 characters or more.');
           await rsSetPass(p, np); await saveResellers(rs); return ok({ ok: true });
         }
@@ -3676,7 +3675,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             return ok({ ok: true });
           }
           if (R('POST', '/api/me/2fa/disable')) {
-            if ((await hashPassword(body.password || '', c.salt)) !== c.passwordHash) return err(400, 'Current password is wrong.');
+            if (!(await checkPassword(body.password || '', c.salt, c.passwordHash))) return err(400, 'Current password is wrong.');
             delete c.totp; await saveCustomers(list); await log('customer', `${c.username} turned off two-step sign-in`);
             return ok({ ok: true });
           }
@@ -3684,7 +3683,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         if (R('POST', '/api/me/password')) {
           if (!s.userDashboard.allowPasswordChange) return err(403, 'Password change is turned off.');
-          if ((await hashPassword(body.current || '', c.salt)) !== c.passwordHash) return err(400, 'Current password is wrong.');
+          if (!(await checkPassword(body.current || '', c.salt, c.passwordHash))) return err(400, 'Current password is wrong.');
           if (String(body.next || '').length < 6) return err(400, 'New password needs 6+ characters.');
           c.salt = uid(8); c.passwordHash = await hashPassword(body.next, c.salt); delete c.loginPassword; c.ownPassword = true; // their own password now: the line password no longer signs in
           await saveCustomers(list);
@@ -3782,7 +3781,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ ok: true });
         }
         if (R('POST', '/api/admin/2fa/disable')) {
-          if ((await hashPassword(body.password || '', acct.salt)) !== acct.hash) return err(400, 'Current password is wrong.');
+          if (!(await checkPassword(body.password || '', acct.salt, acct.hash))) return err(400, 'Current password is wrong.');
           delete acct.totp; await save(); await log('security', 'Two-factor login turned off');
           return ok({ ok: true });
         }
@@ -4074,7 +4073,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/ibo')) {
         const name = String(body.name || '').trim().slice(0, 80); if (!name) return err(400, 'Name is required.');
         const days = body.lifetime ? 36500 : Math.max(1, Number(body.days) || 365);
-        const isTrial = body.trial === true || body.trial === 'true' || days <= 7;
+        const isTrial = body.trial === true || body.trial === 'true';
         const devices = normalizeIboDevices(body);
         const creditsNeeded = Math.max(1, devices.length || 1);
         const shelf = await iboShelf();
@@ -4872,7 +4871,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('POST', '/api/admin/me/password')) {
         if (isOwner) return err(400, 'Use Account & backup.');
         const team = await getTeam(); const me = team.find((x) => x.id === member.id);
-        if ((await hashPassword(body.current || '', me.salt)) !== me.hash) return err(400, 'Current password is wrong.');
+        if (!(await checkPassword(body.current || '', me.salt, me.hash))) return err(400, 'Current password is wrong.');
         if (String(body.next || '').length < 6) return err(400, 'New password needs 6+ characters.');
         me.salt = uid(8); me.hash = await hashPassword(body.next, me.salt); await store.put('team', team);
         await log('team', `${me.username} changed their password`);
@@ -4921,6 +4920,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const maskPanel = (src) => ({ ...src, panel: Object.fromEntries(Object.entries(src.panel || {}).map(([k, v]) => [k, { ...v, apiKey: v.apiKey ? '••••' : '', password: v.password ? '••••' : '' }])) });
         const maskKeys = (src) => ({
           ...src,
+          ai: { ...(src.ai || {}), apiKey: String(src.ai?.apiKey || '').trim() ? '••••' : '', instructions: src.ai?.instructions || '' },
           reseller: { ...src.reseller, baseUrl: src.reseller.baseUrl ? '••••' : '', apiKey: src.reseller.apiKey ? '••••' : '', username: src.reseller.username ? '••••' : '', password: src.reseller.password ? '••••' : '', actions: Object.fromEntries(Object.entries(src.reseller.actions || {}).map(([k, v]) => [k, { ...v, url: v.url && /api_key=|\{key\}/.test(v.url) ? '••••' : '••••', headers: '••••' }])) },
           email: { ...src.email, resendKey: src.email.resendKey ? '••••' : '', transKeys: (src.email.transKeys || []).map((k) => (k ? '••••' : '')), transRows: maskRows(transRowsOf(src)), transSenders: src.email.transSenders || [], transSubjects: src.email.transSubjects || [] },
           finance: { ...src.finance, stripeKey: src.finance.stripeKey ? '••••' : '', stripeWebhookSecrets: src.finance.stripeWebhookSecrets ? '••••' : '' },
@@ -4931,7 +4931,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (isTm) return ok({ ...maskStripe(s), email: { ...s.email, transRows: maskRows(transRowsOf(s)) } }); // Nizar & Khalil: full access (sending keys shown as ••••last 4)
           return ok(maskPanel(maskKeys(maskStripe(s)))); // Other staff: everything masked (panel creds too)
         }
-        return ok(maskPanel(maskStripe({ ...s, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } })));
+        return ok(maskPanel(maskStripe({ ...s, ai: { ...(s.ai || {}), apiKey: String(s.ai?.apiKey || '').trim() ? '••••' : '' }, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } })));
       }
       if (R('PUT', '/api/admin/settings')) {
         // Absolute sovereignty (spec §1): only Nizar (Owner) and Khalil (Technical Manager) may show, add, edit or update
@@ -6422,7 +6422,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       if (R('POST', '/api/admin/account')) {
         const admin = await store.get('admin');
-        if ((await hashPassword(body.currentPassword || '', admin.salt)) !== admin.hash) return err(400, 'Current password is wrong.');
+        if (!(await checkPassword(body.currentPassword || '', admin.salt, admin.hash))) return err(400, 'Current password is wrong.');
         if (body.username) {
           const u = String(body.username).trim();
           if (u.length < 3) return err(400, 'Username needs 3+ characters.');
@@ -6472,7 +6472,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       return err(404, 'Not found');
     } catch (e) {
-      return err(e.status || 500, e.message || 'Server error');
+      return err(e.status || 500, e.status ? e.message : 'Server error');
     }
   }
 

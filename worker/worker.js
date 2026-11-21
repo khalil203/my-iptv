@@ -8,6 +8,18 @@ const CORS = {
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
 };
 
+function publicHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!h || h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return false;
+  if (/^(metadata|metadata\.google\.internal|instance-data)$/.test(h)) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
+    const p = h.split('.').map(Number);
+    if (p[0] === 10 || p[0] === 127 || p[0] === 0 || p[0] >= 224 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127)) return false;
+  }
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return false;
+  return true;
+}
+
 // HTML must never be pinned at the Cloudflare edge; versioned assets (?v=N) live forever.
 function serveAsset(request, response) {
   const type = response.headers.get('content-type') || '';
@@ -88,14 +100,23 @@ async function proxy(request, url) {
   let tu;
   try { tu = new URL(target); } catch { return new Response('Bad URL', { status: 400, headers: CORS }); }
   if (!/^https?:$/.test(tu.protocol)) return new Response('Bad URL', { status: 400, headers: CORS });
+  if (!publicHost(tu.hostname)) return new Response('Bad URL', { status: 400, headers: CORS });
 
   const headers = new Headers({ 'User-Agent': s.player.userAgent || 'IPTVSmartersPro' });
   const range = request.headers.get('range');
   if (range) headers.set('range', range);
 
-  let res;
-  try { res = await fetch(tu.toString(), { headers, redirect: 'follow' }); }
-  catch (e) { return new Response('Upstream error: ' + e.message, { status: 502, headers: CORS }); }
+  let res, next = tu;
+  for (let hop = 0; hop < 4; hop++) {
+    try { res = await fetch(next.toString(), { headers, redirect: 'manual' }); }
+    catch (e) { return new Response('Upstream error', { status: 502, headers: CORS }); }
+    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+      let dest; try { dest = new URL(res.headers.get('location'), next); } catch { return new Response('Bad redirect', { status: 400, headers: CORS }); }
+      if (!/^https?:$/.test(dest.protocol) || !publicHost(dest.hostname)) return new Response('Bad redirect', { status: 400, headers: CORS });
+      next = dest; continue;
+    }
+    break;
+  }
 
   const ct = res.headers.get('content-type') || '';
   const finalPath = new URL(res.url || tu.toString()).pathname;

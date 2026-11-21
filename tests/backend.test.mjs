@@ -958,36 +958,28 @@ test('stripe revenue: income is attributed per bank account and shows 30d + all-
   assert.ok(r.json.total.usd >= acc.usd, 'totals aggregate');
 });
 
-test('one-shot owner reset: admin credential is rewritten to Iptv/Iptv exactly once, then disarms forever', async () => {
+test('bootstrap safety: a public request never resets an existing owner credential', async () => {
   const x = setup(); const db = x.db;
-  // simulate a long-forgotten admin password in KV
   db.set('admin', { v: JSON.stringify({ username: 'Iptv', salt: 'abc12345', hash: 'deadbeef', isDefault: false }), e: 0 });
-  // first request triggers the maintenance reset
   await x.call('GET', '/api/config', {}, undefined);
-  const reset = JSON.parse(db.get('admin').v);
-  assert.equal(reset.username, 'Iptv'); assert.equal(reset.isDefault, true); assert.notEqual(reset.hash, 'deadbeef');
-  assert.equal(db.get('ownerResetV1')?.v, '1', 'ownerResetV1 must be set permanently');
-  // it must never run again: pretend someone set a custom salt after signing in
-  db.set('admin', { v: JSON.stringify({ username: 'Iptv', salt: 'keepme', hash: 'deadbeef', isDefault: true }), e: 0 });
-  await x.call('GET', '/api/config', {}, undefined);
-  assert.equal(JSON.parse(db.get('admin').v).salt, 'keepme', 'ownerResetV1 prevents a second reset');
-  // fresh KV (no admin at all) also gets Iptv/Iptv and can log in
+  const after = JSON.parse(db.get('admin').v);
+  assert.equal(after.hash, 'deadbeef', 'the stored owner hash must survive every public request');
+  assert.equal(after.isDefault, false, 'a real owner must never be downgraded to a default account');
+  assert.equal(db.get('ownerResetV1'), undefined, 'no maintenance side effects from a public read');
+  // fresh KV (no admin at all) still gets the documented default owner and can sign in
   const x2 = setup();
   const sc = await x2.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' });
   assert.equal(sc.status, 200, 'default credentials work on a fresh install');
 });
 
-test('owner reset maintenance: burned Iptv username bucket is flushed, IP bucket still locks', async () => {
+test('login lockout: a burned username bucket and IP bucket both keep their limits', async () => {
   const x = setup(); const db = x.db;
   db.set('rl:login:u:iptv', { v: JSON.stringify(9), e: Date.now() + 900000 });
   db.set('rl:login:1.2.3.4', { v: JSON.stringify(9), e: Date.now() + 900000 });
-  await x.call('GET', '/api/config', {}, undefined); // maintenance runs before cache read
-  assert.equal(db.get('rl:login:u:iptv'), undefined, 'owner username bucket must be flushed at maintenance time');
   const res = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv', ip: '5.6.7.8' });
-  assert.equal(res.status, 200, 'owner can sign in with a fresh IP even after the reset');
-  // IP buckets are untouched (lockout still works for abuse)
+  assert.equal(res.status, 429, 'a burned username bucket locks the account everywhere');
   const res2 = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv', ip: '1.2.3.4' });
-  assert.equal(res2.status, 429, 'IP bucket must still enforce the lockout');
+  assert.equal(res2.status, 429, 'the IP bucket must still enforce the lockout');
 });
 
 test('telegram: bot setup, /start linking, and automatic trial delivery', async () => {
