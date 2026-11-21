@@ -133,12 +133,15 @@ async function api(method, path, body) {
   }
   return json;
 }
+let sessionGeneration = 0;
 function setSession(token, role) {
+  sessionGeneration += 1;
   state.token = token; state.role = role; if (!token || role !== 'user') document.getElementById('chat-fab')?.remove();
   if (token) { localStorage.setItem('tvp_token', token); localStorage.setItem('tvp_role', role); }
   else { localStorage.removeItem('tvp_token'); localStorage.removeItem('tvp_role'); }
   state.user = { tab: 'home', me: null, cache: {}, cat: {}, q: '', limit: 120 };
   state.admin.me = null; state.admin.tab = 'overview';
+  state.admin.mktDraft = null; state.admin.mktComposer = null;
 }
 
 function applyBranding(b) {
@@ -5669,9 +5672,11 @@ Object.assign(forms, {
   },
   async 'mkt-list'(f) { const o = formToObj(f); try { const r = await api('POST', '/api/admin/emailmkt/list', { name: o.name, text: o.text }); toast(`List saved: ${r.count} emails (${r.removed} removed as bounced) ✓`); f.reset(); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); } },
   async 'mkt-ai'(f) {
+    const requestSession = sessionGeneration;
     const button = f.querySelector('button[type="submit"]'); if (button) button.disabled = true;
     try {
       const r = await api('POST', '/api/admin/ai/compose-marketing', { brief: f.brief.value, audience: f.audience.value, tone: f.tone.value });
+      if (requestSession !== sessionGeneration) return;
       state.admin.mktDraft = r; const out = $('#mkt-ai-output'); if (out) out.innerHTML = mktDraftHtml(r);
       toast(r.source === 'ai' ? 'Drafts ready — nothing saved or sent.' : 'Template draft ready; configure an AI key for generated copy.');
     } catch (e) { toast(e.message, true); }

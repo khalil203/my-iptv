@@ -76,6 +76,21 @@ test('owner planning is scheduled through December 2027', () => {
   assert.equal(late.months[late.months.length - 1], '2027-12');
 });
 
+test('marketing drafts are cleared on session changes and late responses are ignored', () => {
+  const app = read('public/app.js');
+  const session = app.match(/function setSession\(token, role\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(session, 'setSession handler exists');
+  assert.match(session, /sessionGeneration \+= 1/);
+  assert.match(session, /state\.admin\.mktDraft = null; state\.admin\.mktComposer = null;/);
+
+  const draftAction = app.match(/async 'mkt-ai'\(f\) \{([\s\S]*?)\n  \},/)?.[1];
+  assert.ok(draftAction, 'marketing AI action exists');
+  assert.match(draftAction, /const requestSession = sessionGeneration/);
+  const staleGuard = draftAction.indexOf('if (requestSession !== sessionGeneration) return;');
+  const draftWrite = draftAction.indexOf('state.admin.mktDraft = r;');
+  assert.ok(staleGuard >= 0 && staleGuard < draftWrite, 'stale responses are rejected before the draft is restored');
+});
+
 test('docs mention the new referral, lifetime and planning rules', () => {
   const admin = read('docs/admin-guide.md');
   const user = read('docs/user-guide.md');
