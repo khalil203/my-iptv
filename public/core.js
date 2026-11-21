@@ -1,5 +1,6 @@
 // core.js — shared backend logic.
 // Runs inside the Cloudflare Worker (real mode) and inside the browser (demo mode).
+import { PROMO_TEMPLATES, PROMO_CATEGORIES, promoTemplate } from './promo-templates.js';
 
 const enc = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -137,6 +138,8 @@ export const DEFAULT_SETTINGS = () => ({
   // Public support page intproto-tv.store/support: details first, then the ticket. Agents with a work email get an alert at once.
   support: { email: 'contact@intproto-tv.com', waLink: true, alertEmails: '' }, // USD everywhere, EUR for Europe (email ending, then phone code)
   promo: { on: false, name: 'Black Friday', code: 'BLACKFRIDAY', offer: '', from: '2026-11-17', to: '2026-12-01', email: true, whatsapp: true, telegram: true },
+  // Promotions hub: every saved campaign (ready, football, basketball, reseller, credit) lives here.
+  promoCenter: { campaigns: [] },
   // Referral programme: one shared code per customer; rewards are free days for the referrer, never a price change for the buyer.
   referral: { on: true, rewards: { y1: 30, y1d2: 90, y1d4: 180 }, maxFreeDays: 365 },
   // Gifts shown to signed-in users. Customers can see free months and discounts; resellers only ever see discounts.
@@ -438,6 +441,8 @@ function permFor(method, path, body) {
   if (path === '/api/admin/appmail') return 'customers_edit';
   if (path === '/api/admin/push/devices') return 'customers_view';
   if (path.startsWith('/api/admin/orders')) return method === 'GET' && !path.endsWith('/backup') ? 'customers_view' : 'owner';
+  // Promotions hub: everyone on the panel can read & preview; only marketing staff can write or send.
+  if (path.startsWith('/api/admin/promos')) return method === 'GET' || path.endsWith('/preview') ? 'customers_view' : 'marketing';
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'marketing';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
@@ -451,7 +456,9 @@ function permFor(method, path, body) {
   if (path === '/api/ibo/players') return null; // the IBO Player downloads: everyone signed in
   if (path === '/api/admin/ai/ask' && method === 'POST') return null; // the shared AI assistant: owner + agents
   if (path === '/api/admin/ai/config' && method === 'GET') return null; // the assistant status is visible to all
-  if (path === '/api/admin/ai/config' || path.startsWith('/api/admin/ai/action') || path === '/api/admin/sports' || path.startsWith('/api/admin/sports/')) return 'owner';
+  if (path === '/api/admin/ai/config' || path.startsWith('/api/admin/ai/action')) return 'owner';
+  if (path === '/api/admin/sports' && method === 'GET') return 'customers_view';
+  if (path === '/api/admin/sports' || path.startsWith('/api/admin/sports/')) return 'marketing';
   if (path === '/api/admin/attendance') return null; // every agent checks in / out (needed before the panel opens)
   if (path.startsWith('/api/admin/attendance')) return 'attendance';
   if (path === '/api/admin/guide') return null;
@@ -1837,6 +1844,99 @@ ${site ? `<a href="${e(site)}" class="cta-btn" style="display:inline-block;backg
   return { subject: (pr ? `🖤 ${pr.name || 'Black Friday'}: ` : '') + v('subject').replace(/<[^>]+>/g, ''), html };
 }
 
+// ---------------- Promotions hub: shared campaign model ----------------
+export const PROMO_TYPES = ['general', 'football', 'basketball', 'reseller', 'credit'];
+export const PROMO_STATUSES = ['draft', 'active', 'scheduled', 'paused', 'sent'];
+export const PROMO_AUDIENCES = ['all', 'active', 'paying', 'expiring', 'expired', 'trial', 'resellers', 'managers'];
+const PROMO_CHANNELS = ['email', 'whatsapp', 'notification', 'telegram'];
+const promoDate = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
+const promoTime = (x) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(x || '')) ? String(x) : '');
+const promoNum = (x, max = 100000) => Math.max(0, Math.min(max, Math.round(Number(x) || 0)));
+const promoClean = (x, n = 400) => String(x ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, '').trim().slice(0, n);
+
+// Normalise one campaign. Used by every write endpoint and by the settings PUT, so stored data is always safe to render.
+export function normCampaign(raw = {}, existing = null) {
+  const q = { ...(existing || {}), ...(raw && typeof raw === 'object' ? raw : {}) };
+  const id = /^[\w-]{1,40}$/.test(String(q.id || '')) ? String(q.id) : 'pc' + uid(6);
+  const type = PROMO_TYPES.includes(String(q.type || '')) ? String(q.type) : 'general';
+  const pickedChannels = (Array.isArray(q.channels) ? q.channels : []).map(String).filter((c) => PROMO_CHANNELS.includes(c));
+  const channels = pickedChannels.length ? pickedChannels : ((raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, 'channels')) ? [] : ['email']);
+  const status = PROMO_STATUSES.includes(String(q.status || '')) ? String(q.status) : 'draft';
+  const audience = PROMO_AUDIENCES.includes(String(q.audience || '')) ? String(q.audience) : 'all';
+  const title = promoClean(q.title, 120);
+  const fallbackId = /^[\w-]{1,60}$/.test(String(q.templateId || '')) ? String(q.templateId) : '';
+  const fallback = promoTemplate(fallbackId);
+  const out = {
+    id, type,
+    category: promoClean(q.category, 40) || (fallback ? fallback.category : ''),
+    templateId: fallback ? fallback.id : '',
+    title: title || `${PROMO_CATEGORIES.find((c) => c.id === type)?.name || 'Promotion'} campaign`,
+    description: promoClean(q.description, 400),
+    subject: promoClean(q.subject, 150) || (fallback ? fallback.subject : ''),
+    html: String(q.html || (fallback ? fallback.html : '')).slice(0, 120000),
+    whatsapp: String(q.whatsapp || (fallback ? fallback.whatsapp : '')).slice(0, 6000),
+    notifTitle: promoClean(q.notifTitle, 120) || (fallback ? fallback.notifTitle : ''),
+    notifBody: promoClean(q.notifBody, 300) || (fallback ? fallback.notifBody : ''),
+    code: String(q.code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 30),
+    discountPct: promoNum(q.discountPct, 100),
+    creditAmount: promoNum(q.creditAmount, 100000),
+    bonusPct: promoNum(q.bonusPct, 1000),
+    link: String(q.link || '').trim().slice(0, 500),
+    audience, channels, status,
+    startAt: promoDate(q.startAt), endAt: promoDate(q.endAt), time: promoTime(q.time),
+    eventId: String(q.eventId || '').replace(/[^\w-]/g, '').slice(0, 40),
+    createdAt: Number(existing?.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+    createdBy: String(q.createdBy || existing?.createdBy || '').slice(0, 80),
+    sentAt: Number(existing?.sentAt) || 0,
+    stats: { email: promoNum(existing?.stats?.email), devices: promoNum(existing?.stats?.devices), telegram: promoNum(existing?.stats?.telegram), whatsapp: promoNum(existing?.stats?.whatsapp) },
+  };
+  if (out.status === 'scheduled' && !out.startAt) out.status = 'draft';
+  return out;
+}
+
+export function campaignFromTemplate(id, overrides = {}) {
+  const tpl = promoTemplate(id);
+  if (!tpl) return null;
+  return normCampaign({
+    templateId: tpl.id, type: tpl.category, title: tpl.title, description: tpl.description,
+    subject: tpl.subject, html: tpl.html, whatsapp: tpl.whatsapp,
+    notifTitle: tpl.notifTitle, notifBody: tpl.notifBody,
+    code: tpl.code, discountPct: tpl.discountPct, creditAmount: tpl.creditAmount, bonusPct: tpl.bonusPct,
+    audience: tpl.audience, channels: tpl.channels, link: tpl.link, status: 'draft', ...overrides,
+  });
+}
+
+// Replace {name}, {app}, {code}… in any promo text. Values are escaped so a manager's text can never inject markup.
+function fillPromo(text, s, person, campaign) {
+  const app = s.branding?.appName || 'INTPROTO-TV';
+  const site = String(s.email?.appUrl || 'https://intproto-tv.store').replace(/\/+$/, '');
+  const safe = (v) => escHtml(String(v ?? ''));
+  const vals = {
+    name: safe(person?.name || person?.username || 'there'),
+    app: safe(app), trial: safe(site + '/freetrial'), support: safe(site + '/support'),
+    code: safe(campaign?.code || ''), discount: safe(campaign?.discountPct || ''),
+    credit: safe(campaign?.creditAmount || ''), bonus: safe(campaign?.bonusPct || ''),
+    link: safe(campaign?.link || site + '/freetrial'),
+  };
+  return String(text || '').replace(/\{(name|app|trial|support|code|discount|credit|bonus|link)\}/g, (m, k) => vals[k] ?? m);
+}
+
+export function renderCampaign(s, campaign, person = null, part = 'all') {
+  const c = campaign || {};
+  const html = String(c.html || '').trim()
+    ? fillPromo(c.html, s, person, c)
+    : `<div style="font-family:Arial,padding:24px;max-width:580px"><h2 style="margin-top:0">${fillPromo(c.title || 'A special offer', s, person, c)}</h2><p style="line-height:1.6">${fillPromo(c.description || '', s, person, c)}</p><p><a href="${fillPromo(c.link || '{trial}', s, person, c)}" style="display:inline-block;background:#7C4DFF;color:#fff;padding:12px 20px;border-radius:9px;text-decoration:none">See the offer</a></p></div>`;
+  const notifTitle = fillPromo(c.notifTitle || c.title || 'A special offer', s, person, c);
+  const notifBody = fillPromo(c.notifBody || c.description || '', s, person, c);
+  return {
+    subject: fillPromo(c.subject || c.title || 'A special offer', s, person, c),
+    html,
+    whatsapp: fillPromo(c.whatsapp || c.description || c.title || '', s, person, c),
+    notifTitle, notifBody, notification: { title: notifTitle, body: notifBody },
+  };
+}
+
 export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) {
   let sCache = null, sAt = 0;
 
@@ -2776,6 +2876,50 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     }
     return { devices, people: people.size };
   }
+
+  // Deliver one promotions-hub campaign through the channels the manager selected.
+  async function sendCampaign(s, campaign) {
+    const c = normCampaign(campaign);
+    const out = { email: 0, devices: 0, telegram: 0, whatsapp: 0, waLinks: [], errors: [] };
+    const audience = c.audience;
+    const list = await getCustomers();
+    const warn = Number(s.alerts?.expiryWarningDays) || 7;
+    const group = ['paying', 'active', 'expiring', 'expired', 'trial'].includes(audience) ? audience : 'all';
+    const customers = ['resellers', 'managers'].includes(audience) ? [] : nlGroup(list, group, warn);
+    const resellers = audience === 'resellers' ? (await getResellers()).filter((r) => r.status !== 'paused' && cleanEmail(r.email)) : [];
+    const managers = audience === 'managers' ? (await getTeam()).filter((m) => m.status !== 'disabled' && cleanEmail(m.notifyEmail || m.email)) : [];
+    const people = [
+      ...customers.map((x) => ({ p: x, email: x.email, phone: x.whatsapp || x.phone })),
+      ...resellers.map((x) => ({ p: x, email: x.email, phone: x.whatsapp || x.phone })),
+      ...managers.map((x) => ({ p: x, email: x.notifyEmail || x.email, phone: '' })),
+    ];
+
+    if (c.channels.includes('email')) {
+      const msgs = people.filter((x) => x.email).map((x) => ({ to: x.email, ...renderCampaign(s, c, x.p) })).map((m) => ({ to: m.to, subject: m.subject, html: m.html }));
+      for (let i = 0; i < msgs.length; i += 100) {
+        const r = await sendBatch(s, msgs.slice(i, i + 100));
+        if (r.ok) out.email += r.sent; else out.errors.push(r.error || 'Email delivery failed');
+      }
+    }
+    if (c.channels.includes('notification')) {
+      const r = renderCampaign(s, c, null);
+      const aud = audience === 'resellers' ? 'resellers' : audience === 'trial' ? 'trials' : (audience === 'expired' ? 'auto' : 'all');
+      const push = await sendPromo(s, aud, { title: r.notifTitle, body: r.notifBody, url: c.link || undefined });
+      out.devices = push.devices;
+    }
+    if (c.channels.includes('telegram')) {
+      const ch = String(s.branding?.telegramChannel || '').trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
+      if (!ch) out.errors.push('No Telegram channel set in Login & branding');
+      else { const r = await tgSend(s, /^-?\d+$/.test(ch) ? ch : '@' + ch, renderCampaign(s, c, null).whatsapp); if (r.ok) out.telegram++; else out.errors.push(r.error || 'Telegram post failed'); }
+    }
+    if (c.channels.includes('whatsapp')) {
+      const text = renderCampaign(s, c, null).whatsapp;
+      out.waLinks = people.filter((x) => x.phone && !/•/.test(String(x.phone))).slice(0, 20).map((x) => ({ name: x.p?.name || x.p?.username || '', url: `https://wa.me/${String(x.phone).replace(/\D/g, '')}?text=${encodeURIComponent(text.replace(/\{name\}/g, x.p?.name || 'there'))}` }));
+      out.whatsapp = out.waLinks.length;
+    }
+    return out;
+  }
+
   async function notifyAgents(s, subject, text, link) {
     const app = s.branding.appName || 'IPTV'; const team = await getTeam(); const to = new Set();
     const add = (e) => { const v = cleanEmail(e); if (v) to.add(v); };
@@ -4157,26 +4301,118 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const ev = (s.sports && Array.isArray(s.sports.events)) ? s.sports.events : [];
         return ok({ on: s.sports ? s.sports.on : true, events: ev });
       }
-      if (R('POST', '/api/admin/sports')) { // add or edit one event (owner only)
-        if (!isOwner) return err(403, 'Only the owner adds or changes sports promotions.');
-        const type = ['champions-league', 'nfl', 'other'].includes(String(body.type || '')) ? String(body.type) : 'other';
+      if (R('POST', '/api/admin/sports')) { // add or edit one event (owner + marketing staff)
+        if (!can('marketing')) return err(403, 'You do not have permission to manage sports promotions.');
+        const type = ['football', 'basketball', 'champions-league', 'nfl', 'nba', 'other'].includes(String(body.type || '')) ? String(body.type) : 'other';
+        const category = ['basketball', 'nba'].includes(type) ? 'basketball' : 'football';
+        const kind = ['matchday', 'tournament', 'seasonal', 'special', 'other'].includes(String(body.kind || '')) ? String(body.kind) : 'other';
         const name = cleanText(body.name, 100); if (!name) return err(400, 'The event needs a name.');
         const date = String(body.date || '').trim();         if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return err(400, 'Give the date as YYYY-MM-DD.');
+        const time = String(body.time || '').trim();          if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return err(400, 'Give the time as HH:MM.');
         const ev = [...((s.sports && Array.isArray(s.sports.events)) ? s.sports.events : [])];
         const id = String(body.id || '').trim() || 's' + uid(5);
-        const nx = { id, name, type, date, tip: cleanText(body.tip, 400), url: String(body.url || '').trim().slice(0, 300), on: body.on !== false };
+        const nx = { id, name, type, category, kind, date, time, competition: cleanText(body.competition, 80), teams: cleanText(body.teams, 120), tip: cleanText(body.tip, 400), url: String(body.url || '').trim().slice(0, 300), on: body.on !== false };
         const i = ev.findIndex((x) => x.id === id);
         if (i >= 0) ev[i] = nx; else ev.push(nx);
         await saveSettings({ ...s, sports: { on: s.sports ? s.sports.on : true, events: ev.filter((e) => e.name).slice(0, 40) } });
         await log('marketing', `Sports promotion "${name}" ${i >= 0 ? 'updated' : 'added'}`);
         return ok({ ok: true, event: nx, events: ev });
       }
-      if (path.startsWith('/api/admin/sports/') && method === 'DELETE' && isOwner) {
+      if (path.startsWith('/api/admin/sports/') && method === 'DELETE' && can('marketing')) {
         const id = path.match(/^\/api\/admin\/sports\/([\w-]+)$/)?.[1];
         const ev = (s.sports && Array.isArray(s.sports.events) ? s.sports.events : []).filter((x) => x.id !== id);
         await saveSettings({ ...s, sports: { on: true, events: ev } });
         await log('marketing', `Sports promotion removed (${id})`);
         return ok({ ok: true, events: ev });
+      }
+
+      // ---------- Promotions hub: ready templates + full campaign management ----------
+      if (R('GET', '/api/admin/promos')) {
+        const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+        return ok({
+          categories: PROMO_CATEGORIES, types: PROMO_TYPES, statuses: PROMO_STATUSES, audiences: PROMO_AUDIENCES,
+          templates: PROMO_TEMPLATES, campaigns,
+          sports: { on: s.sports ? s.sports.on : true, events: (s.sports && Array.isArray(s.sports.events)) ? s.sports.events : [] },
+          config: { app: s.branding?.appName || 'INTPROTO-TV', appUrl: String(s.email?.appUrl || '').replace(/\/+$/, ''), canManage: can('marketing') },
+        });
+      }
+      if (R('POST', '/api/admin/promos/preview')) {
+        const draft = normCampaign(body.draft || body.campaign || body);
+        const sample = { name: 'Alex', username: 'alex' };
+        const r = renderCampaign(s, draft, sample);
+        return ok({ subject: r.subject, html: r.html, whatsapp: r.whatsapp, notification: { title: r.notifTitle, body: r.notifBody }, campaign: draft });
+      }
+      if (R('POST', '/api/admin/promos')) {
+        if (!can('marketing')) return err(403, 'You do not have permission to create promotions.');
+        const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+        const campaign = normCampaign(body, null);
+        const existing = campaigns.find((c) => c.id === campaign.id);
+        if (existing) return err(409, 'A promotion with this id already exists.');
+        campaign.createdBy = String(actorName || '').slice(0, 80);
+        campaigns.unshift(campaign);
+        await saveSettings({ ...s, promoCenter: { campaigns: campaigns.slice(0, 200) } });
+        await log('marketing', `Promotion "${campaign.title}" created by ${actorName}`);
+        return ok({ ok: true, campaign, campaigns });
+      }
+      {
+        const m = path.match(/^\/api\/admin\/promos\/([\w-]+)$/);
+        if (m && method === 'GET') {
+          const id = m[1];
+          const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+          const campaign = campaigns.find((c) => c.id === id);
+          if (campaign) return ok({ kind: 'campaign', campaign, rendered: renderCampaign(s, campaign, { name: 'Alex', username: 'alex' }) });
+          const tpl = promoTemplate(id.startsWith('tpl_') ? id.slice(4) : id);
+          if (tpl) { const c = campaignFromTemplate(tpl.id); return ok({ kind: 'template', template: tpl, campaign: c, rendered: renderCampaign(s, c, { name: 'Alex', username: 'alex' }) }); }
+          return err(404, 'Promotion not found.');
+        }
+        if (m && method === 'PUT') {
+          if (!can('marketing')) return err(403, 'You do not have permission to edit promotions.');
+          const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+          const i = campaigns.findIndex((c) => c.id === m[1]);
+          if (i < 0) return err(404, 'Promotion not found.');
+          const campaign = normCampaign(body, campaigns[i]); campaign.id = campaigns[i].id;
+          campaigns[i] = campaign;
+          await saveSettings({ ...s, promoCenter: { campaigns } });
+          await log('marketing', `Promotion "${campaign.title}" updated by ${actorName}`);
+          return ok({ ok: true, campaign, campaigns });
+        }
+        if (m && method === 'DELETE') {
+          if (!can('marketing')) return err(403, 'You do not have permission to delete promotions.');
+          const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+          const found = campaigns.find((c) => c.id === m[1]);
+          const nextList = campaigns.filter((c) => c.id !== m[1]);
+          if (nextList.length === campaigns.length) return err(404, 'Promotion not found.');
+          await saveSettings({ ...s, promoCenter: { campaigns: nextList } });
+          await log('marketing', `Promotion "${found?.title || m[1]}" deleted by ${actorName}`);
+          return ok({ ok: true, campaigns: nextList });
+        }
+        const sm = path.match(/^\/api\/admin\/promos\/([\w-]+)\/status$/);
+        if (sm && method === 'POST') {
+          if (!can('marketing')) return err(403, 'You do not have permission to manage promotions.');
+          const status = String(body.status || '');
+          if (!PROMO_STATUSES.includes(status)) return err(400, 'Unknown promotion status.');
+          const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+          const campaign = campaigns.find((c) => c.id === sm[1]);
+          if (!campaign) return err(404, 'Promotion not found.');
+          campaign.status = status; campaign.updatedAt = Date.now();
+          await saveSettings({ ...s, promoCenter: { campaigns } });
+          await log('marketing', `Promotion "${campaign.title}" set to ${status} by ${actorName}`);
+          return ok({ ok: true, campaign, campaigns });
+        }
+        const dm = path.match(/^\/api\/admin\/promos\/([\w-]+)\/send$/);
+        if (dm && method === 'POST') {
+          if (!can('marketing')) return err(403, 'You do not have permission to send promotions.');
+          const campaigns = ((s.promoCenter && Array.isArray(s.promoCenter.campaigns)) ? s.promoCenter.campaigns : []).map((c) => normCampaign(c));
+          const campaign = campaigns.find((c) => c.id === dm[1]);
+          if (!campaign) return err(404, 'Promotion not found.');
+          if (!campaign.channels.length) return err(400, 'Choose at least one channel before sending.');
+          const stats = await sendCampaign(s, campaign);
+          campaign.sentAt = Date.now(); campaign.status = 'sent'; campaign.updatedAt = Date.now();
+          campaign.stats = { email: stats.email, devices: stats.devices, telegram: stats.telegram, whatsapp: stats.whatsapp };
+          await saveSettings({ ...s, promoCenter: { campaigns } });
+          await log('marketing', `Promotion "${campaign.title}" sent by ${actorName} (${stats.email} emails, ${stats.devices} devices)`);
+          return ok({ ok: true, stats, campaign, campaigns });
+        }
       }
 
       // ---------- Shared AI assistant: optional LLM mode + panel answers, for the owner and the agents ----------
@@ -4958,6 +5194,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           next.orders = { prefix: pf(q.prefix, 'WLF'), iboPrefix: pf(q.iboPrefix, 'IBO'), rslPrefix: pf(q.rslPrefix, 'RLS'), pad: Math.max(1, Math.min(6, Number(q.pad) || 3)), devPad: 2 }; next.orders.series = [next.orders.prefix, next.orders.iboPrefix, next.orders.rslPrefix].join(','); }
         if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');
           next.promo = { on: !!q.on, name: String(q.name || 'Black Friday').trim().slice(0, 40) || 'Black Friday', code: String(q.code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 30), offer: String(q.offer || '').trim().slice(0, 60), from: day(q.from), to: day(q.to), email: q.email !== false, whatsapp: q.whatsapp !== false, telegram: q.telegram !== false }; }
+        if (isObj(body.promoCenter)) { const list = Array.isArray(body.promoCenter.campaigns) ? body.promoCenter.campaigns : []; const seen = new Set(); next.promoCenter = { campaigns: list.map((c) => { const n = normCampaign(c); if (seen.has(n.id)) return null; seen.add(n.id); return n; }).filter(Boolean).slice(0, 200) }; }
         if (isObj(body.payRoute)) { const ids = new Set((s.stripeAccounts || []).map((a) => a.id)); next.payRoute = { accounts: (Array.isArray(body.payRoute.accounts) ? body.payRoute.accounts : []).map(String).filter((x) => ids.has(x)).slice(0, 20), rotate: body.payRoute.rotate !== false }; }
         if (isObj(body.renewModels)) { const q = { ...RENEW_DEF, ...(s.renewModels || {}), ...body.renewModels }; const okM = (m) => (RENEW_MODELS[m] || m === 'off' ? m : 'm1');
           next.renewModels = { auto: q.auto !== false, code: cleanText(q.code, 40).replace(/\s+/g, ''), discount: cleanText(q.discount, 12), amount: cleanText(q.amount, 20), d7: okM(q.d7), today: okM(q.today), expired: okM(q.expired), expiredDays: Math.min(120, Math.max(1, Number(q.expiredDays) || 30)) }; }

@@ -1551,3 +1551,34 @@ html.translated-rtl #admin-body [dir=ltr], html.translated-rtl #admin-body input
   .ibo-devrow { flex-direction: column; align-items: stretch; }
   .ibo-devrow select.ibo-devsel, .ibo-devrow input.ibo-devmac { width: 100%; min-width: 0; }
 }
+
+/* Promotions hub — ready, sports, reseller, credit and management */
+.pc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.pc-tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line2); padding-bottom: 8px; margin-bottom: 14px; }
+.pc-tab { background: transparent; border: 1px solid transparent; color: var(--muted); padding: 8px 13px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.pc-tab:hover { background: var(--elevated); color: var(--text); }
+.pc-tab.on { background: var(--primary); color: #fff; }
+.pc-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chip { background: var(--elevated); border: 1px solid var(--line2); color: var(--muted); padding: 6px 11px; border-radius: 999px; font-size: 12px; cursor: pointer; }
+.chip.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.pc-grid, .pc-events { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.pc-card, .pc-event { background: var(--elevated); border: 1px solid var(--line2); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.pc-card:hover, .pc-event:hover { border-color: var(--primary); }
+.pc-card-top { display: flex; gap: 10px; align-items: flex-start; }
+.pc-ic { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+.pc-card h4, .pc-event h4 { font-size: 15px; }
+.pc-meta { display: flex; gap: 8px 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.pc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+.pc-tpl { cursor: pointer; }
+.pc-tpl-preview { font-size: 12px; background: rgba(127, 127, 127, .08); border-radius: 10px; padding: 10px; }
+.pc-detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+.pc-detail-grid > div { display: flex; flex-direction: column; gap: 2px; }
+.pc-pv-tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line2); padding-bottom: 8px; }
+.pc-pv-tab { background: var(--elevated); border: 1px solid var(--line2); color: var(--muted); padding: 7px 12px; border-radius: 9px; cursor: pointer; font-size: 13px; }
+.pc-pv-tab.on { background: var(--primary); color: #fff; }
+.pc-pv-panel { margin-top: 6px; }
+@media (max-width: 560px) {
+  .pc-grid, .pc-events { grid-template-columns: 1fr; }
+  .pc-tab { flex: 1 1 auto; text-align: center; }
+  .pc-head .btn { width: 100%; }
+}

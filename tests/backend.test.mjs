@@ -2600,3 +2600,130 @@ test('agents get a planning notification when the owner changes My planning', as
   let marked = false; for (const d of dates) if (await x.store.get('ownerplann:' + d)) marked = true;
   assert.ok(marked, 'the day is marked so agents are only notified once per day');
 });
+
+// ---------------- Promotions hub (bug fixes + feature enhancements) ----------------
+test('promotions library: ready, football, basketball, reseller and credit templates are all present', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const r = await x.call('GET', '/api/admin/promos', {}, tok);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const cats = r.json.categories.map((c) => c.id);
+  for (const c of ['general', 'football', 'basketball', 'reseller', 'credit']) assert.ok(cats.includes(c), c);
+  const byCat = (c) => r.json.templates.filter((t) => t.category === c);
+  for (const c of ['general', 'football', 'basketball', 'reseller', 'credit']) assert.ok(byCat(c).length >= 3, `${c} has ready templates`);
+  assert.ok(byCat('football').some((t) => /match|final|champions/i.test(t.id)));
+  assert.ok(byCat('basketball').some((t) => /game|playoff|final/i.test(t.id)));
+  assert.ok(byCat('credit').some((t) => /bonus|loyalty|recharge/i.test(t.id)));
+  assert.ok(r.json.templates.every((t) => t.title && t.subject && t.html && t.whatsapp));
+  assert.ok(r.json.templates.every((t) => /\{name\}/.test(t.html) || /\{name\}/.test(t.whatsapp)), 'templates are personalised');
+  assert.deepEqual(r.json.campaigns, []);
+  assert.ok(r.json.sports.events.some((e) => e.name === 'UEFA Champions League Final'));
+});
+
+test('promotions: create, open full details, edit, activate, schedule and delete (persisted in settings)', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const draft = { templateId: 'match-day-football', type: 'football', title: 'Big match special', description: 'Watch the derby in HD', audience: 'active', channels: ['email', 'whatsapp', 'notification'], startAt: '2026-11-22', endAt: '2026-11-23', time: '20:00', status: 'active', code: 'DERBY20', discountPct: 20, creditAmount: 5, bonusPct: 10 };
+  const created = await x.call('POST', '/api/admin/promos', draft, tok);
+  assert.equal(created.status, 200, JSON.stringify(created.json));
+  const id = created.json.campaign.id;
+  assert.match(id, /^pc[\w-]+$/);
+  assert.equal(created.json.campaign.type, 'football');
+  assert.equal(created.json.campaign.code, 'DERBY20');
+  assert.equal(created.json.campaign.status, 'active');
+  assert.ok(created.json.campaign.html.includes('{app}'), 'template content is copied into the campaign and stays editable');
+
+  const details = await x.call('GET', '/api/admin/promos/' + id, {}, tok);
+  assert.equal(details.status, 200); assert.equal(details.json.kind, 'campaign');
+  assert.equal(details.json.campaign.title, 'Big match special');
+  assert.ok(details.json.rendered.html.includes('Match day'), 'the full editable email body is returned for the details view');
+  assert.match(details.json.rendered.notification.title, /Match day/, 'the editable notification text is returned in full');
+
+  const edited = await x.call('PUT', '/api/admin/promos/' + id, { title: 'Big match special v2', status: 'scheduled' }, tok);
+  assert.equal(edited.status, 200); assert.equal(edited.json.campaign.title, 'Big match special v2'); assert.equal(edited.json.campaign.status, 'scheduled');
+  assert.equal((await x.call('POST', '/api/admin/promos/' + id + '/status', { status: 'paused' }, tok)).json.campaign.status, 'paused');
+  assert.equal((await x.call('POST', '/api/admin/promos/' + id + '/status', { status: 'nonsense' }, tok)).status, 400);
+
+  const stored = await x.store.get('settings'); assert.equal(stored.promoCenter.campaigns.length, 1);
+  assert.equal((await x.call('DELETE', '/api/admin/promos/' + id, {}, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/promos/' + id, {}, tok)).status, 404);
+  assert.equal((await x.call('DELETE', '/api/admin/promos/' + id, {}, tok)).status, 404);
+});
+
+test('promotions preview: renders email, WhatsApp and notification with placeholders filled, for templates and drafts', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const tpl = await x.call('GET', '/api/admin/promos/tpl_credit-loyalty', {}, tok);
+  assert.equal(tpl.status, 200); assert.equal(tpl.json.kind, 'template');
+  assert.ok(tpl.json.rendered.html.includes('free credits'), 'template details expose the full rendered content');
+
+  const r = await x.call('POST', '/api/admin/promos/preview', { draft: { templateId: 'reseller-credit-bundle', title: 'Credits for {name}', subject: 'Hi {name} from {app}', html: '<p>Hello {name}, code {code}, {credit} credits at {app}</p>', whatsapp: 'Hi {name}! {code}', notifTitle: '{app} bonus', notifBody: 'Get {credit} credits', code: 'top10', creditAmount: 12 } }, tok);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.ok(r.json.subject.includes('Hi Alex from INTPROTO-TV'));
+  assert.ok(r.json.html.includes('Hello Alex, code TOP10, 12 credits at INTPROTO-TV'));
+  assert.ok(r.json.whatsapp.includes('Hi Alex! TOP10'));
+  assert.equal(r.json.notification.title, 'INTPROTO-TV bonus');
+  assert.ok(r.json.notification.body.includes('12 credits'));
+  const inj = await x.call('POST', '/api/admin/promos/preview', { draft: { title: 'x', html: '<b>{name}</b>' } }, tok);
+  assert.ok(!inj.json.html.includes('<script>'), 'preview is safe to render in an iframe');
+});
+
+test('promotions send: email reaches the audience, stats are saved, state changes to sent', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'App <no-reply@example.com>', appUrl: 'https://tv.example.com' } }, tok);
+  await addCustomer(x, tok, { username: 'promoCust', email: 'promo.cust@example.com' });
+  const draft = { type: 'general', title: 'Flash promo', description: 'A quick offer', subject: 'Flash deal for {name}', html: '<p>Hi {name}, use {code}</p>', whatsapp: 'Hi {name}', notifTitle: 'Flash', notifBody: 'Deal inside', code: 'FLASH10', audience: 'all', channels: ['email'], status: 'active' };
+  const created = (await x.call('POST', '/api/admin/promos', draft, tok)).json.campaign;
+  const before = x.mails.length;
+  const sent = await x.call('POST', '/api/admin/promos/' + created.id + '/send', {}, tok);
+  assert.equal(sent.status, 200, JSON.stringify(sent.json));
+  assert.ok(sent.json.stats.email >= 1, 'at least one email delivered');
+  const mails = x.mails.slice(before).flat();
+  assert.ok(mails.some((m) => m.subject.includes('Flash deal for Test Person')), 'email is personalised per recipient');
+  assert.equal(sent.json.campaign.status, 'sent');
+  assert.ok(sent.json.campaign.sentAt > 0);
+  assert.equal(sent.json.campaign.stats.email, sent.json.stats.email);
+  const bad = await x.call('POST', '/api/admin/promos', { title: 'No channels', channels: [] }, tok);
+  assert.equal((await x.call('POST', '/api/admin/promos/' + bad.json.campaign.id + '/send', {}, tok)).status, 400);
+});
+
+test('promotions permissions: readers can view and preview, only marketing staff can create, edit or send', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('POST', '/api/admin/team', { name: 'Viewer', username: 'viewer', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
+  const li = await x.call('POST', '/api/login', { username: 'viewer', password: 'secret12' }); assert.equal(li.status, 200);
+  const vt = li.json.token; await signBylaws(x, vt); await x.call('POST', '/api/admin/attendance', { action: 'in' }, vt);
+  assert.equal((await x.call('GET', '/api/admin/promos', {}, vt)).status, 200, 'staff can read promotions');
+  assert.equal((await x.call('POST', '/api/admin/promos/preview', { draft: { title: 'x' } }, vt)).status, 200, 'staff can preview');
+  assert.equal((await x.call('POST', '/api/admin/promos', { title: 'Nope' }, vt)).status, 403);
+  assert.equal((await x.call('GET', '/api/admin/sports', {}, vt)).status, 200, 'sports read works for panel staff (permission bug fixed)');
+  assert.equal((await x.call('POST', '/api/admin/sports', { name: 'X' }, vt)).status, 403);
+  const writer = await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' }); assert.equal(writer.status, 200);
+});
+
+test('sports events: football and basketball campaigns with kind, time and teams; validation and CRUD', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const a = await x.call('POST', '/api/admin/sports', { name: 'Premier League — Matchday', type: 'football', category: 'football', kind: 'matchday', date: '2026-11-28', time: '17:30', teams: 'Team A vs Team B', competition: 'Premier League', tip: 'Push before kick-off' }, tok);
+  assert.equal(a.status, 200, JSON.stringify(a.json));
+  assert.equal(a.json.event.category, 'football'); assert.equal(a.json.event.kind, 'matchday'); assert.equal(a.json.event.time, '17:30');
+  const b = await x.call('POST', '/api/admin/sports', { name: 'NBA Finals Game 7', type: 'nba', kind: 'seasonal', date: '2027-06-20' }, tok);
+  assert.equal(b.status, 200); assert.equal(b.json.event.category, 'basketball');
+  const all = (await x.call('GET', '/api/admin/sports', {}, tok)).json.events;
+  assert.ok(all.some((e) => e.name === 'NBA Finals Game 7'));
+  assert.equal((await x.call('DELETE', '/api/admin/sports/' + a.json.event.id, {}, tok)).status, 200);
+  assert.ok(!(await x.call('GET', '/api/admin/sports', {}, tok)).json.events.some((e) => e.id === a.json.event.id));
+  assert.equal((await x.call('POST', '/api/admin/sports', { name: '', type: 'football' }, tok)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/sports', { name: 'Bad date', date: '28/11/2026' }, tok)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/sports', { name: 'Bad time', time: '25:99' }, tok)).status, 400);
+});
+
+test('promotions: own section types are independent and settings writes are normalised', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  for (const [type, tpl] of [['reseller', 'reseller-exclusive'], ['credit', 'double-credit']]) {
+    const c = (await x.call('POST', '/api/admin/promos', { templateId: tpl, type, title: type + ' promo' }, tok)).json.campaign;
+    assert.equal(c.type, type);
+  }
+  const list = (await x.call('GET', '/api/admin/promos', {}, tok)).json.campaigns;
+  assert.equal(list.filter((c) => c.type === 'reseller').length, 1);
+  assert.equal(list.filter((c) => c.type === 'credit').length, 1);
+  assert.equal((await x.call('PUT', '/api/admin/settings', { promoCenter: { campaigns: [...list, { ...list[0], id: list[0].id }] } }, tok)).status, 200);
+  const after = (await x.call('GET', '/api/admin/promos', {}, tok)).json.campaigns;
+  assert.equal(after.length, 2, 'duplicate ids are removed when settings are written directly');
+  assert.ok(after.every((c) => c.id && c.title && Array.isArray(c.channels)));
+});

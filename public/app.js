@@ -1,4 +1,4 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=123';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=125';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml, ensureSiteLang } from './site.js?v=123';
 import { ic } from './icons.js?v=102';
@@ -970,69 +970,208 @@ async function adminMail() {
       </div></div>
     <p class="small muted">Everything here is the same list as 🗝️ Accounts & API keys and the Google Sheet: change it in any of the three and the sending keys follow (plan, domain, on/off). Paid keys send first; free trial keys only up to 100 a day and 3,000 a month.</p>`;
 }
-// ---------------- 🎉 Promotions: ready all-year and seasonal campaigns for Email, WhatsApp and the app ----------------
+// ---------------- 🎉 Promotions hub: ready-to-send, sports, reseller, credit and full management ----------------
 const PROMO = { lang: 'en', data: null };
+const PC = { sub: 'manage', type: 'all', sport: 'all', data: null };
+const PC_CHANNELS = ['email', 'whatsapp', 'notification', 'telegram'];
+const pcRefresh = async () => { const b = $('#admin-body'); if (b) b.innerHTML = await adminPromos(); };
+const PC_ICONS = { general: '⚡', football: '⚽', basketball: '🏀', reseller: '🤝', credit: '💳' };
+const pcPill = (status) => `<span class="pill ${({ active: 'st-active', sent: 'st-active', scheduled: 'st-expiring', paused: 'st-expired', draft: '' })[status] || ''}">${esc(status)}</span>`;
+
 async function adminPromos() {
-  try { PROMO.data = await api('GET', '/api/admin/promo/library'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
-  let sp = { events: [] }; try { sp = await api('GET', '/api/admin/sports'); state.admin.sports = sp; } catch {}
-  const L = PROMO.lang; const by = Object.fromEntries(PROMO.data.kinds.map((k) => [k.id, k]));
-  const card = ([k, name]) => { const x = by[k]; if (!x) return ''; const wa = x.wa[L] || x.wa.en; const desc = { holidays: 'Holiday & New Year offers on 1-Year, Multi-Device and Reseller plans.', blackfriday: 'Limited-time deal on packages and reseller credit bundles.', cybermonday: 'The online follow-up to Black Friday, packages and credits.', events: 'Live sports seasons, cinema releases and streaming line-ups: Champions League, UFC, Formula 1…', evergreen: 'An offer you can send any day of the year.', devices: 'Works on Samsung, iPhone, iPad, Android, Smart TV, Fire TV: perfect for multi-device plans.', christmas: 'Christmas only.', newyear: 'New Year only.' }[k];
-    return `<div class="card promo-card" data-go="${esc(k)}" style="margin:0"><div class="row" style="align-items:flex-start;gap:8px"><h3 style="margin:0;flex:1">${esc(name)}</h3><span class="pill">${k === 'evergreen' || k === 'events' || k === 'devices' ? 'All year' : 'Seasonal'}</span></div>
-      <p class="small muted" style="margin:6px 0 8px">${esc(desc)}</p>
-      <pre class="promo-wa" style="white-space:pre-wrap;font:inherit;font-size:13px;max-height:180px;overflow:auto;background:rgba(127,127,127,.08);border-radius:10px;padding:10px;margin:0">${esc(wa)}</pre>
-      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px">
-        <button class="btn sm primary" data-act="nl-season" data-k="${k}">📧 Email to customers</button>
-        <button class="btn sm" data-act="promo-wa" data-k="${k}">💬 WhatsApp</button>
-        <button class="btn sm" data-act="promo-note" data-k="${k}">🔔 App notification</button>
-      </div></div>`; };
-  const ip = { on: true, email: true, whatsapp: true, price: 5.99, everyDays: 30, ...(state.admin.settings.iboPromo || {}) };
-  const iboCard = `<div class="card" id="ibo-auto"><h3 style="margin-top:0">📺 IBO Player offer — automatic</h3>
-    <p class="small muted">After every <b>new subscription</b> and <b>renewal</b> (panel, Stripe payment or reseller), the customer gets: <i>“Skip free app issues and problems — upgrade with IBO Player for ${esc(String(ip.price))}! Enjoy high streaming quality, easy setup, and included secure VPN.”</i> in their language and currency, with the IBO Player payment link. Customers who already have IBO Player, trials and unsubscribed emails are skipped.</p>
+  try { PC.data = await api('GET', '/api/admin/promos'); }
+  catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
+  try { PC.rm = await api('GET', '/api/admin/renewmodels'); } catch { PC.rm = null; }
+  try { PROMO.data = await api('GET', '/api/admin/promo/library'); } catch { PROMO.data = null; }
+  state.admin.sports = PC.data.sports;
+  const manage = !!(PC.data.config && PC.data.config.canManage);
+  const tabs = [['manage', '🛠️', 'Manage'], ['ready', '⚡', 'Ready to send'], ['sports', '🏆', 'Sports events'], ['reseller', '🤝', 'Reseller'], ['credit', '💳', 'Credit'], ['overview', '⚙️', 'More tools']];
+  return `<div class="pc-hub">
+    <div class="pc-head"><div><h2 style="margin:0">🎉 Promotions</h2><p class="small muted" style="margin:4px 0 0">Create, customise, preview, schedule and send campaigns — all in one place.</p></div>
+      ${manage ? `<button class="btn primary" data-act="pc-new">＋ New promotion</button>` : ''}</div>
+    <div class="pc-tabs" role="tablist">${tabs.map(([id, icon, n]) => `<button type="button" role="tab" class="pc-tab ${PC.sub === id ? 'on' : ''}" data-act="pc-sub" data-sub="${id}" aria-selected="${PC.sub === id}">${icon} ${n}</button>`).join('')}</div>
+    <div class="pc-body" id="pc-body">${pcView(manage)}</div>
+  </div>`;
+}
+function pcView(manage) {
+  if (PC.sub === 'ready') return pcTemplates('all', manage);
+  if (PC.sub === 'sports') return pcSports(manage);
+  if (PC.sub === 'reseller') return pcType('reseller', manage);
+  if (PC.sub === 'credit') return pcType('credit', manage);
+  if (PC.sub === 'overview') return pcOverview();
+  return pcManage(manage);
+}
+
+// ---- Reusable cards ----
+function pcCampaignCard(c, manage) {
+  const id = esc(c.id);
+  return `<article class="pc-card" id="promo-${id}" data-go="promo-${id}">
+    <div class="pc-card-top"><span class="pc-ic">${PC_ICONS[c.type] || '🎉'}</span><div style="flex:1;min-width:0"><h4 style="margin:0">${esc(c.title)}</h4><div class="small muted" style="margin-top:3px">${esc(c.description || 'No description yet.')}</div></div>${pcPill(c.status)}</div>
+    <div class="pc-meta"><span>👥 ${esc(c.audience)}</span><span>📅 ${c.startAt ? esc(c.startAt) : 'any time'}${c.endAt ? ' → ' + esc(c.endAt) : ''}${c.time ? ' · ' + esc(c.time) : ''}</span><span>📣 ${esc((c.channels || []).join(', ') || '—')}</span>${c.code ? `<span>🏷️ ${esc(c.code)}</span>` : ''}${c.bonusPct ? `<span>🎁 +${esc(c.bonusPct)}%</span>` : ''}${c.creditAmount ? `<span>💳 ${esc(c.creditAmount)} credits</span>` : ''}</div>
+    <div class="pc-actions"><button class="btn sm" data-act="pc-details" data-id="${id}">🔍 Details</button><button class="btn sm" data-act="pc-preview" data-id="${id}">👁 Preview</button>
+      ${manage ? `<button class="btn sm" data-act="pc-edit" data-id="${id}">✎ Edit</button><button class="btn sm" data-act="pc-status" data-id="${id}" data-status="${c.status === 'active' || c.status === 'scheduled' ? 'paused' : 'active'}">${c.status === 'active' || c.status === 'scheduled' ? '⏸ Deactivate' : '▶ Activate'}</button><button class="btn sm primary" data-act="pc-send" data-id="${id}">📤 Send</button><button class="btn sm danger" data-act="pc-del" data-id="${id}" title="Delete">🗑</button>` : ''}</div>
+  </article>`;
+}
+function pcTemplateCard(t, manage, fromEvent) {
+  return `<article class="pc-card pc-tpl" id="tpl-${esc(t.id)}" data-go="tpl-${esc(t.id)}" data-act="pc-details" data-id="tpl_${esc(t.id)}">
+    <div class="pc-card-top"><span class="pc-ic">${esc(t.icon || '🎉')}</span><div style="flex:1;min-width:0"><h4 style="margin:0">${esc(t.name)}</h4><div class="small muted" style="margin-top:3px">${esc(t.description)}</div></div><span class="pill">${esc(t.badge)}</span></div>
+    <div class="pc-tpl-preview"><b>${esc(t.subject)}</b><div class="small muted" style="margin-top:4px;white-space:pre-line">${esc(String(t.whatsapp || '').slice(0, 160))}…</div></div>
+    <div class="pc-meta"><span>👥 ${esc(t.audience)}</span><span>📣 ${esc((t.channels || []).join(', '))}</span>${t.code ? `<span>🏷️ ${esc(t.code)}</span>` : ''}</div>
+    <div class="pc-actions"><button class="btn sm" data-act="pc-details" data-id="tpl_${esc(t.id)}">🔍 Details</button><button class="btn sm" data-act="pc-preview" data-id="tpl_${esc(t.id)}">👁 Preview</button>
+      ${manage ? `<button class="btn sm primary" data-act="pc-copy" data-id="${esc(t.id)}" ${fromEvent ? `data-event="${esc(fromEvent)}"` : ''}>✍️ Customise &amp; send</button>` : ''}</div>
+  </article>`;
+}
+
+// ---- Sub views ----
+function pcManage(manage) {
+  const all = PC.data.campaigns || [];
+  const list = all.filter((c) => (PC.type === 'all' || c.type === PC.type) && (PC.status === 'all' || c.status === PC.status));
+  const types = [['all', 'All types'], ...(PC.data.types || []).map((t) => [t, `${PC_ICONS[t] || '🎉'} ${t}`])];
+  const statuses = [['all', 'All statuses'], ...(PC.data.statuses || []).map((s) => [s, s])];
+  return `<div class="card"><div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1;min-width:180px">🛠️ Manage promotions <span class="pill">${all.length}</span></h3>
+      <label class="small" style="text-transform:none;letter-spacing:0">Type <select data-input="pc-type" style="width:auto">${types.map(([v, n]) => `<option value="${v}" ${v === PC.type ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+      <label class="small" style="text-transform:none;letter-spacing:0">Status <select data-input="pc-status-filter" style="width:auto">${statuses.map(([v, n]) => `<option value="${v}" ${v === PC.status ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label></div>
+    <p class="small muted" style="margin:8px 0 12px">Saved campaigns are live on the server. Open <b>Details</b> for every setting, <b>Preview</b> to see it before sending, and <b>Send</b> to deliver it to the chosen audience.</p>
+    <div class="pc-grid">${list.length ? list.map((c) => pcCampaignCard(c, manage)).join('') : `<div class="notice">No promotions here yet. ${manage ? 'Create one with <b>＋ New promotion</b>, or start from a ready template.' : 'Ask a manager to create one.'}</div>`}</div></div>`;
+}
+function pcTemplates(cat, manage) {
+  const templates = (PC.data.templates || []).filter((t) => cat === 'all' || t.category === cat);
+  const cats = [['all', 'All', '🎉'], ...(PC.data.categories || []).map((c) => [c.id, c.name, c.icon])];
+  return `<div class="card"><h3 style="margin-top:0">⚡ Ready-to-send promotions <span class="pill">${templates.length}</span></h3>
+    <p class="small muted">Professionally written, fully editable templates. Choose one to <b>customise</b> the title, description, message, offer and rules, then preview and send it — or open its full details first.</p>
+    <div class="pc-chips">${cats.map(([id, n, ic]) => `<button type="button" class="chip ${id === cat ? 'on' : ''}" data-act="pc-cat" data-cat="${id}">${ic} ${esc(n)}</button>`).join('')}</div>
+    <div class="pc-grid" style="margin-top:12px">${templates.map((t) => pcTemplateCard(t, manage)).join('')}</div></div>`;
+}
+function pcSports(manage) {
+  const sp = (PC.data.sports && PC.data.sports.events) || [];
+  const events = sp.filter((e) => PC.sport === 'all' || (e.category || (['basketball', 'nba'].includes(e.type) ? 'basketball' : 'football')) === PC.sport);
+  const icon = (e) => { const t = e.type || ''; return t === 'basketball' || t === 'nba' ? '🏀' : t === 'nfl' ? '🏈' : '⚽'; };
+  const templates = (PC.data.templates || []).filter((t) => t.category === 'football' || t.category === 'basketball');
+  return `<div class="card"><div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1;min-width:180px">🏆 Football &amp; basketball events <span class="pill">${events.length}</span></h3>
+    ${manage ? `<button class="btn sm primary" data-act="sport-new">＋ Add event</button>` : ''}</div>
+    <p class="small muted" style="margin:8px 0 10px">Schedule campaigns around upcoming matches. Add an event, then use <b>Create promo</b> to pre-fill a football or basketball campaign you can preview, schedule and send.</p>
+    <div class="pc-chips">${[['all', 'All', '🏆'], ['football', 'Football', '⚽'], ['basketball', 'Basketball', '🏀']].map(([id, n, ic]) => `<button type="button" class="chip ${PC.sport === id ? 'on' : ''}" data-act="pc-sport-filter" data-sport="${id}">${ic} ${n}</button>`).join('')}</div>
+    <div class="pc-events" style="margin-top:12px">${events.length ? events.map((e) => {
+      const cat = e.category || (['basketball', 'nba'].includes(e.type) ? 'basketball' : 'football');
+      return `<article class="pc-event" id="sport-${esc(e.id)}"><div class="pc-card-top"><span class="pc-ic">${icon(e)}</span><div style="flex:1;min-width:0"><h4 style="margin:0">${esc(e.name)}</h4><div class="small muted">${esc(e.competition || String(e.type || '').replace(/-/g, ' '))}${e.teams ? ' · ' + esc(e.teams) : ''}${e.date ? ' · ' + esc(e.date) : ''}${e.time ? ' · ' + esc(e.time) : ''}</div>${e.tip ? `<div class="small" style="margin-top:5px">${esc(e.tip)}</div>` : ''}</div><span class="pill">${esc(cat)}</span></div>
+        <div class="pc-actions">${e.url ? `<a class="btn sm" target="_blank" rel="noopener" href="${esc(e.url)}">🔗 Link</a>` : ''}<button class="btn sm primary" data-act="sport-promo" data-id="${esc(e.id)}">✍️ Create promo</button>
+        ${manage ? `<button class="btn sm" data-act="sport-edit" data-id="${esc(e.id)}">✎ Edit</button><button class="btn sm danger" data-act="sport-del" data-id="${esc(e.id)}">🗑</button>` : ''}</div></article>`;
+    }).join('') : '<div class="notice">No events yet — add one, or create a promo from a ready football/basketball template below.</div>'}</div>
+    <h4 style="margin:18px 0 8px">Ready event templates</h4><div class="pc-grid">${templates.map((t) => pcTemplateCard(t, manage)).join('')}</div></div>`;
+}
+function pcType(type, manage) {
+  const cat = (PC.data.categories || []).find((c) => c.id === type) || { name: type, icon: '🎉', desc: '' };
+  const list = (PC.data.campaigns || []).filter((c) => c.type === type);
+  const templates = (PC.data.templates || []).filter((t) => t.category === type);
+  return `<div class="card"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h3 style="margin:0;flex:1;min-width:180px">${esc(cat.icon)} ${esc(cat.name)} promotions</h3>
+    ${manage ? `<button class="btn sm primary" data-act="pc-new" data-type="${type}">＋ New ${esc(type)} promotion</button>` : ''}</div>
+    <p class="small muted" style="margin:8px 0 12px">${esc(cat.desc)} These campaigns are managed independently from customer promotions.</p>
+    <div class="pc-grid">${list.length ? list.map((c) => pcCampaignCard(c, manage)).join('') : `<div class="notice">No ${esc(type)} promotions saved yet. Start from a ready template below or create a new one.</div>`}</div>
+    <h4 style="margin:18px 0 8px">Ready ${esc(type)} templates</h4><div class="pc-grid">${templates.map((t) => pcTemplateCard(t, manage)).join('')}</div></div>`;
+}
+function pcOverview() {
+  const all = PC.data.campaigns || [];
+  const count = (s) => all.filter((c) => c.status === s).length;
+  const stats = `<div class="stats"><div class="stat"><span>Total promotions</span><b>${all.length}</b></div><div class="stat c-ok"><span>Active</span><b>${count('active')}</b></div><div class="stat c-acc"><span>Scheduled</span><b>${count('scheduled')}</b></div><div class="stat c-ok"><span>Sent</span><b>${count('sent')}</b></div></div>`;
+  const ip = { on: true, email: true, whatsapp: true, price: 5.99, everyDays: 30, ...(state.admin.settings?.iboPromo || {}) };
+  const iboCard = `<div class="card"><h3 style="margin-top:0">📺 IBO Player offer — automatic</h3>
+    <p class="small muted">After every new subscription and renewal, the customer gets the IBO Player upgrade offer in their language and currency, with the IBO payment link.</p>
     <form data-form="ibo-auto" onsubmit="return false"><div class="row" style="gap:16px;flex-wrap:wrap">${toggle('On', 'on', ip.on)}${toggle('Send by email automatically', 'email', ip.email)}${toggle('Show the WhatsApp button after renew / create', 'whatsapp', ip.whatsapp)}</div>
     <div class="grid3">${field('IBO Player price', 'price', ip.price, { type: 'number', attrs: 'step="0.01" min="0"' })}${field('Not more than once every (days)', 'everyDays', ip.everyDays, { type: 'number', attrs: 'min="1"' })}</div>
-    <div class="row"><span class="spacer"></span><button class="btn primary sm" data-act="ibo-auto-save">💾 Save</button></div></form>
-    <p class="small muted" style="margin-bottom:0">WhatsApp can't be sent by itself without the WhatsApp Business API, so after a renewal the panel shows a <b>💬 Send IBO Player offer on WhatsApp</b> button with the message ready.</p></div>`;
+    <div class="row"><span class="spacer"></span><button class="btn primary sm" data-act="ibo-auto-save">💾 Save</button></div></form></div>`;
   let rmCard = '';
-  try { const rm = await api('GET', '/api/admin/renewmodels'); const c = rm.cfg; const opts = [...rm.models.map((m) => [m.id, `${m.icon} ${m.name}`]), ['off', '— none —']];
-    rmCard = `<div class="card" id="rm-card"><h3 style="margin-top:0">🔁 Renewal emails — 5 ready models, 5 languages</h3>
-      <p class="small muted">Sent automatically in each customer's language and currency, with the plans, the promo code and the renewal payment link (GreenApp Host, matched to their plan). Each step goes once per subscription.</p>
+  if (PC.rm) {
+    const rm = PC.rm, c = rm.cfg, opts = [...rm.models.map((m) => [m.id, `${m.icon} ${m.name}`]), ['off', '— none —']];
+    rmCard = `<div class="card"><h3 style="margin-top:0">🔁 Renewal emails — 5 ready models, 5 languages</h3>
+      <p class="small muted">Sent automatically in each customer's language and currency, with the plans, promo code and renewal payment link.</p>
       <form data-form="rm" onsubmit="return false"><div class="row" style="gap:16px;flex-wrap:wrap">${toggle('Send automatically', 'auto', c.auto)}</div>
-      <div class="grid3">${field('Promo code', 'code', c.code, { ph: rm.code.code && !c.code ? rm.code.code + ' (from promotion)' : 'e.g. STAY20', help: 'Empty = the promo lines are left out.' })}${field('Discount %', 'discount', c.discount, { ph: '20' })}${field('Or amount', 'amount', c.amount, { ph: '10' })}</div>
+      <div class="grid3">${field('Promo code', 'code', c.code, { ph: 'e.g. STAY20' })}${field('Discount %', 'discount', c.discount)}${field('Or amount', 'amount', c.amount)}</div>
       <div class="grid3">${field('7 days before', 'd7', c.d7, { type: 'select', options: opts })}${field('Last day', 'today', c.today, { type: 'select', options: opts })}${field(`After it ends (up to ${c.expiredDays} days)`, 'expired', c.expired, { type: 'select', options: opts })}</div>
       <div class="row"><span class="spacer"></span><button class="btn primary" data-act="rm-save">💾 Save</button></div></form>
       <div class="grid2" style="gap:10px;margin-top:12px">${rm.models.map((m) => `<div class="card" style="margin:0;padding:14px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:24px">${m.icon}</span><b style="flex:1">${esc(m.name)}</b></div><p class="small muted" style="margin:6px 0 10px">${esc(m.subject)}</p>
-        <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="rm-preview" data-m="${m.id}">👁 Preview</button><button class="btn sm primary" data-act="rm-send" data-m="${m.id}">📤 Send now</button><button class="btn sm ghost" data-act="rm-test" data-m="${m.id}">🧪 Test to me</button></div></div>`).join('')}</div></div>`; } catch {}
-  const promoCards = `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">Reseller &amp; manager offers</h3><p class="small muted" style="margin:4px 0 0">Proposed defaults. Preview only — nothing is written to the server until you confirm the rules.</p></div><span class="pill st-expiring">Proposed defaults</span></div>
-    <div class="grid2" style="gap:12px;margin-top:12px">${Object.values(PROMOS).map((p) => {
-      const ex = promoEligibility({ role: p.id === 'fourForFive' ? 'reseller' : 'owner', credits: 1, purchaseCount: 4, promoId: p.id });
-      return `<article class="promo-card" data-id="${esc(p.id)}"><h4>${esc(p.title)}</h4><p>${esc(p.terms)}</p><p class="small muted">${esc(p.start)} → ${esc(p.end)} · ${ex.ok ? 'Sample eligible now' : esc(ex.reason)}</p><button class="btn sm" data-act="promo-preview" data-id="${esc(p.id)}">Preview rules</button></article>`;
-    }).join('')}</div></div>`;
-  return iboCard + rmCard + sportsCard(sp) + promoCards + `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
-    <label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">Preview in <select data-input="promo-lang" style="width:auto">${LANG5.map(([c, n]) => `<option value="${c}" ${c === L ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div></div>
-    <h4 style="margin:14px 0 8px">All year</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => ['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
-    <h4 style="margin:18px 0 8px">Seasonal</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => !['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
-    <p class="small muted" style="margin-top:14px">📧 opens the template in Email marketing (add a discount, code or end date, preview, then send). 💬 gives the WhatsApp text to copy for a broadcast list or your status, or use it per customer in their WhatsApp window (“📣” messages). 🔔 sends it inside the customers' app and to their phones.</p>`;
+        <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="rm-preview" data-m="${m.id}">👁 Preview</button><button class="btn sm primary" data-act="rm-send" data-m="${m.id}">📤 Send now</button><button class="btn sm ghost" data-act="rm-test" data-m="${m.id}">🧪 Test to me</button></div></div>`).join('')}</div></div>`;
+  }
+  const by = Object.fromEntries((PROMO.data?.kinds || []).map((k) => [k.id, k]));
+  const classic = PROMO.data ? `<div class="card"><h3 style="margin-top:0">🎁 Classic seasonal library — 5 languages</h3>
+    <p class="small muted">The original ready email/WhatsApp/app campaigns. Load one into Email marketing, copy its WhatsApp text, or send it as an app notification.</p>
+    <div class="pc-grid">${PROMO_KINDS.map(([k, name]) => { const x = by[k]; if (!x) return ''; const wa = x.wa[PROMO.lang] || x.wa.en;
+      return `<article class="pc-card" id="classic-${esc(k)}"><div class="pc-card-top"><span class="pc-ic">🎉</span><div style="flex:1;min-width:0"><h4 style="margin:0">${esc(name)}</h4><div class="small muted">${esc(String(wa).slice(0, 90))}…</div></div></div>
+      <div class="pc-actions"><button class="btn sm primary" data-act="nl-season" data-k="${esc(k)}">📧 Email to customers</button><button class="btn sm" data-act="promo-wa" data-k="${esc(k)}">💬 WhatsApp</button><button class="btn sm" data-act="promo-note" data-k="${esc(k)}">🔔 App notification</button></div></article>`;
+    }).join('')}</div></div>` : '';
+  const links = `<div class="card"><h3 style="margin-top:0">🔗 More campaign tools</h3>
+    <p class="small muted">Black Friday, the newsletter and the Telegram channel post are managed in Message templates and Email marketing; they keep working as before.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="atab" data-tab="templates">✉️ Message templates &amp; Black Friday</button><button class="btn sm" data-act="atab" data-tab="mkt">📣 Email marketing</button>${Object.values(PROMOS).map((p) => `<button class="btn sm" data-act="promo-preview" data-id="${esc(p.id)}">🔍 ${esc(p.title)}</button>`).join('')}</div></div>`;
+  return stats + iboCard + rmCard + classic + links;
 }
 
-// ---------------- Sports & events (Promotions tab; the Owner can manage them) ----------------
-const sportsCard = (sp) => {
-  const owner = state.admin.me && state.admin.me.role === 'owner';
-  const evs = (sp.events || []).filter((e) => e.on !== false && sp.on !== false).slice(0, 12);
-  const icon = (t) => (t === 'nfl' ? '🏈' : t === 'champions-league' ? '⚽' : '🏆');
-  return `<div class="card sport-cards" style="display:grid;gap:10px"><h3 style="margin:0">🏆 Sports &amp; events — ${evs.length} promotion${evs.length === 1 ? '' : 's'}</h3>
-    ${evs.length ? evs.map((e) => `<article class="sport-card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-      <span style="font-size:24px;flex:0 0 auto">${esc(icon(e.type))}</span><div style="flex:1;min-width:200px"><b>${esc(e.name)}</b>${e.date ? `<div class="small muted">${esc(e.date)}</div>` : ''}${e.type && !['champions-league', 'nfl'].includes(e.type) ? `<div class="small muted">${esc(String(e.type).replace(/-/g, ' '))}</div>` : ''}</div>
-      ${e.tip ? `<p class="sport-tip">${esc(e.tip)}</p>` : ''}
-      ${e.url ? `<a class="btn sm" target="_blank" rel="noopener" href="${esc(e.url)}">🔗 Link</a>` : ''}
-      ${owner ? `<button class="btn sm" data-act="sport-edit" data-id="${esc(e.id)}">✏️</button><button class="btn sm danger" data-act="sport-del" data-id="${esc(e.id)}">🗑</button>` : ''}
-    </div></article>`).join('') : '<p class="small muted">No sports events yet — the Owner can add Champions League, NFL and other events on Promotions.</p>'}</div>`;
-};
-const sportForm = (e) => `<form data-form="sport-save" data-id="${esc(e.id || '')}"><h4 style="margin-top:0">🏆 ${e.id ? 'Edit' : 'Add'} sports promo</h4>
+// ---- Forms & previews ----
+function pcCampaignForm(c = {}) {
+  const d = { type: 'general', audience: 'all', status: 'draft', channels: ['email'], ...c };
+  const sel = (list, cur) => list.map(([v, n]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const types = (PC.data.types || ['general']).map((t) => [t, `${PC_ICONS[t] || '🎉'} ${t}`]);
+  const audiences = (PC.data.audiences || ['all']).map((a) => [a, a]);
+  const statuses = (PC.data.statuses || ['draft']).map((s) => [s, s]);
+  return `<form data-form="pc-save" data-id="${esc(d.id || '')}" data-tpl="${esc(d.templateId || '')}" onsubmit="return false">
+    <div class="grid2">${field('Title', 'title', d.title || '', { attrs: 'required' })}${field('Type', 'type', d.type, { type: 'select', options: types })}</div>
+    ${field('Short description', 'description', d.description || '', { type: 'textarea', rows: 2 })}
+    <div class="grid3">${field('Audience', 'audience', d.audience, { type: 'select', options: audiences })}${field('Status', 'status', d.status, { type: 'select', options: statuses })}${field('Sub-kind / category', 'category', d.category || '', { ph: 'matchday, bonus…' })}</div>
+    <div class="grid3">${field('Start date', 'startAt', d.startAt || '', { type: 'date' })}${field('End date', 'endAt', d.endAt || '', { type: 'date' })}${field('Time (HH:MM)', 'time', d.time || '', { ph: '20:00' })}</div>
+    <h4 style="margin:16px 0 8px">Message content</h4>
+    ${field('Email subject', 'subject', d.subject || '')}
+    ${field('Email body (HTML)', 'html', d.html || '', { type: 'textarea', rows: 6, help: 'Editable. Placeholders: {name} {app} {code} {discount} {credit} {bonus} {trial} {support}' })}
+    ${field('WhatsApp message', 'whatsapp', d.whatsapp || '', { type: 'textarea', rows: 4 })}
+    <div class="grid2">${field('App notification title', 'notifTitle', d.notifTitle || '')}${field('App notification body', 'notifBody', d.notifBody || '')}</div>
+    <h4 style="margin:16px 0 8px">Offer &amp; rules</h4>
+    <div class="grid3">${field('Promo code', 'code', d.code || '')}${field('Discount %', 'discountPct', d.discountPct || 0, { type: 'number', attrs: 'min="0" max="100"' })}${field('Credit amount', 'creditAmount', d.creditAmount || 0, { type: 'number', attrs: 'min="0"' })}</div>
+    <div class="grid2">${field('Bonus %', 'bonusPct', d.bonusPct || 0, { type: 'number', attrs: 'min="0"' })}${field('Link / destination', 'link', d.link || '', { ph: '{trial}' })}</div>
+    <div class="row" style="gap:14px;flex-wrap:wrap;margin-top:10px"><span class="small muted" style="text-transform:none;letter-spacing:0">Send through:</span>${PC_CHANNELS.map((ch) => `<label class="small" style="text-transform:none;letter-spacing:0;display:flex;gap:4px;align-items:center"><input type="checkbox" name="ch_${ch}" ${(d.channels || []).includes(ch) ? 'checked' : ''}> ${ch}</label>`).join('')}</div>
+    <div class="row" style="margin-top:14px;gap:6px;flex-wrap:wrap"><button type="button" class="btn" data-act="pc-preview-draft">👁 Preview draft</button><span class="spacer"></span><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">💾 Save promotion</button></div>
+  </form>`;
+}
+function pcDetailsHtml(x) {
+  const c = x.campaign || x.template || {};
+  const r = x.rendered || {};
+  const rows = [['Type', c.type], ['Audience', c.audience], ['Status', c.status || 'template'], ['Schedule', `${c.startAt || 'any time'}${c.endAt ? ' → ' + c.endAt : ''}${c.time ? ' · ' + c.time : ''}`], ['Channels', (c.channels || []).join(', ')], ['Promo code', c.code], ['Discount', c.discountPct ? c.discountPct + '%' : ''], ['Credit amount', c.creditAmount], ['Bonus', c.bonusPct ? c.bonusPct + '%' : ''], ['Link', c.link]];
+  return `<div class="notice"><b>${esc(c.title || 'Promotion')}</b><div class="small">${esc(c.description || '')}</div></div>
+    <div class="pc-detail-grid">${rows.filter(([, v]) => v !== '' && v != null && v !== 0).map(([k, v]) => `<div><span class="small muted">${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>
+    <h4 style="margin:14px 0 6px">Email</h4><p class="small muted" style="margin:0 0 6px">Subject: <b>${esc(r.subject || c.subject || '')}</b></p>
+    <h4 style="margin:12px 0 6px">WhatsApp</h4><pre class="promo-wa" style="white-space:pre-wrap;font:inherit;font-size:13px;background:rgba(127,127,127,.08);border-radius:10px;padding:10px;margin:0;max-height:200px;overflow:auto">${esc(r.whatsapp || c.whatsapp || '')}</pre>
+    <h4 style="margin:12px 0 6px">App notification</h4><p class="small" style="margin:0"><b>${esc(r.notification?.title || c.notifTitle || '')}</b> — ${esc(r.notification?.body || c.notifBody || '')}</p>`;
+}
+function pcOpenPreview(r, title) {
+  const body = modal(`👁 Preview: ${esc(title || 'Promotion')}`, `<div class="pc-pv-tabs" role="tablist">
+      <button type="button" class="pc-pv-tab on" data-act="pc-pv-tab" data-pv="email" aria-selected="true">📧 Email</button>
+      <button type="button" class="pc-pv-tab" data-act="pc-pv-tab" data-pv="whatsapp" aria-selected="false">💬 WhatsApp</button>
+      <button type="button" class="pc-pv-tab" data-act="pc-pv-tab" data-pv="notification" aria-selected="false">🔔 App notification</button></div>
+    <div class="pc-pv-panel" data-pv="email"><p class="small muted" style="margin:8px 0">Subject: <b>${esc(r.subject || '')}</b></p><iframe title="Email preview" sandbox="" style="width:100%;height:54vh;border:1px solid var(--border);border-radius:12px;background:#fff"></iframe></div>
+    <div class="pc-pv-panel" data-pv="whatsapp" hidden><textarea readonly rows="12" style="width:100%;margin-top:8px">${esc(r.whatsapp || '')}</textarea><div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn" data-act="copy-text" data-text="${esc(r.whatsapp || '')}">📋 Copy text</button></div></div>
+    <div class="pc-pv-panel" data-pv="notification" hidden><div class="card" style="margin:8px 0 0"><b>${esc(r.notification?.title || '')}</b><p class="small" style="margin:6px 0 0">${esc(r.notification?.body || '')}</p></div></div>
+  `, { wide: true });
+  const frame = body && body.querySelector('iframe');
+  if (frame) frame.srcdoc = r.html || '';
+}
+function pcFormDraft(form) {
+  const d = formToObj(form);
+  return {
+    id: form.dataset.id || undefined, templateId: form.dataset.tpl || undefined,
+    title: d.title, description: d.description, type: d.type, category: d.category,
+    audience: d.audience, status: d.status, startAt: d.startAt, endAt: d.endAt, time: d.time,
+    subject: d.subject, html: d.html, whatsapp: d.whatsapp, notifTitle: d.notifTitle, notifBody: d.notifBody,
+    code: d.code, discountPct: d.discountPct, creditAmount: d.creditAmount, bonusPct: d.bonusPct, link: d.link,
+    channels: PC_CHANNELS.filter((ch) => d['ch_' + ch]),
+  };
+}
+
+// ---- Sports form (football & basketball) ----
+const sportForm = (e) => `<form data-form="sport-save" data-id="${esc(e.id || '')}"><h4 style="margin-top:0">🏆 ${e.id ? 'Edit' : 'Add'} sports event</h4>
   ${field('Event name', 'name', e.name || '', { attrs: 'required autocomplete="off"' })}
-  <div class="grid2">${field('Type', 'type', e.type || 'champions-league', { type: 'select', options: [['champions-league', 'UEFA Champions League (football)'], ['nfl', 'NFL'], ['other', 'Other (cricket, tennis, hockey…)']] })}${field('Date (optional)', 'date', e.date || '', { ph: 'YYYY-MM-DD' })}</div>
-  ${field('Promotion text', 'tip', e.tip || '', { type: 'textarea', rows: 4 })}
+  <div class="grid2">${field('Sport', 'type', e.type || 'football', { type: 'select', options: [['football', '⚽ Football'], ['basketball', '🏀 Basketball'], ['champions-league', '⚽ Champions League'], ['nfl', '🏈 NFL'], ['nba', '🏀 NBA'], ['other', '🏆 Other']] })}
+    ${field('Campaign kind', 'kind', e.kind || 'matchday', { type: 'select', options: [['matchday', 'Match day'], ['tournament', 'Tournament'], ['seasonal', 'Seasonal event'], ['special', 'Special offer'], ['other', 'Other']] })}</div>
+  <div class="grid3">${field('Date', 'date', e.date || '', { type: 'date' })}${field('Kick-off time', 'time', e.time || '', { ph: '20:00' })}${field('Competition', 'competition', e.competition || '', { ph: 'Premier League, NBA…' })}</div>
+  ${field('Teams', 'teams', e.teams || '', { ph: 'Team A vs Team B' })}
+  ${field('Promotion text', 'tip', e.tip || '', { type: 'textarea', rows: 3 })}
   ${field('Link (optional)', 'url', e.url || '', { ph: 'https://…' })}
-  <div class="row" style="margin-top:10px;gap:6px"><button class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Save promo</button></div></form>`;
+  <div class="row" style="margin-top:10px;gap:6px"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Save event</button></div></form>`;
 
 // ---------------- IBO Players: downloads & playlists (IBO Player tab) ----------------
 const iboNormMac = (x) => { const s = String(x || '').replace(/[:\s.-]/g, '').toUpperCase(); return s ? (s.match(/.{2}/g) || []).join(':') : ''; };
@@ -3808,6 +3947,73 @@ Object.assign(actions, {
       <pre class="promo-wa" style="white-space:pre-wrap;font:inherit;font-size:13px;max-height:220px;overflow:auto;background:rgba(127,127,127,.08);border-radius:10px;padding:10px;margin:0">${esc(JSON.stringify(applied.reseller, null, 2))}</pre></div>
       <p class="small muted">Preview only — nothing is saved or applied to a real reseller or manager.</p>`, { wide: true });
   },
+  // ---- Promotions hub actions ----
+  'pc-sub': async (el) => { PC.sub = el.dataset.sub; await pcRefresh(); },
+  'pc-cat': async (el) => { PC.type = el.dataset.cat; PC.sub = 'ready'; await pcRefresh(); },
+  'pc-sport-filter': async (el) => { PC.sport = el.dataset.sport; await pcRefresh(); },
+  'pc-new': (el) => { const t = el.dataset.type || 'general'; modal(`＋ New ${esc(t)} promotion`, pcCampaignForm({ type: t }), { wide: true }); },
+  'pc-copy': (el) => {
+    const t = (PC.data?.templates || []).find((x) => x.id === el.dataset.id);
+    if (!t) return toast('Template not found.', true);
+    const d = { templateId: t.id, type: t.category, title: t.title, description: t.description, subject: t.subject, html: t.html, whatsapp: t.whatsapp, notifTitle: t.notifTitle, notifBody: t.notifBody, code: t.code, discountPct: t.discountPct, creditAmount: t.creditAmount, bonusPct: t.bonusPct, link: t.link, audience: t.audience, channels: t.channels, status: 'draft' };
+    const ev = el.dataset.event && ((PC.data?.sports || {}).events || []).find((x) => x.id === el.dataset.event);
+    if (ev) { d.title = `${ev.name} — ${t.title}`; d.description = [ev.competition, ev.teams, ev.tip].filter(Boolean).join(' · ').slice(0, 400); d.startAt = ev.date || ''; d.time = ev.time || ''; d.eventId = ev.id; }
+    modal(`✍️ Customise: ${esc(t.name)}`, pcCampaignForm(d), { wide: true });
+  },
+  'pc-details': async (el) => {
+    try { const x = await api('GET', '/api/admin/promos/' + encodeURIComponent(el.dataset.id)); modal('🔍 Promotion details', pcDetailsHtml(x), { wide: true }); }
+    catch (e) { toast(e.message, true); }
+  },
+  'pc-preview': async (el) => {
+    try { const x = await api('GET', '/api/admin/promos/' + encodeURIComponent(el.dataset.id)); pcOpenPreview(x.rendered || {}, (x.campaign || x.template || {}).title); }
+    catch (e) { toast(e.message, true); }
+  },
+  'pc-preview-draft': async (el) => {
+    const form = el.closest('form'); if (!form) return;
+    try { const r = await api('POST', '/api/admin/promos/preview', { draft: pcFormDraft(form) }); pcOpenPreview(r, formToObj(form).title); }
+    catch (e) { toast(e.message, true); }
+  },
+  'pc-pv-tab': (el) => {
+    const root = el.closest('.modal-body') || document;
+    root.querySelectorAll('.pc-pv-tab').forEach((b) => { b.classList.toggle('on', b === el); b.setAttribute('aria-selected', String(b === el)); });
+    root.querySelectorAll('.pc-pv-panel').forEach((p) => { p.hidden = p.dataset.pv !== el.dataset.pv; });
+  },
+  'pc-edit': async (el) => {
+    try { const x = await api('GET', '/api/admin/promos/' + encodeURIComponent(el.dataset.id)); modal(`✎ Edit: ${esc(x.campaign.title)}`, pcCampaignForm(x.campaign), { wide: true }); }
+    catch (e) { toast(e.message, true); }
+  },
+  'pc-del': async (el) => {
+    if (!confirm('Delete this promotion permanently?')) return;
+    el.disabled = true;
+    try { await api('DELETE', '/api/admin/promos/' + encodeURIComponent(el.dataset.id)); toast('Deleted ✓'); await pcRefresh(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'pc-status': async (el) => {
+    el.disabled = true;
+    try { await api('POST', '/api/admin/promos/' + encodeURIComponent(el.dataset.id) + '/status', { status: el.dataset.status }); toast('Status updated ✓'); await pcRefresh(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'pc-send': async (el) => {
+    if (!confirm('Send this promotion to the selected audience now?')) return;
+    el.disabled = true;
+    try {
+      const r = await api('POST', '/api/admin/promos/' + encodeURIComponent(el.dataset.id) + '/send', {});
+      const st = r.stats || {};
+      toast(`Sent: ${st.email || 0} emails, ${st.devices || 0} devices, ${st.telegram || 0} Telegram posts${(st.errors || []).length ? ' · ' + st.errors.join('; ') : ''}`);
+      if ((r.campaign.channels || []).includes('whatsapp') && (st.waLinks || []).length) modal('💬 WhatsApp — ready to send', `<p class="small muted">Tap a contact to open the chat with the personalised message ready. Nothing is sent until you press send in WhatsApp.</p>${st.waLinks.map((l) => `<div class="list-item"><div style="flex:1;min-width:0"><b>${esc(l.name || 'Customer')}</b></div><a class="btn sm wa-btn" target="_blank" rel="noopener" href="${esc(l.url)}">💬 Open chat</a></div>`).join('')}`, { wide: true });
+      await pcRefresh();
+    } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'sport-new': () => modal('＋ Add sports event', sportForm({})),
+  'sport-promo': (el) => {
+    const ev = ((PC.data?.sports || {}).events || []).find((x) => x.id === el.dataset.id);
+    if (!ev) return toast('Event not found.', true);
+    const cat = ev.category || (['basketball', 'nba'].includes(ev.type) ? 'basketball' : 'football');
+    const tpls = (PC.data?.templates || []).filter((t) => t.category === cat);
+    const re = ev.kind === 'tournament' ? /champions|playoff|tournament/i : ev.kind === 'seasonal' ? /final|season/i : /match|game|hoops/i;
+    const pick = tpls.find((t) => re.test(t.id)) || tpls[0] || { id: cat === 'basketball' ? 'hoops-game-day' : 'match-day-football' };
+    actions['pc-copy']({ dataset: { id: pick.id, event: ev.id } });
+  },
   'ad-copy': (el, e) => {
     const tpl = adsTemplates().find((x) => x.id === el.dataset.id);
     if (!tpl) return toast('Ad example not found.', true);
@@ -3889,6 +4095,8 @@ document.addEventListener('input', (e) => {
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.dataset.input === 'promo-wa-edit') { const a = $('#promo-wa-share'); if (a) a.href = 'https://wa.me/?text=' + encodeURIComponent(t.value); return; }
   if (t.dataset.input === 'promo-lang') { PROMO.lang = t.value; renderAdmin(); return; }
+  if (t.dataset.input === 'pc-type') { PC.type = t.value; pcRefresh(); return; }
+  if (t.dataset.input === 'pc-status-filter') { PC.status = t.value; pcRefresh(); return; }
   if (t.dataset.input === 'mail-plan') { if (!t.value) return; if (t.value === 'custom') return actions['mail-plan-custom'](t);
     api('POST', '/api/admin/email/plan', { id: t.dataset.id, tier: t.value }).then(() => { toast(t.value === 'free' ? 'Set to free trial ✓' : 'Upgraded to paid ✓'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
   if (t.dataset.input === 'mail-on') { api('POST', '/api/admin/email/sending', { id: t.dataset.id, on: t.checked }).then(() => { toast(t.checked ? 'Sending switched on ✓' : 'Sending switched off'); renderAdmin(); }).catch((e) => toast(e.message, true)); return; }
@@ -5296,7 +5504,7 @@ async function adminHolidays() {
 }
 const holRow = (c = {}) => `<div class="row hol-row" style="gap:6px;margin-bottom:6px;flex-wrap:wrap" data-id="${esc(c.id || '')}"><input data-k="name" placeholder="Name (e.g. Shop anniversary)" value="${esc(c.name || '')}" style="flex:2;min-width:160px"><input data-k="date" type="date" value="${esc(c.date || '')}" style="width:160px"><select data-k="kind" style="width:auto">${['evergreen', 'events', 'devices', 'holidays', 'christmas', 'newyear', 'blackfriday', 'cybermonday'].map((k) => `<option ${c.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select><input data-k="tip" placeholder="Note" value="${esc(c.tip || '')}" style="flex:2;min-width:140px"><button type="button" class="btn sm ghost" data-act="hol-del">✕</button></div>`;
 Object.assign(actions, {
-  'hol-promo': (el) => { state.goAfter = el.dataset.k; state.admin.tab = 'promos'; renderAdmin().then?.(() => goAfterRender()); setTimeout(goAfterRender, 400); },
+  'hol-promo': (el) => { const map = { holidays: 'season-kickoff', christmas: 'season-kickoff', newyear: 'season-kickoff', blackfriday: 'double-credit', cybermonday: 'credit-purchase-offer', events: 'match-day-football', evergreen: 'season-kickoff', devices: 'extra-credit-pack' }; actions['pc-details']({ dataset: { id: 'tpl_' + (map[el.dataset.k] || 'season-kickoff') } }); },
   'hol-add': () => document.getElementById('hol-custom').insertAdjacentHTML('beforeend', holRow({})),
   'hol-del': (el) => el.closest('.hol-row').remove(),
   'hol-save': async (el) => { const f = el.closest('form'); const custom = [...document.querySelectorAll('#hol-custom .hol-row')].map((r) => { const g = (k) => r.querySelector(`[data-k=${k}]`).value; return { id: r.dataset.id, name: g('name'), date: g('date'), kind: g('kind'), tip: g('tip') }; }).filter((c) => c.name && c.date);
@@ -5479,7 +5687,15 @@ Object.assign(forms, {
     try { await api('POST', '/api/admin/ibo', o); toast('Added ✓ — ' + devs.length + ' device(s)'); f.reset(); state.admin.iboSelected = []; $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); }
   },
   async 'ibo-buy'(f) { try { const o = formToObj(f); await api('POST', '/api/admin/ibo/credits', { action: 'buy', credits: o.credits, price: o.price }); toast('Credits added ✓'); f.reset(); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); } },
-  async 'sport-save'(f) { try { await api('POST', '/api/admin/sports', { id: f.dataset.id, name: f.name.value, type: f.type.value, date: f.date.value, tip: f.tip.value, url: f.url.value }); closeModal(); toast('Saved ✓'); $('#admin-body').innerHTML = await adminPromos(); } catch (e) { toast(e.message, true); } },
+  async 'sport-save'(f) { try { const o = formToObj(f); await api('POST', '/api/admin/sports', { id: f.dataset.id, ...o }); closeModal(); toast('Event saved ✓'); await pcRefresh(); } catch (e) { toast(e.message, true); } },
+  async 'pc-save'(f) {
+    const d = pcFormDraft(f);
+    const url = d.id ? '/api/admin/promos/' + encodeURIComponent(d.id) : '/api/admin/promos';
+    try {
+      await api(d.id ? 'PUT' : 'POST', url, d);
+      closeModal(); toast(d.id ? 'Promotion updated ✓' : 'Promotion created ✓'); await pcRefresh();
+    } catch (e) { toast(e.message, true); }
+  },
 });
 Object.assign(actions, {
   'sport-edit': (el) => { const e = (state.admin.sports || {}).events.find((x) => x.id === el.dataset.id) || {}; modal('🏆 Sports promo', sportForm(e)); },
