@@ -27,6 +27,8 @@ jobs:
           wc -c /tmp/diag/*.json
       - name: Diagnose
         run: node tools/diagnose.mjs
+      - name: Repro login
+        run: node tools/repro-login.mjs
       - name: Remove downloaded data
         if: always()
         run: rm -rf /tmp/diag
