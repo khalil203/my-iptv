@@ -641,7 +641,7 @@ export function createTranslator(ctx) {
   const api = {
     trCur, trDir, trAuto, afterRoute,
     flagOf, nameOf,
-    translatorCard: () => `<div class="card tr-teaser"><span class="tr-teaser-ico" aria-hidden="true">🌐</span><div style="flex:1;min-width:0"><h3 style="margin:0">Translator</h3><p class="muted small" style="margin:4px 0 0">The whole panel, a text, a chat or a web page — in ${esc(nameOf(S.target))} or any of ${TR_LANGS.length} languages. Your customer data stays private.</p></div><button type="button" class="btn primary" data-act="tr-open">Open</button></div>`,
+    translatorCard: () => `<div class="card tr-teaser"><span class="tr-teaser-ico" aria-hidden="true">🌐</span><div style="flex:1;min-width:0"><h3 style="margin:0">Translator</h3><p class="muted small" style="margin:4px 0 0">The whole panel, a text, a chat or a web page — in ${esc(nameOf(S.target))} or any of ${TR_LANGS.length} languages. Your customer data stays private.</p></div><button type="button" class="btn primary" data-act="tr-open" aria-label="Open Translator panel">Open Translator</button></div>`,
     openHub, translateMany, translateLong, translateMsg, chatAuto, translateReply, setTarget,
     actions: {
       'tr-open': (el) => { openHub(el?.dataset?.tab || 'panel'); },
