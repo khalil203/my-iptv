@@ -12,6 +12,10 @@ One app for web, iPhone and Android (installs from the browser as an app).
 - **Daily emails:** a low-credit alert to you, and expiry reminders to customers.
 - **Team & access:** add staff logins with permissions (presets: Sales agent, Accountant, Manager, Full access). Staff only see what you allow, and every action is logged with their name.
 - **Secure proxy:** streams play over HTTPS on iPhone and Android, and your reseller API key never leaves the server.
+- **Shared AI Assistant (Owner + agents):** ask about the daily/tomorrow work plan, alerts, IBO Player setup on Roku TV or sports promos — the panel answers work without any key; the Owner can also create Resend APIs, update sports promos and change customer programs. Agents get pushed a summary of today's plan when the Owner saves My planning.
+- **IBO Players:** download links with downloader codes and playlist logins for IBO Player (1171959), IBO Player Pro (923441), KING4K (862414), IBO Pro Player (6402995), IBO Pro (474637), IBOSS IPTV (967528) and IBO XPlayer (7947185) — in the IBO tab.
+- **IBO device management:** several devices per account, several MAC addresses per device — the APP/device name is the IBO type name, and each box gets a MAC, all managed on the IBO tab.
+- **Sports promotions:** the Owner adds Champions League and NFL-style events on Promotions — every panel shows them.
 
 It runs on **Cloudflare Workers + KV (free plan)**.
 
@@ -104,10 +108,21 @@ Free plan: the relay sleeps after 15 minutes without viewers, so the first chann
 - **Backups:** Account & backup → Download backup. Do this regularly.
 - **Demo mode:** if you open `public/index.html` without the worker, it runs in demo mode and saves data only in that browser. This is useful for trying it out.
 
+## Promotions & referral programme (20 Nov 2026)
+
+- **Referral (free days for the referrer, never a discount for the buyer):** a friend/family referral who buys an eligible 1-year plan gives **30 days** (1-year), **90 days** (2-device 1-year, $109.99) or **180 days** (4-device 1-year, $139.99). Each customer shares a personal code from **Account → Referral**; capped at **365 days per referrer** and **one award per buyer**. Self-referral and code reuse are blocked. Lifetime plans are not referral-eligible.
+- **Gifts & promotions (one place):** normal customers see `1 month free`, `3 months free`, `6 months free` or `10% / 20% discount` together. **Resellers only ever see 10% or 20% discount** — free months are never shown to resellers.
+- **Lifetime Intproto-TV (fixed, not discounted):** Lifetime Standard **1 Device $499.95** and Lifetime VIP **4 Devices $999.95** across all packages and promotions.
+- **Owner "My planning":** extended through **December 2027**, read-only and synced to the agent panel with a one-time notify-all-agents on go-live (owner can re-notify). Only the owner can edit; agents use **Work planning** for their own tasks.
+- **Panels & guide:** owner and agent panels share the same colours/overview and responsive layouts for laptop, iPhone, Samsung and tablets. The in-app agent guide is updated with these rules.
+
 ## Files
 ```
-public/         the app (index.html, app.js, styles.css, core.js, sw.js, icons)
+public/         the app (index.html, app.js, styles.css, core.js, sw.js, icons, growth.js, ui-controls.js)
 public/core.js  backend logic (shared by the worker and demo mode)
+public/growth.js  promo and marketing helpers (ads/templates/permissions)
+public/ui-controls.js  shared UI helpers (category tokens, refresh, notice)
+docs/developer-brief.md  canonical product brief and upgrade scope
 worker/worker.js  Cloudflare Worker: /api, /proxy, static files
 wrangler.toml   Cloudflare config
 ```

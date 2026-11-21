@@ -89,6 +89,8 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'p12d2', name: '2 Devices · 1 Year', days: 365, price: 109.99, connections: 2, package: '3', credits: 24 },
     { id: 'p12d3', name: '3 Devices · 1 Year', days: 365, price: 129.99, connections: 3, package: '4', credits: 36 },
     { id: 'p12d4', name: '4 Devices · 1 Year', days: 365, price: 139.99, connections: 4, package: '4', credits: 48 },
+    { id: 'life1', name: 'Lifetime Standard · 1 Device', days: 36500, price: 499.95, connections: 1, devices: 1, package: '4', credits: 0, lifetime: true, kind: 'lifetime' },
+    { id: 'life4', name: 'Lifetime VIP · 4 Devices', days: 36500, price: 999.95, connections: 4, devices: 4, package: '4', credits: 0, lifetime: true, kind: 'lifetime' },
   ],
   currency: 'USD',
   resellerPackages: [
@@ -111,10 +113,15 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 's1y2d', title: '2 Devices · 1 Year', days: 365, devices: 2, price: 109.99, badge: '⭐ Best Value', link: '' },
     { id: 's1y3d', title: '3 Devices · 1 Year', days: 365, devices: 3, price: 129.99, badge: '', link: '' },
     { id: 's1y4d', title: '4 Devices · 1 Year', days: 365, devices: 4, price: 139.99, badge: '', link: '' },
+    { id: 'life1', title: 'Lifetime Standard · 1 Device', days: 36500, devices: 1, connections: 1, price: 499.95, badge: '🏆 Lifetime', link: '', lifetime: true, kind: 'lifetime' },
+    { id: 'life4', title: 'Lifetime VIP · 4 Devices', days: 36500, devices: 4, connections: 4, price: 999.95, badge: '🏆 Lifetime', link: '', lifetime: true, kind: 'lifetime' },
     { id: 'ibo1y', title: 'IBO Player · 1 Year', days: 365, devices: 1, price: 5.99, badge: '', link: '' },
     { id: 'ibolife', title: 'IBO Player · Lifetime', days: 36500, devices: 1, price: 11.98, badge: '⭐ Lifetime activation', link: '' },
   ],
   orderCurrency: 'EUR',
+  importantNotice: '',
+  payoutSchedule: 2,
+  autoTransferEnabled: false,
   waTemplates: {}, // custom WhatsApp templates: { pay: { en, fr, ar }, login: {...}, renew: {...} }
   // Seasonal promotion (Black Friday). When it is on and today is between the dates, the code is added to renewal emails,
   // WhatsApp / Telegram messages for renewals, trials and orders, and it is ready as a newsletter and a Telegram channel post.
@@ -124,6 +131,22 @@ export const DEFAULT_SETTINGS = () => ({
   // Public support page intproto-tv.store/support: details first, then the ticket. Agents with a work email get an alert at once.
   support: { email: 'contact@intproto-tv.com', waLink: true, alertEmails: '' }, // USD everywhere, EUR for Europe (email ending, then phone code)
   promo: { on: false, name: 'Black Friday', code: 'BLACKFRIDAY', offer: '', from: '2026-11-17', to: '2026-12-01', email: true, whatsapp: true, telegram: true },
+  // Referral programme: one shared code per customer; rewards are free days for the referrer, never a price change for the buyer.
+  referral: { on: true, rewards: { y1: 30, y1d2: 90, y1d4: 180 }, maxFreeDays: 365 },
+  // Gifts shown to signed-in users. Customers can see free months and discounts; resellers only ever see discounts.
+  gifts: {
+    customer: [
+      { id: 'free1', days: 30, label: '1 month free', title: '1 month free', months: 1, pct: 0, discountPct: 0, note: 'A free month on an eligible annual plan.' },
+      { id: 'free3', days: 90, label: '3 months free', title: '3 months free', months: 3, pct: 0, discountPct: 0, note: 'Three free months on an eligible annual plan.' },
+      { id: 'free6', days: 180, label: '6 months free', title: '6 months free', months: 6, pct: 0, discountPct: 0, note: 'Six free months on an eligible annual plan.' },
+      { id: 'discount10', days: 0, label: '10% discount', title: '10% discount', months: 0, pct: 10, discountPct: 10, note: '10% off an eligible plan.' },
+      { id: 'discount20', days: 0, label: '20% discount', title: '20% discount', months: 0, pct: 20, discountPct: 20, note: '20% off an eligible plan.' },
+    ],
+    reseller: [
+      { id: 'discount10', days: 0, label: '10% discount', title: '10% discount', months: 0, pct: 10, discountPct: 10, note: '10% off reseller credit packs.' },
+      { id: 'discount20', days: 0, label: '20% discount', title: '20% discount', months: 0, pct: 20, discountPct: 20, note: '20% off reseller credit packs.' },
+    ],
+  },
   renewalOffer: { title: '2-Device, 1-Year Subscription', price: '$109.99', bonus: 'Including 2 FREE Months', coupon: 'LION001', url: 'https://intproto-tv.com', auto: true, autoDays: 3, dailyLimit: 90 },
   trial: { enabled: true, hours: 24, credits: 0, package: '', connections: 1, showCredentialsOnScreen: false, mode: 'auto', notifyAdmin: true },
   // Free-trial Telegram dispatch: the customer presses Start in the bot, then the trial login can be sent to the chat automatically.
@@ -158,7 +181,72 @@ export const DEFAULT_SETTINGS = () => ({
   mailTexts: {}, // owner's own wording for emails: { MAIL|AM|RM|OM: { en|fr|ar: { key: text } } }
   waCustom: [], // extra WhatsApp messages the owner added: { id, name, text: { en, fr, ar } }
   security: { sessionHours: 72, proxySecret: '' },
+  // Sports & events promotion calendar (owner Promotions tab): the sports events the agents are told about.
+  sports: { on: true, events: [
+    { id: 'ucl', name: 'UEFA Champions League Final', type: 'champions-league', date: '2027-06-07', tip: 'Prime-time match — push the sports & events promotion to sports fans before the day.', url: '' },
+    { id: 'nfl', name: 'NFL — prime-time match', type: 'nfl', date: '2027-01-11', tip: 'Pass to the sports customers after the game; their streaming line stays the same.', url: '' },
+  ] },
+  // Shared AI assistant (owner + agents): optional LLM mode, panel answers otherwise.
+  ai: { on: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '', instructions: '', tz: 'Asia/Bangkok' },
 });
+
+// IBO Players: the apps customers install on TVs, STBs and Android devices — APK download links, downloader codes and playlist logins for the IBO Player panel and the setup guide.
+export const IBO_PLAYERS = [
+  { id: 'ibo', name: 'IBO Player', code: '1171959', apk: 'https://ibodesk.com/iboupdate.apk', altApk: '', playlist: 'https://iboplayer.com/device/login', icon: '/ibo/ibo-player.svg', note: '' },
+  { id: 'pro', name: 'IBO Player Pro', code: '923441', apk: 'https://ibodesk.com/ibopro.apk', altApk: 'https://iboproapp.com/ibopro.apk', playlist: 'https://iboplayer.pro/manage-playlists/login/', icon: '/ibo/ibo-player-pro.svg', note: 'Some guides also list 834339 or 481220 depending on the build or the version.' },
+  { id: 'king4k', name: 'KING4K Player', code: '862414', apk: 'https://ibodesk.com/king4k.apk', altApk: '', playlist: '', icon: '/ibo/king4k.svg', note: '' },
+  { id: 'iboproplayer', name: 'IBO Pro Player', code: '6402995', apk: 'https://ibodesk.com/iboproplayer.apk', altApk: '', playlist: '', icon: '/ibo/ibo-pro-player.svg', note: '' },
+  { id: 'ibopro', name: 'IBO Pro', code: '474637', apk: 'https://ibodesk.com/iboprocode.apk', altApk: '', playlist: '', icon: '/ibo/ibo-pro.svg', note: '' },
+  { id: 'iboss', name: 'IBOSS IPTV', code: '967528', apk: 'https://ibodesk.com/iboss.apk', altApk: '', playlist: '', icon: '/ibo/iboss.svg', note: '' },
+  { id: 'iboxplayer', name: 'IBO XPlayer', code: '7947185', apk: 'https://ibodesk.com/iboxplayer.apk', altApk: '', playlist: '', icon: '/ibo/ibo-xplayer.svg', note: '' },
+];
+export const iboPlayerByName = (name) => IBO_PLAYERS.find((p) => p.name === String(name || ''));
+export const iboMacNorm = (x) => { const s = String(x || '').replace(/[:\s.-]/g, '').toUpperCase(); return s ? (s.match(/.{2}/g) || []).join(':') : ''; };
+// All MAC addresses of an IBO client: one per device, plus the legacy macs/macAddress entries.
+export const iboMacs = (ibo) => {
+  const out = []; const seen = new Set();
+  const push = (x) => { const m = iboMacNorm(x); if (m && !seen.has(m)) { seen.add(m); out.push(m); } };
+  if (Array.isArray(ibo && ibo.devices)) for (const d of ibo.devices) push(d && d.mac);
+  (Array.isArray(ibo && ibo.macs) ? ibo.macs : []).forEach(push);
+  push(ibo && (ibo.macAddress || ibo.mac));
+  return out;
+};
+// The devices of an IBO client: [{ id, deviceApp, mac }], normalised and de-duplicated. Up to 8.
+const normalizeIboDevices = (body) => {
+  const raw = Array.isArray(body.devices) && body.devices.length ? body.devices : null;
+  if (raw) {
+    const out = [];
+    for (const d of raw) {
+      const mac = iboMacNorm(d && d.mac);
+      if (!mac) continue;
+      const p = iboPlayerByName(d && d.deviceApp);
+      out.push({ id: 'd' + uid(5), deviceApp: (p ? p.name : String(d.deviceApp || '').trim() || 'IBO Player').slice(0, 60), mac });
+    }
+    if (out.length) return out.slice(0, 8);
+  }
+  const macs = [...new Set([...(Array.isArray(body.macs) ? body.macs : []).map(iboMacNorm), iboMacNorm(body.macAddress), iboMacNorm(body.mac)].filter(Boolean))];
+  return macs.map((m) => ({ id: 'd' + uid(5), deviceApp: String(body.deviceApp || 'IBO Player'), mac: m }));
+};
+// Keep the legacy macs/macAddress fields in sync with the device list (and derive devices from them when missing).
+const iboSyncDevices = (x) => {
+  const macs = (Array.isArray(x.devices) && x.devices.length ? x.devices.map((d) => iboMacNorm(d && d.mac)) : iboMacs(x)).filter(Boolean);
+  if (!(Array.isArray(x.devices) && x.devices.length)) x.devices = macs.map((m) => ({ id: 'd' + uid(5), deviceApp: x.deviceApp || 'IBO Player', mac: m }));
+  x.macs = [...new Set((x.devices.map((d) => iboMacNorm(d && d.mac)) || []).filter(Boolean))];
+  if (x.macs.length) x.macAddress = x.macs[0];
+  return x;
+};
+// Setup guide the AI assistant uses when asked "how do I set up IBO Player on Roku TV".
+export function iboSetupGuide() {
+  const p = IBO_PLAYERS[0];
+  return [
+    `Setup ${p.name} on a Roku TV, Android TV or STB:`,
+    `1. Install the app — Downloader code: ${p.code} (in the Android TV / Fire TV Downloader app).`,
+    `2. Playlist: ${p.playlist || ''} — log in there and copy the playlist M3U link (shown in the app settings after you open the player).`,
+    `3. In the app: Settings (⚙️) → Playlist/Xtream Codes → paste the M3U link, then the username and the password.`,
+    ...IBO_PLAYERS.slice(1).map((q) => `Other players: ${q.name} (code ${q.code}, APK ${q.apk}${q.playlist ? ', playlist ' + q.playlist : ''}${q.altApk ? ', listed as ' + q.altApk : ''}${q.note ? '. ' + q.note : ''}).`),
+    'MAC-based devices: send us the MAC address — we activate it. More boxes can be added on the IBO Player panel.'
+  ].filter(Boolean).join('\n');
+}
 
 const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
 export function deepMerge(a, b) {
@@ -166,6 +254,73 @@ export function deepMerge(a, b) {
   const out = { ...a };
   for (const k of Object.keys(b)) out[k] = isObj(a[k]) && isObj(b[k]) ? deepMerge(a[k], b[k]) : b[k];
   return out;
+}
+
+// Referral rewards are free subscription days for the person who shared their code.
+// The reward keys stay stable so settings can be edited without breaking the endpoint.
+export const REFERRAL_REWARD_TABLE = Object.freeze({ y1: 30, y1d2: 90, y1d4: 180 });
+export const REFERRAL_REWARD_ROWS = Object.freeze([
+  { id: 'y1', days: 30, label: '1 month free for a 1-year subscription' },
+  { id: 'y1d2', days: 90, label: '3 months free for a 2-device 1-year subscription ($109.99)' },
+  { id: 'y1d4', days: 180, label: '6 months free for a 4-device 1-year subscription ($139.99)' },
+]);
+const REFERRAL_PACKAGE_KEYS = Object.freeze({
+  y1: 'y1', y1d1: 'y1', s1y: 'y1', p12: 'y1', p12d1: 'y1',
+  y1d2: 'y1d2', s1y2d: 'y1d2', p12d2: 'y1d2',
+  y1d4: 'y1d4', s1y4d: 'y1d4', p12d4: 'y1d4',
+});
+const REFERRAL_DEVICE_KEY = Object.freeze({ 1: 'y1', 2: 'y1d2', 4: 'y1d4' });
+export function referralRewardDays(pkg, rewards = REFERRAL_REWARD_TABLE) {
+  const p = pkg && typeof pkg === 'object' ? pkg : {};
+  const id = String(typeof pkg === 'string' ? pkg : (p.id || p.packageId || p.pkg || '')).trim().toLowerCase();
+  let key = REFERRAL_PACKAGE_KEYS[id] || '';
+  const annual = Number(p.days) === 365 || Number(p.days) === 366 || /1\s*(?:year|yr)|12\s*months/i.test(String(p.title || p.name || ''));
+  if (!key && annual) key = REFERRAL_DEVICE_KEY[Number(p.devices || p.connections || 1)] || '';
+  if (!key && annual && id) key = REFERRAL_DEVICE_KEY[Number(id.match(/d([1-4])$/)?.[1] || id.match(/([1-4])d$/)?.[1] || 0)] || '';
+  if (!key) return 0;
+  const days = Number(rewards && rewards[key]);
+  return Number.isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
+}
+export const LIFETIME_PACKAGE_IDS = Object.freeze(['life1', 'life4']);
+const LIFETIME_FIXED_PRICES = Object.freeze({ life1: 499.95, life4: 999.95 });
+export const LIFETIME_PACKAGE_TITLES = Object.freeze({ life1: 'Lifetime Standard · 1 Device', life4: 'Lifetime VIP · 4 Devices' });
+export const isLifetimePackage = (pkg) => LIFETIME_PACKAGE_IDS.includes(String(pkg?.id || pkg || '')) || pkg?.lifetime === true || pkg?.kind === 'lifetime';
+export const lifetimeFixedPrice = (pkg) => LIFETIME_FIXED_PRICES[String(pkg?.id || pkg || '')] || null;
+export const OWNERPLAN_END_MONTH = '2027-12';
+export function ownerPlanMonths(today = new Date().toISOString().slice(0, 10)) {
+  const month = /^\d{4}-\d{2}$/.test(String(today).slice(0, 7)) ? String(today).slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const [ey, em] = OWNERPLAN_END_MONTH.split('-').map(Number);
+  const end = new Date(Date.UTC(ey, em - 1, 1));
+  const months = [];
+  let cur = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1));
+  if (cur > end) cur = new Date(Date.UTC(ey, em - 1, 1));
+  while (cur <= end) {
+    months.push(cur.toISOString().slice(0, 7));
+    cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+  }
+  if (!months.length) months.push(month);
+  const lastMonth = months[months.length - 1], [ly, lm] = lastMonth.split('-').map(Number);
+  return { months, first: months[0] + '-01', last: lastMonth + '-' + String(new Date(Date.UTC(ly, lm, 0)).getUTCDate()).padStart(2, '0') };
+}
+// Resellers may only see discounts: free-month gifts are stripped even if an old setting still contains them.
+export function visibleGifts(s, kind = 'customer') {
+  const reseller = kind === 'reseller';
+  const raw = reseller ? s?.gifts?.reseller : s?.gifts?.customer;
+  return (Array.isArray(raw) ? raw : []).filter((g) => g && typeof g === 'object' && (g.title || g.name || g.label)).map((g, i) => {
+    const rawMonths = g.months ?? g.freeMonths ?? ((Number(g.days) || 0) / 30 || 0);
+    const givenMonths = Math.min(24, Math.max(0, Number(rawMonths) || 0));
+    const months = reseller ? 0 : givenMonths;
+    const days = reseller ? 0 : (Number.isFinite(Number(g.days)) ? Math.max(0, Math.round(Number(g.days))) : months * 30);
+    const pct = Math.min(100, Math.max(0, Number(g.pct ?? g.discountPct ?? g.discount ?? 0)));
+    const label = String(g.label || g.title || g.name).slice(0, 120);
+    return {
+      id: String(g.id || (reseller ? 'r' : 'c') + i),
+      days, label, title: label, months, freeMonths: months,
+      pct, discountPct: pct,
+      note: String(g.note || g.terms || '').slice(0, 240),
+      kind: reseller ? 'reseller' : 'customer',
+    };
+  });
 }
 export const getPath = (o, p) => String(p || '').split('.').filter(Boolean).reduce((x, k) => (x == null ? x : x[k]), o);
 const fill = (tpl, vars, encode) => String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => {
@@ -231,9 +386,8 @@ export const OWNER_ONLY = ['exports', 'calls', 'master_sheets'];
 const PERM_KEYS = PERMS.map((p) => p[0]);
 const GRANTABLE_KEYS = PERM_KEYS.filter((k) => !OWNER_ONLY.includes(k));
 const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
-// Only the owner and the Technical Service (role "Technical Manager") get these: API keys (Resend…), editing message texts, senders, subjects and links (templates), SEO and ads.
 // Agents can SEND email marketing, newsletters, promotions and renewal emails, but always with the saved texts and the automatic payment links.
-export const TECH_ONLY = ['secrets', 'templates_edit', 'seo', 'ads'];
+export const TECH_ONLY = ['secrets', 'templates_edit', 'seo'];
 export const isTechRole = (role) => /technical|technique|panel manager/i.test(String(role || ''));
 
 // Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
@@ -281,17 +435,23 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/promo')) return method === 'GET' ? 'customers_view' : 'marketing';
   if (path === '/api/admin/renewal/status') return 'customers_view';
   if (path === '/api/admin/duplicates') return 'customers_view';
+  if (path.startsWith('/api/admin/referral')) return 'plans';
   if (path === '/api/admin/reseller-sales') return 'customers_view';
   if (path.startsWith('/api/admin/customers')) return method === 'GET' ? 'customers_view' : method === 'DELETE' ? 'customers_delete' : 'customers_edit';
   if (path === '/api/admin/finance' || (path === '/api/admin/tx' && method === 'GET')) return 'finance_view';
   if (path === '/api/admin/stripe/balance') return 'finance_view';
   if (path.startsWith('/api/admin/stripe/account/')) return 'stripe';
   if (path.startsWith('/api/admin/ibo')) return 'ibo';
+  if (path === '/api/ibo/players') return null; // the IBO Player downloads: everyone signed in
+  if (path === '/api/admin/ai/ask' && method === 'POST') return null; // the shared AI assistant: owner + agents
+  if (path === '/api/admin/ai/config' && method === 'GET') return null; // the assistant status is visible to all
+  if (path === '/api/admin/ai/config' || path.startsWith('/api/admin/ai/action') || path === '/api/admin/sports' || path.startsWith('/api/admin/sports/')) return 'owner';
   if (path === '/api/admin/attendance') return null; // every agent checks in / out (needed before the panel opens)
   if (path.startsWith('/api/admin/attendance')) return 'attendance';
   if (path === '/api/admin/guide') return null;
   if (path === '/api/admin/waiting') return 'customers_view';
   if (path.startsWith('/api/admin/holidays/')) return 'customers_view';
+  if (path === '/api/admin/ownerplan/sync' && method === 'GET') return null; // read-only overview for every signed-in admin
   if (path.startsWith('/api/admin/ownerplan')) return 'owner'; // the owner's personal & business planning: owner only, never agents
   if (path.startsWith('/api/admin/workplan')) return null; // everyone on the team (agents check off, owner edits)
   if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
@@ -892,6 +1052,121 @@ export function payUrlFor(url, c) {
 export const toUsd = (amount, cur, rates) => (Number(amount) || 0) / (Number((rates || {})[cur]) || 1);
 export const fromUsd = (usd, cur, rates) => (Number(usd) || 0) * (Number((rates || {})[cur]) || 1);
 const DAYMS = 86400000;
+
+export function txTime(x) {
+  if (x instanceof Date) { const d = x.getTime(); return Number.isFinite(d) && d > 0 ? d : 0; }
+  if (!x || typeof x !== 'object') return 0;
+  for (const k of ['at', 'ts', 'createdAt', 'time', 'date']) {
+    const v = x[k];
+    if (v == null || v === '') continue;
+    if (v instanceof Date) { const d = v.getTime(); if (Number.isFinite(d) && d > 0) return d; continue; }
+    if (typeof v === 'number') { if (Number.isFinite(v) && v > 0) return v; continue; }
+    if (typeof v !== 'string') continue;
+    const s = v.trim(); if (!s) continue;
+    if (/^-?\d+(?:\.\d+)?$/.test(s)) { const n = Number(s); if (Number.isFinite(n) && n > 0) return n; continue; }
+    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(s)) { const d = parseLooseDate(s); if (d) return d; continue; }
+    const parsed = Date.parse(s); if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    const loose = parseLooseDate(s); if (loose) return loose;
+  }
+  return 0;
+}
+export function sortTxNewest(list) {
+  return (Array.isArray(list) ? list : []).map((x, i) => ({ x, i })).sort((a, b) => txTime(b.x) - txTime(a.x) || a.i - b.i).map((e) => e.x);
+}
+export function exactTimeParts(ms, tz = 'Asia/Bangkok') {
+  const at = txTime({ at: ms });
+  const opts = { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+  let fmt;
+  try { fmt = new Intl.DateTimeFormat('en-CA', opts); } catch { fmt = new Intl.DateTimeFormat('en-CA', { ...opts, timeZone: 'UTC' }); }
+  const p = {};
+  for (const part of fmt.formatToParts(new Date(at))) if (part.type !== 'literal') p[part.type] = part.value;
+  const hour = p.hour === '24' ? '00' : p.hour || '00';
+  return { date: `${p.year || '1970'}-${p.month || '01'}-${p.day || '01'}`, time: `${hour}:${p.minute || '00'}:${p.second || '00'}`, tz };
+}
+export function formatExactTime(x, tz = 'Asia/Bangkok') {
+  const at = x && typeof x === 'object' ? txTime(x) : txTime({ at: x });
+  const p = exactTimeParts(at, tz);
+  return `${p.date} ${p.time} ${p.tz}`;
+}
+export function normalizePayoutDays(v) {
+  const n = Number(v);
+  return n === 1 || n === 2 || n === 7 ? n : 2;
+}
+export function nextPayoutDate(days, fromMs = Date.now()) {
+  const start = txTime({ at: fromMs }) || Date.now();
+  return start + normalizePayoutDays(days) * DAYMS;
+}
+export function usBankHolidayOn(date) {
+  const ms = date instanceof Date ? date.getTime() : date && typeof date === 'object' ? txTime(date) : txTime({ at: date });
+  if (!ms) return null;
+  const d = new Date(ms);
+  for (const h of holidayCalendar(ms - 2 * DAYMS)) {
+    const regions = String(h.region || '').split('/').map((x) => x.trim());
+    if (!regions.includes('US')) continue;
+    const hd = new Date(h.at);
+    if (hd.getFullYear() === d.getFullYear() && hd.getMonth() === d.getMonth() && hd.getDate() === d.getDate()) return h.name;
+  }
+  return null;
+}
+export function bankPayoutNote(account = {}, fromMs = Date.now()) {
+  const a = isObj(account) ? account : {};
+  const days = normalizePayoutDays(a.payoutDays ?? a.payoutSchedule ?? 2);
+  const tz = a.tz || 'Asia/Bangkok';
+  const next = nextPayoutDate(days, fromMs);
+  const holiday = usBankHolidayOn(next);
+  const label = a.name ? ` Account: ${a.name}.` : '';
+  return `Bank Balance is an internal cash ledger ("Mattress"), not a live bank feed; differences come from pending Stripe payouts that have not reached the bank yet.${label} Configured payout schedule: ${days} day${days === 1 ? '' : 's'}. Next payout: ${formatExactTime(next, tz)}.${holiday ? ` US bank holiday warning: ${holiday} may delay payouts.` : ''}`;
+}
+export function balanceTxLink(tx) {
+  const id = String(isObj(tx) ? (tx.id ?? tx.txId ?? '') : tx ?? '');
+  return { id, url: '#tx-' + encodeURIComponent(id), label: 'View transaction' };
+}
+export function applyTransactionInput(input, now = Date.now()) {
+  const src = isObj(input) ? input : {};
+  const out = { ...src };
+  const date = String(src.date ?? '').trim();
+  const time = String(src.time ?? '').trim();
+  let at = 0;
+  if (date && time) {
+    const hm = time.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (hm && !/[Zz]|[+-]\d{2}:?\d{2}$/.test(time) && !/^\d{4}-\d{2}-\d{2}T/.test(time)) {
+      const p2 = (n) => String(n).padStart(2, '0');
+      at = Date.parse(`${date}T${p2(hm[1])}:${p2(hm[2])}:${p2(hm[3] || '0')}Z`) || 0;
+    } else at = txTime({ at: time }) || txTime({ at: `${date}T${time}` });
+  } else if (time) at = txTime({ at: time });
+  else if (date) at = parseLooseDate(date) || txTime({ at: date });
+  else at = txTime(out) || txTime({ at: now });
+  out.at = at || txTime({ at: now });
+  out.timePrecision = 'second';
+  return out;
+}
+export function migrateLegacyTransactions(data) {
+  const clone = isObj(data) || Array.isArray(data) ? JSON.parse(JSON.stringify(data)) : {};
+  const report = { scanned: 0, migrated: 0, alreadyExact: 0, skipped: 0 };
+  const paths = ['tx', 'transactions', 'finance.tx', 'finance.transactions', 's.finance.tx', 's.finance.transactions', 'settings.finance.tx', 'settings.finance.transactions'];
+  const seen = new Set();
+  for (const path of paths) {
+    const arr = getPath(clone, path);
+    if (!Array.isArray(arr) || seen.has(arr)) continue;
+    seen.add(arr);
+    for (const t of arr) {
+      report.scanned++;
+      if (!isObj(t)) { report.skipped++; continue; }
+      const hasClock = typeof t.time === 'string' && /^\d{1,2}:\d{2}(?::\d{2})?/.test(t.time.trim());
+      const exactAt = txTime({ at: t.at, ts: t.ts, createdAt: t.createdAt, time: t.time });
+      if (t.timePrecision === 'second' || hasClock || (exactAt > 0 && t.timePrecision !== 'date-only')) { report.alreadyExact++; continue; }
+      if (t.timePrecision === 'date-only' && exactAt > 0) { report.skipped++; continue; }
+      const legacyAt = t.date == null || t.date === '' ? 0 : parseLooseDate(t.date) || txTime({ at: t.date });
+      if (!legacyAt) { report.skipped++; continue; }
+      t.at = legacyAt;
+      t.timePrecision = 'date-only';
+      t.legacy = true;
+      report.migrated++;
+    }
+  }
+  return { data: clone, report };
+}
+
 const planCredits = (p) => (p && p.credits != null && p.credits !== '' ? Number(p.credits) : p ? Math.max(1, Math.round((p.days || 30) / 30)) : 1);
 const escHtml = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -1204,7 +1479,7 @@ ${logo ? `<img src="${e(logo)}" alt="${e(app)}" width="96" style="display:block;
 <tr><td class="mobile-pad" style="padding:0 40px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
 <tr><td style="padding:20px 24px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;text-align:${align}"><h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a">${L.details}</h2><p style="margin:6px 0 0;font-size:13px;color:#475569;line-height:1.5">${L.detailsIntro}</p></td></tr>
 <tr><td style="padding:20px 24px"><table border="0" cellpadding="0" cellspacing="0" width="100%">${row(L.user, e(u))}${row(L.pass, e(p))}${dns ? row(L.dns, `<a href="${e(dns)}" style="color:${P};text-decoration:none;font-size:14px">${e(dns)}</a>`) : ''}
-${m3u.length ? `<tr><td colspan="2" style="padding-top:16px;text-align:${align}"><div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${L.m3u}</div>${m3u.map((x, i) => `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-bottom:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">${i ? 'HLS' : 'TS'}:</b> ${e(x)}</div>`).join('')}</td></tr>` : ''}${c.ibo && c.ibo.mac ? row('Device MAC Address', e(c.ibo.mac)) : ''}${c.ibo && c.ibo.key ? row('Device Key', e(c.ibo.key)) : ''}
+${m3u.length ? `<tr><td colspan="2" style="padding-top:16px;text-align:${align}"><div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${L.m3u}</div>${m3u.map((x, i) => `<div dir="ltr" style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin-bottom:10px;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.5;color:#0369a1;word-break:break-all;text-align:left"><b style="color:#64748b">${i ? 'HLS' : 'TS'}:</b> ${e(x)}</div>`).join('')}</td></tr>` : ''}${iboMacs(c.ibo).map((m) => row('Device MAC Address', e(m))).join('')}${c.ibo && c.ibo.key ? row('Device Key', e(c.ibo.key)) : ''}
 </table></td></tr></table></td></tr>
 ${extraHtml()}${base ? `<tr><td class="mobile-pad" align="center" style="padding:0 40px 28px"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#0c4a6e,#0284c7);border-radius:12px"><tr><td align="center" style="padding:24px;color:#fff"><h3 style="margin:0 0 6px;font-size:17px;color:#fff">${v('appTitle')}</h3><p style="margin:0 0 16px;font-size:13px;color:#e0f2fe">${L.appText}</p>
 <a href="${e(base)}/app" style="display:inline-block;background:#fff;color:#0369a1;font-weight:800;padding:13px 22px;border-radius:12px;text-decoration:none;margin:4px;font-size:16px">📲 ${L.getApp}</a>${appLinksHtml(base, okLang(lang), true)}<p style="margin:12px 0 0;font-size:13px;color:#e0f2fe">👤 ${e(tx(lang, 'profTitle'))}: <a href="${e(base)}/profile" style="color:#fff;font-weight:700">${e(base.replace(/^https?:\/\//, ''))}/profile</a></p></td></tr></table></td></tr>` : ''}
@@ -1634,6 +1909,31 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       s.pricingV3 = true; await store.put('settings', s);
       await log('settings', 'Pricing schedule v3 applied (8 packages, EUR with mirrored USD, Package IDs per schedule)');
     }
+    if (!s.pricingV4) {
+      // Lifetime packages have fixed prices: add them to old installs without touching custom packages.
+      const fresh = DEFAULT_SETTINGS(); const lifeIds = new Set(LIFETIME_PACKAGE_IDS);
+      const fixedOrders = fresh.orderPackages.filter((p) => lifeIds.has(p.id)).map((p) => ({ ...p }));
+      const order = (s.orderPackages || []).filter((p) => !lifeIds.has(p.id));
+      const beforeIbo = order.findIndex((p) => /^ibo/i.test(String(p.id || p.title || '')));
+      order.splice(beforeIbo < 0 ? order.length : beforeIbo, 0, ...fixedOrders);
+      s.orderPackages = order;
+      const fixedPlans = fresh.plans.filter((p) => lifeIds.has(p.id)).map((p) => ({ ...p }));
+      s.plans = [...(s.plans || []).filter((p) => !lifeIds.has(p.id)), ...fixedPlans];
+      s.pricingV4 = true; await store.put('settings', s);
+      await log('settings', 'Lifetime packages added at fixed prices ($499.95 / $999.95)');
+    }
+    if (!s.pricingV5) {
+      // Final naming + gift catalogue: keep owner-added packages/gifts, normalise only the spec ids.
+      const fresh = DEFAULT_SETTINGS(); const lifeIds = new Set(LIFETIME_PACKAGE_IDS);
+      s.plans = (s.plans || []).map((p) => lifeIds.has(p.id) ? { ...fresh.plans.find((x) => x.id === p.id), ...p, ...fresh.plans.find((x) => x.id === p.id) } : p);
+      s.orderPackages = (s.orderPackages || []).map((p) => lifeIds.has(p.id) ? { ...fresh.orderPackages.find((x) => x.id === p.id), ...p, ...fresh.orderPackages.find((x) => x.id === p.id) } : p);
+      const giftIds = new Set(['free1', 'free3', 'free6', 'discount10', 'discount20']);
+      const customCustomer = (s.gifts?.customer || []).filter((g) => g && !giftIds.has(g.id));
+      const customReseller = (s.gifts?.reseller || []).filter((g) => g && !giftIds.has(g.id));
+      s.gifts = { customer: [...fresh.gifts.customer, ...customCustomer], reseller: [...fresh.gifts.reseller, ...customReseller] };
+      s.pricingV5 = true; await store.put('settings', s);
+      await log('settings', 'Lifetime names, badges and promotions catalogue normalised');
+    }
     if (!s.security.proxySecret) { s.security.proxySecret = uid(24); await store.put('settings', s); }
     if (!s.telegram.webhookSecret) { s.telegram.webhookSecret = uid(16); await store.put('settings', s); }
     applyMailTexts(s.mailTexts); setMailLang(s.email.lang);
@@ -1660,6 +1960,80 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   const getCustomers = async () => (await store.get('customers')) || [];
   const markSent = (c, k) => { c.contact = { ...(c.contact || {}), [k]: Date.now() }; }; // the ✓ Sent mark (shown for 24 hours)
   const saveCustomers = (c) => store.put('customers', c);
+  // ---------- referral programme ----------
+  // Codes are uppercase, 6–8 chars and skip look-alikes (I/O/0/1) so they are easy to read and type.
+  const REFERRAL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const normRefCode = (x) => String(x || '').trim().toUpperCase()
+    .replace(/O/g, 'Q').replace(/I/g, 'J').replace(/0/g, '2').replace(/1/g, '7')
+    .replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 8);
+  const publicRefCode = (c) => normRefCode(c?.refCode || c?.id || '');
+  const validRefCode = (x) => /^[A-HJ-NP-Z2-9]{6,8}$/.test(String(x || ''));
+  function newRefCode(list) {
+    let code = '';
+    do { code = Array.from(crypto.getRandomValues(new Uint8Array(7)), (b) => REFERRAL_ALPHABET[b % REFERRAL_ALPHABET.length]).join(''); }
+    while (list.some((x) => normRefCode(x.refCode) === code));
+    return code;
+  }
+  async function ensureRefCodes(list) {
+    let changed = false;
+    for (const c of list) {
+      const code = normRefCode(c.refCode);
+      if (!validRefCode(code) || list.some((x) => x !== c && normRefCode(x.refCode) === code)) { c.refCode = newRefCode(list); changed = true; }
+    }
+    if (changed) await saveCustomers(list);
+    return changed;
+  }
+  async function findByRefCode(list, code) {
+    const n = normRefCode(code); if (!n) return null;
+    return list.find((x) => publicRefCode(x) === n) || null;
+  }
+  function referralInfo(c, list, s) {
+    const code = publicRefCode(c), cfg = s?.referral || {};
+    const base = String(s?.email?.appUrl || '').replace(/\/+$/, '');
+    const referred = list.filter((x) => x.referredBy === c.id || normRefCode(x.referredBy) === code);
+    const awards = Array.isArray(c.referralAwards) ? c.referralAwards : Array.isArray(c.refAwards) ? c.refAwards : [];
+    const awardedDays = awards.reduce((a, x) => a + (Number(x?.days) || 0), 0) || Number(c.refAwardedDays) || 0;
+    const max = Math.max(0, Number(cfg.maxFreeDays) || 0);
+    const rewards = { ...REFERRAL_REWARD_TABLE, ...(cfg.rewards || {}) };
+    const rewardTable = REFERRAL_REWARD_ROWS.map((r) => ({ ...r, days: Math.min(365, Math.max(0, Number(rewards[r.id]) || 0)) }));
+    return {
+      code, link: base ? `${base}/?ref=${code}` : `?ref=${code}`, rewardTable, earned: awardedDays,
+      config: { on: cfg.on !== false, rewards, maxFreeDays: max, rewardTable },
+      on: cfg.on !== false, referred: referred.length, awardedDays, remainingDays: Math.max(0, max - awardedDays), awards: awards.slice(-20),
+    };
+  }
+  async function grantReferralDays(s, list, referrer, days, meta = {}) {
+    const cfg = s?.referral || {}; if (cfg.on === false || !referrer) return { ok: false, reason: 'off' };
+    const used = Number(referrer.refAwardedDays) || 0, max = Math.max(0, Number(cfg.maxFreeDays) || 0);
+    const granted = Math.max(0, Math.min(Math.round(Number(days) || 0), max - used));
+    if (!granted) return { ok: false, reason: 'limit' };
+    const now = Date.now(), base = Math.max(now, Number(referrer.expiresAt) || now);
+    referrer.expiresAt = base + granted * DAY;
+    referrer.refAwardedDays = used + granted;
+    const rec = { at: now, days: granted, by: meta.by || 'system', referredId: meta.referredId || '', pkgId: meta.pkgId || '', note: cleanText(meta.note || '', 120) };
+    referrer.referralAwards = [...(Array.isArray(referrer.referralAwards) ? referrer.referralAwards : []), rec].slice(-100);
+    referrer.refAwards = referrer.referralAwards;
+    referrer.referrals = [...(Array.isArray(referrer.referrals) ? referrer.referrals : []), { id: rec.referredId, pkgId: rec.pkgId, days: granted, at: now }].slice(-100);
+    await saveCustomers(list);
+    try { await pushTo(s, 'c:' + referrer.id, { title: '🎁 Referral reward', body: `${granted} free days added to your subscription${meta.note ? ' · ' + meta.note : ''}.`, url: '/?tab=account', tag: 'referral-' + referrer.id }); } catch {}
+    await baseLog('referral', `Referral: +${granted} days for ${referrer.name || referrer.username || referrer.email || referrer.id}`, meta.by || 'system');
+    return { ok: true, days: granted, expiresAt: referrer.expiresAt };
+  }
+  async function autoAwardReferral(s, buyer, pkg, meta = {}) {
+    const cfg = s?.referral || {}; if (cfg.on === false || !buyer?.referredBy) return { ok: false, reason: 'skipped' };
+    const pid = String(pkg?.id || pkg?.packageId || pkg || '');
+    if (isLifetimePackage(pkg) || /^(ibo|life)/i.test(pid)) return { ok: false, reason: 'not_eligible' };
+    const days = referralRewardDays(pkg, cfg.rewards || REFERRAL_REWARD_TABLE); if (!days) return { ok: false, reason: 'not_eligible' };
+    const k = 'refaward:' + buyer.id; if (await store.get(k)) return { ok: false, reason: 'already' };
+    const list = await getCustomers();
+    const referrer = list.find((x) => x.id === buyer.referredBy) || await findByRefCode(list, buyer.referredBy);
+    if (!referrer || referrer.id === buyer.id) return { ok: false, reason: 'no_referrer' };
+    const prior = Array.isArray(referrer.referralAwards) ? referrer.referralAwards : Array.isArray(referrer.refAwards) ? referrer.refAwards : [];
+    if (prior.some((a) => String(a?.referredId || '') === buyer.id)) return { ok: false, reason: 'already' };
+    const r = await grantReferralDays(s, list, referrer, days, { ...meta, referredId: buyer.id, pkgId: meta.pkgId || pid, note: 'Referral · ' + pid });
+    if (r.ok) await store.put(k, Date.now(), 500 * 86400);
+    return r;
+  }
   // ---------- resellers: dedicated profiles (RSL ids) with their own order history ----------
   // A profile can be typed in by hand, made from customer rows (one person can have many order rows) or read from pasted text.
   const getResellers = async () => (await store.get('resellers')) || [];
@@ -2257,7 +2631,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   }
   const getSubs = async () => (await store.get('pushsubs')) || [];
   const saveSubs = (l) => store.put('pushsubs', l.slice(-2000));
-  const NOTIFY_DEF = { tickets: true, trials: true, receipts: true, shifts: true, shiftReminders: true, oversight: true, watch: [], customers: true, resellers: true, autoPromo: false, promoDays: 7 };
+  const NOTIFY_DEF = { tickets: true, trials: true, receipts: true, shifts: true, shiftReminders: true, oversight: true, plan: true, watch: [], customers: true, resellers: true, autoPromo: false, promoDays: 7 };
   const notifyCfg = (s) => ({ ...NOTIFY_DEF, ...(s.notify || {}) });
   // who: 'owner' · 'm:<team member id>' · 'c:<customer id>' · 'r:<reseller id>'
   async function pushTo(s, who, note) {
@@ -2279,9 +2653,19 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     return { devices: list.length, sent };
   }
   // Everyone who works the support queue: the owner and active team members who can see customers.
-  async function agentIds(perm = 'customers_view') { const team = await getTeam(); return ['owner', ...team.filter((m) => m.status !== 'disabled' && (m.perms || []).includes(perm)).map((m) => 'm:' + m.id)]; }
+  async function agentIds(perm = 'customers_view') { const team = await getTeam(); return ['owner', ...team.filter((m) => m.status !== 'disabled' && (perm === '*' || (m.perms || []).includes(perm))).map((m) => 'm:' + m.id)]; }
   const AGENT_PAGE = { tickets: '/intprototv?tab=support', trials: '/intprototv?tab=trialq', receipts: '/intprototv?tab=receipts' }; // where a tap on the notification opens
-  async function pushAgents(s, kind, note) { const cfg = notifyCfg(s); if (cfg[kind] === false) return; try { await pushTo(s, await agentIds(), { ...note, kind, url: note.url || AGENT_PAGE[kind] || '/intprototv' }); } catch {} }
+  async function pushAgents(s, kind, note) { const cfg = notifyCfg(s); if (cfg[kind] === false) return; try { await pushTo(s, await agentIds(kind === 'plan' ? '*' : 'customers_view'), { ...note, kind, url: note.url || AGENT_PAGE[kind] || '/intprototv' }); } catch {} }
+  const OWNERPLAN_SYNC_MARKER = 'ownerplan-sync-2027-notified';
+  const OWNERPLAN_SYNC_NOTE = { title: '🗓️ My planning updated', body: 'The Owner My planning schedule now runs through December 2027 and is visible in your panel. Open Work planning to see the synced overview.', url: '/intprototv?tab=workplan', tag: 'ownerplan-2027' };
+  // One notice per install: sent by tick() when the update is live, and repeatable only by explicit owner request.
+  async function notifyOwnerPlanSync(s, force = false) {
+    if (!force && await store.get(OWNERPLAN_SYNC_MARKER)) return { sent: 0, already: true };
+    const ids = await agentIds('*');
+    await pushAgents(s, 'plan', OWNERPLAN_SYNC_NOTE);
+    await store.put(OWNERPLAN_SYNC_MARKER, { at: Date.now() }, 90 * 86400);
+    return { sent: ids.length, already: false };
+  }
   // The next payment link for a package, in turn (rotation) among the allowed accounts' matching links
   async function nextPayLink(s, pkg, cur, peek) {
     const { list, otherCurrency } = payCandidates(s, pkg, cur); if (!list.length) return null;
@@ -2329,6 +2713,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
   async function tick() {
     const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
     try { out.ibo = await iboSendDue(s); } catch {}
+    try { out.ownerplanSync = (await notifyOwnerPlanSync(s)).sent; } catch {}
     try { // work planning: a reminder when each activity starts, and the monthly Management Meet Party
       const wp = workPlanOf(s); const L = localNow(wp.tz); const wd = Number(L.day); const toMin = (x) => { const [h, m] = String(x).split(':').map(Number); return h * 60 + m; };
       for (const sl of wp.slots) { const since = L.min - toMin(sl.start); if (since < 0 || since >= 15) continue; const k = `planrem:${L.date}:${sl.id}`; if (await store.get(k)) continue; await store.put(k, 1, 2 * 86400);
@@ -2551,6 +2936,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const inMain = acc ? amount : fromUsd(toUsd(amount, currency, s.finance.rates), s.currency, s.finance.rates);
     c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Math.round(inMain * 100) / 100, credits, stripe: ses.id });
     await saveCustomers(list);
+    await autoAwardReferral(s, c, pk, { by: 'Stripe', source: 'stripe', paymentId: ses.id, orderId: rec.ref || '', pkgId: pk.id });
     await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: acc ? amount : Math.round(inMain * 100) / 100, accountId: acc ? acc.id : '', sa: tag ? tag.id : '', by: 'Stripe (automatic)' });
     return done('activated', `${c.username} +${days} days (${pk.title})`);
   }
@@ -2660,14 +3046,28 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     try {
       const s = await getSettings();
       const R = (m, p) => method === m && path === p;
+      // Lifetime packages keep their published prices: gift/referral offers are free days, never a price change.
+      const pkgView = (p) => {
+        const life = isLifetimePackage(p);
+        const title = LIFETIME_PACKAGE_TITLES[p.id] || p.title || p.name || '';
+        const devices = Number(p.devices || p.connections) || 1;
+        const ibo = /^ibo/i.test(String(p.id || '')) || /^ibo/i.test(title);
+        return {
+          id: p.id, name: title, title, days: Number(p.days) || 0, devices,
+          connections: Number(p.connections || p.devices) || devices,
+          price: life ? ((lifetimeFixedPrice(p) ?? Number(p.price)) || 0) : (Number(p.price) || 0),
+          badge: life ? '🏆 Lifetime' : (p.badge || ''), kind: life ? 'lifetime' : ibo ? 'ibo' : 'subscription',
+          fixed: life, discountable: !life && !ibo, lifetime: life,
+        };
+      };
 
       // ---------- public ----------
+      if (R('GET', '/api/config/gifts')) return ok({ customer: visibleGifts(s, 'customer'), reseller: visibleGifts(s, 'reseller') });
       if (R('GET', '/api/config')) {
         await getAdmin();
         const cur = s.currencyRule?.on !== false ? 'USD' : s.orderCurrency === 'ALL' ? 'EUR' : s.orderCurrency || 'EUR';
         const rcur = s.currencyRule?.on !== false ? 'USD' : s.resellerCurrency || 'EUR';
-        const kindOf = (p) => /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription';
-        const orderPackages = (s.orderPackages || []).filter((p) => (p.title || p.name) && Number(p.price) > 0).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', cur, kind: kindOf(p) }));
+        const orderPackages = (s.orderPackages || []).filter((p) => (p.title || p.name) && Number(p.price) > 0).map((p) => ({ ...pkgView(p), cur }));
         const resellerPackages = (s.resellerPackages || []).filter((p) => (p.name || p.title) && Number(p.price) > 0).map((p) => ({ id: p.id, name: p.name || p.title, title: p.name || p.title, credits: Number(p.credits) || 0, price: Number(p.price) || 0, cur: rcur, kind: 'reseller' }));
         return ok({ waNumbers: (s.waNumbers || []).filter((w) => w.on).map((w) => ({ use: w.use, number: w.number, label: w.label })), branding: s.branding, currency: s.currency, setupRequired: false, mode, trial: { enabled: !!s.trial.enabled, hours: s.trial.hours }, supportEmail: cleanEmail(s.email.supportEmail), captcha: s.security.captcha === false ? null : await captchaChallenge(s),
           telegram: tgOn(s) ? { bot: s.telegram.botUsername || '', link: tgBotLink(s) } : null,
@@ -2720,7 +3120,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         // All-agents queue mode (spec §4): the request goes to the shared panel; an authorized agent claims and processes it.
         if (s.trial.mode === 'agents') {
           const tql = (await store.get('trialqueue')) || [];
-          const entry = { id: uid(6), name, email, phone, whatsapp, telegram, lang: okLang(body.lang), at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
+          const refCode = normRefCode(body.ref || body.refCode || query.ref);
+          const entry = { id: uid(6), name, email, phone, whatsapp, telegram, lang: okLang(body.lang), refCode, at: Date.now(), status: 'pending', claimedBy: '', claimedAt: 0, handledBy: '', doneAt: 0, customerId: '', note: '' };
           tql.unshift(entry); await store.put('trialqueue', tql.slice(0, 300));
           await log('trial', `Free trial request queued for ${name} <${email}> (all-agents queue)`);
           await pushAgents(s, 'trials', { title: '🎁 Free trial request waiting', body: `${name} · ${email}`, tag: 'trial-' + entry.id });
@@ -2756,6 +3157,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           }
         }
         if (!lineReady) c.pendingLine = now; // waits for you to paste a line; the customer is told and you are notified
+        const directRef = await findByRefCode(list, normRefCode(body.ref || body.refCode || query.ref));
+        if (directRef) c.referredBy = directRef.id;
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
         let sent = { ok: false };
@@ -3003,7 +3406,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             lines: { list: lines.slice(0, 300), active: lines.filter((l) => l.expiresAt > now + warn).length, expiring: lines.filter((l) => l.expiresAt > now && l.expiresAt <= now + warn).length, expired: lines.filter((l) => l.expiresAt <= now).length },
             orders, requests: (p.requests || []).filter((q) => q.status === 'pending').map((q) => ({ id: q.id, at: q.at, pkg: q.pkg, credits: q.credits, price: q.price, cur: q.cur, method: q.method })),
             packages: (s.resellerPackages || []).filter((x) => Number(x.price) > 0).map((x) => ({ id: x.id, name: x.name, credits: Number(x.credits) || 0, price: Number(x.price) || 0, per: Number(x.credits) ? Math.round(Number(x.price) / Number(x.credits) * 100) / 100 : 0 })).sort((a, b) => a.credits - b.credits),
-            currency: cur, payMethods: s.resellerPayMethods || [],
+            currency: cur, payMethods: s.resellerPayMethods || [], gifts: visibleGifts(s, 'reseller'),
             support: { whatsapp: String(b.whatsapp || '').replace(/\D/g, ''), telegram: String(b.telegram || '').replace(/^@/, ''), email: s.email.replyTo || s.email.fromEmail || '', app: b.appName || 'IPTV', logo: b.logoUrl || '' },
           });
         }
@@ -3059,12 +3462,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       // ---------- customer ----------
       if (ses.role === 'user') {
         const list = await getCustomers();
+        await ensureRefCodes(list);
         const c = list.find((x) => x.id === ses.id);
         if (!c) return err(401, 'Account not found.');
         if (c.status === 'disabled') return err(401, 'This account is disabled.');
         if (path === '/api/me' && method === 'GET' && !c.pendingLine && (c.dns || s.player.serverUrl) && Date.now() - (lastLineCheck.get(c.id) || (c.panel && c.panel.at) || 0) > 30 * 60000) { try { if (await syncLine(s, c)) await saveCustomers(list); } catch {} }
         // Customer terms gate (spec §7): must accept the terms once before seeing the app
-        if (!c.agreedAt && path !== '/api/me' && path !== '/api/me/agree' && path !== '/api/me/password' && path !== '/api/me/device' && path !== '/api/me/inbox/read' && path !== '/api/me/order') return err(403, 'terms_required'); // asking for a package works before the terms (trial users)
+        const refPaths = ['/api/me', '/api/me/agree', '/api/me/password', '/api/me/device', '/api/me/inbox/read', '/api/me/order', '/api/me/referral', '/api/me/referral/apply'];
+        if (!c.agreedAt && !refPaths.includes(path)) return err(403, 'terms_required'); // asking for a package works before the terms (trial users)
         const v = view(c, s);
         const canWatch = v.state !== 'expired' && !s.userDashboard.maintenance && !c.pendingLine;
         if (R('POST', '/api/me/device')) { // which phone / tablet / TV this customer uses
@@ -3077,15 +3482,36 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (R('POST', '/api/me/inbox/read')) { let ch = 0; for (const n of c.inbox || []) if (!n.read) { n.read = Date.now(); ch++; } if (ch) await saveCustomers(list); return ok({ ok: true }); }
         if (R('POST', '/api/me/agree')) { c.agreedAt = Date.now(); await saveCustomers(list); await log('customer', `${c.username} accepted the terms of service`); return ok({ ok: true, agreed: true }); }
 
+        if (R('GET', '/api/me/referral')) return ok(referralInfo(c, list, s));
+        if (R('POST', '/api/me/referral/apply')) {
+          const code = normRefCode(body.code || body.ref || query.ref);
+          if (!code) return err(400, 'Enter a referral code.');
+          if (code === publicRefCode(c) || code === normRefCode(c.id)) return err(400, 'You cannot use your own referral code.');
+          const referrer = await findByRefCode(list, code);
+          if (!referrer) return err(404, 'Referral code not found.');
+          if (c.referredBy && c.referredBy !== referrer.id) return err(409, 'A referral code is already applied to this account.');
+          if (c.referredBy === referrer.id) return ok({ ok: true, already: true, ...referralInfo(c, list, s) });
+          c.referredBy = referrer.id; c.referredAt = Date.now(); await saveCustomers(list);
+          await log('customer', `${c.username} used referral code ${code} from ${referrer.username || referrer.name || referrer.id}`);
+          return ok({ ok: true, ...referralInfo(c, list, s) });
+        }
+
         if (R('POST', '/api/me/order')) { // customer asks to buy a package: the admin is told and sends a payment link
           const opk = (s.orderPackages || []).find((p) => p.id === body.pkg); const rpk = (s.resellerPackages || []).find((p) => p.id === body.pkg); const pk = opk || rpk; if (!pk) return err(400, 'Package not found.');
           const pkgTitle = pk.title || pk.name || 'Package';
+          const refCode = normRefCode(body.ref || body.refCode || query.ref);
+          if (refCode && !c.referredBy) {
+            const referrer = await findByRefCode(list, refCode);
+            if (referrer && referrer.id !== c.id) { c.referredBy = referrer.id; c.referredAt = Date.now(); await log('customer', `${c.username} used referral code ${refCode} on an order request`); }
+          }
           const pkgLine = rpk ? `${Number(rpk.credits) || 0} reseller credits` : `${Number(pk.days) || 0} days · ${Number(pk.devices) || 1} device(s)`;
           const pkgCur = s.currencyRule?.on !== false ? custCurrency(s, c) : rpk ? (s.resellerCurrency || 'EUR') : (s.orderCurrency || 'EUR'); // USD worldwide, EUR for Europe
           const k = 'buyreq:' + c.id + ':' + new Date().toISOString().slice(0, 10); const n = Number(await store.get(k)) || 0;
           if (n >= 5) return err(429, 'Too many requests today. Please contact us on WhatsApp.');
           await store.put(k, n + 1, 2 * 86400);
           c.buyRequest = { pkg: pk.id, title: pkgTitle, price: pk.price, at: Date.now() };
+          // The referral code is attached here, but no reward is granted yet: a request is not a paid subscription.
+          // Auto-award runs when the subscription is actually granted (receipt approval, Stripe success, paid admin new/renewal).
           // the customer gets the package email with its payment link right away (matching GreenApp Host link, rotation)
           let mailed = { ok: false, error: 'no email address' };
           if (opk && cleanEmail(c.email) && !(await getBad())[cleanEmail(c.email)]) {
@@ -3104,9 +3530,10 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const sales = (await getSales()).filter((x) => x.customerId === c.id && Number(x.amount) > 0);
           const totalPaidUsd = Math.round(sales.reduce((a, x) => a + (Number(x.amountUsd) || 0), 0) * 100) / 100;
           return ok({
-            user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, dashboard: s.userDashboard, branding: s.branding, currency: s.currency, myCurrency: s.currencyRule?.on !== false ? custCurrency(s, c) : '',
-            plans: s.plans.map((p) => ({ id: p.id, name: p.name, days: p.days, price: p.price, connections: p.connections })),
-            orderPackages: (s.orderPackages || []).map((p) => ({ id: p.id, title: p.title || p.name, days: Number(p.days) || 0, devices: Number(p.devices) || 0, price: Number(p.price) || 0, badge: p.badge || '', kind: /^ibo/i.test(p.id || '') || /^ibo/i.test(p.title || '') ? 'ibo' : 'subscription', cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
+            user: pub, totalPaidUsd, paidCount: sales.length, agreed: !!c.agreedAt, importantNotice: s.importantNotice || '', dashboard: s.userDashboard, branding: s.branding, currency: s.currency, myCurrency: s.currencyRule?.on !== false ? custCurrency(s, c) : '',
+            referral: referralInfo(c, list, s), gifts: visibleGifts(s, 'customer'),
+            plans: (s.plans || []).map((p) => pkgView(p)),
+            orderPackages: (s.orderPackages || []).map((p) => ({ ...pkgView(p), cur: ['EUR', 'USD', 'USDT', 'MAD', 'THB'].includes(s.orderCurrency) ? s.orderCurrency : 'EUR' })),
             resellerPackages: (s.resellerPackages || []).map((p) => ({ id: p.id, title: p.name || p.title, name: p.name || p.title, credits: Number(p.credits) || 0, days: 0, devices: 0, price: Number(p.price) || 0, badge: '', kind: 'reseller', cur: s.resellerCurrency || 'EUR' })),
             buyRequest: c.buyRequest || null,
             inbox: (c.inbox || []).slice(0, 30).map((n) => ({ id: n.id, at: n.at, title: n.title, body: n.body, url: n.url || '', read: !!n.read })),
@@ -3119,7 +3546,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
               dns: String(c.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, ''),
               m3u: String(c.m3u || '').trim(),
               lineType: CONN_TYPES[c.lineType] ? c.lineType : 'xtream1', lines: customerConns(c, s).filter((x) => !x.main),
-              ibo: c.ibo && (String(c.ibo.mac || '').trim() || String(c.ibo.key || '').trim()) ? { mac: String(c.ibo.mac || '').trim(), key: String(c.ibo.key || '').trim() } : null,
+               ibo: c.ibo && (String(c.ibo.mac || '').trim() || String(c.ibo.key || '').trim()) ? { mac: String(c.ibo.mac || '').trim(), key: String(c.ibo.key || '').trim(), macs: iboMacs(c.ibo) } : null,
             } : null,
           });
         }
@@ -3267,6 +3694,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return err(404, 'Not found');
       }
 
+      // ---------- IBO Players: the downloads customers use (the IBO panel + the setup guide) ----------
+      if (R('GET', '/api/ibo/players')) return ok(IBO_PLAYERS);
+
       // ---------- admin ----------
       if (!['admin', 'staff'].includes(ses.role) || !path.startsWith('/api/admin/')) return err(403, 'Not allowed.');
       let perms = PERM_KEYS, isOwner = ses.role === 'admin', member = null;
@@ -3397,6 +3827,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const credits = plan ? planCredits(plan) : Math.max(1, Math.round(days / 30));
           (c.renewals ||= []).push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(rc.amount) || 0, credits, receipt: rc.id });
           await saveCustomers(list);
+          const awardedPkg = { ...(s.orderPackages.find((p) => p.id === rc.pkg) || {}), id: rc.pkg || '', days, devices, title: rc.pkgTitle || '' };
+          await autoAwardReferral(s, c, awardedPkg, { by: actorName, source: 'receipt', receiptId: rc.id, pkgId: rc.pkg || '' });
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.amount) || 0, accountId: String(body.accountId || ''), sa: String(body.stripeAccountId || ''), by: actorName });
           rc.status = 'approved'; rc.daysAdded = days;
           const T = [tx(lang, 'paidT'), tx(lang, 'paidB', { days })];
@@ -3513,6 +3945,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         let password = String(entry.password || ln.p || '').trim(); if (!password) password = rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789');
         const now = Date.now(); const salt = uid(8);
         const c = { loginPassword: password, id: uid(8), name: entry.name, email: cleanEmail(entry.email) || entry.email, phone: entry.phone, whatsapp: entry.whatsapp, telegram: entry.telegram || '', lang: okLang(entry.lang), note: 'Free trial (agents queue)', username, salt, passwordHash: await hashPassword(password, salt), lineUsername: ln.u, linePassword: ln.p, dns: ln.dns, m3u: String(m3uText || '').trim(), lineId: '', planId: 'trial', isTrial: true, connections: Number(s.trial.connections) || 1, startAt: now, expiresAt: now + (Number(s.trial.hours) || 24) * 3600000, status: 'active', createdAt: now, lastLogin: null, renewals: [{ at: now, type: 'trial', planId: 'trial', days: 1, credits: Number(s.trial.credits) || 0, price: 0 }] };
+        if (entry.refCode) { const ref = await findByRefCode(list, entry.refCode); if (ref) c.referredBy = ref.id; }
         list.push(c); await saveCustomers(list);
         await recordSale(s, c, { type: 'trial', plan: null, days: 1, credits: Number(s.trial.credits) || 0, amount: 0, accountId: '' });
         const dns = String(ln.dns || s.email.dns || s.player.serverUrl || '').replace(/\/+$/, '');
@@ -3565,6 +3998,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           name: String(body2.name || '').trim(),
           lang: okLang(String(body2.lang || '')),
           username: ln.u, password: ln.p,
+          refCode: normRefCode(body2.ref || body2.refCode || query.ref),
         };
         const r = await trialSend(entry, m3u);
         if (r.error) return err(400, r.error);
@@ -3607,10 +4041,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const saveIboShelf = (x) => store.put('iboCredits', x);
       const iboMsg = (ibo, kind) => {
         const t = kind === 'trial' ? `${s.trial.hours || 24}-hour free trial` : kind === 'activation' ? '1-year activation' : 'renewed';
+        const macs = iboMacs(ibo);
+        const devs = Array.isArray(ibo.devices) && ibo.devices.length ? ibo.devices : macs.map((m) => ({ deviceApp: ibo.deviceApp || 'IBO Player', mac: m }));
         return [`${s.branding.appName || 'INTPROTO-TV'} · IBO Player — ${t}`,
           `Username: ${ibo.username}`, `Password: ${ibo.password}`, ibo.dns ? `DNS: ${ibo.dns}` : '',
           '', 'Open IBO Player → Settings (⚙️) → Playlist/Xtream Codes → add these credentials.',
-          'Using a MAC-based device (Smart TV, STB, Formuler…)? Send us your MAC address on WhatsApp or Telegram and we will activate it for you.',
+          ...devs.map((d, i) => { const p = iboPlayerByName(d.deviceApp); const l = [`Device ${i + 1}: ${d.deviceApp || 'IBO Player'} · MAC ${iboMacNorm(d.mac || '')}`]; if (p) { if (p.code) l.push(`Downloader code: ${p.code}`); if (p.apk) l.push(`APK: ${p.apk}`); if (p.playlist) l.push(`Playlist: ${p.playlist}`); } return l; }),
+          ...macs.length ? [`Using a MAC-based device (Smart TV, STB, Formuler…)? These MAC addresses are already activated for this device: ${macs.join(', ')}. Another box? Send us its MAC address on WhatsApp or Telegram and we will activate it.`] : ['Using a MAC-based device (Smart TV, STB, Formuler…)? Send us your MAC address on WhatsApp or Telegram and we will activate it for you.'],
         ].filter(Boolean).join('\n');
       };
       if (R('GET', '/api/admin/ibo')) {
@@ -3638,15 +4075,37 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const name = String(body.name || '').trim().slice(0, 80); if (!name) return err(400, 'Name is required.');
         const days = body.lifetime ? 36500 : Math.max(1, Number(body.days) || 365);
         const isTrial = body.trial === true || body.trial === 'true' || days <= 7;
+        const devices = normalizeIboDevices(body);
+        const creditsNeeded = Math.max(1, devices.length || 1);
         const shelf = await iboShelf();
-        if (!isTrial && !body.free) { if ((Number(shelf.credits) || 0) < 1) return err(400, 'No IBO credits left — buy credits on this page first.'); shelf.credits = Number(shelf.credits) - 1; await saveIboShelf(shelf); }
+        if (!isTrial && !body.free) { if ((Number(shelf.credits) || 0) < creditsNeeded) return err(400, `No IBO credits left — buy credits on this page first (${devices.length || 1} credit${devices.length === 1 ? '' : 's'} needed).`); shelf.credits = Number(shelf.credits) - creditsNeeded; await saveIboShelf(shelf); }
         const rnd = (n, ch) => Array.from(crypto.getRandomValues(new Uint32Array(n)), (x) => ch[x % ch.length]).join('');
-        const x = { id: uid(8), name, contact: String(body.contact || '').slice(0, 120), deviceApp: String(body.deviceApp || 'IBO Player').slice(0, 60), macAddress: String(body.macAddress || '').slice(0, 40),
+        const x = { id: uid(8), name, contact: String(body.contact || '').slice(0, 120), deviceApp: String((devices[0] && devices[0].deviceApp) || 'IBO Player').slice(0, 60), devices,
           username: String(body.username || '').trim() || ('ibo' + rnd(5, '0123456789')), password: String(body.password || '').trim() || rnd(8, 'abcdefghjkmnpqrstuvwxyz23456789'),
-          dns: String(body.dns || '').slice(0, 200), isTrial, creditsUsed: isTrial || body.free ? 0 : 1, status: 'active',
+          dns: String(body.dns || '').slice(0, 200), isTrial, creditsUsed: isTrial || body.free ? 0 : creditsNeeded, status: 'active',
           startAt: Date.now(), expiresAt: Date.now() + days * DAY, note: String(body.note || '').slice(0, 500), createdAt: Date.now() };
+        iboSyncDevices(x);
         const list = await getIbo(); list.unshift(x); await saveIbo(list);
         await log('ibo', `Added IBO ${isTrial ? 'trial' : 'client'} ${x.name} (${x.username})`);
+        return ok({ ok: true, client: x });
+      }
+      // MAC management: these paths are checked before the iboId pattern above, so “macs” is not an IBO client id.
+      if (R('POST', '/api/admin/ibo/macs')) { // add one more device (a second TV box, another player…) to an IBO client
+        const list = await getIbo(); const x = list.find((y) => y.id === String(body.id || '')); if (!x) return err(404, 'Not found.');
+        const mac = iboMacNorm(body.mac); if (!mac) return err(400, 'MAC address is required.');
+        if (!(Array.isArray(x.devices) && x.devices.length)) x.devices = iboMacs(x).map((m) => ({ id: 'd' + uid(5), deviceApp: x.deviceApp || 'IBO Player', mac: m }));
+        x.devices.push({ id: 'd' + uid(5), deviceApp: x.devices[0] ? x.devices[0].deviceApp : 'IBO Player', mac });
+        iboSyncDevices(x);
+        await saveIbo(list); await log('ibo', `Added MAC ${mac} to IBO client ${x.name}`);
+        return ok({ ok: true, client: x });
+      }
+      if (R('DELETE', '/api/admin/ibo/macs')) { // remove a device (MAC) from an IBO client
+        const list = await getIbo(); const x = list.find((y) => y.id === String(body.id || query.id || '')); if (!x) return err(404, 'Not found.');
+        const mac = iboMacNorm(body.mac || query.mac); if (!mac) return err(400, 'MAC address is required.');
+        if (!(Array.isArray(x.devices) && x.devices.length)) x.devices = iboMacs(x).map((m) => ({ id: 'd' + uid(5), deviceApp: x.deviceApp || 'IBO Player', mac: m }));
+        x.devices = x.devices.filter((d) => iboMacNorm(d && d.mac) !== mac);
+        iboSyncDevices(x);
+        await saveIbo(list); await log('ibo', `Removed MAC ${mac} from IBO client ${x.name}`);
         return ok({ ok: true, client: x });
       }
       const iboId = path.match(/^\/api\/admin\/ibo\/([\w-]+)(?:\/(\w+))?$/);
@@ -3656,6 +4115,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (method === 'DELETE') { await saveIbo(list.filter((y) => y !== x)); await log('ibo', `Removed IBO client ${x.name}`); return ok({ ok: true }); }
         if (method === 'PUT' && !sub) {
           for (const k of ['name', 'contact', 'deviceApp', 'macAddress', 'username', 'password', 'dns', 'note']) if (body[k] !== undefined) x[k] = String(body[k]).slice(0, k === 'note' ? 500 : 120);
+          if (Array.isArray(body.devices) && body.devices.length) { // the full device list: one { deviceApp, mac } per device
+            const devs = normalizeIboDevices({ devices: body.devices });
+            if (devs.length) x.devices = devs;
+          } else if (Array.isArray(body.macs)) { // the device's full MAC list — every activated box on it
+            const nm = [...new Set(body.macs.map(iboMacNorm).filter(Boolean))];
+            if (iboMacNorm(x.macAddress) && !nm.includes(iboMacNorm(x.macAddress))) nm.unshift(iboMacNorm(x.macAddress));
+            x.macs = nm;
+          }
+          iboSyncDevices(x);
           if (body.status !== undefined && ['active', 'disabled'].includes(body.status)) x.status = body.status;
           if (body.days !== undefined) { const d = Math.max(1, Number(body.days) || 365); x.expiresAt = Math.max(Date.now(), x.expiresAt || 0) + d * DAY; }
           if (body.expiresAt !== undefined) { const t = new Date(body.expiresAt).getTime(); if (!isNaN(t)) x.expiresAt = t; }
@@ -3682,6 +4150,144 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           return ok({ ok: true, sent: false, via, text, wa: String(x.contact || '').replace(/\D/g, '') });
         }
         return err(404, 'Not found.');
+      }
+
+      // ---------- Sports & events promotions (owner Promotions tab) ----------
+      if (R('GET', '/api/admin/sports')) {
+        if (!can('customers_view')) return err(403, 'Only panel users see the sports promotions.');
+        const ev = (s.sports && Array.isArray(s.sports.events)) ? s.sports.events : [];
+        return ok({ on: s.sports ? s.sports.on : true, events: ev });
+      }
+      if (R('POST', '/api/admin/sports')) { // add or edit one event (owner only)
+        if (!isOwner) return err(403, 'Only the owner adds or changes sports promotions.');
+        const type = ['champions-league', 'nfl', 'other'].includes(String(body.type || '')) ? String(body.type) : 'other';
+        const name = cleanText(body.name, 100); if (!name) return err(400, 'The event needs a name.');
+        const date = String(body.date || '').trim();         if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return err(400, 'Give the date as YYYY-MM-DD.');
+        const ev = [...((s.sports && Array.isArray(s.sports.events)) ? s.sports.events : [])];
+        const id = String(body.id || '').trim() || 's' + uid(5);
+        const nx = { id, name, type, date, tip: cleanText(body.tip, 400), url: String(body.url || '').trim().slice(0, 300), on: body.on !== false };
+        const i = ev.findIndex((x) => x.id === id);
+        if (i >= 0) ev[i] = nx; else ev.push(nx);
+        await saveSettings({ ...s, sports: { on: s.sports ? s.sports.on : true, events: ev.filter((e) => e.name).slice(0, 40) } });
+        await log('marketing', `Sports promotion "${name}" ${i >= 0 ? 'updated' : 'added'}`);
+        return ok({ ok: true, event: nx, events: ev });
+      }
+      if (path.startsWith('/api/admin/sports/') && method === 'DELETE' && isOwner) {
+        const id = path.match(/^\/api\/admin\/sports\/([\w-]+)$/)?.[1];
+        const ev = (s.sports && Array.isArray(s.sports.events) ? s.sports.events : []).filter((x) => x.id !== id);
+        await saveSettings({ ...s, sports: { on: true, events: ev } });
+        await log('marketing', `Sports promotion removed (${id})`);
+        return ok({ ok: true, events: ev });
+      }
+
+      // ---------- Shared AI assistant: optional LLM mode + panel answers, for the owner and the agents ----------
+      const aiIsoToday = (tz, off = 0) => { try { const now = new Date(Date.now() + off * 86400000); const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; } catch { return new Date(Date.now() + off * 86400000).toISOString().slice(0, 10); } };
+      const aiWdOf = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();
+      async function aiAlertSummary() { // what the Alerts tab shows, in words
+        const list = await getCustomers(); const a = { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {}, ...(s.alerts || {}) }; const now = Date.now();
+        const items = [];
+        for (const c of list) {
+          if (c.status === 'disabled') { items.push(`${c.name || c.username} — account disabled`); continue; }
+          const expired = (c.expiresAt || 0) <= now; const isTrial = !!c.isTrial;
+          const daysLeft = c.daysLeft !== undefined ? Number(c.daysLeft) : (c.expiresAt ? Math.floor((c.expiresAt - now) / 86400000) : 0);
+          if (isTrial && !expired && (c.hoursLeft || 0) <= a.trialHours) items.push(`${c.name || c.username} — trial ending in about ${Math.max(0, c.hoursLeft || 0)} h`);
+          else if (isTrial && expired && daysLeft >= -a.expiredDays) items.push(`${c.name || c.username} — trial ended, no pay link yet`);
+          else if (!isTrial && expired && daysLeft >= -a.expiredDays) items.push(`${c.name || c.username} — subscription expired (paused)`);
+          else if (!isTrial && !expired && daysLeft <= a.expiringDays) items.push(`${c.name || c.username} — subscription ends in ${daysLeft} day(s)`);
+        }
+        return items.slice(0, 15).map((x) => '• ' + x).join('\n') || 'Nothing is in the alert list — everything looks on track.';
+      }
+      async function aiPanelContext() { // what the assistant knows, from the panel itself
+        const wp = workPlanOf(s); const tz = s.ai?.tz || 'Asia/Bangkok'; const today = aiIsoToday(tz);
+        const wd = aiWdOf(today); const tasks = (wp.days[wd] || {});
+        const plan = wp.slots.map((sl) => `${sl.start}–${sl.end} ${sl.icon} ${sl.title}${tasks[sl.id] ? ' — ' + tasks[sl.id] : ''}`);
+        const tNext = aiWdOf(aiIsoToday(tz, 1)); const tTasks = (wp.days[tNext] || {});
+        const tomorrow = wp.slots.map((sl) => `${sl.start}–${sl.end} ${sl.icon} ${sl.title}${tTasks[sl.id] ? ' — ' + tTasks[sl.id] : ''}`);
+        return { today, plan, tomorrow, rules: wp.rules, alerts: await aiAlertSummary(), players: IBO_PLAYERS.map((p) => `${p.name} (${p.code})`).join(', '), sports: (s.sports?.events || []).map((e) => `${e.name} — ${e.type}${e.date ? ' on ' + e.date : ''}${e.tip ? ': ' + e.tip : ''}`) };
+      }
+      async function aiAsk(s, member, question) {
+        const ai = s.ai || {}; const q = question.toLowerCase(); const ctx = await aiPanelContext(); const wp = workPlanOf(s);
+        const tz = s.ai?.tz || 'Asia/Bangkok'; const name = (member && member.name) || 'you';
+        if (ai.on !== false && String(ai.apiKey || '').trim() && /^https?:\/\//i.test(String(ai.baseUrl || ''))) { // optional LLM mode
+          const sys = [ai.instructions || 'You are the AI assistant of INTPROTO-TV (the TVplus IPTV reseller app).', 'Answer concisely, in the language of the user. Use the panel context. Suggest actions the owner or the agents can take, with the panel links.', 'Known links: /intprototv?tab=workplan (Work planning), /intprototv?tab=ownerplan (My planning), /intprototv?tab=alerts (Alerts), /intprototv?tab=ibo (IBO Player), /intprototv?tab=promos (Promotions).'].join('\n');
+          const prompt = ['Panel context:\n' + JSON.stringify(ctx, null, 1), 'User question:', question].join('\n');
+          try {
+            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.3, max_tokens: 900, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] }) });
+            const j = await r.json().catch(() => ({}));
+            const ans = j.choices && j.choices[0] && j.choices[0].message ? String(j.choices[0].message.content || '').trim() : '';
+            if (r.ok && ans) return { answer: ans.slice(0, 1500), source: 'ai', related: ['/intprototv?tab=workplan', '/intprototv?tab=alerts'] };
+          } catch {}
+        }
+        // Deterministic panel answers — the assistant works even without an LLM key.
+        if (/tomorrow/i.test(q)) {
+          const tNext = aiWdOf(aiIsoToday(tz, 1)); const tTasks = (wp.days[tNext] || {});
+          const items = wp.slots.map((sl) => (tTasks[sl.id] ? `${sl.start}–${sl.end} ${sl.icon} ${sl.title} — ${tTasks[sl.id]}` : '')).filter(Boolean);
+          return { answer: `Tomorrow:\n${items.join('\n') || 'Nothing is scheduled for tomorrow — add activities in My planning.'}`, source: 'panel', related: ['/intprototv?tab=workplan'] };
+        }
+        if (/alert/i.test(q)) return { answer: `Alerts:\n${await aiAlertSummary()}`, source: 'panel', related: ['/intprototv?tab=alerts'] };
+        if (/ibo|player pro|king4k|iboss|roku|stb|media box/i.test(q)) return { answer: `IBO Player setup guide:\n${iboSetupGuide()}`, source: 'panel', related: ['/intprototv?tab=ibo'] };
+        if (/plan|today|activity|next/i.test(q)) return { answer: `Today's plan for ${name} (${ctx.today}):\n${ctx.plan.join('\n') || 'Nothing is scheduled today — your day is open. Add activities in My planning.'}\n\nRules: ${(wp.rules || []).length ? (wp.rules || []).join(' · ') : 'none yet.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
+        return { answer: 'I can help with:\n• Today\'s and tomorrow\'s work planning (Work planning tab).\n• Alerts and subscriptions (Alerts tab).\n• IBO Player setup on Roku, Android TV and STBs (IBO Player tab).\n• Actions below: create a Resend API, update a sports promo, change a customer program, notify agents.', source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ibo', '/intprototv?tab=promos'] };
+      }
+      if (R('GET', '/api/admin/ai/config')) {
+        const ai = s.ai || {};
+        return ok({ on: ai.on !== false, provider: ai.provider || 'openai', baseUrl: ai.baseUrl || 'https://api.openai.com/v1', model: ai.model || 'gpt-4o-mini', apiKey: '', hasKey: !!String(ai.apiKey || '').trim(), instructions: ai.instructions || '', tz: ai.tz || 'Asia/Bangkok' });
+      }
+      if (R('PUT', '/api/admin/ai/config')) {
+        if (!isOwner) return err(403, 'Only the owner configures the AI assistant.');
+        const prev = s.ai || {};
+        const next = { on: body.on === undefined ? prev.on !== false : body.on === true, provider: cleanText(body.provider, 20) || 'openai', baseUrl: cleanText(body.baseUrl, 250) || 'https://api.openai.com/v1', model: cleanText(body.model, 80) || 'gpt-4o-mini', instructions: String(body.instructions || '').slice(0, 1200), tz: cleanText(body.tz, 40) || 'Asia/Bangkok', apiKey: prev.apiKey || '' };
+        if (typeof body.apiKey === 'string' && body.apiKey.trim()) next.apiKey = body.apiKey.trim().slice(0, 200);
+        if (body.clearKey) next.apiKey = '';
+        if (!/^https?:\/\/\S+\.\S+/i.test(next.baseUrl)) return err(400, 'The AI provider URL must start with http:// or https://.');
+        await saveSettings({ ...s, ai: next }); await log('settings', 'AI assistant configured');
+        return ok({ ok: true, hasKey: !!String(next.apiKey || '').trim(), on: next.on, model: next.model });
+      }
+      if (R('POST', '/api/admin/ai/ask')) {
+        const q = cleanText(body.question, 1500); if (!q) return err(400, 'Write your question first.');
+        try { return ok(await aiAsk(s, member, q)); } catch (e) { return err(500, e.message || 'The assistant could not answer right now.'); }
+      }
+      if (R('POST', '/api/admin/ai/action')) {
+        if (!isOwner) return err(403, 'Only the owner runs assistant actions.');
+        const a = String(body.action || '');
+        try {
+          if (a === 'resend-create') { // a fresh Resend API key via the owner's existing key
+            const key = String(s.email.resendKey || '').trim(); if (!key) return err(400, 'Add a Resend key in Email sending (System → Email sending) first.');
+            const r = await fetchFn('https://api.resend.com/api_keys', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ name: 'AI assistant — ' + new Date().toLocaleDateString('en-GB') }) });
+            const j = await r.json().catch(() => ({}));
+            const token = j.data && j.data.token;
+            if (!r.ok || !token) return err(502, 'Resend could not create the key: ' + ((j.error && (j.error.message || j.error.name)) || r.status || 'unknown'));
+            await log('settings', `AI assistant: created Resend API "${j.data.name || ''}"`);
+            return ok({ ok: true, key: token, name: j.data.name || 'AI assistant key', dashboard: '/intprototv?tab=accounts', hint: 'Add the new key to the rotating 10 keys on Email marketing — it is masked there.' });
+          }
+          if (a === 'update-ad') { // add or edit a sports promo on the Promotions tab
+            const type = ['champions-league', 'nfl', 'other'].includes(String(body.type || '')) ? String(body.type) : 'other';
+            const name = cleanText(body.name, 100) || (type === 'champions-league' ? 'Champions League final' : type === 'nfl' ? 'NFL match' : 'Sports promo');
+            const date = String(body.date || '').trim(); if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return err(400, 'Give the date as YYYY-MM-DD.');
+            const ev = [...((s.sports && Array.isArray(s.sports.events)) ? s.sports.events : [])];
+            const id = String(body.id || '').trim() || 's' + uid(5);
+            const nx = { id, name, type, date, tip: cleanText(body.tip, 400), url: String(body.url || '').trim().slice(0, 300), on: true };
+            const i = ev.findIndex((x) => x.id === id);
+            if (i >= 0) ev[i] = nx; else ev.push(nx);
+            await saveSettings({ ...s, sports: { on: true, events: ev.filter((e) => e.name).slice(0, 40) } });
+            await log('marketing', `AI: sports promo "${name}" saved`);
+            return ok({ ok: true, event: nx, link: '/intprototv?tab=promos' });
+          }
+          if (a === 'change-program') { // save a customer's line: username, password, DNS, M3U
+            const id = String(body.customerId || '').trim(); if (!id) return err(400, 'Pick the customer.');
+            const list = await getCustomers(); const c = list.find((x) => x.id === id); if (!c) return err(404, 'Customer not found.');
+            const user = String(body.username || '').trim(), pass = String(body.password || '').trim(), dns = String(body.dns || '').trim(), m3u = String(body.m3u || '').trim();
+            if (!user || !pass) return err(400, 'I need the new line username and password.');
+            c.lineUsername = user; c.linePassword = pass; c.dns = dns; if (m3u) c.m3u = m3u; c.renewPending = 0; c.lineBad = ''; c.pendingLine = 0;
+            await saveCustomers(list);
+            await log('customer', `AI: changed the program of ${c.name} (${user})`);
+            return ok({ ok: true, customer: c.name, username: user, m3u: c.m3u || '' });
+          }
+          if (a === 'ibo-setup') return ok({ ok: true, answer: iboSetupGuide(), related: ['/intprototv?tab=ibo'] });
+          if (a === 'ask-alerts') { const summary = await aiAlertSummary(); return ok({ ok: true, answer: summary, related: ['/intprototv?tab=alerts'] }); }
+          if (a === 'notify-agents') { const r2 = await notifyOwnerPlanSync(s, true); return ok({ ok: true, sent: r2.sent }); }
+          return err(400, 'Unknown action.');
+        } catch (e) { return err(500, e.message || 'The action could not be completed.'); }
       }
 
       // ---------- Email marketing dashboard (spec §8.1) ----------
@@ -3890,15 +4496,92 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body.note !== undefined) e.note = cleanText(body.note, 300);
         e.edited = actorName; l.sort((a, b) => a.at - b.at); await store.put('attendance', l); await log('team', `Attendance: ${e.name} ${e.action} edited`); return ok({ ok: true });
       }
+      if (path.startsWith('/api/admin/referral')) { // owner / plans permission — promotion settings and manual rewards
+        const cfg = s.referral || {};
+        const rewards = { ...REFERRAL_REWARD_TABLE, ...(cfg.rewards || {}) };
+        const table = REFERRAL_REWARD_ROWS.map((r) => ({ ...r, days: Math.min(365, Math.max(0, Number(rewards[r.id]) || 0)) }));
+        if (R('GET', '/api/admin/referral')) {
+          const list = await getCustomers(); await ensureRefCodes(list);
+          const rows = list.map((c) => { const info = referralInfo(c, list, s); return { id: c.id, name: c.name || c.username || '', username: c.username || '', code: info.code, link: info.link, referred: info.referred, earned: info.earned, remainingDays: info.remainingDays }; });
+          const leaders = rows.filter((r) => r.referred > 0).sort((a, b) => b.referred - a.referred || b.earned - a.earned).slice(0, 20);
+          return ok({ ok: true, config: { on: cfg.on !== false, rewards, rewardTable: table, maxFreeDays: Math.max(0, Number(cfg.maxFreeDays) || 0) }, rewardTable: table, rewards,
+            stats: { customers: list.length, withCode: rows.filter((r) => !!r.code).length, referred: rows.reduce((a, r) => a + r.referred, 0), awardedDays: rows.reduce((a, r) => a + r.earned, 0), leaders: leaders.length },
+            customers: rows, leaders });
+        }
+        if (R('PUT', '/api/admin/referral')) {
+          const next = { ...cfg, rewards: { ...rewards } };
+          if (body.on !== undefined) next.on = !!body.on;
+          if (body.maxFreeDays !== undefined) { const n = Number(body.maxFreeDays); if (!Number.isInteger(n) || n < 0 || n > 365) return err(400, 'maxFreeDays must be a whole number from 0 to 365.'); next.maxFreeDays = n; }
+          if (body.rewards && typeof body.rewards === 'object') {
+            for (const key of Object.keys(REFERRAL_REWARD_TABLE)) if (body.rewards[key] !== undefined) {
+              const n = Number(body.rewards[key]); if (!Number.isInteger(n) || n < 0 || n > 365) return err(400, `Reward ${key} must be a whole number from 0 to 365.`); next.rewards[key] = n;
+            }
+          }
+          await saveSettings({ ...s, referral: next });
+          await log('settings', `Referral promotion updated by ${actorName}`);
+          return ok({ ok: true, config: next, rewardTable: REFERRAL_REWARD_ROWS.map((r) => ({ ...r, days: Number(next.rewards[r.id]) || 0 })) });
+        }
+        if (R('POST', '/api/admin/referral/award')) {
+          const list = await getCustomers(); await ensureRefCodes(list);
+          const referred = list.find((x) => x.id === String(body.referredId || body.customerId || body.id || ''));
+          if (!referred) return err(404, 'Referred customer not found.');
+          const referrerId = String(body.referrerId || body.referrer || referred.referredBy || '');
+          const referrer = list.find((x) => x.id === referrerId) || await findByRefCode(list, normRefCode(referrerId));
+          if (!referrer || referrer.id === referred.id) return err(400, 'This customer has no valid referring customer.');
+          if (referred.referredBy !== referrer.id && normRefCode(referred.referredBy) !== publicRefCode(referrer)) return err(400, 'This customer was not referred by that code.');
+          const pkgId = String(body.pkgId || body.pkg || referred.planId || '');
+          const pkg = s.plans.find((p) => p.id === pkgId) || s.orderPackages.find((p) => p.id === pkgId) || { id: pkgId };
+          const days = referralRewardDays(pkg, rewards);
+          if (!days) return err(400, 'This subscription does not earn a referral reward.');
+          const marker = 'refaward:' + referred.id + ':' + pkgId;
+          const alreadyAwarded = (Array.isArray(referrer.referralAwards) ? referrer.referralAwards : Array.isArray(referrer.refAwards) ? referrer.refAwards : [])
+            .some((a) => String(a?.referredId || '') === referred.id && String(a?.pkgId || '') === pkgId);
+          if (await store.get(marker) || alreadyAwarded) return err(409, 'This referral reward was already granted.');
+          const r = await grantReferralDays(s, list, referrer, days, { by: actorName, referredId: referred.id, pkgId, note: 'Referral · ' + pkgId });
+          if (!r.ok) return err(400, r.reason === 'limit' ? 'This customer has reached the free-day limit.' : 'Reward could not be granted.');
+          await store.put(marker, Date.now(), 500 * 86400);
+          await log('referral', `${actorName} granted ${r.days} referral days to ${referrer.username || referrer.id} for ${referred.username || referred.id}`);
+          return ok({ ok: true, days: r.days, expiresAt: r.expiresAt, code: publicRefCode(referrer) });
+        }
+        return err(404, 'Not found');
+      }
+      if (R('GET', '/api/admin/ownerplan/sync')) { // read-only for any signed-in admin; no keys, checkoffs or private notes
+        const raw = (await store.get('ownerplan')) || {}; const P = ownerPlanOf(raw); const tz = P.tz || 'Asia/Bangkok';
+        const today = opLocal(tz, Date.now()).date; const range = ownerPlanMonths(today);
+        const scrub = (x) => String(x || '').replace(/re_[A-Za-z0-9_-]{6,}/gi, '').slice(0, 200);
+        const plan = (P.blocks || []).map((b) => {
+          const v = opVer(b, range.last) || (b.v || [])[b.v.length - 1] || {};
+          return { id: b.id, start: v.from || range.first, end: range.last,
+            title: scrub(v.title), icon: scrub(v.icon).slice(0, 4) || '•', rule: v.rule || 'weekly',
+            days: Array.isArray(v.days) ? v.days.map(Number).filter((d) => d >= 0 && d <= 6) : [],
+            dom: Math.min(31, Math.max(1, Number(v.dom) || 1)), note: '' };
+        });
+        const team = await getTeam();
+        const agents = [{ id: 'owner', name: 'Owner', username: '', role: 'owner' }, ...team.filter((m) => m.status !== 'disabled').map((m) => ({ id: m.id, name: m.name || m.username, username: m.username || '', role: m.role || '' }))];
+        return ok({ ok: true, result: { tz, today, months: range.months, first: range.first, last: range.last,
+          from: range.first, to: range.last, rangeCapDays: 42, plan, updatedAt: Number(raw.updatedAt) || Date.now(), agents } });
+      }
       if (path.startsWith('/api/admin/ownerplan')) { // owner only (permFor) — personal & business planning, 10 Resend keys a day
         if (!isOwner) return err(403, 'Only the owner can open this planning.');
         const P = ownerPlanOf(await store.get('ownerplan')); const tz = P.tz || 'Asia/Bangkok';
         const L = opLocal(tz, Date.now()); const today = L.date; const ISO = /^\d{4}-\d{2}-\d{2}$/;
         const addD = (d, n) => new Date(new Date(d + 'T12:00:00Z').getTime() + n * DAYMS).toISOString().slice(0, 10);
-        const months = [0, 1, 2, 3].map((k) => { const d = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + k, 1)); return d.toISOString().slice(0, 7); });
-        const first = months[0] + '-01'; const lastDay = (m) => m + '-' + String(opDim(m + '-01')).padStart(2, '0'); const last = lastDay(months[3]);
+        const range = ownerPlanMonths(today);
+        const months = range.months;
+        const first = range.first; const lastDay = (m) => m + '-' + String(opDim(m + '-01')).padStart(2, '0'); const last = range.last;
         const ovAll = (await store.get('ownerov')) || {}; const chkM = {}; const getChk = async (m) => (chkM[m] ??= (await store.get('ownerchk:' + m)) || {}); const apiM = {}; const getApi = async (m) => (apiM[m] ??= (await store.get('ownerapi:' + m)) || {});
-        const savePlan = async () => { await store.put('ownerplan', { blocks: P.blocks, notify: P.notify, tz: P.tz, apiDaily: P.apiDaily, since: P.since }); };
+        const savePlan = async () => { await store.put('ownerplan', { blocks: P.blocks, notify: P.notify, tz: P.tz, apiDaily: P.apiDaily, since: P.since });
+          // Agents get a push about today's plan (once per day; the owner can re-notify with the 📣 button on My planning).
+          try {
+            const L = localNow(P.tz); const k = 'ownerplann:' + L.date;
+            if (!(await store.get(k))) {
+              await store.put(k, 1, 7 * 86400);
+              const due = opDay(P, L.date, {}).filter((b) => !b.done);
+              const note = { title: `📌 Today's plan · ${L.date}`, body: due.length ? due.slice(0, 3).map((b) => b.title).join(' · ') : 'Nothing is scheduled for today.', url: '/intprototv?tab=ownerplan', tag: 'opagent-' + L.date, kind: 'plan' };
+              await pushAgents(s, 'plan', note);
+            }
+          } catch {}
+        };
         if (!P.since) { P.since = today; await savePlan(); } // compliance counts from the day the planning started
         const cleanBlock = (b, base = {}) => { const hm = (x) => (/^\d{2}:\d{2}$/.test(String(x || '')) ? x : null); const rule = b.rule === 'monthly' ? 'monthly' : b.rule === 'weekly' ? 'weekly' : base.rule || 'weekly';
           const days = Array.isArray(b.days) ? [...new Set(b.days.map(Number).filter((d) => d >= 0 && d <= 6))] : base.days || [];
@@ -3973,6 +4656,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (R('POST', '/api/admin/ownerplan/holiday')) { const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }; hr.custom = [...(hr.custom || [])];
           if (body.remove) hr.custom = hr.custom.filter((c) => c.id !== String(body.remove)); else { const date = String(body.date || ''); const name = cleanText(body.name, 80); if (!ISO.test(date) || !name) return err(400, 'Give the date and the name of the holiday.'); hr.custom.push({ id: uid(5), name, date, kind: 'evergreen', region: 'Own', tip: cleanText(body.tip, 200) }); }
           await saveSettings({ ...s, holidayRemind: hr }); return ok(hr.custom); }
+        if (R('POST', '/api/admin/ownerplan/notify-agents')) { const r = await notifyOwnerPlanSync(s, true); await log('owner', `Owner planning: ${actorName} re-sent the December 2027 sync notice to agents`); return ok({ ok: true, sent: r.sent }); }
         return err(404, 'Not found');
       }
       if (path.startsWith('/api/admin/workplan')) {
@@ -4625,11 +5309,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('GET', '/api/admin/customers')) {
         const bad = await getBad(); const sales = await getSales(); const paid = {};
         for (const sa of sales) if (Number(sa.amount) > 0) paid[sa.customerId] = (paid[sa.customerId] || 0) + (Number(sa.amountUsd) || 0);
-        return ok((await getCustomers()).filter((c) => !c.rsOrder || query.rs).map((c) => { const v = viewP(c, s); v.totalPaidUsd = Math.round((paid[c.id] || 0) * 100) / 100; const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; }));
+        const list = await getCustomers(); await ensureRefCodes(list);
+        return ok(list.filter((c) => !c.rsOrder || query.rs).map((c) => { const v = viewP(c, s); v.totalPaidUsd = Math.round((paid[c.id] || 0) * 100) / 100; v.refCode = publicRefCode(c); v.referredBy = c.referredBy || ''; v.referrals = (c.referrals || []).length; const b = bad[cleanEmail(c.email)]; return b ? { ...v, emailBad: b.why } : v; }));
       }
 
       if (R('POST', '/api/admin/customers')) {
-        const list = await getCustomers();
+        const list = await getCustomers(); await ensureRefCodes(list);
+        const refBy = await findByRefCode(list, normRefCode(body.ref || body.refCode || query.ref));
         const ln0 = body.m3u ? parseLineLink(body.m3u) : null;
         if (body.m3u && !ln0) return err(400, 'This does not look like a line link from the panel. Paste the full M3U link (it contains username= and password=).');
         if (ln0) { if (!String(body.username || '').trim()) body.username = ln0.u; if (!body.password) body.password = ln0.p; }
@@ -4659,6 +5345,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           lineId: String(body.lineId || ''), planId: plan ? plan.id : 'custom',
           connections: Number(body.connections) || (plan ? plan.connections : 1),
           startAt, expiresAt, status: 'active', createdAt: Date.now(), lastLogin: null,
+          refCode: newRefCode(list), referredBy: refBy ? refBy.id : '', referrals: [], referralAwards: [],
           renewals: [{ at: Date.now(), type: 'new', planId: plan ? plan.id : 'custom', days: Math.round((expiresAt - startAt) / DAY), price: Number(body.price) || 0, credits: plan ? planCredits(plan) : Number(body.credits) || 0 }],
         };
         if (ln0) { c.lineUsername = ln0.u; c.linePassword = ln0.p; c.dns = ln0.dns; }
@@ -4681,6 +5368,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (dup.length) await logAttempt({ kind: 'new customer', name: c.name, email: c.email, phone: c.phone, whatsapp: c.whatsapp, by: actorName, newUsername: c.username, matches: dup.slice(0, 5).map((m) => ({ id: m.c.id, username: m.c.username, name: m.c.name, why: m.why })) });
         list.push(c);
         await saveCustomers(list);
+        if (!trialNew && plan && Number(body.price) > 0 && Math.round((expiresAt - startAt) / DAY) === Number(plan.days))
+          await autoAwardReferral(s, c, plan, { by: actorName, source: 'admin-new', orderId: c.orderNo || '', pkgId: plan.id });
         await recordSale(s, c, { type: 'new', plan, days: c.renewals[0].days, credits: c.renewals[0].credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
         let mail = null;
         if (body.sendEmail && c.email) { const m = accessEmail(s, c, String(body.password), 'sub', body.appUrl); mail = await sendEmail(s, c.email, m.subject, m.html); if (mail.ok) { c.loginMailAt = Date.now(); markSent(c, 'email'); await saveCustomers(list); } }
@@ -4707,7 +5396,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!ln && !iboMac && !iboKey) return err(400, 'Paste the full M3U link (or fill Username, Password and DNS), or add the IBO Player device fields.');
           if (!ln && (paste || String(body.username || '').trim() || String(body.password || '') || String(body.dns || '').trim())) return err(400, 'Paste the full M3U link (or fill Username, Password and DNS).');
           if (!ln) {
-            if (iboMac || iboKey) c.ibo = { mac: iboMac, key: iboKey, at: Date.now(), by: actorName || 'team' };
+            if (iboMac || iboKey) c.ibo = { mac: iboMacNorm(iboMac), key: iboKey, macs: [...new Set([iboMacNorm(iboMac)].filter(Boolean))], at: Date.now(), by: actorName || 'team' };
             else if (body.clearIbo) delete c.ibo;
             await saveCustomers(list);
             await log('customer', `IBO Player details ${iboMac || iboKey ? 'saved' : 'cleared'} for paid customer ${c.username} (${c.name})${iboMac ? ' · ' + iboMac : ''}`);
@@ -4836,6 +5525,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           c.renewals = c.renewals || [];
           c.renewals.push({ at: Date.now(), type: wasTrial ? 'new' : 'renew', planId: plan ? plan.id : 'custom', days, price: Number(body.price) || 0, credits });
           await saveCustomers(list);
+          if (Number(body.price) > 0) {
+            const renewDevices = Number(body.devices) || (plan ? Number(plan.connections) || 1 : 1);
+            const renewPkg = plan ? { ...plan, days, devices: renewDevices } : { id: 'custom-' + days + 'd', days, devices: renewDevices, title: String(body.planTitle || '') };
+            await autoAwardReferral(s, c, renewPkg, { by: actorName, source: 'admin-renew', receiptId: String(body.receiptId || ''), paymentId: String(body.paymentId || ''), pkgId: renewPkg.id });
+          }
           await recordSale(s, c, { type: wasTrial ? 'new' : 'renew', plan, days, credits, amount: Number(body.price) || 0, accountId: body.accountId, sa: String(body.stripeAccountId || ''), by: actorName });
           await log('renewal', `Renewed ${c.username} +${days} days (${Number(body.price) || 0} ${(s.finance.accounts.find((a) => a.id === body.accountId) || {}).currency || (s.currencyRule?.on !== false ? custCurrency(s, c) : s.currency)})`);
           const iboOffer = iboCfg(s).on && iboCfg(s).whatsapp && !hasIbo(c) && !!(c.whatsapp || c.phone);
@@ -5090,14 +5784,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       }
       if (R('GET', '/api/admin/tx')) {
         const tx = await getTx();
-        return ok(tx.filter((t) => !query.account || t.accountId === query.account || t.toAccountId === query.account).sort((a, b) => b.at - a.at).slice(0, Number(query.limit) || 300));
+        return ok(sortTxNewest(tx.filter((t) => !query.account || t.accountId === query.account || t.toAccountId === query.account)).slice(0, Number(query.limit) || 300));
       }
       if (R('POST', '/api/admin/tx')) {
         const type = ['income', 'expense', 'transfer'].includes(body.type) ? body.type : null;
         const acc = s.finance.accounts.find((a) => a.id === body.accountId);
         const amount = Math.abs(Number(body.amount) || 0);
         if (!type || !acc || !amount) return err(400, 'Choose a type, an account and an amount.');
-        const t = { id: uid(6), by: actorName, at: body.date ? new Date(body.date).getTime() + 12 * 3600000 : Date.now(), type, accountId: acc.id, amount, category: String(body.category || (type === 'transfer' ? 'Transfer' : 'Other')), note: String(body.note || '').slice(0, 200) };
+        const t = applyTransactionInput({ at: body.at, by: actorName, date: body.date, time: body.time, type, accountId: acc.id, amount, category: String(body.category || (type === 'transfer' ? 'Transfer' : 'Other')), note: String(body.note || '').slice(0, 200) });
+        t.id = uid(6);
         if (type === 'transfer') {
           const to = s.finance.accounts.find((a) => a.id === body.toAccountId);
           if (!to || to.id === acc.id) return err(400, 'Choose a different destination account.');

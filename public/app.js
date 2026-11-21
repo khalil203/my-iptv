@@ -1,12 +1,14 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks } from './core.js?v=120';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=123';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml } from './site.js?v=122';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=122';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=124';
 import { openLangSheet, paintLangPill, langChip } from './lang.js?v=122';
 import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=122';
-import { createTranslator } from './translator.js?v=122';
+import { createTranslator } from './translator.js?v=123';
+import { esc as escHtml, categoryClass, refreshControlHtml, refreshMetaHtml, importantNoticeHtml, noticeEditorHtml, markRefreshBusy } from './ui-controls.js?v=123';
+import { PROMOS, REFERRAL_TIERS, LIFETIME_PLANS, promoEligibility, applyPromoToReseller, adsTemplates, adsPanelHtml, resellerSampleHtml, domainAccountHtml, agentPermissionPreset } from './growth.js?v=123';
 
 // Client diagnostics (spec: fix fast): if the app cannot start or throws anywhere, tell the server once.
 const __diagSend = (o) => { try { navigator.sendBeacon('/api/diag', JSON.stringify({ at: Date.now(), origin: location.origin, ua: String(navigator.userAgent || '').slice(0, 200), ...o })); } catch {} };
@@ -15,7 +17,7 @@ window.addEventListener('unhandledrejection', (e) => __diagSend({ kind: 'js-reje
 
 // ---------------- helpers ----------------
 const $ = (s, r = document) => r.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = escHtml;
 const fmtDate = (x) => (x ? new Date(x).toLocaleDateString(isAdminUI() ? undefined : locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtDT = (x) => (x ? new Date(x).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -96,9 +98,12 @@ const can = (p) => { const me = state.admin.me; if (!p) return true; if (!me) re
 const state = {
   mode: 'server', config: null, local: null,
   token: localStorage.getItem('tvp_token'), role: localStorage.getItem('tvp_role'),
-  admin: { tab: 'overview', customers: [], settings: null, filter: 'all', q: '', subDays: '30' },
+  admin: { tab: 'overview', customers: [], settings: null, filter: 'all', q: '', subDays: '30', refreshedAt: 0, domainDraft: {} },
   user: { tab: 'home', me: null, cache: {}, cat: {}, q: '', limit: 120 },
 };
+const txTimeLabel = (x) => formatExactTime(txTime(x));
+const customerImportantNotice = () => state.user.me?.importantNotice ? importantNoticeHtml(state.user.me.importantNotice) : '';
+const updateRefreshMeta = () => { const el = $('[data-refresh-meta]'); if (el) el.outerHTML = refreshMetaHtml(state.admin.refreshedAt || Date.now()); };
 
 function localStore() {
   const P = 'tvp_db_';
@@ -532,8 +537,10 @@ function renderSetup() {
 // Admin menu: [id, icon, name, permission, group, search words]
 const ADMIN_TABS = [
   ['overview', '📊', 'Overview', null, 'Home', 'dashboard home stats revenue'],
-  ['guide', '🎓', 'Agent guide', null, 'Home', 'help how instructions video tutorial training'],
+   ['guide', '🎓', 'Agent guide', null, 'Home', 'help how instructions video tutorial training'],
+   ['aiassist', '🤖', 'AI Assistant', null, 'Home', 'ai assistant chat ask planning alerts sports promos programs actions'],
   ['ownerplan', '🗓️', 'My planning', 'owner', 'Home', 'owner personal business planning calendar month week day schedule muay thai gym bank resend api keys domains meet party holidays reminders'],
+  ['planview', '🗓️', 'Planning overview', null, 'Home', 'owner planning synced read only schedule months december 2027 agent team'],
   ['workplan', '📌', 'Work planning', null, 'Home', 'schedule planning planner tasks check off rules daily weekly agent work google sheets meeting'],
   ['customers', '👥', 'Customers', 'customers_view', 'Customers', 'clients users add renew whatsapp'],
   ['resellers', '🤝', 'Resellers', 'resellers', 'Customers', 'reseller rsl credits packages rank purchases orders email'],
@@ -578,7 +585,7 @@ const ADMIN_TABS = [
   ['security', '🔐', 'My account', null, 'System', 'password two-step 2fa sessions login'],
   ['activity', '📜', 'Activity', 'activity', 'System', 'log audit history'],
 ];
-const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
+const navHtml = (tabs, t) => { let g = ''; return tabs.map(([k, icn, n, , grp, words]) => `${grp !== g ? ((g = grp), `<div class="nav-g ${categoryClass((tabs.find((z) => z[4] === grp) || [])[0])}">${grp}</div>`) : ''}<a class="${k === t ? 'on' : ''} ${categoryClass(k)}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}" data-k="${esc((n + ' ' + grp + ' ' + words).toLowerCase())}"><span class="ic">${icn}</span>${n}${k === 'chat' ? '<b class="nav-badge" id="chat-badge" hidden></b>' : ''}</a>`).join(''); };
 
 
 // Agents: check in before the panel opens (tracks working hours)
@@ -660,8 +667,8 @@ async function renderAdmin() {
       <a class="btn sm ghost" href="download.html" style="margin:6px 8px">📲 Get the apps</a>
       <div class="side-user"><div class="avatar">${esc(initials(me.name))}</div><div style="min-width:0"><b>${esc(me.name)}</b><div class="small muted">${me.role === 'owner' ? 'Owner · full access' : 'Team · ' + me.perms.length + ' permissions'}</div></div></div></aside>
     <main class="main" id="main">
-      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}<button class="btn sm" data-act="tr-open" title="Translator — panel, text, chat, web" translate="no">🌐 ${esc(TR.trCur().toUpperCase().slice(0, 2))}</button><button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
-      <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
+      <div class="topbar"><button class="btn sm menu-btn" data-act="menu-open" aria-label="Menu">☰ Menu</button><h2>${title}</h2><span class="spacer"></span>${state.mode === 'demo' ? '<span class="badge-demo">Demo</span>' : ''}<span class="tz-clock small muted" title="Europe · US Eastern · local" style="align-self:center"><span data-tz="e">--:--</span> 🇪🇺 · <span data-tz="u">--:--</span> 🇺🇸</span>${me.role !== 'owner' && me.sessionExp ? `<span class="chip-user small" title="You are signed out automatically after ${me.staffHours || 6} hours">⏱ ${Math.max(0, Math.floor((me.sessionExp - Date.now()) / 3600000))}h ${Math.max(0, Math.floor(((me.sessionExp - Date.now()) % 3600000) / 60000))}m</span>` : ''}${refreshControlHtml()}${refreshMetaHtml(state.admin.refreshedAt || Date.now())}<button class="btn sm" data-act="tr-open" title="Translator — panel, text, chat, web" translate="no">🌐 ${esc(TR.trCur().toUpperCase().slice(0, 2))}</button><button class="btn sm" data-act="snd-open" title="Alert sounds">${sndCfg().on ? '🔊' : '🔇'}</button><button class="btn sm" data-act="atab" data-tab="guide" title="How the panel works">🎓 Guide</button><button class="btn sm danger" data-act="report-problem" title="Report a problem (bug, payment, service)">🐞 Report</button><span class="chip-user small">${esc(me.name)}</span><button class="btn sm" data-act="theme" title="Theme">🌗</button><button class="btn sm" data-act="logout">Log out</button></div>
+      <div class="mobile-nav">${tabs.filter((x) => x[4] === (ADMIN_TABS.find((y) => y[0] === t) || [])[4]).map(([k, ic, n]) => `<a class="${k === t ? 'on' : ''} ${categoryClass(k)}" ${k === t ? 'aria-current="page"' : ''} data-act="atab" data-tab="${k}">${ic} ${n}</a>`).join('')}</div>
       <div class="content" id="admin-body"><div class="skeleton"></div><div class="skeleton short"></div></div>
     </main></div>`;
   try {
@@ -678,8 +685,10 @@ async function renderAdmin() {
     }
     const body = $('#admin-body');
     if (t === 'guide') body.innerHTML = agentGuide();
+    else if (t === 'aiassist') body.innerHTML = await adminAiAssist();
     else if (t === 'workplan') body.innerHTML = await adminWorkPlan();
     else if (t === 'ownerplan') body.innerHTML = await adminOwnerPlan();
+    else if (t === 'planview') body.innerHTML = await adminPlanSync();
     else if (t === 'overview') body.innerHTML = await adminOverview();
     else if (t === 'customers') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = state.admin.profileId ? (adminCustomerProfile(state.admin.customers.find((x) => x.id === state.admin.profileId)) || adminCustomers()) : adminCustomers(); }
     else if (t === 'subs') { state.admin.customers = await api('GET', '/api/admin/customers'); body.innerHTML = await adminSubs(); }
@@ -888,6 +897,7 @@ async function adminNotify(s) {
       <p class="small muted" style="margin-top:0">Only you (the owner) can change this.</p>
       <h4 style="margin:6px 0">To the agents (owner + everyone who can see customers)</h4>
       ${tg('tickets', '🛟 New support requests and chat messages', 'From intproto-tv.store/support, the in-app support and the live chat — sent at once to every agent device.')}
+      ${tg('plan', '📌 Daily work planning to the agents', 'When the owner saves a change to My planning, every agent gets a push with today’s plan. Agents see it in the Work planning tab and in their Notifications.')}
       ${tg('trials', '🎁 Free trial requests', 'Every new free trial, and every request waiting in the trial queue.')}
       ${tg('receipts', '🧾 Payment receipts to check')}
       <h4 style="margin:12px 0 6px">Team & shifts</h4>
@@ -960,6 +970,7 @@ async function adminMail() {
 const PROMO = { lang: 'en', data: null };
 async function adminPromos() {
   try { PROMO.data = await api('GET', '/api/admin/promo/library'); } catch (e) { return `<div class="notice danger">${esc(e.message)}</div>`; }
+  let sp = { events: [] }; try { sp = await api('GET', '/api/admin/sports'); state.admin.sports = sp; } catch {}
   const L = PROMO.lang; const by = Object.fromEntries(PROMO.data.kinds.map((k) => [k.id, k]));
   const card = ([k, name]) => { const x = by[k]; if (!x) return ''; const wa = x.wa[L] || x.wa.en; const desc = { holidays: 'Holiday & New Year offers on 1-Year, Multi-Device and Reseller plans.', blackfriday: 'Limited-time deal on packages and reseller credit bundles.', cybermonday: 'The online follow-up to Black Friday, packages and credits.', events: 'Live sports seasons, cinema releases and streaming line-ups: Champions League, UFC, Formula 1…', evergreen: 'An offer you can send any day of the year.', devices: 'Works on Samsung, iPhone, iPad, Android, Smart TV, Fire TV: perfect for multi-device plans.', christmas: 'Christmas only.', newyear: 'New Year only.' }[k];
     return `<div class="card promo-card" data-go="${esc(k)}" style="margin:0"><div class="row" style="align-items:flex-start;gap:8px"><h3 style="margin:0;flex:1">${esc(name)}</h3><span class="pill">${k === 'evergreen' || k === 'events' || k === 'devices' ? 'All year' : 'Seasonal'}</span></div>
@@ -987,11 +998,123 @@ async function adminPromos() {
       <div class="row"><span class="spacer"></span><button class="btn primary" data-act="rm-save">💾 Save</button></div></form>
       <div class="grid2" style="gap:10px;margin-top:12px">${rm.models.map((m) => `<div class="card" style="margin:0;padding:14px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:24px">${m.icon}</span><b style="flex:1">${esc(m.name)}</b></div><p class="small muted" style="margin:6px 0 10px">${esc(m.subject)}</p>
         <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="rm-preview" data-m="${m.id}">👁 Preview</button><button class="btn sm primary" data-act="rm-send" data-m="${m.id}">📤 Send now</button><button class="btn sm ghost" data-act="rm-test" data-m="${m.id}">🧪 Test to me</button></div></div>`).join('')}</div></div>`; } catch {}
-  return iboCard + rmCard + `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
+  const promoCards = `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">Reseller &amp; manager offers</h3><p class="small muted" style="margin:4px 0 0">Proposed defaults. Preview only — nothing is written to the server until you confirm the rules.</p></div><span class="pill st-expiring">Proposed defaults</span></div>
+    <div class="grid2" style="gap:12px;margin-top:12px">${Object.values(PROMOS).map((p) => {
+      const ex = promoEligibility({ role: p.id === 'fourForFive' ? 'reseller' : 'owner', credits: 1, purchaseCount: 4, promoId: p.id });
+      return `<article class="promo-card" data-id="${esc(p.id)}"><h4>${esc(p.title)}</h4><p>${esc(p.terms)}</p><p class="small muted">${esc(p.start)} → ${esc(p.end)} · ${ex.ok ? 'Sample eligible now' : esc(ex.reason)}</p><button class="btn sm" data-act="promo-preview" data-id="${esc(p.id)}">Preview rules</button></article>`;
+    }).join('')}</div></div>`;
+  return iboCard + rmCard + sportsCard(sp) + promoCards + `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div style="flex:1;min-width:240px"><h3 style="margin:0">🎉 Ready promotions</h3><p class="small muted" style="margin:4px 0 0">Every promotion is ready in English, French, German, Spanish and Italian, with the free trial (${esc(location.origin)}/freetrial) and support (${esc(location.origin)}/support) links. Each customer gets their own language and currency.</p></div>
     <label class="small" style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">Preview in <select data-input="promo-lang" style="width:auto">${LANG5.map(([c, n]) => `<option value="${c}" ${c === L ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div></div>
     <h4 style="margin:14px 0 8px">All year</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => ['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
     <h4 style="margin:18px 0 8px">Seasonal</h4><div class="grid2" style="gap:12px">${PROMO_KINDS.filter(([k]) => !['events', 'evergreen', 'devices'].includes(k)).map(card).join('')}</div>
     <p class="small muted" style="margin-top:14px">📧 opens the template in Email marketing (add a discount, code or end date, preview, then send). 💬 gives the WhatsApp text to copy for a broadcast list or your status, or use it per customer in their WhatsApp window (“📣” messages). 🔔 sends it inside the customers' app and to their phones.</p>`;
+}
+
+// ---------------- Sports & events (Promotions tab; the Owner can manage them) ----------------
+const sportsCard = (sp) => {
+  const owner = state.admin.me && state.admin.me.role === 'owner';
+  const evs = (sp.events || []).filter((e) => e.on !== false && sp.on !== false).slice(0, 12);
+  const icon = (t) => (t === 'nfl' ? '🏈' : t === 'champions-league' ? '⚽' : '🏆');
+  return `<div class="card sport-cards" style="display:grid;gap:10px"><h3 style="margin:0">🏆 Sports &amp; events — ${evs.length} promotion${evs.length === 1 ? '' : 's'}</h3>
+    ${evs.length ? evs.map((e) => `<article class="sport-card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:24px;flex:0 0 auto">${esc(icon(e.type))}</span><div style="flex:1;min-width:200px"><b>${esc(e.name)}</b>${e.date ? `<div class="small muted">${esc(e.date)}</div>` : ''}${e.type && !['champions-league', 'nfl'].includes(e.type) ? `<div class="small muted">${esc(String(e.type).replace(/-/g, ' '))}</div>` : ''}</div>
+      ${e.tip ? `<p class="sport-tip">${esc(e.tip)}</p>` : ''}
+      ${e.url ? `<a class="btn sm" target="_blank" rel="noopener" href="${esc(e.url)}">🔗 Link</a>` : ''}
+      ${owner ? `<button class="btn sm" data-act="sport-edit" data-id="${esc(e.id)}">✏️</button><button class="btn sm danger" data-act="sport-del" data-id="${esc(e.id)}">🗑</button>` : ''}
+    </div></article>`).join('') : '<p class="small muted">No sports events yet — the Owner can add Champions League, NFL and other events on Promotions.</p>'}</div>`;
+};
+const sportForm = (e) => `<form data-form="sport-save" data-id="${esc(e.id || '')}"><h4 style="margin-top:0">🏆 ${e.id ? 'Edit' : 'Add'} sports promo</h4>
+  ${field('Event name', 'name', e.name || '', { attrs: 'required autocomplete="off"' })}
+  <div class="grid2">${field('Type', 'type', e.type || 'champions-league', { type: 'select', options: [['champions-league', 'UEFA Champions League (football)'], ['nfl', 'NFL'], ['other', 'Other (cricket, tennis, hockey…)']] })}${field('Date (optional)', 'date', e.date || '', { ph: 'YYYY-MM-DD' })}</div>
+  ${field('Promotion text', 'tip', e.tip || '', { type: 'textarea', rows: 4 })}
+  ${field('Link (optional)', 'url', e.url || '', { ph: 'https://…' })}
+  <div class="row" style="margin-top:10px;gap:6px"><button class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Save promo</button></div></form>`;
+
+// ---------------- IBO Players: downloads & playlists (IBO Player tab) ----------------
+const iboNormMac = (x) => { const s = String(x || '').replace(/[:\s.-]/g, '').toUpperCase(); return s ? (s.match(/.{2}/g) || []).join(':') : ''; };
+const iboAppsForForm = IBO_PLAYERS.map((p) => [p.name, p.name]);
+const iboPlayersCard = () => `<div class="card"><h3 style="margin-top:0">📺 IBO Players — download links, codes &amp; playlists</h3>
+  <p class="small muted">Apps for TVs, STBs and Android devices. On the player: Settings (⚙️) → Playlist/Xtream Codes → enter the Downloader code, paste the APK (Android TV via the Downloader app), then log in to the Playlist URL and add the playlist M3U link from your panel.</p>
+  <div class="ibo-players">${IBO_PLAYERS.map((p) => `<article class="ibo-card">
+    ${p.icon ? `<img class="ibo-app-icon ibo-app-big" src="${esc(p.icon)}" alt="">` : ''}
+    <h4>${esc(p.name)}${p.code ? ` <span class="tagp">${esc(p.code)}</span>` : ''}</h4>
+    ${p.apk ? `<div class="ibo-link"><b style="color:var(--primary)">📥</b> <a href="${esc(p.apk)}" target="_blank" rel="noopener">${esc(p.apk)}</a></div>` : ''}
+    ${p.altApk ? `<div class="ibo-link ibo-alt">alt APK: ${esc(p.altApk)}</div>` : ''}
+    ${p.playlist ? `<div class="ibo-link ibo-playlist">📺 Playlist login: <a href="${esc(p.playlist)}" target="_blank" rel="noopener">${esc(p.playlist)}</a></div>` : `<div class="ibo-link ibo-playlist">📺 Playlist login: —</div>`}
+    ${p.note ? `<div class="ibo-link ibo-alt">${esc(p.note)}</div>` : ''}
+  </article>`).join('')}</div>
+  <p class="small muted" style="margin-top:8px">Setup on the TV: open IBO Player → Settings (⚙️) → Playlist/Xtream Codes → add the M3U link (pasted from your panel) plus the username and password.</p></div>`;
+const iboDevRowHtml = (idx, dev) => {
+  const p = IBO_PLAYERS.find((x) => x.name === dev.deviceApp) || IBO_PLAYERS[0];
+  return `<div class="ibo-devrow" data-app="${esc(p.name)}">
+    <img class="ibo-app-icon" src="${esc(p.icon || '')}" alt="" style="flex:0 0 auto">
+    <select name="deviceApp" class="ibo-devsel" title="App / device">${IBO_PLAYERS.map((q) => `<option value="${esc(q.name)}" ${q.name === p.name ? 'selected' : ''}>${esc(q.name)}</option>`).join('')}</select>
+    <input name="mac" type="text" class="ibo-devmac" value="${esc(dev.mac || '')}" placeholder="AA:BB:CC:DD:EE:FF" autocapitalize="characters" spellcheck="false" dir="ltr">
+    <button type="button" class="btn sm ghost ibo-dev-del" title="Remove this device">✕</button>
+  </div>`;
+};
+const iboDevListHtml = (devs) => `<div class="ibo-devlist">${((devs && devs.length) ? devs : [{}]).slice(0, 8).map(iboDevRowHtml).join('')}</div>`;
+// App selected in a device row: attach the player’s downloader code / APK / playlist (used in the setup email) and swap the app icon.
+function iboRowSelect(sel) {
+  const row = sel.closest('.ibo-devrow'); if (!row) return;
+  const p = IBO_PLAYERS.find((x) => x.name === sel.value) || IBO_PLAYERS[0];
+  const icon = row.querySelector('img.ibo-app-icon'); if (icon) icon.src = esc(p.icon || '');
+  row.dataset.app = p.name; row.dataset.code = p.code || ''; row.dataset.apk = p.apk || ''; row.dataset.playlist = p.playlist || '';
+}
+document.addEventListener('change', (e) => { const sel = e.target.closest('select[name="deviceApp"]'); if (sel) iboRowSelect(sel); });
+const iboMacForm = (id) => `<form data-form="ibo-mac" data-id="${esc(id || '')}"><h4 style="margin-top:0">➕ Add a device (MAC) to this client</h4>
+  ${field('MAC address of the new device', 'mac', '', { attrs: 'required autocapitalize="characters" dir="ltr" spellcheck="false"', ph: 'AA:BB:CC:DD:EE:FF' })}
+  <div class="row" style="margin-top:10px;gap:6px"><button class="btn ghost" data-act="close-modal">Cancel</button><button type="submit" class="btn primary">Add device</button></div></form>`;
+
+// ---------------- Shared AI assistant (owner + agents): panel answers and actions ----------------
+function aiaBubble(text, who) { return `<div class="aia-msg ${who === 'me' ? 'aia-me' : 'aia-ai'}">${esc(text)}<span class="aia-meta">${who === 'me' ? 'You' : 'AI'}</span></div>`; }
+function showAia(text) { const box = $('#aia-chat'); if (box) { box.insertAdjacentHTML('beforeend', aiaBubble(text, 'ai')); box.scrollTop = box.scrollHeight; } }
+async function aiaSend(q) {
+  const box = $('#aia-chat'); if (!box) return;
+  const text = q.trim(); if (!text) return;
+  state.admin.aiChat.push({ who: 'me', text });
+  box.insertAdjacentHTML('beforeend', aiaBubble(text, 'me')); box.scrollTop = box.scrollHeight;
+    try { const r = await api('POST', '/api/admin/ai/ask', { question: text }); state.admin.aiChat.push({ who: 'ai', text: r.answer || '…' }); showAia(r.answer || '…'); }
+  catch (e) { toast(e.message, true); }
+}
+async function aiaAction(kind) {
+  if (kind === 'daily') return void (await aiaSend('What is my daily work plan? List today’s tasks from Work planning.'));
+  if (kind === 'tomorrow') return void (await aiaSend('What is tomorrow’s work plan? List tomorrow’s tasks from Work planning.'));
+  if (kind === 'alerts') return void (await aiaSend('What are the current alerts? Give me the list from the Alerts tab.'));
+  const map = { ibo: 'ibo-setup', ad: 'update-ad', resend: 'resend-create', program: 'change-program', notify: 'notify-agents' };
+  const act = map[kind]; if (!act) return;
+  try {
+    const r = await api('POST', '/api/admin/ai/action', { action: act });
+    if (act === 'ibo-setup') showAia(r.answer || '…');
+    else if (act === 'resend') toast('✅ Resend API created — add the key to the rotating 10 keys on Email marketing (System → Email sending).');
+    else if (act === 'update-ad') toast('✅ Sports promo saved — open Promotions to see it.');
+    else if (act === 'change-program') { const cs = await api('GET', '/api/admin/customers'); const c = cs.find((x) => x.lineUsername); if (!c) return toast('No customer with a line found — set one up first.', true); modal('💾 Change the customer program', paidLineForm(c.id)); }
+    else if (act === 'notify-agents') toast(`📣 Agents notified about the plan (${r.sent || 0} device(s)).`);
+  } catch (e) { toast(e.message, true); }
+}
+async function adminAiAssist() {
+  const me = state.admin.me; const owner = me && me.role === 'owner';
+  state.admin.aiChat = state.admin.aiChat || [];
+  let st = {}; try { st = await api('GET', '/api/admin/ai/config'); } catch {}
+  const ready = st && st.on !== false;
+  const act = (kind, label) => `<button class="btn sm" data-act="aia-act" data-action="${esc(kind)}">${esc(label)}</button>`;
+  const quick = [
+    ...ready ? [act('daily', '🗓 Today’s plan'), act('tomorrow', '🗓 Tomorrow’s plan'), act('alerts', '⚠ Alerts'), act('ibo', '📺 IBO Player setup (Roku TV)'), act('ad', '🏆 Update sports promo')] : [],
+    ...owner ? [act('resend', '⚙️ Create Resend API'), act('program', '💾 Change customer program'), act('notify', '📣 Notify agents')] : []
+  ];
+  return `<div class="card" style="max-width:760px;margin:0 auto">
+    <h3 style="display:flex;gap:10px;align-items:baseline"><span>🤖 AI Assistant</span><span class="small muted">${ready ? (st.hasKey ? `${esc(st.model || 'AI')} · key set` : 'Panel answers — set up an AI key to enable full chat') : 'Turned off — ask the owner to turn it on'}</span></h3>
+    <p class="small muted">Ask anything about the panel: the daily plan, the alerts, IBO Player setup on Roku, sports promos. Owner actions: create a Resend API, update a sports promo, change a customer program, notify agents.</p>
+    <div class="aia-stat"><div class="aia-val">${ready ? '✓ On' : '— Off'}</div><div class="aia-sub">${st.provider ? esc(st.provider + ' · ' + (st.model || '')) : 'Panel mode — deterministic answers from the app data'}</div></div>
+    ${owner ? `<form data-form="ai-cfg" class="card" style="padding:14px;background:var(--elevated);border:1px solid var(--line2);margin-top:12px"><h4 style="margin-top:0">⚙️ AI configuration (owner)</h4>
+      <div class="grid2">${field('Provider', 'provider', st.provider || 'openai', { type: 'select', options: [['openai', 'OpenAI-compatible (recommended)'], ['openrouter', 'OpenRouter']] })}${field('Model', 'model', st.model || 'gpt-4o-mini')}</div>
+      <div class="grid2">${field('API key', 'apiKey', '••••', { type: 'password', ph: 'sk-…', attrs: 'autocomplete="off"' })}${field('Time zone for “today”', 'tz', st.tz || 'Asia/Bangkok', { ph: 'Asia/Bangkok' })}</div>
+      <div class="grid2">${field('Base URL', 'baseUrl', st.baseUrl || 'https://api.openai.com/v1')}${field('System instructions for the assistant', 'instructions', st.instructions || '', { type: 'textarea', rows: 3 })}</div>
+      <div class="row" style="margin-top:10px"><button type="submit" class="btn primary">💾 Save AI config</button></div></form>` : ''}
+    <div class="aia-actions">${quick.join('')}</div>
+    <div class="aia-chat" id="aia-chat">${state.admin.aiChat.length ? state.admin.aiChat.map((m) => aiaBubble(m.text, m.who)).join('') : `<div class="aia-empty"><span class="ic">🤖</span><div>Ask anything — “What is today’s work plan?”, “What are the alerts?”, “Set up IBO Player on Roku”…</div></div>`}</div>
+    <form data-form="ai-ask" class="aia-input-row" style="margin-top:12px"><input type="text" name="question" placeholder="Ask the AI…" required autocomplete="off" dir="ltr"><button type="submit" class="btn primary">Ask</button></form>
+  </div>`;
 }
 async function adminOverview() {
   const [st, cr, me, sd] = await Promise.all([api('GET', '/api/admin/stats'), api('GET', '/api/admin/panel/credits').catch(() => ({})), api('GET', '/api/admin/me'), can('profits') ? api('GET', '/api/admin/sales-by-day').catch(() => null) : Promise.resolve(null)]);
@@ -1075,11 +1198,16 @@ async function adminResellerPage() {
   const r = await api('GET', '/api/admin/reseller'); RS.data = r;
   const tot = r.list.reduce((a, x) => ({ c: a.c + x.credits, u: a.u + x.spentUsd, n: a.n + x.purchases }), { c: 0, u: 0, n: 0 });
   const found = r.found || []; const waiting = r.list.filter((x) => (x.requests || []).length);
+  const growthCard = `<div class="card" style="margin-top:14px"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0;flex:1;min-width:220px">Sample reseller app &amp; proposed offers</h3><span class="pill st-expiring">Preview only</span></div>
+    <p class="small muted">This shows what a sample reseller sees and previews the proposed promo rules. Nothing here is saved or applied to a real reseller.</p>
+    ${resellerSampleHtml()}
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:12px">${Object.values(PROMOS).map((p) => `<button class="btn sm" data-act="promo-preview" data-id="${esc(p.id)}">${esc(p.title)}</button>`).join('')}</div></div>`;
   return `${waiting.length ? `<div class="card" style="border:2px solid #f59e0b;margin-bottom:14px"><h3 style="margin-top:0">🛒 Orders from the reseller dashboard (${waiting.reduce((a, x) => a + x.requests.length, 0)})</h3>${waiting.map((x) => x.requests.map((q) => `<div class="list-item"><span style="flex:1"><b>${esc(x.name)}</b> <span class="muted small">${esc(x.rslId)}</span> · ${q.credits} credits (${esc(q.pkg)}) · ${esc(String(q.price))} ${esc(q.cur)} · ${esc(q.method || '')} · ${fmtDT(q.at)}${q.note ? `<div class="small muted">“${esc(q.note)}”</div>` : ''}</span><button class="btn sm primary" data-act="rs-sell" data-id="${x.id}" data-req="${q.id}" data-pkg="${esc(q.pkgId || '')}">✓ Paid · complete</button><button class="btn sm ghost" data-act="rs-req-x" data-id="${x.id}" data-req="${q.id}" title="Cancel this order">✕</button></div>`).join('')).join('')}</div>` : ''}<div class="stats">
     <div class="stat c-acc"><i class="st-ic">${ic('user', 20)}</i><span>Resellers</span><b>${r.list.length}</b></div>
     <div class="stat"><i class="st-ic">${ic('list', 20)}</i><span>Orders</span><b>${tot.n}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('star', 20)}</i><span>Credits sold</span><b>${tot.c}</b></div>
     <div class="stat c-ok"><i class="st-ic">${ic('card', 20)}</i><span>Total paid</span><b>${usd(tot.u)}</b></div></div>
+  ${growthCard}
   ${found.length ? `<div class="card"><div class="row"><h3 style="margin:0">🔎 Found in your data: ${found.length} reseller${found.length > 1 ? 's' : ''}</h3><span class="spacer"></span><button class="btn danger" data-act="rs-found-clear">✕ Delete all</button><button class="btn primary" data-act="rs-found-all">＋ Add all</button></div>
     <p class="small muted">These rows have “Reseller”, “RSL” or credits in them. Adding them moves them out of the customer list and into a reseller profile, each row as one order.</p>
     ${found.map((f, i) => `<div class="list-item"><div class="avatar">${esc(initials(f.name))}</div><div style="flex:1;min-width:0"><b>${esc(f.name)}</b>${f.into ? ` <span class="tagp">goes to ${esc(f.into.rslId)}</span>` : ''}<div class="small muted">${f.n} order${f.n > 1 ? 's' : ''} · ${usd(f.totalUsd)}${f.credits ? ' · ' + f.credits + ' credits' : ''} · ${esc(f.refs.slice(0, 4).join(', '))}${f.refs.length > 4 ? '…' : ''}</div><div class="small muted">${esc([f.email, f.phone].filter(Boolean).join(' · '))}</div></div><button class="btn sm" data-act="rs-found-add" data-i="${i}">＋ Add</button> <button class="btn sm danger" data-act="rs-found-skip" data-i="${i}" title="Not a reseller: remove from this box">✕</button></div>`).join('')}</div>` : ''}
@@ -1568,7 +1696,9 @@ function adminUserDash(s) {
     ${toggle('Turn on maintenance (customers cannot watch)', 'userDashboard.maintenance', d.maintenance, 'Admins can still sign in.')}
     ${field('Maintenance message', 'userDashboard.maintenanceMessage', d.maintenanceMessage, { type: 'textarea', rows: 2 })}
     <button class="btn primary">Save user dashboard</button>
-    <p class="small muted">To block one person, use Disable on the Customers page.</p></form>`;
+    <p class="small muted">To block one person, use Disable on the Customers page.</p></form>
+    <div class="card"><h3>Important notice</h3>${noticeEditorHtml(s.importantNotice || '')}</div>
+    <div class="card"><h3>Domain &amp; account details</h3>${domainAccountHtml(state.admin.domainDraft || {})}</div>`;
 }
 
 // ---- 📞 WhatsApp numbers used across the app: main, support, sales (free trial / prices), resellers ----
@@ -1800,7 +1930,7 @@ async function adminTeam() {
 }
 function memberForm(m) {
   const me = state.admin.me; const all = me.allPerms; const isNew = !m;
-  const roles = me.allRoles || PRESETS;
+  const roles = { ...(me.allRoles || PRESETS), 'Ads agent': agentPermissionPreset() };
   const ownerOnly = me.ownerOnly || ['exports', 'calls', 'master_sheets'];
   const grantable = all.filter(([k]) => !ownerOnly.includes(k));
   m = m || { perms: roles['Sales Agent'] || [], role: 'Sales Agent' };
@@ -1859,7 +1989,7 @@ const stripeSelect = (s, name, value, label = 'Stripe account', opts = {}) => fi
 async function adminFinance(s) {
   const f = await api('GET', '/api/admin/finance');
   state.admin.finance = f;
-  const tx = await api('GET', '/api/admin/tx' + (state.admin.txAccount ? '?account=' + state.admin.txAccount : ''));
+  const tx = sortTxNewest(await api('GET', '/api/admin/tx' + (state.admin.txAccount ? '?account=' + state.admin.txAccount : '')));
   const accName = (id) => f.accounts.find((a) => a.id === id)?.name || '—';
   const accCur = (id) => f.accounts.find((a) => a.id === id)?.currency || '';
   const labels = f.points.map((p) => new Date(p).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
@@ -1882,11 +2012,14 @@ async function adminFinance(s) {
       <div class="row" style="margin-top:8px"><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="income" data-acc="${a.id}">＋</button><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="expense" data-acc="${a.id}">−</button><button class="btn sm" data-act="new-tx" data-perm="finance_edit" data-type="transfer" data-acc="${a.id}">⇄</button><span class="spacer"></span><a class="small" data-act="tx-filter" data-acc="${a.id}" style="cursor:pointer">history</a></div>
     </div>`).join('')}</div>
     <div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Transactions${state.admin.txAccount ? ' · ' + esc(accName(state.admin.txAccount)) : ''}</h3><span class="spacer"></span>${state.admin.txAccount ? '<button class="btn sm" data-act="tx-filter" data-acc="">Show all</button>' : ''}<button class="btn sm" data-act="export-tx" data-perm="exports">⬇ CSV</button><button class="btn sm danger" data-act="clear-tx" data-perm="finance_edit" style="margin-left:8px">🗑 Clear all history</button></div>
-      ${tx.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Category / note</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>${tx.map((x) => `<tr>
-        <td class="small">${fmtDT(x.at)}</td><td>${x.type === 'income' ? '🟢 in' : x.type === 'expense' ? '🔴 out' : '🔁 transfer'}</td>
-        <td>${esc(accName(x.accountId))}${x.toAccountId ? ` → ${esc(accName(x.toAccountId))}` : ''}</td><td><b>${esc(x.category)}</b><div class="small muted">${esc(x.note)}</div></td>
+      ${tx.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Category / note</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>${tx.map((x) => {
+        const lk = balanceTxLink(x);
+        return `<tr>
+        <td class="small">${esc(txTimeLabel(x))}</td><td>${x.type === 'income' ? '🟢 in' : x.type === 'expense' ? '🔴 out' : '🔁 transfer'}</td>
+        <td>${esc(accName(x.accountId))}${x.toAccountId ? ` → ${esc(accName(x.toAccountId))}` : ''}</td><td><b>${esc(x.category)}</b><div class="small muted">${esc(x.note)}</div>${lk.id ? `<a class="bank-tx-link" href="${esc(lk.url)}">${esc(lk.label)}</a>` : ''}</td>
         <td style="text-align:right;white-space:nowrap" class="${x.type === 'income' ? 'pos' : x.type === 'expense' ? 'neg' : ''}">${x.type === 'expense' ? '−' : x.type === 'income' ? '+' : ''}${num(x.amount, accCur(x.accountId))}${x.toAccountId ? `<div class="small muted">→ ${num(x.toAmount, accCur(x.toAccountId))}</div>` : ''}</td>
-        <td><button class="btn sm ghost" data-act="del-tx" data-perm="finance_edit" data-id="${x.id}" title="Delete transaction" aria-label="Delete transaction">🗑</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No transactions yet.</p>'}
+        <td><button class="btn sm ghost" data-act="del-tx" data-perm="finance_edit" data-id="${x.id}" title="Delete transaction" aria-label="Delete transaction">🗑</button></td></tr>`;
+      }).join('')}</tbody></table></div>` : '<p class="muted">No transactions yet.</p>'}
     </div>
     <details class="card" data-perm="finance_edit"><summary style="cursor:pointer"><b>⚙️ Banks, wallets & exchange rates</b></summary>
       <div style="margin-top:12px"><div class="acc-row small muted"><span>Name</span><span>Currency</span><span>Opening balance</span><span>Color</span><span></span></div>
@@ -1922,7 +2055,7 @@ function txForm(type, accId) {
     ${field('Amount', 'amount', '', { type: 'number', attrs: 'step="any" min="0" required' })}</div>
     ${type === 'transfer' ? `<div class="grid2">${field('To', 'toAccountId', accs.find((a) => a.id !== (accId || accs[0]?.id))?.id, { type: 'select', options: accs.map((a) => [a.id, `${a.name} (${a.currency})`]) })}${field('Amount received', 'toAmount', '', { type: 'number', attrs: 'step="any" min="0"', help: 'Leave empty to convert with today\'s rate.' })}</div>` : ''}
     <div class="grid2">${stripeSelect(s, 'stripeAccountId', '')}
-    ${field('Category', 'category', cats[0], { attrs: 'list="cats"' })}<datalist id="cats">${cats.map((c) => `<option value="${c}">`).join('')}</datalist>${field('Date', 'date', isoDay(Date.now()), { type: 'date' })}</div>
+    ${field('Category', 'category', cats[0], { attrs: 'list="cats"' })}<datalist id="cats">${cats.map((c) => `<option value="${c}">`).join('')}</datalist>${field('Date', 'date', isoDay(Date.now()), { type: 'date' })}${field('Time (optional)', 'time', '', { type: 'time', attrs: 'step="1"', help: 'Leave empty for date-only history.' })}</div>
     ${field('Note', 'note', '')}
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">Cancel</button><button class="btn primary">Save</button></div>
   </form>`;
@@ -2152,6 +2285,7 @@ function profilePage() {
   const color = user.state === 'expired' ? '#ef4444' : user.state === 'expiring' ? '#f59e0b' : '#22c55e';
   return `<div class="uapp"><div class="uhead">${brandHtml(b, false)}<span class="spacer"></span>${logoutBtn()}</div>
     <div class="ubody" style="max-width:760px;margin:0 auto;padding:14px">
+      ${customerImportantNotice()}
       ${inboxCard(state.user.me?.inbox)}
       <div class="card">
         <div class="row"><h2 style="margin:0">${t('pf_balance')}</h2><span class="spacer"></span>${pill(user.state)}</div>
@@ -2181,6 +2315,10 @@ function profilePage() {
 }
 
 function blockedScreen() {
+  const body = blockedScreenBody();
+  return body ? customerImportantNotice() + body : '';
+}
+function blockedScreenBody() {
   const { user, dashboard: d, branding: b } = state.user.me;
   if (d.maintenance) return `<div class="block-screen"><div class="ic">🛠</div><h2>${t('maintTitle')}</h2><p class="muted">${esc(d.maintenanceMessage)}</p></div>`;
   if (user.state === 'expired') return `<div class="block-screen"><div class="ic">⏰</div><h2>${t('expiredTitle')}</h2><p class="muted">${t('expiredText', { date: fmtDate(user.expiresAt) })}</p>${b.supportUrl ? `<a class="btn primary ${waNum(b) ? 'wa-btn' : ''}" href="${esc(waNum(b) ? waUrl(b, t('waMsg', { app: b.appName, u: user.username })) : b.supportUrl)}" target="_blank" rel="noopener">${waNum(b) ? '💬 ' + t('whatsapp') : esc(b.supportLabel || t('support'))}</a>` : ''}</div>${orderCard()}`;
@@ -2199,6 +2337,7 @@ async function renderUserTab() {
     const trialLeft = user.isTrial && user.state !== 'expired';
     pullNativePos();
     el.innerHTML = `<div class="cinema">${state.user.me.branding.logoUrl ? `<img class="cinema-logo" src="${esc(state.user.me.branding.logoUrl)}" alt="">` : `<div class="cinema-mark">${esc((state.user.me.branding.appName || 'INTPROTO-TV').slice(0, 2).toUpperCase())}</div>`}<div class="cinema-text"><span class="cinema-eyebrow">${t('overview')}</span><h2 class="cinema-title">${esc(state.user.me.branding.appName || 'INTPROTO-TV')}</h2><p class="cinema-h">${t('hello', { name: esc(user.name.split(' ')[0]) })}</p></div><div class="cinema-watermark">$${esc((state.user.me.branding.appName || 'INTPROTO').slice(0, 4))}</div></div>
+      ${customerImportantNotice()}
       ${d.maintenance ? `<div class="notice warning">🛠 ${esc(d.maintenanceMessage)}</div>` : ''}
       ${d.announcement ? `<div class="notice ${esc(d.announcementType)}">📣 ${esc(d.announcement)}</div>` : ''}
       ${trialLeft ? `<div class="notice info">🎁 ${t('trialEnds', { n: user.hoursLeft })} ${renew}</div>` : ''}
@@ -2219,11 +2358,12 @@ async function renderUserTab() {
     return;
   }
   if (u.tab === 'account') {
-    el.innerHTML = `<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
+    el.innerHTML = `${customerImportantNotice()}<div class="card"><div class="row"><div class="avatar" style="width:52px;height:52px;font-size:20px">${esc(initials(user.name))}</div><div><h2 style="margin:0">${esc(user.name)}</h2><div class="muted">${esc(user.username)}</div></div></div>
         ${user.email ? `<div class="list-item" style="margin-top:12px"><span style="flex:1;min-width:0;overflow-wrap:anywhere" dir="ltr">${esc(user.email)}</span>${user.emailVerified ? `<span class="pill st-active">${t('emVerified')}</span>` : `<button class="btn sm primary" data-act="em-send">${t('emVerify')}</button>`}</div>` : ''}</div>
       <div class="card"><h3>${t('mySub')}</h3><div class="list-item"><span style="flex:1">${t('status')}</span>${pill(user.state)}</div><div class="list-item"><span style="flex:1">${t('plan')}</span><b>${esc(user.isTrial ? t('trial') : pkgName(user.planName))}</b></div><div class="list-item"><span style="flex:1">${t('linesN')}</span><b>${user.connections}</b></div><div class="list-item"><span style="flex:1">${t('started')}</span><b>${fmtDate(user.startAt)}</b></div><div class="list-item"><span style="flex:1">${t('expires')}</span><b>${fmtDate(user.expiresAt)}</b></div>${(state.user.me.totalPaidUsd || 0) > 0 ? `<div class="list-item"><span style="flex:1">${t('totalPaid')}</span><b>$${Number(state.user.me.totalPaidUsd).toFixed(2)}</b></div>` : ''}
         ${(user.renewals || []).length ? `<h3 style="margin-top:14px">${t('history')}</h3>${user.renewals.slice().reverse().map((r) => `<div class="list-item small"><span style="flex:1">${r.type === 'renew' ? t('renewed') : r.type === 'trial' ? t('trial') : t('startedOn')} · ${fmtDate(r.at)}</span><span dir="ltr">+${r.type === 'trial' ? '24h' : r.days + 'd'}</span></div>`).join('')}` : ''}</div>
       ${plansCard()}
+      ${(giftCard() || referralCard()) ? `<div class="grid2">${giftCard()}${referralCard()}</div>` : ''}
       <div class="card" id="acc-devices"><h3>${t('devicesT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-tickets"><div class="row"><h3 style="margin:0;flex:1">${t('supportT')}</h3><button class="btn sm primary" data-act="ticket-new">＋ ${t('newTicket')}</button></div><p class="muted small">${t('loadingDots')}</p></div>
       <div class="card" id="acc-payments"><h3>${t('paymentsT')}</h3><p class="muted small">${t('loadingDots')}</p></div>
@@ -2390,7 +2530,7 @@ function orderCard() {
   const std = op.filter((p) => !isIbo(p));
   const ibo = op.filter((p) => isIbo(p));
   const waLink = (p, pr) => waUrl(me.branding, t('waBuy', { app, pkg: pkgName(p.title || p.name), price: pr, u }));
-  const card = (p) => { const title = pkgName(p.title || p.name || t('w_package')); const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(pkgName(p.badge))}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${esc(t('pkgCreditsN', { n: p.credits }))}</div>` : ''}${p.days ? `<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>` : ''}
+  const card = (p) => { const title = pkgName(p.title || p.name || t('w_package')); const pr = priceTxt(p.price, p.cur); const wa = waLink(p, pr); return `<div class="plan-c${LIFETIME_PLANS.some((x) => x.id === p.id) ? ' plan-lifetime' : ''}">${p.badge ? `<div class="small" dir="auto" style="color:var(--accent);font-weight:700">${esc(pkgName(p.badge))}</div>` : ''}<b dir="auto">${esc(title)}</b><div class="pp" dir="ltr">${pr}</div>${p.credits ? `<div class="small" style="color:var(--accent);font-weight:700">${esc(t('pkgCreditsN', { n: p.credits }))}</div>` : ''}${p.days ? `<div class="small muted">${t('daysN', { n: p.days })} · ${t('devices', { n: p.devices })}</div>` : ''}
     ${me.buyRequest?.pkg === p.id && !me.buyRequest.answeredAt ? `<div class="small pos" style="margin-top:8px">✓ ${t('requested')}</div>` : `<button class="btn sm primary block" style="margin-top:8px" data-act="buy-request" data-pkg="${esc(p.id)}">🛒 ${t('requestBuy')}</button>`}
     ${wa ? `<a class="btn sm wa-btn block" style="margin-top:6px" href="${esc(wa)}" target="_blank" rel="noopener">💬 ${t('whatsapp')}</a>` : ''}</div>`; };
   const section = (title, list) => list.length ? `<h3 class="op-sec">${esc(title)}</h3><div class="plans-grid">${list.map(card).join('')}</div>` : '';
@@ -2404,7 +2544,25 @@ function plansCard() {
   if (state.user.me.orderPackages?.length || state.user.me.resellerPackages?.length) return `<div id="acc-plans" data-go="packages">${orderCard()}</div>`;
   const me = state.user.me; if (!me.plans?.length) return '';
   const sup = me.branding.supportUrl;
-  return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c"><b>${esc(pkgName(p.name))}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
+  return `<div class="card"><h3>💎 ${t('plansTitle')}</h3><div class="plans-grid">${me.plans.map((p) => `<div class="plan-c${LIFETIME_PLANS.some((x) => x.id === p.id) ? ' plan-lifetime' : ''}"><b>${esc(pkgName(p.name))}</b><div class="pp">${priceTxt(p.price, me.currency)}</div><div class="small muted">${t('devices', { n: p.connections })}</div>${sup ? `<a class="btn sm primary" href="${esc(sup)}${sup.includes('wa.me') ? `?text=${encodeURIComponent(`${me.branding.appName}: ${p.name} (${priceTxt(p.price, me.currency)}) — ${me.user.username}`)}` : ''}" target="_blank" rel="noopener">${t('choose')}</a>` : ''}</div>`).join('')}</div></div>`;
+}
+function giftCard() {
+  const list = state.user.me?.gifts || [];
+  if (!list.length) return '';
+  return `<div class="card" id="acc-gifts"><h3 style="margin-top:0">🎁 ${t('giftsTitle')}</h3>
+    <p class="small muted" style="margin:6px 0 12px">${t('giftsText')}</p>
+    <div class="gift-grid">${list.map((g) => `<div class="gift-item ${Number(g.discountPct || g.pct) > 0 ? 'gift-discount' : 'gift-free'}"><b>${esc(g.label || g.title || '')}</b><div class="small muted">${esc(g.note || '')}</div></div>`).join('')}</div></div>`;
+}
+function referralCard() {
+  const r = state.user.me?.referral || {};
+  const tiers = Array.isArray(r.rewardTable) && r.rewardTable.length ? r.rewardTable : Object.values(REFERRAL_TIERS);
+  const code = r.code || ''; const link = r.link || '';
+  return `<div class="card" id="acc-referral"><h3 style="margin-top:0">🤝 ${t('refTitle')}</h3>
+    <p class="small muted" style="margin:6px 0 12px">${t('refText')}</p>
+    ${code ? `<div class="ref-code"><span dir="ltr">${esc(code)}</span><button class="btn sm" data-act="ref-copy-code">⧉ ${t('copy')}</button></div>` : ''}
+    ${link ? `<div class="ref-code"><span dir="ltr" style="overflow-wrap:anywhere;flex:1">${esc(link)}</span><button class="btn sm primary" data-act="ref-copy-link">⧉ ${t('refCopyLink')}</button></div>` : ''}
+    <div class="ref-tiers">${tiers.map((x) => `<div class="list-item small"><span style="flex:1">${esc(x.label || '')}</span><b>${esc(x.days || 0)} ${t('daysShort')}</b></div>`).join('')}</div>
+    ${Number(r.earned || r.awardedDays) > 0 ? `<div class="small pos" style="margin-top:8px">✓ ${t('refEarned', { n: Number(r.earned || r.awardedDays) })}</div>` : ''}</div>`;
 }
 function appsCard() {
   return `<div class="card" style="text-align:center"><div style="font-size:46px">📲</div><h3>${t('apps_title')}</h3><p class="muted">${t('apps_text')}</p>
@@ -3138,7 +3296,7 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
 'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
 'toggle-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); await api('PUT', '/api/admin/team/' + m.id, { status: m.status === 'disabled' ? 'active' : 'disabled' }); toast(t('updated')); renderAdmin(); },
 'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast(t('deleted')); renderAdmin(); },
-preset: (el) => { const roles = state.admin.me.allRoles || PRESETS; const p = roles[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },
+preset: (el) => { const roles = { ...(state.admin.me.allRoles || PRESETS), 'Ads agent': agentPermissionPreset() }; const p = roles[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },
 'trial-login': async (el) => { closeModal(); try { const r = await api('POST', '/api/login', { username: el.dataset.u, password: el.dataset.p }); setSession(r.token, r.role); route(); } catch (e) { renderLogin(e.message); } },
 theme: () => {
     const order = ['auto', 'light', 'dark']; const next = order[(order.indexOf(themeMode()) + 1) % 3];
@@ -3161,9 +3319,9 @@ trial: () => modal('🎁 ' + t('trialTitle', { hours: state.config.trial.hours }
     await saveSettings({ finance: { accounts, rates, autoRates: $('#auto-rates').checked, stripeKey: $('#stripe-key').value.trim() } }); renderAdmin();
   },
   'export-tx': async () => {
-    const f = state.admin.finance; const tx = await api('GET', '/api/admin/tx?limit=100000');
+    const f = state.admin.finance; const tx = sortTxNewest(await api('GET', '/api/admin/tx?limit=100000'));
     const n = (id) => f.accounts.find((a) => a.id === id)?.name || '';
-    const rows = [['Date', 'Type', 'Account', 'Amount', 'To account', 'Amount received', 'Category', 'Note']].concat(tx.map((x) => [new Date(x.at).toISOString(), x.type, n(x.accountId), x.amount, n(x.toAccountId), x.toAmount ?? '', x.category, x.note]));
+    const rows = [['Date', 'Type', 'Account', 'Amount', 'To account', 'Amount received', 'Category', 'Note']].concat(tx.map((x) => [txTimeLabel(x), x.type, n(x.accountId), x.amount, n(x.toAccountId), x.toAmount ?? '', x.category, x.note]));
     download('transactions.csv', '\ufeff' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
   },
   period: (el) => { state.admin.period = el.dataset.p; renderAdmin(); },
@@ -3514,7 +3672,7 @@ async trial(f) {
     } catch (e) { $('#trial-err').innerHTML = e.data?.suggest ? `<div class="err-box">${t('trial_typo', { s: esc(e.data.suggest) })} <button type="button" class="btn sm" data-act="trial-fix" data-email="${esc(e.data.suggest)}">${t('useIt')}</button></div>` : `<div class="err-box">${esc(t(e.message))}</div>`; btn.disabled = false; }
   },
 async tx(f) {
-    try { await api('POST', '/api/admin/tx', formToObj(f)); toast(t('saved')); closeModal(); renderAdmin(); }
+    try { await api('POST', '/api/admin/tx', applyTransactionInput(formToObj(f))); toast(t('saved')); closeModal(); renderAdmin(); }
     catch (e) { toast(e.message, true); }
   },
   async stock(f) {
@@ -3597,6 +3755,61 @@ async tx(f) {
     catch (e) { toast(e.message, true); }
   },
 };
+Object.assign(actions, {
+  'panel-refresh': async () => {
+    markRefreshBusy(document, true);
+    try {
+      if (state.admin.tab === 'overview') {
+        state.admin.settings = await api('GET', '/api/admin/settings');
+        await renderAdminBodyOnly();
+      } else {
+        await renderAdmin();
+      }
+      state.admin.refreshedAt = Date.now();
+      updateRefreshMeta();
+      toast('Data refreshed ✓');
+    } catch (e) { toast(e.message, true); }
+    finally { markRefreshBusy(document, false); }
+  },
+  'notice-save': async (el) => {
+    const editor = el.closest('[data-notice-editor]') || $('[data-notice-editor]');
+    const text = editor?.querySelector('[name=notice]')?.value ?? '';
+    el.disabled = true;
+    try { await saveSettings({ importantNotice: text }, true); toast('Notice saved ✓'); await renderAdmin(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'notice-clear': async (el) => {
+    el.disabled = true;
+    try { await saveSettings({ importantNotice: '' }, true); toast('Notice cleared ✓'); await renderAdmin(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
+  'domain-save': (el) => {
+    const form = el.closest('form'); if (!form) return;
+    if (!form.reportValidity()) return;
+    state.admin.domainDraft = Object.fromEntries(new FormData(form).entries());
+    toast('Details saved in this browser session only. Provider and price still need confirmation.');
+  },
+  'domain-pay': () => toast('Payments are disabled until the domain provider and price are confirmed.', true),
+  'promo-preview': (el) => {
+    const promo = PROMOS[el.dataset.id];
+    if (!promo) return toast('Unknown promotion.', true);
+    const now = Date.now();
+    const role = promo.id === 'fourForFive' ? 'reseller' : 'owner';
+    const sample = { role, credits: 1, purchaseCount: 4, redeemedPromos: [], planExpiresAt: now, ledger: [] };
+    const elig = promoEligibility({ role, credits: sample.credits, purchaseCount: sample.purchaseCount, promoId: promo.id, redeemed: [], now });
+    const applied = applyPromoToReseller(sample, promo.id, now);
+    modal(`Preview: ${promo.title}`, `<div class="notice ${elig.ok ? '' : 'warning'}"><b>${elig.ok ? 'Sample is eligible' : 'Sample is not eligible'}</b><div class="small">${esc(elig.reason || promo.terms)}</div></div>
+      <p class="small muted">${esc(promo.start)} → ${esc(promo.end)} · ${esc(promo.status)}</p>
+      <div class="card" style="margin:12px 0;padding:12px"><h4 style="margin-top:0">Result</h4><p class="small">${applied.ok ? 'Applied to the sample account only.' : esc(applied.reason || 'Not applied.')}</p>
+      <pre class="promo-wa" style="white-space:pre-wrap;font:inherit;font-size:13px;max-height:220px;overflow:auto;background:rgba(127,127,127,.08);border-radius:10px;padding:10px;margin:0">${esc(JSON.stringify(applied.reseller, null, 2))}</pre></div>
+      <p class="small muted">Preview only — nothing is saved or applied to a real reseller or manager.</p>`, { wide: true });
+  },
+  'ad-copy': (el, e) => {
+    const tpl = adsTemplates().find((x) => x.id === el.dataset.id);
+    if (!tpl) return toast('Ad example not found.', true);
+    return actions['copy-text']({ dataset: { text: `${tpl.title}\n\n${tpl.body}\n\n${tpl.cta}` } }, e);
+  },
+});
 async function renderAdminBodyOnly() { if (state.admin.tab === 'overview') $('#admin-body').innerHTML = await adminOverview(); }
 
 const inFlight = new Set();
@@ -3610,6 +3823,16 @@ document.addEventListener('click', (e) => {
   inFlight.add(key);
   if (el.tagName === 'A' && !el.hasAttribute('data-keep')) e.preventDefault();
   Promise.resolve(fn(el, e)).catch((err) => toast(err.message, true)).finally(() => inFlight.delete(key));
+});
+document.addEventListener('click', (e) => {
+  const tab = e.target.closest('.ads-tab');
+  if (!tab) return;
+  const wrap = tab.closest('.ads-panel-wrap'); if (!wrap) return;
+  const tabs = [...wrap.querySelectorAll('.ads-tab')];
+  const panels = [...wrap.querySelectorAll('.ads-panel')];
+  const idx = tabs.indexOf(tab); if (idx < 0) return;
+  tabs.forEach((t, i) => { t.setAttribute('aria-selected', String(i === idx)); t.tabIndex = i === idx ? 0 : -1; });
+  panels.forEach((p, i) => { p.hidden = i !== idx; });
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.role === 'user' && state.user.me && Date.now() - (state.user.meAt || 0) > 60000) renderUser(); });
 document.addEventListener('submit', (e) => {
@@ -3629,6 +3852,15 @@ document.addEventListener('input', (e) => {
 let searchT;
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.dataset?.input === 'nav-search') { const first = document.querySelector('#nav a:not([hidden])'); if (first) first.click(); }
+  const adsTab = e.target.closest?.('.ads-tab');
+  if (adsTab && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    const wrap = adsTab.closest('.ads-panel-wrap'); if (!wrap) return;
+    const tabs = [...wrap.querySelectorAll('.ads-tab')];
+    const i = tabs.indexOf(adsTab); if (i < 0) return;
+    e.preventDefault();
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    next.focus(); next.click();
+  }
   const modalEl = $('#modal-root .modal');
   if (e.key === 'Escape' && modalEl) { e.preventDefault(); closeModal(); return; }
   if (e.key === 'Escape') { actions['menu-close']?.(); return; }
@@ -3644,6 +3876,10 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.name === 'notice' && t.closest('[data-notice-editor]')) {
+    const preview = t.closest('[data-notice-editor]').querySelector('[data-notice-preview]');
+    if (preview) { preview.textContent = t.value || 'Nothing to preview yet.'; preview.classList.toggle('empty', !t.value); }
+  }
   if (t.dataset.input === 'dup-search') { state.admin.dupQ = t.value; clearTimeout(searchT); searchT = setTimeout(async () => { const pos = t.selectionStart; $('#admin-body').innerHTML = await adminDups(); const n = $('[data-input=dup-search]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 300); }
   if (t.form?.dataset?.form === 'acc' && t.name === 'tier' && ACC.d) { const pl = ACC.d.plans[t.value]; if (pl && t.value !== 'custom') { t.form.price.value = pl.price; t.form.quota.value = pl.quota; } }
   if (t.dataset.input === 'acc-q') { ACC.q = t.value; const pos = t.selectionStart; $('#admin-body').innerHTML = accPage(); const n = $('[data-input=acc-q]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
@@ -3699,9 +3935,9 @@ document.addEventListener('change', async (e) => {
   }
   if (t.dataset.input === 'restore' && t.files[0]) {
     try {
-      const data = JSON.parse(await t.files[0].text());
-      if (!confirm(`Restore ${data.customers?.length ?? 0} customers and all settings? Current data will be replaced.`)) return;
-      await api('POST', '/api/admin/restore', data); await refreshConfig(); toast('Backup restored ✓'); renderAdmin();
+      const restored = migrateLegacyTransactions(JSON.parse(await t.files[0].text()));
+      if (!confirm(`Restore ${restored.data.customers?.length ?? 0} customers and all settings? Current data will be replaced.`)) return;
+      await api('POST', '/api/admin/restore', restored.data); await refreshConfig(); toast(`Backup restored ✓ ${restored.report.migrated} transaction timestamp(s) filled in.`); renderAdmin();
     } catch (err) { toast(err.message || 'Invalid file', true); }
   }
 });
@@ -3856,9 +4092,12 @@ async function adminAutoPay(s) {
   const tone = { activated: 'st-active', unmatched: 'st-expiring', needs_attention: 'st-expired' };
   const riskTone = { low: 'st-active', medium: 'st-expiring', high: 'st-expired' };
   const riskLabel = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' };
+  const payoutDays = normalizePayoutDays(s.finance?.payoutSchedule ?? s.payoutSchedule ?? 2);
+  const payoutAccount = (s.finance?.accounts || [])[0] || { name: '' };
   return `<div class="card"><h3>Automatic activation from Stripe</h3>
     <p class="small muted" style="margin-top:0">When a customer pays through one of your Stripe payment links, Stripe tells this app and the subscription is extended by itself. A payment is only accepted when Stripe's signature matches your signing secret, and it is never applied twice.</p>
     <div class="notice ${p.configured ? 'success' : 'warning'}">${p.configured ? '✅ Connected. Verified payments activate automatically.' : '⚠️ Not connected yet. Follow the three steps below for each Stripe account.'}</div>
+    <p class="small muted">${esc(bankPayoutNote({ ...payoutAccount, payoutDays }))} Automatic bank transfers are off and remain display-only until the provider is confirmed.</p>
     <ol class="small" style="padding-inline-start:18px;line-height:1.7"><li>In Stripe: <b>Developers → Webhooks → Add endpoint</b>, with this address:<div class="code" style="margin:6px 0">${esc(url)}</div></li><li>Choose the event <b>checkout.session.completed</b>.</li><li>Copy the endpoint's <b>Signing secret</b> (starts with <code>whsec_</code>) and paste it here, one per line if you use several Stripe accounts.</li></ol>
     <form data-form="settings">${field('Signing secrets', 'finance.stripeWebhookSecrets', s.finance.stripeWebhookSecrets || '', { type: 'textarea', rows: 3, ph: 'whsec_…', attrs: 'autocapitalize="none" spellcheck="false"' })}<button class="btn primary">Save</button></form>
     <h3 style="margin-top:18px">Payments received from Stripe</h3>
@@ -3907,7 +4146,7 @@ Object.assign(forms, {
   'pin-unlock'(f) { if (f.pin.value.trim() !== getPin()) return toast(t('wrongPin'), true); state.user.unlocked = true; closeModal(); renderUserTab(); },
   async 'sup-set'(f) { await saveSettings({ support: { email: f.email.value.trim(), alertEmails: f.alertEmails.value, waLink: f.waLink.checked } }); $('#admin-body').innerHTML = await adminSupport(); },
   async 'notify-set'(f) { const g = (k) => !!f.elements[k]?.checked; const watch = [...f.querySelectorAll('[name=watch]')]; const all = watch.every((x) => x.checked);
-    await saveSettings({ notify: { tickets: g('tickets'), trials: g('trials'), receipts: g('receipts'), shiftReminders: g('shiftReminders'), shifts: g('shifts'), oversight: g('oversight'), customers: g('customers'), resellers: g('resellers'), autoPromo: g('autoPromo'), promoDays: Number(f.promoDays.value) || 7, watch: all ? [] : watch.filter((x) => x.checked).map((x) => x.value) } }); renderAdmin(); },
+    await saveSettings({ notify: { tickets: g('tickets'), trials: g('trials'), receipts: g('receipts'), shiftReminders: g('shiftReminders'), shifts: g('shifts'), oversight: g('oversight'), plan: g('plan'), customers: g('customers'), resellers: g('resellers'), autoPromo: g('autoPromo'), promoDays: Number(f.promoDays.value) || 7, watch: all ? [] : watch.filter((x) => x.checked).map((x) => x.value) } }); renderAdmin(); },
   async 'push-promo'(f) { const b = f.querySelector('button.primary'); b.disabled = true; try { const r = await api('POST', '/api/admin/push/promo', { audience: f.audience.value, title: f.title.value, body: f.body.value }); toast(`Sent to ${r.people} people (${r.devices} device${r.devices === 1 ? '' : 's'})`); } catch (e) { toast(e.message, true); } b.disabled = false; },
   async 'sup-start'(f) {
     const b = f.querySelector('button.primary'); const box = f.querySelector('#sup-err');
@@ -4516,6 +4755,8 @@ async function persistStripeAccountsFromTable(silent) {
 Object.assign(actions, {
   'copy-el': async (el) => { const txt = document.getElementById(el.dataset.el)?.textContent || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
   'copy-text': async (el) => { const txt = el.dataset.text || ''; try { await navigator.clipboard.writeText(txt); } catch { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); } toast(t('copied')); },
+  'ref-copy-code': async () => { const txt = state.user.me?.referral?.code || ''; if (txt) await actions['copy-text']({ dataset: { text: txt } }); },
+  'ref-copy-link': async () => { const txt = state.user.me?.referral?.link || ''; if (txt) await actions['copy-text']({ dataset: { text: txt } }); },
   'view-customer': async (el) => { if ($('.modal')) closeModal(); state.admin.profileId = el.dataset.id; const body = $('#admin-body'); if (body) body.innerHTML = adminCustomerProfile((state.admin.customers || []).find((x) => x.id === el.dataset.id)) || adminCustomers(); },
   'back-list': () => { state.admin.profileId = ''; renderAdmin(); },
   'pool-del': async (el) => { await api('POST', '/api/admin/trialpool/remove', { u: el.dataset.u }); renderAdmin(); },
@@ -5113,6 +5354,7 @@ async function adminGadsPage() {
   const r = await api('GET', '/api/admin/gads'); const t = r.total || {};
   const rows = (r.campaigns || []).map((c) => `<tr><td><b>${esc(c.name)}</b><div class="small muted">${esc(c.account || '—')} · ${esc(c.domain)}${c.gmail ? ' · ' + esc(c.gmail) : ''} · ${esc(c.status)}</div><div class="small muted">🔑 ${esc(c.keyword || '—')}</div></td><td class="small">${c.dailyBudget} ${esc(c.currency)}/day<div class="muted">${c.impressions|0} impr · ${c.clicks|0} clk · <b>${c.results|0} results</b></div></td><td class="small">Today $${Number(c.today||0).toFixed(2)}<div class="muted">7d $${Number(c.week||0).toFixed(2)} · 30d $${Number(c.month||0).toFixed(2)}</div></td><td><button class="btn sm" data-act="gads-entry" data-id="${esc(c.id)}">＋ Spend</button><button class="btn sm danger" data-act="gads-del" data-id="${esc(c.id)}">🗑</button></td></tr>`).join('');
   return `<p class="small muted">Google Ads campaigns across <b>InProto-TV.com</b>, <b>online.info.net</b> and <b>intproto-tv.store</b> — multiple accounts, per-campaign daily budget and spend per day / week / month.</p>
+    ${adsPanelHtml()}
     <div class="chips" style="margin-bottom:12px"><a class="on">Today $${Number(t.today||0).toFixed(2)}</a><a class="on">Last 7 days $${Number(t.week||0).toFixed(2)}</a><a class="on">Last 30 days $${Number(t.month||0).toFixed(2)}</a></div>
     <div class="grid2" style="gap:16px;align-items:start"><form data-form="gads-campaign" class="card"><h3>＋ New campaign</h3>${field('Google Ads account', 'account', '', { ph: 'e.g. GreenApp Ads' })}${field('Campaign name', 'name', '', { attrs: 'required maxlength="120"' })}${field('Email (Gmail)', 'gmail', '', { type: 'email', ph: 'name@gmail.com', attrs: 'placeholder="name@gmail.com"' })}${field('Domain', 'domain', '', { type: 'text', ph: 'intproto-tv.store', attrs: 'placeholder="intproto-tv.store"', help: 'Type it manually — no predefined domains.' })}${field('Keywords', 'keyword', '', { ph: 'iptv subscription buy, tvplus, ibo player', attrs: 'maxlength="140"' })}<div class="grid2">${field('Budget (daily)', 'dailyBudget', 10, { type: 'number', attrs: 'min="0" step="any"' })}${field('Currency', 'currency', 'USD', { type: 'select', options: [['USD', 'USD'], ['EUR', 'EUR']] })}</div><button type="submit" class="btn primary">Add campaign</button></form>
     <div class="card"><h3>Campaigns (${(r.campaigns || []).length})</h3>${(r.campaigns || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Campaign</th><th>Budget</th><th>Spend</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted small">No campaigns yet.</p>'}</div></div>`;
@@ -5121,6 +5363,7 @@ async function adminFbPage() {
   const r = await api('GET', '/api/admin/fb'); const t = r.total || {};
   const cards = (r.ads || []).map((a) => `<div class="card"><div class="row">${a.image ? `<button class="btn" style="flex:0 0 auto" data-act="att-show" data-src="/api/admin/fb/att?id=${encodeURIComponent(a.image)}">🖼 Photo</button>` : ''}<div style="flex:1;min-width:180px"><p style="margin:0;white-space:pre-wrap">${esc(a.description)}</p><p class="small muted">${esc(a.account || '—')} · ${esc(a.phone || '')}</p></div></div><p class="small" style="margin:8px 0 4px">Today $${Number(a.today||0).toFixed(2)} · 7d $${Number(a.week||0).toFixed(2)} · 30d $${Number(a.month||0).toFixed(2)} · ${a.results||0} results</p><div class="row"><button class="btn sm" data-act="fb-entry" data-id="${esc(a.id)}">＋ Log performance</button><button class="btn sm danger" data-act="fb-del" data-id="${esc(a.id)}">🗑</button></div></div>`).join('');
   return `<p class="small muted">Facebook Ads for photo posts — keep the creative description, the phone number and the ad account used for each campaign, and log performance per creative. Everything is kept in the creative history log.</p>
+    ${adsPanelHtml()}
     <div class="chips" style="margin-bottom:12px"><a class="on">${(r.ads || []).length} creatives</a><a class="on">Today $${Number(t.today||0).toFixed(2)}</a><a class="on">Last 7 days $${Number(t.week||0).toFixed(2)}</a><a class="on">Last 30 days $${Number(t.month||0).toFixed(2)}</a></div>
     <div class="grid2" style="gap:16px;align-items:start"><form data-form="fb-ad" class="card"><h3>＋ New creative</h3>${field('Facebook Ad account', 'account', '', { ph: 'act_…' })}${field('Phone used', 'phone', '', { type: 'tel', ph: '+212…' })}${field('Description', 'description', '', { type: 'textarea', rows: 4, attrs: 'required maxlength="500"', ph: 'Post text / creative description' })}<label class="field"><span>Photo</span><input type="file" name="image" accept="image/*"></label><button type="submit" class="btn primary">Add creative</button></form>
     <div>${cards || '<div class="empty card"><span class="ic">👍</span>No creatives yet.</div>'}</div></div>`;
@@ -5171,30 +5414,40 @@ Object.assign(forms, {
 const iboForm = (s) => `<form data-form="ibo-add" class="card"><h3>＋ Add IBO client</h3>
   ${field('Name', 'name', '', { attrs: 'required' })}
   ${field('Contact (Telegram, WhatsApp or email)', 'contact', '', { ph: '@id · +212… · name@email.com', attrs: 'autocomplete="off"' })}
-  <div class="grid2">${field('App / device', 'deviceApp', 'IBO Player', { type: 'select', options: ['IBO Player', 'Smart IPTV', 'Set IPTV', 'IPTV Smarters', 'Xtream IPTV', 'Other'].map((o) => [o, o]) })}${field('MAC address (MAC-based devices)', 'macAddress', '', { ph: 'AA:BB:CC:DD:EE:FF', attrs: 'autocapitalize="none" spellcheck="false" dir="ltr"' })}</div>
+  <h4 style="margin:8px 0 6px">Devices — up to 8, each with its own app and MAC</h4>
+  ${iboDevListHtml(state.admin.iboSelected || [])}
+  <button type="button" class="btn sm ghost" data-act="ibo-dev-add" ${(state.admin.iboSelected || []).length >= 8 ? 'disabled' : ''}>➕ Add device</button>
   <div class="grid2">${field('DNS / portal (optional)', 'dns', state.admin.settings.player.serverUrl || '', { ph: 'http://dns:8080', attrs: 'autocapitalize="none"' })}${field('Username (optional)', 'username', '', { attrs: 'autocapitalize="none"' })}</div>
   ${field('Password (optional)', 'password', '', { attrs: 'autocapitalize="none"' })}
   <div class="grid2">${field('Duration', 'days', '365', { type: 'select', options: [['365', '1 year'], ['36500', 'Lifetime'], ['1', '1 day (trial)']] })}${field('Note', 'note', '', { ph: 'Order, source…' })}</div>
   <label class="toggle" style="margin:6px 0"><input type="checkbox" name="trial" value="1"><i></i><span>Free 24h trial (no credit used)</span></label>
-  <p class="small muted">A 1-year activation uses <b>1 IBO credit</b> ($${(state.admin.iboShelf?.costUsd || 3.5).toFixed(2)}). Lifetime also uses 1 credit.</p>
+  <p class="small muted">Each device uses <b>1 IBO credit</b> ($${(state.admin.iboShelf?.costUsd || 3.5).toFixed(2)}) — this client: <b>${Math.max(1, (state.admin.iboSelected || []).length)} device(s)</b>. Lifetime also uses 1 credit per device.</p>
   <button type="submit" class="btn primary block">＋ Add client</button></form>`;
 async function adminIboPage() {
   let r; try { r = await api('GET', '/api/admin/ibo'); } catch (e) { return `<div class="err-box">${esc(e.message)}</div>`; }
   state.admin.ibo = r.list; state.admin.iboShelf = r;
   const st = r.stats || {}; const now = Date.now();
   const pillFor = (x) => (x.expiresAt && x.expiresAt <= now) || x.status !== 'active' ? '<span class="pill st-expired">expired</span>' : x.isTrial ? '<span class="pill st-expiring">trial</span>' : '<span class="pill st-active">active</span>';
-  const row = (x) => `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.contact || '')}</div></td><td class="small">${esc(x.username)} / ${esc(x.password)}<div class="muted">${esc(x.dns || '')}</div></td><td class="small">${esc(x.deviceApp || '')}<div class="muted">${esc(x.macAddress || '')}</div></td><td class="small">${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${pillFor(x)}</td>
-    <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)" aria-label="Activate or renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp" aria-label="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email" aria-label="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove" aria-label="Remove IBO device">🗑</button></div></td></tr>`;
-  return `<div class="grid2" style="gap:16px;align-items:start">
+  const row = (x) => {
+    const devs = Array.isArray(x.devices) && x.devices.length ? x.devices : (Array.isArray(x.macs) && x.macs.length ? x.macs.map((m) => ({ deviceApp: x.deviceApp || 'IBO Player', mac: m })) : (x.macAddress ? [{ deviceApp: x.deviceApp || 'IBO Player', mac: x.macAddress }] : []));
+    return `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.contact || '')}</div></td><td class="small">${esc(x.username)} / ${esc(x.password)}<div class="muted">${esc(x.dns || '')}</div></td><td class="small">${devs.map((d) => `${esc(d.deviceApp || '')}<span class="muted"> · ${esc(iboNormMac(d.mac || ''))}</span>`).join('<br>')}${devs.length > 1 ? `<span class="muted small">(${devs.length} devices)</span>` : ''}</td><td class="small">${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${pillFor(x)}</td>
+      <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-mac" data-id="${esc(x.id)}" title="Add another MAC address" aria-label="Add another MAC address">➕</button><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)" aria-label="Activate or renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp" aria-label="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email" aria-label="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove" aria-label="Remove IBO device">🗑</button></div></td></tr>`; };
+  return `<div class="ibo-page">
+    ${iboPlayersCard()}
+    <div class="grid2" style="gap:16px;align-items:start">
     <div class="card"><h3>💳 IBO credit balance</h3><div class="row" style="gap:16px;align-items:baseline"><div class="stat"><span class="dp-l">Credits</span><div class="big">${r.credits}</div></div><div class="stat"><span class="dp-l">Cost per credit</span><div class="big">$${Number(r.costUsd || 3.5).toFixed(2)}</div></div><div class="stat"><span class="dp-l">Active / trial / expired</span><div class="big">${st.active || 0} / ${st.trial || 0} / ${st.expired || 0}</div></div></div>
       <form data-form="ibo-buy" class="row" style="margin-top:10px;gap:8px;align-items:flex-end"><div style="flex:1">${field('Credits to buy', 'credits', 10, { type: 'number', attrs: 'min="1" required' })}</div><div style="flex:1">${field('Total paid (USD)', 'price', 35, { type: 'number', attrs: 'min="0" step="any"' })}</div><button type="submit" class="btn primary">Buy</button></form>
       <p class="small muted">1 credit = 1-year activation for 1 IBO account · $${Number(r.costUsd || 3.5).toFixed(2)} per credit.</p></div>
     ${iboForm(state.admin.settings)}
+    </div>
   </div>
   <div class="card"><h3>📺 IBO clients <span class="small muted">(${(r.list || []).length})</span></h3>
-    ${(r.list || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Client</th><th>Login</th><th>Device / MAC</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>${(r.list || []).map(row).join('')}</tbody></table></div>` : '<div class="empty"><span class="ic">📺</span>No IBO clients yet. Add your first one on the left.</div>'}</div>`;
+    ${(r.list || []).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Client</th><th>Login</th><th>Device / MAC</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>${(r.list || []).map(row).join('')}</tbody></table></div>` : '<div class="empty"><span class="ic">📺</span>No IBO clients yet. Add your first one above — or add another MAC to an existing one with ➕.</div>'}</div>`;
 }
 Object.assign(actions, {
+  'ibo-mac': (el) => modal('➕ Add a device to this client', iboMacForm(el.dataset.id)),
+  'ibo-dev-add': (el) => { const form = el.closest('form[data-form="ibo-add"]'); const list = form && form.querySelector('.ibo-devlist'); if (!list) return; const n = list.querySelectorAll('.ibo-devrow').length; if (n >= 8) return; list.insertAdjacentHTML('beforeend', iboDevRowHtml(n, {})); iboRowSelect(list.querySelectorAll('.ibo-devrow')[n].querySelector('select[name="deviceApp"]')); },
+  'ibo-dev-del': (el) => { el.closest('.ibo-devrow').remove(); },
   'ibo-del': async (el) => { if (!confirm('Remove this IBO client?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/ibo/' + el.dataset.id); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'ibo-activate': async (el) => { el.disabled = true; try { const r = await api('POST', `/api/admin/ibo/${el.dataset.id}/activate`, {}); toast(`Activated ✓ · ${r.credits} credit${r.credits === 1 ? '' : 's'} left`); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'ibo-send': async (el) => {
@@ -5212,8 +5465,22 @@ Object.assign(actions, {
   },
 });
 Object.assign(forms, {
-  async 'ibo-add'(f) { const o = formToObj(f); o.trial = f.trial && f.trial.checked ? true : undefined; try { await api('POST', '/api/admin/ibo', o); toast('Added ✓'); f.reset(); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); } },
+  async 'ibo-mac'(f) { try { const r = await api('POST', '/api/admin/ibo/macs', { id: f.dataset.id, mac: iboNormMac(f.mac.value) }); closeModal(); toast('Device added ✓ — credits multiply by the number of devices.'); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); } },
+  async 'ai-ask'(f) { const q = f.question ? f.question.value : ''; if (f.question) f.question.value = ''; await aiaSend(q); },
+  async 'ibo-add'(f) {
+    const devs = [...f.querySelectorAll('.ibo-devrow')].map((r) => { const app = r.querySelector('select[name="deviceApp"]').value; const mac = iboNormMac(r.querySelector('input[name="mac"]').value); return mac ? { deviceApp: app, mac } : null; }).filter(Boolean);
+    if (!devs.length) return toast('Enter the MAC address of at least one device.', true);
+    const o = formToObj(f); delete o.deviceApp; delete o.mac; delete o.macAddress;
+    o.devices = devs; o.trial = f.trial && f.trial.checked ? true : undefined;
+    try { await api('POST', '/api/admin/ibo', o); toast('Added ✓ — ' + devs.length + ' device(s)'); f.reset(); state.admin.iboSelected = []; $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); }
+  },
   async 'ibo-buy'(f) { try { const o = formToObj(f); await api('POST', '/api/admin/ibo/credits', { action: 'buy', credits: o.credits, price: o.price }); toast('Credits added ✓'); f.reset(); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); } },
+  async 'sport-save'(f) { try { await api('POST', '/api/admin/sports', { id: f.dataset.id, name: f.name.value, type: f.type.value, date: f.date.value, tip: f.tip.value, url: f.url.value }); closeModal(); toast('Saved ✓'); $('#admin-body').innerHTML = await adminPromos(); } catch (e) { toast(e.message, true); } },
+});
+Object.assign(actions, {
+  'sport-edit': (el) => { const e = (state.admin.sports || {}).events.find((x) => x.id === el.dataset.id) || {}; modal('🏆 Sports promo', sportForm(e)); },
+  'sport-del': async (el) => { if (!confirm('Delete this sports promo?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/sports/' + encodeURIComponent(el.dataset.id)); toast('Deleted ✓'); $('#admin-body').innerHTML = await adminPromos(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'aia-act': (el) => void aiaAction(el.dataset.action || ''),
 });
 
 async function adminReceipts() {
@@ -5356,7 +5623,8 @@ const GUIDE = {
     ['🛟', 'Support requests and live chat', ['New requests ring a sound and show a notification. Open <b>Support requests</b>, read, reply, then close the request.', 'Live chat messages appear in <b>Live chat</b> with a red badge.'], 'support.png'],
     ['🛒', 'Package requests and payments', ['When a customer taps <b>Request</b>, the payment link is emailed to them automatically. You see it under <b>🛒 requests</b>.', 'Check payment receipts in <b>Receipts</b> and approve or reject them.'], ''],
     ['🔊', 'Alert sounds', ['Tap <b>🔊</b> at the top to choose a sound for each alert, the volume, the spoken alert and a reminder while customers wait.', 'Keep the panel tab open (it can stay in the background) so you hear new customers.'], 'sounds.png'],
-    ['🔐', 'Rules', ['Never share customer data. Copying text from the panel is turned off for agents.', 'API keys, email marketing, list uploads, sender names, SEO and ads are managed only by the owner and the Technical Service.', 'Problem? Tap <b>🐞 Report</b> at the top.'], ''] ] },
+     ['🤝', 'Referrals, gifts and planning', ['A customer who refers a friend earns free days for the referrer, never a discount on the buyer: 30 days for a 1-year plan, 90 days for the 2-device 1-year ($109.99), 180 days for the 4-device 1-year ($139.99).', 'Customers see 1/3/6 months free or 10%/20% discount gifts. Resellers only see 10%/20% discount on credit packs — never free months.', 'Lifetime plans are fixed: Lifetime Standard · 1 Device $499.95 and Lifetime VIP · 4 Devices $999.95. Do not discount them.', 'Owner planning is synced through December 2027. Use <b>Planning overview</b> to read the shared schedule; the owner can tap <b>📣 Notify agents</b> to re-send the notice.'], ''],
+     ['🔐', 'Rules', ['Never share customer data. Copying text from the panel is turned off for agents.', 'API keys, email marketing, list uploads, sender names, SEO and ads are managed only by the owner and the Technical Service.', 'Problem? Tap <b>🐞 Report</b> at the top.'], ''] ] },
   fr: { title: 'Guide agent — fonctionnement du panneau', intro: 'Lisez ce guide avant votre premier service. Captures et courtes vidéos montrent chaque étape.', sec: [
     ['🟢', 'Début et fin de service', ['Connectez-vous avec votre identifiant et mot de passe (et le code à 6 chiffres si la double authentification est active).', 'Touchez <b>Check in & open the panel</b>. Rien ne s’ouvre avant le pointage : cela enregistre vos heures.', 'Pause avec <b>☕ Break</b> dans Attendance, puis <b>Check out</b> à la fin.', 'Par sécurité vous êtes <b>déconnecté automatiquement après 6 heures</b> (le minuteur ⏱ en haut affiche le temps restant). Reconnectez-vous et pointez à nouveau.'], 'checkin.png', 'checkin.webm'],
     ['👥', 'Trouver un client', ['Ouvrez <b>Customers</b> et tapez : nom, identifiant, téléphone, e-mail ou <b>numéro de commande</b>.', 'Les filtres (Active, Expiring, Expired, Trial, 🛒 requests) affinent la liste.', 'Touchez un client pour ouvrir sa fiche : abonnement, lignes, appareils, historique.'], 'customers.png'],
@@ -5365,7 +5633,8 @@ const GUIDE = {
     ['🛟', 'Support et chat en direct', ['Chaque nouvelle demande sonne et affiche une notification. Ouvrez <b>Support requests</b>, répondez puis fermez.', 'Les messages du chat arrivent dans <b>Live chat</b> avec un badge rouge.'], 'support.png'],
     ['🛒', 'Demandes de forfait et paiements', ['Quand un client touche <b>Demander</b>, le lien de paiement lui est envoyé automatiquement par e-mail.', 'Vérifiez les reçus dans <b>Receipts</b> et approuvez ou refusez.'], ''],
     ['🔊', 'Sons d’alerte', ['Touchez <b>🔊</b> en haut pour choisir un son par alerte, le volume, la voix et un rappel tant que des clients attendent.', 'Gardez l’onglet du panneau ouvert (même en arrière-plan).'], 'sounds.png'],
-    ['🔐', 'Règles', ['Ne partagez jamais les données clients. La copie de texte est désactivée pour les agents.', 'Clés API, e-mail marketing, imports de listes, noms d’expéditeur, SEO et publicités : uniquement le propriétaire et le Service technique.', 'Un problème ? Touchez <b>🐞 Report</b>.'], ''] ] },
+     ['🤝', 'Parrainage, cadeaux et planning', ['Un client qui parraine un ami reçoit des jours gratuits pour lui-même, jamais une réduction sur l’achat : 30 jours pour un forfait 1 an, 90 jours pour le 1 an 2 appareils (109,99 $), 180 jours pour le 1 an 4 appareils (139,99 $).', 'Les clients voient 1/3/6 mois offerts ou 10 %/20 % de réduction. Les revendeurs ne voient que 10 %/20 % de réduction sur les packs de crédits — jamais de mois gratuits.', 'Les forfaits Lifetime sont fixes : Lifetime Standard · 1 appareil 499,95 $ et Lifetime VIP · 4 appareils 999,95 $.', 'Le planning du propriétaire est synchronisé jusqu’en décembre 2027. Utilisez <b>Planning overview</b> pour lire le calendrier partagé ; le propriétaire peut toucher <b>📣 Notify agents</b> pour renvoyer l’avis.'], ''],
+     ['🔐', 'Règles', ['Ne partagez jamais les données clients. La copie de texte est désactivée pour les agents.', 'Clés API, e-mail marketing, imports de listes, noms d’expéditeur, SEO et publicités : uniquement le propriétaire et le Service technique.', 'Un problème ? Touchez <b>🐞 Report</b>.'], ''] ] },
   ar: { title: 'دليل الموظف — كيف تعمل لوحة التحكم', intro: 'اقرأ هذا الدليل قبل أول مناوبة. الصور والفيديوهات القصيرة توضح كل خطوة.', sec: [
     ['🟢', 'بداية ونهاية المناوبة', ['سجّل الدخول باسم المستخدم وكلمة المرور (والرمز المكوّن من 6 أرقام إذا كان التحقق بخطوتين مفعّلاً).', 'اضغط <b>Check in & open the panel</b>. لا يُفتح شيء قبل تسجيل الحضور: هكذا تُحسب ساعات عملك.', 'للاستراحة اضغط <b>☕ Break</b> في Attendance، وفي النهاية اضغط <b>Check out</b>.', 'للأمان يتم <b>تسجيل خروجك تلقائياً بعد 6 ساعات</b> (المؤقت ⏱ في الأعلى يعرض الوقت المتبقي). سجّل الدخول وسجّل الحضور من جديد للمتابعة.'], 'checkin.png', 'checkin.webm'],
     ['👥', 'البحث عن عميل', ['افتح <b>Customers</b> واكتب في خانة البحث: الاسم أو اسم المستخدم أو الهاتف أو البريد أو <b>رقم الطلب</b>.', 'استعمل الفلاتر (Active، Expiring، Expired، Trial، 🛒 requests).', 'اضغط على العميل لفتح ملفه: الاشتراك والخطوط والأجهزة والسجل.'], 'customers.png'],
@@ -5374,7 +5643,8 @@ const GUIDE = {
     ['🛟', 'طلبات الدعم والدردشة المباشرة', ['كل طلب جديد يصدر صوتاً وإشعاراً. افتح <b>Support requests</b> واقرأ ورد ثم أغلق الطلب.', 'رسائل الدردشة تظهر في <b>Live chat</b> مع شارة حمراء.'], 'support.png'],
     ['🛒', 'طلبات الباقات والمدفوعات', ['عندما يضغط العميل <b>طلب</b>، يصله رابط الدفع تلقائياً بالبريد. تجده في <b>🛒 requests</b>.', 'راجع إيصالات الدفع في <b>Receipts</b> واقبلها أو ارفضها.'], ''],
     ['🔊', 'أصوات التنبيه', ['اضغط <b>🔊</b> في الأعلى لاختيار صوت لكل تنبيه، ومستوى الصوت، والتنبيه الصوتي المنطوق، والتذكير أثناء انتظار العملاء.', 'اترك تبويب اللوحة مفتوحاً (ولو في الخلفية) لتسمع العملاء الجدد.'], 'sounds.png'],
-    ['🔐', 'القواعد', ['لا تشارك بيانات العملاء أبداً. نسخ النصوص من اللوحة معطّل للموظفين.', 'مفاتيح API والتسويق بالبريد ورفع القوائم وأسماء المرسل وSEO والإعلانات: للمالك والخدمة التقنية فقط.', 'مشكلة؟ اضغط <b>🐞 Report</b> في الأعلى.'], ''] ] } };
+     ['🤝', 'الإحالة والهدايا والتخطيط', ['العميل الذي يحيل صديقاً يحصل على أيام مجانية له هو، وليس خصماً على المشتري: 30 يوماً لخطة سنة واحدة، و90 يوماً لخطة جهازين/سنة (109.99$)، و180 يوماً لخطة 4 أجهزة/سنة (139.99$).', 'يرى العملاء هدايا 1/3/6 أشهر مجانية أو خصم 10%/20%. يرى الوكلاء خصم 10%/20% فقط على حزم الرصيد — ولا أشهر مجانية.', 'أسعار Lifetime ثابتة: Lifetime Standard · جهاز واحد 499.95$ وLifetime VIP · 4 أجهزة 999.95$.', 'تخطيط المالك متزامن حتى ديسمبر 2027. استخدم <b>Planning overview</b> لقراءة الجدول المشترك، ويمكن للمالك الضغط على <b>📣 Notify agents</b> لإعادة إرسال الإشعار.'], ''],
+     ['🔐', 'القواعد', ['لا تشارك بيانات العملاء أبداً. نسخ النصوص من اللوحة معطّل للموظفين.', 'مفاتيح API والتسويق بالبريد ورفع القوائم وأسماء المرسل وSEO والإعلانات: للمالك والخدمة التقنية فقط.', 'مشكلة؟ اضغط <b>🐞 Report</b> في الأعلى.'], ''] ] } };
 function agentGuide() {
   const me = state.admin.me || {}; const lang = GUIDE[me.lang] ? me.lang : 'en'; const G = GUIDE[lang]; const rtl = lang === 'ar';
   const tabs = Object.keys(GUIDE).map((k) => `<a data-act="guide-lang" data-l="${k}" class="${k === lang ? 'on' : ''}">${{ en: '🇬🇧 English', fr: '🇫🇷 Français', ar: '🇸🇦 العربية' }[k]}</a>`).join('');
@@ -5563,8 +5833,8 @@ async function adminOwnerPlan() {
   const stat = (label, big, sub = '') => `<div class="stat"><span>${label}</span><b>${big}</b>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`;
   const ms = S.months[OP.month] || S.all;
   const head = `<div class="card"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><h3 style="margin:0;flex:1;min-width:200px">🗓️ My planning <span class="badge">🔒 Owner only</span></h3>
-      <button class="btn sm primary" data-act="op-add">＋ Add activity</button><button class="btn sm" data-act="op-holiday">🏖️ Holidays</button><button class="btn sm" data-act="op-notify">🔔 Alerts</button></div>
-    <div class="op-tabs" style="margin-top:12px">${base.months.map((m) => `<button class="btn sm ${m === OP.month ? 'primary' : ''}" data-act="op-month" data-m="${m}">${opMonthName(m)}</button>`).join('')}</div>
+      <button class="btn sm primary" data-act="op-add">＋ Add activity</button><button class="btn sm" data-act="op-holiday">🏖️ Holidays</button><button class="btn sm" data-act="op-notify">🔔 Alerts</button><button class="btn sm" data-act="op-notify-agents" title="Notify all active agents that the planning is synced through December 2027">📣 Notify agents</button></div>
+    <div class="op-months-scroll" style="margin-top:12px"><label class="small muted" for="op-month-select">${esc(t('planSyncMonth'))}</label><select id="op-month-select" class="btn sm" data-act="op-month-select">${base.months.map((m) => `<option value="${m}" ${m === OP.month ? 'selected' : ''}>${esc(opMonthName(m))}</option>`).join('')}</select><span class="small muted">${esc(t('planSyncThrough'))}</span></div>
     <div class="op-tabs" style="margin-top:8px">${[['day', '📋 Day'], ['week', '📅 Week'], ['month', '🗓️ Month']].map(([k, n]) => `<button class="btn sm ${OP.view === k ? 'primary' : 'ghost'}" data-act="op-view" data-v="${k}">${n}</button>`).join('')}<span class="spacer"></span><button class="btn sm" data-act="op-go" data-d="today">Today</button></div>
     <div class="stats" style="margin-top:12px">${stat('Today', S.today.pct + '%', `${S.today.done}/${S.today.total} done`)}${stat('This week', S.week.pct + '%', `${S.week.done}/${S.week.total}`)}${stat(opMonthName(OP.month), ms.done + '/' + ms.total, ms.pct + '% of the month')}${stat('Compliance so far', `<span class="${pctCls(S.all.compliance)}">${S.all.compliance}%</span>`, `${S.all.dueDone}/${S.all.due} due tasks · goal 100%`)}${stat('Resend keys today', `${S.today.api}/${base.apiDaily}`, `week ${S.week.api}/${S.week.apiGoal} · 4 months ${S.all.api}/${S.all.apiGoal}`)}</div>
     <div class="wp-bar"><i style="width:${S.all.compliance}%"></i></div>
@@ -5629,8 +5899,9 @@ async function opReload() { await renderAdmin(); opAlertsRefresh(); }
 Object.assign(actions, {
   'op-month': (el) => { OP.month = el.dataset.m; if (OP.view === 'day') OP.view = 'month'; const t = OP.cache?.today || ''; OP.date = t.startsWith(OP.month) ? t : OP.month + '-01'; renderAdmin(); },
   'op-view': (el) => { OP.view = el.dataset.v; renderAdmin(); },
-  'op-open': (el) => { const d = el.dataset.d; if (OP.cache && (d < OP.cache.first || d > OP.cache.last)) return toast('Outside the planning (this month and the next 3).', true); OP.date = d; OP.month = d.slice(0, 7); OP.view = 'day'; renderAdmin(); },
+  'op-open': (el) => { const d = el.dataset.d; if (OP.cache && (d < OP.cache.first || d > OP.cache.last)) return toast('Outside the planning (available through December 2027).', true); OP.date = d; OP.month = d.slice(0, 7); OP.view = 'day'; renderAdmin(); },
   'op-go': (el) => { const c = OP.cache; if (el.dataset.d === 'today') { OP.date = c.today; OP.month = c.today.slice(0, 7); } else { let d = opAdd(OP.date, Number(el.dataset.d)); if (d < c.first) d = c.first; if (d > c.last) d = c.last; OP.date = d; OP.month = d.slice(0, 7); } renderAdmin(); },
+  'op-notify-agents': async () => { try { const r = await api('POST', '/api/admin/ownerplan/notify-agents'); toast(`📣 ${esc(t('planSyncSent', { n: Number(r.sent) || 0 }))}`); } catch (e) { toast(e.message, true); } },
   'op-check': async (el) => { const done = el.checked; try { await api('POST', '/api/admin/ownerplan/check', { date: el.dataset.date, id: el.dataset.id, done }); toast(done ? '✓ Checked off' : 'Unchecked'); opReload(); } catch (e) { el.checked = !done; toast(e.message, true); } },
   'op-add': () => modal('＋ Add an activity', opForm({}, 'add', OP.date)),
   'op-edit': (el) => { const b = opFindBlock(el.dataset.date, el.dataset.id); if (!b) return; modal('✏️ Edit · ' + b.title, opForm(b, 'edit', el.dataset.date)); },
@@ -5689,3 +5960,24 @@ function opAlertsTick() {
 }
 setInterval(() => { if (Date.now() - OPA.at > 5 * 60000) opAlertsRefresh(); else opAlertsTick(); }, 30000);
 setTimeout(opAlertsRefresh, 4000);
+
+async function adminPlanSync() {
+  const r = await api('GET', '/api/admin/ownerplan/sync'); const d = r.result || r;
+  const months = Array.isArray(d.months) ? d.months : [];
+  const cur = String(d.today || '').slice(0, 7);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return `<div class="card"><h3 style="margin-top:0">🗓️ ${esc(t('planSyncTitle'))}</h3>
+    <p class="small muted" style="margin:6px 0 12px">${esc(t('planSyncText', { from: d.from || d.first || '', to: d.to || d.last || '' }))}</p>
+    <div class="op-months-scroll">${months.map((m) => `<span class="op-chip ${m === cur ? 'on' : ''}">${esc(m)}</span>`).join('')}</div>
+    <div class="small muted" style="margin-top:8px">${esc(t('planSyncUpdated', { at: fmtDT(d.updatedAt) }))}</div></div>
+  <div class="card"><h3 style="margin-top:0">📌 ${esc(t('planSyncRules'))}</h3>
+    ${(d.plan || []).length ? d.plan.map((b) => `<div class="plan-sync-row"><span class="plan-sync-icon">${esc(b.icon || '•')}</span><div style="flex:1;min-width:0"><b>${esc(b.title || '')}</b><div class="small muted">${esc(b.rule || '')} · ${esc((b.days || []).map((x) => days[x]).join(' / '))}${Number(b.dom) ? ' · ' + esc(t('planSyncDom', { n: b.dom })) : ''}</div></div><span class="small muted">${esc(b.start || '')} → ${esc(b.end || '')}</span></div>`).join('') : `<p class="muted small">${esc(t('planSyncEmpty'))}</p>`}</div>
+  <div class="card"><h3 style="margin-top:0">👥 ${esc(t('planSyncTeam'))}</h3><div class="chip-row">${(d.agents || []).map((a) => `<span class="op-chip">${esc(a.name || a.username || a.id)}</span>`).join('')}</div>
+    <p class="small muted" style="margin:10px 0 0">${esc(t('planSyncPrivate'))}</p></div>`;
+}
+document.addEventListener('change', (e) => {
+  const el = e.target; if (el?.dataset?.act !== 'op-month-select') return;
+  OP.month = el.value; if (OP.view === 'day') OP.view = 'month';
+  const today = OP.cache?.today || ''; OP.date = today.startsWith(OP.month) ? today : OP.month + '-01';
+  renderAdmin();
+});

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail, parseResellerText, parseLooseDate, parseMoney, cleanPhoneText, scrubCards, cleanRslId } from '../public/core.js';
+import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail, parseResellerText, parseLooseDate, parseMoney, cleanPhoneText, scrubCards, cleanRslId, TECH_ONLY, txTime, sortTxNewest, exactTimeParts, formatExactTime, normalizePayoutDays, nextPayoutDate, usBankHolidayOn, bankPayoutNote, balanceTxLink, applyTransactionInput, migrateLegacyTransactions } from '../public/core.js';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 function setup(hook) {
@@ -999,7 +999,7 @@ test('telegram: bot setup, /start linking, and automatic trial delivery', async 
   const cfg = await x.call('GET', '/api/config');
   assert.equal(cfg.status, 200);
   assert.ok(Array.isArray(cfg.json.orderPackages), 'all order packages are exposed');
-  assert.ok(cfg.json.orderPackages.every((p) => p.kind === 'ibo' || p.kind === 'subscription'));
+  assert.ok(cfg.json.orderPackages.every((p) => ['ibo', 'subscription', 'lifetime'].includes(p.kind)));
   assert.ok(Array.isArray(cfg.json.resellerPackages), 'reseller packages are exposed');
   assert.equal(cfg.json.telegram.link, '', 'the public link appears only after the bot is connected');
 
@@ -2296,13 +2296,13 @@ test('work planning: schedule for every agent, check off today only, owner-only 
   const out = await x.be.tick(); assert.ok(out !== undefined);
 });
 
-test('owner planning: owner only, 4 months, recurring blocks, day-only vs future edits, checks, 10 Resend keys a day, alerts', async () => {
+test('owner planning: owner only, months through Dec 2027, recurring blocks, day-only vs future edits, checks, 10 Resend keys a day, alerts', async () => {
   const pushes = []; const x = setup(); const tok = await adminToken(x);
   await x.call('POST', '/api/admin/team', { name: 'Sara', username: 'sara', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'customers_edit', 'attendance', 'secrets', 'templates_edit'] }, tok);
   const st = (await x.call('POST', '/api/login', { username: 'sara', password: 'secret12' })).json.token; await signBylaws(x, st).catch(() => {});
   assert.equal((await x.call('GET', '/api/admin/ownerplan', {}, st)).status, 403, 'agents never see the owner planning');
   assert.equal((await x.call('POST', '/api/admin/ownerplan/check', { date: '2026-01-01', id: 'wake' }, st)).status, 403);
-  const g = (await x.call('GET', '/api/admin/ownerplan', {}, tok)).json; assert.equal(g.months.length, 4); const T = g.today; const wd = new Date(T + 'T12:00:00Z').getUTCDay();
+  const g = (await x.call('GET', '/api/admin/ownerplan', {}, tok)).json; assert.ok(g.months.includes('2027-12')); assert.equal(g.last, '2027-12-31'); const T = g.today; const wd = new Date(T + 'T12:00:00Z').getUTCDay();
   const ids = g.rows[0].blocks.map((b) => b.id); assert.ok(ids.includes('wake') && ids.includes('api') && ids.includes('bank') && ids.includes('sleep'));
   assert.equal(ids.includes('muay'), wd >= 2 && wd <= 5); assert.equal(ids.includes('legs'), wd === 1); assert.equal(ids.includes('support'), wd >= 1 && wd <= 5);
   // the monthly meeting on the 29th (Feb: the 28th)
@@ -2348,4 +2348,263 @@ test('owner planning: owner only, 4 months, recurring blocks, day-only vs future
   assert.equal((await x.be.ownerAlerts(at('09:30'))).sent, 1, 'only the next block starts; wake is checked so no late alert');
   assert.equal((await x.be.ownerAlerts(at('11:30'))).sent, 1, 'morning block left unchecked → late alert, and lunch... (moved to 12:00 today) not yet');
   assert.equal((await x.be.ownerAlerts(at('11:50'))).sent, 1, '10 min before the moved lunch');
+});
+
+test('finance helpers: timestamps, sorting, exact time format, payouts and bank notes', async () => {
+  const exact = Date.parse('2026-01-02T03:04:05Z');
+  assert.equal(txTime({ at: 111 }), 111);
+  assert.equal(txTime({ ts: '222' }), 222);
+  assert.equal(txTime({ createdAt: '2026-01-02T03:04:05Z' }), exact);
+  assert.equal(txTime({ date: '2026-11-20' }), Date.UTC(2026, 10, 20, 12));
+  assert.equal(txTime({ time: 'not a date' }), 0);
+
+  const rows = [
+    { id: 'old', date: '2024-01-01' },
+    { id: 'exact', at: exact },
+    { id: 'mid', ts: Date.parse('2025-06-01T00:00:00Z') },
+    { id: 'bad', date: 'nope' },
+    { id: 'zero', at: 0 },
+    { id: 'equal1', at: 1000 },
+    { id: 'equal2', at: 1000 },
+  ];
+  const rowsBefore = JSON.stringify(rows);
+  assert.deepEqual(sortTxNewest(rows).map((x) => x.id), ['exact', 'mid', 'old', 'equal1', 'equal2', 'bad', 'zero']);
+  assert.equal(JSON.stringify(rows), rowsBefore, 'sortTxNewest does not mutate its input');
+
+  const parts = exactTimeParts(exact);
+  assert.equal(parts.date, '2026-01-02');
+  assert.equal(parts.time, '10:04:05', 'seconds are always present');
+  assert.equal(parts.tz, 'Asia/Bangkok');
+  assert.match(formatExactTime({ at: exact }), /^2026-01-02 10:04:05 Asia\/Bangkok$/);
+
+  assert.equal(normalizePayoutDays(1), 1);
+  assert.equal(normalizePayoutDays('2'), 2);
+  assert.equal(normalizePayoutDays(7), 7);
+  assert.equal(normalizePayoutDays(3), 2, 'unsupported payout days fall back to 2');
+  const from = Date.UTC(2026, 10, 20, 9, 30);
+  assert.equal(nextPayoutDate(2, from), from + 2 * 86400000);
+  assert.equal(nextPayoutDate(3, from), from + 2 * 86400000);
+
+  assert.equal(usBankHolidayOn(new Date(2026, 6, 4, 12).getTime()), 'Independence Day');
+  assert.equal(usBankHolidayOn(new Date(2026, 5, 3, 12).getTime()), null);
+  const note = bankPayoutNote({ name: 'Mercury', payoutDays: 2 }, new Date(2026, 6, 2, 12).getTime());
+  assert.match(note, /Mattress/);
+  assert.match(note, /internal cash ledger/i);
+  assert.match(note, /pending Stripe payouts/i);
+  assert.match(note, /2 days/);
+  assert.match(note, /Next payout:/);
+  assert.match(note, /Independence Day/, 'US bank holiday delays are called out');
+  assert.deepEqual(balanceTxLink({ id: 'a b/c' }), { id: 'a b/c', url: '#tx-a%20b%2Fc', label: 'View transaction' });
+});
+
+test('finance helpers: new input keeps fields and legacy migration never mutates', async () => {
+  const input = { id: 'tx1', date: '2026-11-20', time: '13:47:05', note: 'keep me' };
+  const applied = applyTransactionInput(input);
+  assert.equal(applied.at, Date.parse('2026-11-20T13:47:05Z'));
+  assert.equal(applied.timePrecision, 'second');
+  assert.equal(applied.date, '2026-11-20');
+  assert.equal(applied.time, '13:47:05');
+  assert.equal(applied.note, 'keep me');
+  assert.equal(input.at, undefined, 'applyTransactionInput does not mutate its input');
+  assert.equal(input.timePrecision, undefined);
+
+  const legacy = { s: { finance: { tx: [
+    { id: 'legacy', date: '2024-05-06', amount: 10 },
+    { id: 'now', at: 1715000000000, time: '12:30:45', amount: 5 },
+    { id: 'junk', note: 'no date' },
+  ] } }, tx: [{ id: 'more', date: '2026-07-04' }] };
+  const before = JSON.stringify(legacy);
+  const { data, report } = migrateLegacyTransactions(legacy);
+  assert.equal(JSON.stringify(legacy), before, 'migration leaves the source untouched');
+  assert.deepEqual(report, { scanned: 4, migrated: 2, alreadyExact: 1, skipped: 1 });
+  const old = data.s.finance.tx[0];
+  assert.equal(old.date, '2024-05-06', 'the original date is preserved');
+  assert.equal(old.at, Date.UTC(2024, 4, 6, 12));
+  assert.equal(old.timePrecision, 'date-only');
+  assert.equal(old.legacy, true);
+  assert.equal(old.amount, 10);
+  assert.equal(data.s.finance.tx[1].at, 1715000000000);
+  assert.ok(!data.s.finance.tx[1].legacy, 'exact rows are left alone');
+  assert.equal(data.tx[0].at, Date.UTC(2026, 6, 4, 12));
+});
+
+test('finance settings defaults are seeded and ads is a normal agent permission', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const st = await x.call('GET', '/api/admin/settings', {}, tok);
+  assert.equal(st.status, 200);
+  assert.equal(st.json.importantNotice, '', 'editable Important notice starts empty');
+  assert.equal(st.json.payoutSchedule, 2);
+  assert.equal(st.json.autoTransferEnabled, false);
+  const c = await addCustomer(x, tok, { username: 'noticeuser', email: 'notice.user@example.com' });
+  const u = await x.call('POST', '/api/login', { username: c.username, password: 'secret12' });
+  const customerMe = await x.call('GET', '/api/me', {}, u.json.token);
+  assert.equal(customerMe.json.importantNotice, '', 'customer /api/me exposes the default Important notice');
+  assert.ok(!TECH_ONLY.includes('ads'), 'agents with the ads permission are not blocked as tech-only');
+  for (const p of ['secrets', 'templates_edit', 'seo']) assert.ok(TECH_ONLY.includes(p), p + ' stays tech/owner-only');
+  const made = await x.call('POST', '/api/admin/team', { name: 'Ads Agent', username: 'adsagent', password: 'secret12', role: 'Sales Agent', perms: ['customers_view', 'ads'] }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  assert.ok(made.json.perms.includes('ads'));
+  const li = await x.call('POST', '/api/login', { username: 'adsagent', password: 'secret12' });
+  const me = await x.call('GET', '/api/admin/me', {}, li.json.token);
+  assert.ok(me.json.perms.includes('ads'), 'the agent keeps ads in their live permissions');
+});
+
+test('finance API: table and CSV-sized export are newest-first; table stays capped at 300', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.store.put('tx', [
+    { id: 'old', date: '2024-01-01', amount: 1 },
+    { id: 'new', at: Date.parse('2026-01-02T03:04:05Z'), amount: 2 },
+    { id: 'mid', ts: Date.parse('2025-06-01T00:00:00Z'), amount: 3 },
+  ]);
+  const list = await x.call('GET', '/api/admin/tx', {}, tok);
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.json.map((t) => t.id), ['new', 'mid', 'old']);
+  const csvLike = await x.call('GET', '/api/admin/tx', {}, tok, { limit: 100000 });
+  assert.deepEqual(csvLike.json.map((t) => t.id), ['new', 'mid', 'old']);
+  const many = Array.from({ length: 301 }, (_, i) => ({ id: 'n' + i, at: i + 1 }));
+  await x.store.put('tx', many);
+  const capped = await x.call('GET', '/api/admin/tx', {}, tok);
+  assert.equal(capped.json.length, 300);
+  assert.equal(capped.json[0].id, 'n300');
+  assert.equal(capped.json.at(-1).id, 'n1');
+});
+
+test('finance API: a transaction entered with hours, minutes and seconds keeps them all', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const made = await x.call('POST', '/api/admin/tx', { type: 'income', accountId: 'stripe', amount: 12.5, date: '2026-11-20', time: '13:47:05', category: 'Sale' }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  assert.equal(made.json.at, Date.parse('2026-11-20T13:47:05Z'));
+  assert.equal(made.json.timePrecision, 'second');
+  assert.equal(made.json.date, '2026-11-20');
+  assert.equal(made.json.time, '13:47:05');
+});
+
+// ---- Upgrade: IBO players, multi-MAC IBO devices, AI assistant, sports promos, agent planning notifications ----
+
+test('ibo players: the IBO players list has the downloader codes and APK links', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const r = await x.call('GET', '/api/ibo/players', {}, tok);
+  assert.equal(r.status, 200);
+  const names = r.json.map((p) => p.name);
+  for (const want of ['IBO Player', 'IBO Player Pro', 'KING4K Player', 'IBO Pro Player', 'IBO Pro', 'IBOSS IPTV', 'IBO XPlayer']) assert.ok(names.includes(want), `${want} is in the IBO players list`);
+  const ibo = r.json.find((p) => p.name === 'IBO Player');
+  assert.equal(ibo.code, '1171959');
+  assert.match(ibo.apk, /^https:\/\/ibodesk\.com\/iboupdate\.apk$/);
+  assert.match(ibo.playlist, /iboplayer\.com\/device\/login/);
+  const pro = r.json.find((p) => p.name === 'IBO Player Pro');
+  assert.match(pro.code, /^923441$/);
+  assert.match(pro.apk, /ibodesk\.com\/ibopro\.apk/);
+  assert.match(pro.playlist, /iboplayer\.pro\/manage-playlists\/login\/$/);
+});
+
+test('IBO clients: several devices per client, per-device apps, credits multiply by device count', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const set = await x.call('POST', '/api/admin/ibo/credits', { action: 'set', credits: 8 }, tok);
+  assert.equal(set.status, 200);
+  const m = await x.call('POST', '/api/admin/ibo', { name: 'Living room', deviceApp: 'IBO Player Pro', devices: [{ deviceApp: 'IBO Player Pro', mac: 'aa:bb:cc:dd:ee:ff' }, { deviceApp: 'KING4K Player', mac: 'AA-BB-CC-DD-EE-01' }] }, tok);
+  assert.equal(m.status, 200, JSON.stringify(m.json));
+  assert.equal(m.json.client.devices.length, 2);
+  assert.equal(m.json.client.devices[0].deviceApp, 'IBO Player Pro');
+  assert.equal(m.json.client.devices[1].deviceApp, 'KING4K Player');
+  assert.deepEqual(m.json.client.macs, ['AA:BB:CC:DD:EE:FF', 'AA:BB:CC:DD:EE:01']);
+  assert.equal(m.json.client.macAddress, 'AA:BB:CC:DD:EE:FF');
+  const g = await x.call('GET', '/api/admin/ibo', {}, tok);
+  assert.equal(g.json.list[0].devices.length, 2);
+  const m2 = await x.call('POST', '/api/admin/ibo', { name: 'Four-box household', devices: [{ deviceApp: 'IBO Player', mac: 'AA:BB:CC:DD:EE:02' }, { deviceApp: 'IBO Player', mac: 'AA:BB:CC:DD:EE:03' }, { deviceApp: 'IBO Player Pro', mac: 'AA:BB:CC:DD:EE:04' }, { deviceApp: 'KING4K Player', mac: 'AA:BB:CC:DD:EE:05' }] }, tok);
+  assert.equal(m2.status, 200, JSON.stringify(m2.json));
+  assert.equal(m2.json.client.devices.length, 4);
+  const shelf = await x.call('GET', '/api/admin/ibo/credits', {}, tok);
+  assert.equal(shelf.json.credits, 2, '4 devices deducted 4 credits from the 8 set');
+  const add = await x.call('POST', '/api/admin/ibo/macs', { id: m2.json.client.id, mac: '00 11 22 33 44 55' }, tok);
+  assert.equal(add.status, 200); assert.equal(add.json.client.devices.length, 5);
+  const del = await x.call('DELETE', '/api/admin/ibo/macs', { id: m2.json.client.id, mac: '00:11:22:33:44:55' }, tok);
+  assert.equal(del.status, 200); assert.equal(del.json.client.devices.length, 4);
+  assert.equal((await x.call('DELETE', '/api/admin/ibo/macs', { id: m2.json.client.id, mac: 'Q' }, tok)).status, 400, 'an unparseable MAC is refused');
+});
+
+test('AI assistant: panel answers questions, the owner can configure and run actions', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const q1 = await x.call('POST', '/api/admin/ai/ask', { question: 'What is my daily plan?' }, tok);
+  assert.equal(q1.status, 200); assert.equal(q1.json.source, 'panel'); assert.match(q1.json.answer, /Today's plan/);
+  const q2 = await x.call('POST', '/api/admin/ai/ask', { question: "What are tomorrow's tasks?" }, tok);
+  assert.equal(q2.json.source, 'panel'); assert.match(q2.json.answer, /Tomorrow/);
+  const alerts = await x.call('POST', '/api/admin/ai/action', { action: 'ask-alerts' }, tok);
+  assert.equal(alerts.status, 200); assert.ok(alerts.json.answer);
+  const ibo = await x.call('POST', '/api/admin/ai/action', { action: 'ibo-setup' }, tok);
+  assert.equal(ibo.status, 200); assert.match(ibo.json.answer, /1171959/);
+  const notify = await x.call('POST', '/api/admin/ai/action', { action: 'notify-agents' }, tok);
+  assert.equal(notify.status, 200);
+  const cfg = await x.call('GET', '/api/admin/ai/config', {}, tok);
+  assert.equal(cfg.json.on, true); assert.equal(cfg.json.model, 'gpt-4o-mini'); assert.equal(cfg.json.hasKey, false);
+  const set = await x.call('PUT', '/api/admin/ai/config', { on: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-test-123', instructions: 'Answer in French.' }, tok);
+  assert.equal(set.status, 200); assert.equal(set.json.hasKey, true);
+  const cfg2 = await x.call('GET', '/api/admin/ai/config', {}, tok);
+  assert.equal(cfg2.json.hasKey, true, 'the config never returns the key');
+});
+
+test('AI assistant: agents share the panel answers, but only the owner runs actions', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const made = await x.call('POST', '/api/admin/team', { name: 'Agent One', username: 'agentone', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  const lg = await x.call('POST', '/api/login', { username: 'agentone', password: 'secret12' });
+  assert.equal(lg.status, 200);
+  const byl = await x.call('POST', '/api/admin/bylaws/sign', { name: 'Agent One' }, lg.json.token);
+  assert.equal(byl.status, 200, JSON.stringify(byl.json));
+  const ag = await x.call('POST', '/api/admin/ai/ask', { question: 'What is my daily plan?' }, lg.json.token);
+  assert.equal(ag.status, 200); assert.equal(ag.json.source, 'panel');
+  assert.equal((await x.call('PUT', '/api/admin/ai/config', { on: true }, lg.json.token)).status, 403);
+  assert.equal((await x.call('POST', '/api/admin/ai/action', { action: 'notify-agents' }, lg.json.token)).status, 403);
+});
+
+test('AI assistant owner actions: new Resend API, sports promo update, customer program change', async () => {
+  const x = setup((url) => { if (String(url).startsWith('https://api.resend.com/api_keys')) return { ok: true, status: 200, json: async () => ({ data: { token: 'rk_test_new', name: 'AI assistant' } }), text: async () => '{}' }; });
+  const tok = await adminToken(x);
+  const s = await x.store.get('settings'); s.email.resendKey = 're_owner_key'; await x.store.put('settings', s);
+  const re = await x.call('POST', '/api/admin/ai/action', { action: 'resend-create' }, tok);
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  assert.equal(re.json.key, 'rk_test_new');
+  const ad = await x.call('POST', '/api/admin/ai/action', { action: 'update-ad', name: 'Champions League final', type: 'champions-league', date: '2027-06-07', tip: 'Prime-time match.' }, tok);
+  assert.equal(ad.status, 200);
+  const sp = await x.call('GET', '/api/admin/sports', {}, tok);
+  assert.ok(sp.json.events.some((e) => e.name === 'Champions League final' && e.type === 'champions-league'));
+  const cust = await addCustomer(x, tok);
+  const ch = await x.call('POST', '/api/admin/ai/action', { action: 'change-program', customerId: cust.id, username: 'agent_new_line', password: 'Pass1234', dns: 'http://line.test:8080' }, tok);
+  assert.equal(ch.status, 200, JSON.stringify(ch.json));
+  assert.equal(ch.json.username, 'agent_new_line');
+  const cs = await x.call('GET', '/api/admin/customers', {}, tok);
+  assert.equal(cs.json.find((c) => c.id === cust.id).lineUsername, 'agent_new_line');
+});
+
+test('sports: owner adds, edits and deletes sports events; the seeded calendar is there', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const g0 = await x.call('GET', '/api/admin/sports', {}, tok);
+  assert.ok(g0.json.events.some((e) => e.name === 'UEFA Champions League Final' && e.date === '2027-06-07' && e.type === 'champions-league'), 'the seeded Champions League event is in the calendar');
+  const a = await x.call('POST', '/api/admin/sports', { name: 'Champions League Final (test)', type: 'champions-league', date: '2027-06-07', tip: 'Prime-time match.' }, tok);
+  assert.equal(a.status, 200, JSON.stringify(a.json));
+  const g = await x.call('GET', '/api/admin/sports', {}, tok);
+  assert.ok(g.json.events.some((e) => e.name === 'Champions League Final (test)' && e.date === '2027-06-07' && e.type === 'champions-league'));
+  const id = g.json.events.find((e) => e.name === 'Champions League Final (test)').id;
+  const b = await x.call('POST', '/api/admin/sports', { id, name: 'Champions League Final — updated', tip: 'New tip.' }, tok);
+  assert.equal(b.status, 200);
+  const g2 = await x.call('GET', '/api/admin/sports', {}, tok);
+  assert.ok(g2.json.events.some((e) => e.name === 'Champions League Final — updated' && e.tip === 'New tip.'));
+  assert.ok(!g2.json.events.some((e) => e.name === 'Champions League Final (test)'), 'the original event was replaced');
+  const d = await x.call('DELETE', '/api/admin/sports/' + id, {}, tok);
+  assert.equal(d.status, 200);
+  const g3 = await x.call('GET', '/api/admin/sports', {}, tok);
+  assert.ok(!g3.json.events.some((e) => e.name === 'Champions League Final — updated'));
+  const bad = await x.call('POST', '/api/admin/sports', { name: '', type: 'nfl' }, tok);
+  assert.equal(bad.status, 400);
+});
+
+test('agents get a planning notification when the owner changes My planning', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const today = new Date().toISOString().slice(0, 10);
+  const bkk = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, p) => { a[p.type] = p.value; return a; }, {});
+  const dates = new Set([today, `${bkk.year}-${bkk.month}-${bkk.day}`]);
+  for (const d of dates) await x.store.del('ownerplann:' + d);
+  const r = await x.call('POST', '/api/admin/ownerplan/block', { op: 'add', date: today, block: { start: '09:00', end: '10:00', title: 'Team standup' } }, tok);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  let marked = false; for (const d of dates) if (await x.store.get('ownerplann:' + d)) marked = true;
+  assert.ok(marked, 'the day is marked so agents are only notified once per day');
 });

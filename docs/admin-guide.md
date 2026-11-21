@@ -44,3 +44,27 @@ The public website (home, pricing, FAQ, privacy, terms) is shown to visitors who
 - **Language of emails** (Trial & email setup): English for everyone by default; you can pick French, Arabic, or each customer's own language.
 - **Renewing never fails because of the panel**: the renewal is saved, a notice shows what the panel answered, and the customer is listed in Alerts → *Paid: renew on the panel*.
 - **Paying inside the app**: *Pay now* opens the Stripe page in the same window (and inside the Android app after customers install the new version). Stripe does not allow its payment page to be shown inside a frame of another page. New pay links created from Plans & prices send the customer back into the app after paying; for links you made yourself, set “After payment → redirect to” `https://intproto-tv.store/#paid` in Stripe.
+
+## Promotions, referrals & planning (20 Nov 2026 update)
+
+### Referral programme
+- Every customer has a personal referral link (`?ref=<code>`) under **Account → Referral**. A friend or family member who signs up with it and buys an eligible 1-year plan earns the referrer **free subscription days**: **1 month (30 days)** for a standard 1-year plan, **3 months (90 days)** for the **2-device 1-year ($109.99)** plan and **6 months (180 days)** for the **4-device 1-year ($139.99)** plan.
+- The reward is added to the referrer's expiry date, never applied as a discount to the buyer. There is a **365-day lifetime cap per referrer** and **one reward per referred buyer**. Self-referrals and changing an already-applied code are blocked.
+- Monitor it in **Customers / referral reports**: a customer's account shows the code, how many people they referred, days awarded and days remaining.
+
+### Gifts & promotions visibility
+- Normal customers see all available gifts and discounts in **one place** in the app: `1 month free`, `3 months free`, `6 months free`, or `10% / 20% discount`. Keep the wording simple — no separate hidden offers.
+- **Resellers see discounts only** (`10%` or `20%`); free-month gifts are stripped from the reseller view even if an older setting still lists them. When editing gift settings, keep reseller entries to discounts only.
+
+### Lifetime Intproto-TV promotions
+- **Lifetime Standard — 1 Device: $499.95** and **Lifetime VIP — 4 Devices: $999.95**. These fixed prices apply across all packages and promotions: no discount code, no referral reward and no free months on lifetime plans.
+
+### Owner "My planning" & agent sync
+- The owner's **🗓️ My planning** schedule now runs through **December 2027** with the same recurring blocks, monthly events and 10 daily API-key slots. Only the owner can edit it.
+- Agents see a **read-only synced overview** in their panel with the same colours and layout as the owner view; they cannot change owner blocks, checks or API keys.
+- All agents are notified **once** when the updated schedule goes live. The owner can send the notice again from **My planning → Notify agents** after later changes.
+- Agents should check **Work planning** for their own tasks; the owner planning notice links there.
+
+### Phone, tablet & laptop guidance
+- The owner and agent panels use one shared colour set and the same overview cards on every screen size. On a phone (iPhone, Samsung, Android) tap **☰ Menu** to jump between pages; buttons and tabs have full-height tap targets and the layouts reflow to one column. Tablets and laptops show the two-column version. All new panels respect dark/light themes and reduced-motion settings.
+- The in-app **Agent guide** page is updated with all of the above; send agents there first when they ask about the new referral, gift or planning rules.
