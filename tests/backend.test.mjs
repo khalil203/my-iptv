@@ -762,6 +762,29 @@ test('marketing: keys stay masked, lists drop bounced emails, campaign sends wit
   assert.equal((await x.call('GET', '/api/admin/emailmkt', {}, staff)).status, 403);
 });
 
+test('marketing send: a one-time reviewed subject covers every batch without changing rotating subjects', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'INTPROTO-TV <hello@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  await x.call('PUT', '/api/admin/emailmkt/settings', { keys: ['re_one', 're_two', 're_three'], senders: ['INTPROTO-TV'], subjects: ['Rotate A', 'Rotate B'] }, tok);
+  const savedSubjects = (await x.store.get('mkt')).subjects.slice();
+  const emails = Array.from({ length: 101 }, (_, i) => `review${i}@example.com`).join('\n');
+  const list = await x.call('POST', '/api/admin/emailmkt/list', { name: 'Subject override batch', text: emails }, tok);
+  assert.equal(list.status, 200); assert.equal(list.json.count, 101);
+
+  const overridden = await x.call('POST', '/api/admin/emailmkt/send', { listId: list.json.id, subject: 'Reviewed one-time subject' }, tok);
+  assert.equal(overridden.status, 200, JSON.stringify(overridden.json)); assert.equal(overridden.json.sent, 101);
+  const overrideBatches = x.mails.slice(0, 2);
+  assert.equal(overrideBatches.length, 2, '101 recipients are sent in two batches');
+  assert.ok(overrideBatches.every((batch) => Array.isArray(batch) && batch.every((message) => message.subject === 'Reviewed one-time subject')));
+  assert.deepEqual((await x.store.get('mkt')).subjects, savedSubjects, 'the one-time subject does not replace configured rotation subjects');
+
+  const rotated = await x.call('POST', '/api/admin/emailmkt/send', { listId: list.json.id }, tok);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json)); assert.equal(rotated.json.sent, 101);
+  const rotationBatches = x.mails.slice(2, 4);
+  assert.deepEqual(rotationBatches.map((batch) => batch[0].subject), ['Rotate A', 'Rotate B'], 'without an override, configured subjects continue rotating by batch');
+  assert.deepEqual((await x.store.get('mkt')).subjects, savedSubjects);
+});
+
 test('seo/gads/fb trackers: logs entries and rolls up daily spend', async () => {
   const x = setup(); const tok = await adminToken(x);
   const post = await x.call('POST', '/api/admin/seo', { platform: 'Reddit', title: 'Posted about INTPROTO on r/IPTV', result: '12 upvotes' }, tok);
@@ -2534,6 +2557,10 @@ test('AI assistant: panel answers questions, the owner can configure and run act
   const q1 = await x.call('POST', '/api/admin/ai/ask', { question: 'What is my daily plan?' }, tok);
   assert.equal(q1.status, 200); assert.equal(q1.json.source, 'panel'); assert.match(q1.json.answer, /Agent Work planning/); assert.match(q1.json.answer, /Owner’s My planning/); assert.match(q1.json.answer, /OWNER_TODAY_EDITED/); assert.match(q1.json.answer, /OWNER_TODAY_ADDED/); assert.match(q1.json.answer, /10:00–10:30/);
   assert.doesNotMatch(q1.json.answer, /OWNER_PUBLIC_TEST_BLOCK|OWNER_API_BLOCK_SHOULD_NOT_LEAK|PRIVATE_NOTE_SHOULD_NOT_LEAK|APIKEY_RECORD_SHOULD_NOT_LEAK|CHECKOFF_SHOULD_NOT_LEAK/);
+  const bothPlans = await x.call('POST', '/api/admin/ai/ask', { question: 'Show both owner My planning and agent Work planning for today.' }, tok);
+  assert.equal(bothPlans.status, 200); assert.equal(bothPlans.json.source, 'panel');
+  assert.match(bothPlans.json.answer, /Agent Work planning for/); assert.match(bothPlans.json.answer, /Owner’s My planning \(/);
+  assert.match(bothPlans.json.answer, /OWNER_TODAY_EDITED/); assert.match(bothPlans.json.answer, /OWNER_TODAY_ADDED/);
   const ownerOnly = await x.call('POST', '/api/admin/ai/ask', { question: 'Show the owner’s My planning schedule.' }, tok);
   assert.match(ownerOnly.json.answer, /OWNER_TODAY_EDITED/); assert.match(ownerOnly.json.answer, /OWNER_TODAY_ADDED/); assert.doesNotMatch(ownerOnly.json.answer, /OWNER_API_BLOCK_SHOULD_NOT_LEAK|PRIVATE_NOTE_SHOULD_NOT_LEAK|APIKEY_RECORD_SHOULD_NOT_LEAK|CHECKOFF_SHOULD_NOT_LEAK/);
   const ownerTomorrowPlan = await x.call('POST', '/api/admin/ai/ask', { question: 'Show the owner’s My planning for tomorrow.' }, tok);
@@ -2574,18 +2601,45 @@ test('AI provider HTTP URLs are rejected and a legacy HTTP configuration falls b
   assert.equal(providerCalls, 0, 'HTTP or credential-bearing AI URLs must never reach fetch');
 });
 
+test('AI settings: generic writes are owner-only, secure provider URLs are required, and masked keys are preserved', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const configured = await x.call('PUT', '/api/admin/ai/config', { on: true, baseUrl: 'https://ai.example/v1', model: 'text-model', apiKey: 'sk-original-secret', photoAnalysis: true }, tok);
+  assert.equal(configured.status, 200);
+  for (const ai of [{ baseUrl: 'http://ai.example/v1' }, { baseUrl: 'https://user:secret@ai.example/v1' }]) {
+    assert.equal((await x.call('PUT', '/api/admin/settings', { ai }, tok)).status, 400, 'generic settings reject HTTP and credential-bearing provider URLs');
+    assert.equal((await x.store.get('settings')).ai.apiKey, 'sk-original-secret');
+  }
+  const masked = await x.call('PUT', '/api/admin/settings', { ai: { baseUrl: 'https://ai.example/v1', photoAnalysis: false, apiKey: '••••' } }, tok);
+  assert.equal(masked.status, 200, JSON.stringify(masked.json));
+  assert.equal((await x.store.get('settings')).ai.apiKey, 'sk-original-secret', 'submitting the masked key leaves the existing key intact');
+
+  const made = await x.call('POST', '/api/admin/team', { name: 'Settings Viewer', username: 'settingsviewer', password: 'secret12', role: 'Sales Agent', perms: ['settings', 'customers_view'] }, tok);
+  assert.equal(made.status, 200);
+  const login = await x.call('POST', '/api/login', { username: 'settingsviewer', password: 'secret12' }); assert.equal(login.status, 200);
+  const staff = login.json.token; await signBylaws(x, staff);
+  assert.equal((await x.call('GET', '/api/admin/settings', {}, staff)).status, 200, 'staff has generic settings access');
+  for (const ai of [{ baseUrl: 'https://attacker.example/v1' }, { photoAnalysis: true }, { apiKey: 'sk-attacker' }]) {
+    assert.equal((await x.call('PUT', '/api/admin/settings', { ai }, staff)).status, 403, 'settings permission does not grant AI configuration access');
+  }
+  assert.equal((await x.store.get('settings')).ai.apiKey, 'sk-original-secret');
+  assert.equal((await x.store.get('settings')).ai.baseUrl, 'https://ai.example/v1');
+  assert.equal((await x.store.get('settings')).ai.photoAnalysis, false);
+});
+
 test('AI marketing composer returns safe HTML and WhatsApp plain text, without sending or saving', async () => {
   let providerBody = null;
   const x = setup((url, init) => { if (String(url).endsWith('/chat/completions')) { providerBody = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ emailSubject: 'A useful update', emailHeadline: 'Offer < 10 & safe', emailBody: 'Use < 5 devices & check.', whatsappText: '*Hello* <b>there</b>' }) } }] }) }; } });
   const tok = await adminToken(x);
   await x.call('PUT', '/api/admin/ai/config', { on: true, baseUrl: 'https://ai.example/v1', model: 'vision-text-model', apiKey: 'sk-test' }, tok);
+  await x.store.put('mkt', { rows: [{ id: 'saved-row', key: 're_saved', domain: 'example.com', on: true }], subjects: ['Saved rotating subject'], html: '<p>Existing campaign</p>', totalSent: 19, totalSpendUsd: 3.5 });
+  const mktBefore = await x.store.get('mkt');
   const draft = await x.call('POST', '/api/admin/ai/compose-marketing', { brief: 'Share the verified December service update.', audience: 'existing subscribers', tone: 'friendly' }, tok);
   assert.equal(draft.status, 200, JSON.stringify(draft.json));
   assert.equal(draft.json.emailSubject, 'A useful update'); assert.match(draft.json.emailHtml, /Offer &lt; 10 &amp; safe/); assert.match(draft.json.emailHtml, /Use &lt; 5 devices &amp; check/); assert.doesNotMatch(draft.json.emailHtml, /<script>|<img/);
   assert.equal(draft.json.whatsappText, '*Hello* there'); assert.doesNotMatch(draft.json.whatsappText, /<[^>]+>|<html/i);
   assert.equal(draft.json.sent, false); assert.equal(draft.json.saved, false); assert.equal(providerBody.model, 'vision-text-model');
   assert.equal(x.mails.length, 0, 'draft generation never sends a campaign');
-  assert.equal((await x.store.get('emailmkt'))?.html, undefined, 'draft generation does not persist campaign HTML');
+  assert.deepEqual(await x.store.get('mkt'), mktBefore, 'draft generation leaves the marketing store unchanged');
   const fallback = setup(); const ftok = await adminToken(fallback);
   const templ = await fallback.call('POST', '/api/admin/ai/compose-marketing', { brief: 'Verified service update.' }, ftok);
   assert.equal(templ.status, 200); assert.equal(templ.json.source, 'template'); assert.match(templ.json.emailHtml, /Verified service update/); assert.doesNotMatch(templ.json.whatsappText, /<html|<p>/);
@@ -2612,7 +2666,8 @@ test('AI photo analysis requires customer consent and ticket-view permission, se
   assert.equal(analyzed.status, 200, JSON.stringify(analyzed.json)); assert.match(analyzed.json.answer, /Visible error/); assert.equal(analyzed.json.saved, false);
   const providerText = JSON.stringify(providerRequests[0].body);
   assert.match(providerText, /data:image\/jpeg;base64/); assert.doesNotMatch(providerText, /PRIVATE_TICKET_TEXT_SHOULD_NOT_BE_SENT|Private Customer Name|Private subject/);
-  assert.equal(ticketBefore.messages.length, 1, 'analysis did not add a staff reply');
+  const ticketAfter = (await x.call('GET', '/api/me/tickets', {}, user)).json.find((t) => t.id === yesConsent.json.id);
+  assert.deepEqual(ticketAfter.messages, ticketBefore.messages, 'analysis did not change ticket messages or add a staff reply');
   const noView = await x.call('POST', '/api/admin/team', { name: 'Agent Without Ticket View', username: 'noview', password: 'secret12', role: 'Sales Agent', perms: [] }, tok);
   assert.equal(noView.status, 200);
   const staff = await x.call('POST', '/api/login', { username: 'noview', password: 'secret12' }); await signBylaws(x, staff.json.token);
@@ -2639,6 +2694,32 @@ test('AI photo-analysis quota serializes concurrent attempts and counts provider
   assert.equal(providerCalls, 20, 'the exhausted quota prevents later provider calls');
 });
 
+test('configured AI provider requests for ask, marketing composition, and photo analysis reject redirects', async () => {
+  const providerRequests = [];
+  const x = setup((url, init) => {
+    if (String(url).endsWith('/chat/completions')) {
+      providerRequests.push({ url: String(url), init });
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ emailSubject: 'Reviewed', emailHeadline: 'Update', emailBody: 'Service update.', whatsappText: 'Service update.' }) } }] }) };
+    }
+  });
+  const tok = await adminToken(x);
+  assert.equal((await x.call('PUT', '/api/admin/ai/config', { on: true, baseUrl: 'https://ai.example/v1', model: 'vision-model', apiKey: 'sk-test', photoAnalysis: true }, tok)).status, 200);
+  const asked = await x.call('POST', '/api/admin/ai/ask', { question: 'Give me a short service status summary.' }, tok);
+  assert.equal(asked.status, 200); assert.equal(asked.json.source, 'ai');
+  const composed = await x.call('POST', '/api/admin/ai/compose-marketing', { brief: 'Verified service update.' }, tok);
+  assert.equal(composed.status, 200); assert.equal(composed.json.source, 'ai');
+  await addCustomer(x, tok);
+  const user = (await x.call('POST', '/api/login', { username: 'testuser', password: 'secret12' })).json.token;
+  const image = 'data:image/png;base64,' + 'R'.repeat(500);
+  const ticket = await x.call('POST', '/api/me/tickets', { subject: 'Playback issue', text: 'Please see the image.', image, aiPhotoConsent: true }, user);
+  assert.equal(ticket.status, 200);
+  const ticketView = (await x.call('GET', '/api/me/tickets', {}, user)).json.find((t) => t.id === ticket.json.id);
+  const analyzed = await x.call('POST', '/api/admin/ai/analyze-photo', { ticketId: ticket.json.id, att: ticketView.messages[0].att }, tok);
+  assert.equal(analyzed.status, 200);
+  assert.equal(providerRequests.length, 3);
+  assert.deepEqual(providerRequests.map((r) => r.init.redirect), ['error', 'error', 'error'], 'every configured AI fetch rejects HTTP redirects');
+});
+
 test('AI assistant: agents share the panel answers, but only the owner runs actions', async () => {
   const x = setup(); const tok = await adminToken(x);
   const made = await x.call('POST', '/api/admin/team', { name: 'Agent One', username: 'agentone', password: 'secret12', role: 'Sales Agent', perms: ['customers_view'] }, tok);
@@ -2658,15 +2739,24 @@ test('AI alert context contains aggregate counts, not customer identity', async 
   const x = setup((url, init) => { if (String(url).endsWith('/chat/completions')) { providerRequests.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'There is one subscription ending soon.' } }] }) }; } });
   const tok = await adminToken(x);
   const customer = await addCustomer(x, tok, { name: 'PRIVATE_ALERT_CUSTOMER', username: 'privatealert' });
+  const staleHours = await addCustomer(x, tok, { name: 'PRIVATE_TRIAL_STALE_HOURS', username: 'staletrialhours', email: 'stalehours@example.com' });
+  const shouldNotEnd = await addCustomer(x, tok, { name: 'PRIVATE_TRIAL_NOT_ENDING', username: 'notendingtrial', email: 'notending@example.com' });
+  const ended = await addCustomer(x, tok, { name: 'PRIVATE_TRIAL_ENDED', username: 'endedtrial', email: 'ended@example.com' });
+  const capturedNow = Date.now();
   const customers = await x.store.get('customers');
   const row = customers.find((c) => c.id === customer.id); row.expiresAt = Date.now() + 2 * 86400000; row.daysLeft = 2;
+  const endingTrial = customers.find((c) => c.id === staleHours.id); endingTrial.isTrial = true; endingTrial.expiresAt = capturedNow + 6 * 3600000; endingTrial.hoursLeft = 1000; delete endingTrial.daysLeft;
+  const laterTrial = customers.find((c) => c.id === shouldNotEnd.id); laterTrial.isTrial = true; laterTrial.expiresAt = capturedNow + 2 * 86400000; laterTrial.hoursLeft = 1; delete laterTrial.daysLeft;
+  const expiredTrial = customers.find((c) => c.id === ended.id); expiredTrial.isTrial = true; expiredTrial.expiresAt = capturedNow - 3600000; expiredTrial.hoursLeft = 0; delete expiredTrial.daysLeft;
   await x.store.put('customers', customers);
   await x.call('PUT', '/api/admin/ai/config', { on: true, baseUrl: 'https://ai.example/v1', model: 'text-model', apiKey: 'sk-test' }, tok);
   const response = await x.call('POST', '/api/admin/ai/ask', { question: 'Summarize the current alerts.' }, tok);
   assert.equal(response.status, 200, JSON.stringify(response.json));
   const prompt = JSON.stringify(providerRequests[0]);
+  assert.match(prompt, /Trials ending within 12 hours: 1/, 'the trial ending count follows expiresAt and current time, not stale hoursLeft');
+  assert.match(prompt, /Trials ended without a pay link \(30-day window\): 1/, 'an expired trial remains in the ended-trial bucket');
   assert.match(prompt, /Subscriptions ending within 7 days: 1/);
-  assert.doesNotMatch(prompt, /PRIVATE_ALERT_CUSTOMER|privatealert|test\.person@example\.com/);
+  assert.doesNotMatch(prompt, /PRIVATE_ALERT_CUSTOMER|privatealert|PRIVATE_TRIAL_|staletrialhours|endedtrial|test\.person@example\.com/);
 });
 
 test('AI assistant owner actions: new Resend API, sports promo update, customer program change', async () => {

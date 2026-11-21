@@ -178,6 +178,7 @@ export function ensureLang(code) {
   packPending[code] = (async () => {
     try {
       const url = new URL('langs/' + encodeURIComponent(code) + '.json', document.baseURI || location.href);
+      url.searchParams.set('v', '126');
       const r = await fetch(url, { cache: 'force-cache' });
       if (r.ok) {
         const j = await r.json();

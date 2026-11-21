@@ -17,6 +17,28 @@ test('i18n module loads with all six language dictionaries', async () => {
   assert.match(m.tIn('fr', 'ticketAiPhotoConsent'), /fournisseur d’IA configuré/);
 });
 
+test('generated language-pack requests use a versioned cache URL', async () => {
+  const m = await import(`../public/i18n.js?cache-test-${Date.now()}`);
+  const oldDocument = globalThis.document;
+  const oldFetch = globalThis.fetch;
+  let requested;
+  globalThis.document = { baseURI: 'https://example.test/app/' };
+  globalThis.fetch = async (url, options) => {
+    requested = new URL(String(url));
+    assert.equal(options.cache, 'force-cache');
+    return { ok: true, json: async () => ({ code: 'fi', strings: { sample: 'ok' } }) };
+  };
+  try {
+    assert.equal(await m.ensureLang('fi'), true);
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+    globalThis.fetch = oldFetch;
+  }
+  assert.match(requested.pathname, /\/langs\/fi\.json$/);
+  assert.match(requested.searchParams.get('v') || '', /^\d+$/);
+});
+
 test('generated language packs cover every selectable language', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');

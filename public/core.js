@@ -4457,7 +4457,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (c.status === 'disabled') { counts.disabled++; continue; }
           const expired = (c.expiresAt || 0) <= now; const isTrial = !!c.isTrial;
           const daysLeft = c.daysLeft !== undefined ? Number(c.daysLeft) : (c.expiresAt ? Math.floor((c.expiresAt - now) / 86400000) : 0);
-          if (isTrial && !expired && (c.hoursLeft || 0) <= a.trialHours) counts.trialEnding++;
+          if (isTrial && !expired && Math.floor((Number(c.expiresAt) - now) / 3600000) <= a.trialHours) counts.trialEnding++;
           else if (isTrial && expired && daysLeft >= -a.expiredDays) counts.trialEnded++;
           else if (!isTrial && expired && daysLeft >= -a.expiredDays) counts.expired++;
           else if (!isTrial && !expired && daysLeft <= a.expiringDays) counts.expiring++;
@@ -4485,7 +4485,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const sys = [ai.instructions || 'You are the AI assistant of INTPROTO-TV (the TVplus IPTV reseller app).', 'Answer concisely, in the language of the user. Use the panel context. Clearly distinguish the owner’s My planning from agents’ Work planning; the owner schedule is a read-only overview and contains no private notes, checkoffs or API-key records. Alert context contains aggregate counts only, not customer names. Never claim access to private details omitted from context.', 'For IPTV setup, explain the difference between Xtream Codes/API details and an M3U playlist, say app menu names can vary, and do not request or repeat passwords, full M3U links or other credentials. IPTV players do not provide content; advise using authorized access only.', 'Suggest actions and use panel links when helpful. Known links: /intprototv?tab=workplan (Work planning), /intprototv?tab=ownerplan (My planning), /intprototv?tab=alerts (Alerts), /intprototv?tab=ibo (IBO Player), /intprototv?tab=promos (Promotions).'].join('\n');
           const prompt = ['Panel context:\n' + JSON.stringify(ctx, null, 1), 'User question:', question].join('\n');
           try {
-            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.3, max_tokens: 900, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] }) });
+            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.3, max_tokens: 900, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] }) });
             const j = await r.json().catch(() => ({}));
             const ans = j.choices && j.choices[0] && j.choices[0].message ? String(j.choices[0].message.content || '').trim() : '';
             if (r.ok && ans) return { answer: ans.slice(0, 1500), source: 'ai', related: ['/intprototv?tab=workplan', '/intprototv?tab=alerts'] };
@@ -4497,10 +4497,11 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const bothPlansAsked = /both|owner.{0,50}work planning|work planning.{0,80}(my planning|owner)|my planning.{0,80}work planning/i.test(q);
         const ownerLines = (ctx.ownerPlanning.plan || []).join('\n') || 'Nothing is scheduled in the owner overview for this date.';
         const workLines = (ctx.plan || []).join('\n') || 'Nothing is scheduled in agent Work planning for this date.';
+        if (bothPlansAsked && /tomorrow/i.test(q)) return { answer: `Tomorrow’s schedules:\nAgent Work planning (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}\n\nOwner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
+        if (bothPlansAsked) return { answer: `Today’s schedules (kept separate):\nAgent Work planning for ${name} (${ctx.today} · ${ctx.timezone}):\n${workLines}\n\nOwner’s My planning (${ctx.ownerPlanning.today} · ${ctx.ownerPlanning.timezone}):\n${ownerLines}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
         if (ownerPlanAsked && !workPlanAsked && !/tomorrow/i.test(q)) return { answer: `Owner’s My planning (${ctx.ownerPlanning.today} · ${ctx.ownerPlanning.timezone}):\n${ownerLines}\n\nTomorrow (${ctx.ownerPlanning.tomorrowDate}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=ownerplan'] };
         if (/tomorrow/i.test(q) && workPlanAsked && !ownerPlanAsked) return { answer: `Agent Work planning for ${name} (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan'] };
         if (/tomorrow/i.test(q) && ownerPlanAsked && !workPlanAsked) return { answer: `Owner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=ownerplan'] };
-        if (/tomorrow/i.test(q) && bothPlansAsked) return { answer: `Tomorrow’s schedules:\nAgent Work planning (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}\n\nOwner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
         if (workPlanAsked) return { answer: `Agent Work planning for ${name} (${ctx.today} · ${ctx.timezone}):\n${workLines}\n\nRules: ${(wp.rules || []).length ? (wp.rules || []).join(' · ') : 'none yet.'}`, source: 'panel', related: ['/intprototv?tab=workplan'] };
         if (/tomorrow/i.test(q)) return { answer: `Tomorrow’s schedules:\nAgent Work planning (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}\n\nOwner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
         if (/alert/i.test(q)) return { answer: `Alerts:\n${await aiAlertSummary()}`, source: 'panel', related: ['/intprototv?tab=alerts'] };
@@ -4538,7 +4539,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const system = 'Write a customer-friendly marketing campaign for an IPTV subscription service. Return only one JSON object with string fields emailSubject, emailHeadline, emailBody, whatsappText. Keep emailBody as plain text with paragraphs, not HTML. Write WhatsApp as plain text (optional WhatsApp *bold*, _italic_ markers), never HTML. Do not promise channels, reliability, prices, trials, or features unless the brief explicitly says them. Do not imply that the player provides content. No invented discounts or urgency. The email HTML will be built safely from the plain-text fields by the app.';
           const prompt = JSON.stringify({ campaignBrief: brief, audience, tone, appName });
           try {
-            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.55, max_tokens: 800, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] }) });
+            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.55, max_tokens: 800, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] }) });
             const j = await r.json().catch(() => ({})); const raw = String(j.choices?.[0]?.message?.content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
             const a = raw.indexOf('{'); const b = raw.lastIndexOf('}');
             if (r.ok && a >= 0 && b > a) { const parsed = JSON.parse(raw.slice(a, b + 1)); draft = { ...fallback, ...parsed }; source = 'ai'; }
@@ -4570,7 +4571,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const system = 'You are a cautious technical-support assistant reviewing one customer-submitted IPTV app or device troubleshooting image. Describe only visible, relevant evidence; do not guess private credentials or transcribe passwords, QR codes, full URLs, tokens, email addresses, or account identifiers. Explain uncertainty. Give a few safe, generic next steps and ask for non-sensitive details only if needed. Do not diagnose people or claim the image proves an account or service status. A human support agent will review your suggestion before replying.';
         const prompt = 'Inspect the attached image for a visible IPTV player/device setup or playback problem. Do not receive or infer any ticket text or customer identity. Return a concise observation, possible cause(s), and safe next troubleshooting steps. Redact or ignore credentials and personal details if visible.';
         try {
-          const r = await fetchFn(trimSlash(String(ai.baseUrl)) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.2, max_tokens: 650, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: image, detail: 'low' } }] }] }) });
+          const r = await fetchFn(trimSlash(String(ai.baseUrl)) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.2, max_tokens: 650, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: image, detail: 'low' } }] }] }) });
           const j = await r.json().catch(() => ({})); const content = j.choices?.[0]?.message?.content;
           const answer = (Array.isArray(content) ? content.filter((p) => p?.type === 'text').map((p) => p.text || '').join('\n') : String(content || '')).trim();
           if (!r.ok || !answer) return err(502, 'The configured provider could not analyze this picture. Check that its selected model supports vision.');
@@ -4682,7 +4683,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const doc = await getMktList(listRef.id); if (!doc) return err(404, 'List not found.');
         const bad = await getBad(); const recipients = (doc.emails || []).filter((e) => !bad[e]);
         if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
-        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const domains = mrows.map((r) => r.domain);
+        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const subjectOverride = cleanText(body.subject, 150); const domains = mrows.map((r) => r.domain);
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
         const html = (locked ? String(m.html || '') : String(body.html || m.html || '')).slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
@@ -4691,7 +4692,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const bi = Math.floor(i / 100); const batch = recipients.slice(i, i + 100);
           const cands = await mailCandidates(mrows, batch.length, accts);
           if (!cands.length) { stopped = 'Every marketing key is at its plan limit or paused. Add a paid key or wait for the limit to reset.'; await log('marketing', `Marketing stopped at ${i}/${recipients.length}: ${stopped}`); break; }
-          const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
+          const subject = subjectOverride || (subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`);
           let done = false;
           for (const row of cands.slice(0, 6)) {
           const keyIndex = mrows.indexOf(row); const key = row.key; const dom = row.domain;
@@ -5266,6 +5267,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(maskPanel(maskStripe({ ...s, ai: { ...(s.ai || {}), apiKey: String(s.ai?.apiKey || '').trim() ? '••••' : '' }, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } })));
       }
       if (R('PUT', '/api/admin/settings')) {
+        if (Object.prototype.hasOwnProperty.call(body || {}, 'ai') && !isOwner) return err(403, 'Only the owner configures the AI assistant.');
         // Absolute sovereignty (spec §1): only Nizar (Owner) and Khalil (Technical Manager) may show, add, edit or update
         // IPTV panel keys, Resend keys, Stripe keys and other API credentials. Everyone else is locked out at the API level.
         const API_KEY_PATHS = [['panel', 'dino'], ['panel', 'xtream'], ['panel', 'mega'], ['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets'], ['telegram', 'botToken'], ['telegram', 'webhookSecret']];
@@ -5281,11 +5283,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body?.reseller?.password === '••••') delete body.reseller.password;
         if (body?.reseller?.username === '••••') delete body.reseller.username;
         if (body?.reseller?.baseUrl === '••••') delete body.reseller.baseUrl;
+        if (body?.ai?.apiKey === '••••') delete body.ai.apiKey;
         if (body?.panel) for (const k of Object.keys(body.panel)) { const v = body.panel[k]; if (v && typeof v === 'object' && (v.apiKey === '••••' || v.password === '••••' || v.baseUrl === '••••')) { if (v.apiKey === '••••') delete v.apiKey; if (v.password === '••••') delete v.password; if (v.baseUrl === '••••') delete v.baseUrl; } }
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
         let newRows = null;
         if (body?.email && Array.isArray(body.email.transRows)) { if (!isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.'); newRows = normRows(body.email.transRows, transRowsOf(s)); delete body.email.transRows; }
         const next = deepMerge(s, body || {});
+        if (Object.prototype.hasOwnProperty.call(body || {}, 'ai') && !secureAiUrl(next.ai?.baseUrl)) return err(400, 'The AI provider URL must use HTTPS and cannot include embedded credentials.');
         if (isObj(body.orders)) { const q = { ...(s.orders || {}), ...body.orders }; const pf = (x, d) => (/^[A-Za-z]{1,10}$/.test(String(x || '').trim()) ? String(x).trim() : d);
           next.orders = { prefix: pf(q.prefix, 'WLF'), iboPrefix: pf(q.iboPrefix, 'IBO'), rslPrefix: pf(q.rslPrefix, 'RLS'), pad: Math.max(1, Math.min(6, Number(q.pad) || 3)), devPad: 2 }; next.orders.series = [next.orders.prefix, next.orders.iboPrefix, next.orders.rslPrefix].join(','); }
         if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');

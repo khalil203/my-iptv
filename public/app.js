@@ -4092,6 +4092,9 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if ((t.id === 'mkt-html' || t.id === 'mkt-subject') && state.admin) {
+    state.admin.mktComposer = { ...(state.admin.mktComposer || {}), [t.id === 'mkt-html' ? 'html' : 'subject']: t.value };
+  }
   if (t.name === 'notice' && t.closest('[data-notice-editor]')) {
     const preview = t.closest('[data-notice-editor]').querySelector('[data-notice-preview]');
     if (preview) { preview.textContent = t.value || 'Nothing to preview yet.'; preview.classList.toggle('empty', !t.value); }
@@ -4338,10 +4341,17 @@ Object.assign(actions, {
   'tk-filter': async (el) => { state.admin.tkFilter = el.dataset.f; $('#admin-body').innerHTML = await adminSupport(); },
   'tk-open': (el) => adminTicketModal(el.dataset.id),
   'ai-photo-analyze': async (el) => {
+    const ticketModal = el.closest('.modal');
     el.disabled = true; toast('Analyzing the consented image…');
     try {
       const r = await api('POST', '/api/admin/ai/analyze-photo', { ticketId: el.dataset.ticketId, att: el.dataset.attId });
-      modal('🔎 AI image troubleshooting suggestion', `<div class="notice warning small">Suggestion only — review it, verify the visible details, and write the customer reply yourself. The result was not saved or sent.</div><div style="white-space:pre-wrap;line-height:1.6">${esc(r.answer || '')}</div><p class="small muted" style="margin-bottom:0">Model: ${esc(r.model || 'configured provider')}</p>` , { wide: true });
+      const body = ticketModal && $('#modal-root').contains(ticketModal) ? ticketModal.querySelector('.modal-body') : null;
+      if (body) {
+        let suggestion = body.querySelector('[data-ai-photo-suggestion]');
+        if (!suggestion) { suggestion = document.createElement('div'); suggestion.dataset.aiPhotoSuggestion = ''; body.append(suggestion); }
+        suggestion.innerHTML = `<div class="notice warning small">Suggestion only — review it, verify the visible details, and write the customer reply yourself. The result was not saved or sent.</div><div style="white-space:pre-wrap;line-height:1.6">${esc(r.answer || '')}</div><p class="small muted" style="margin-bottom:0">Model: ${esc(r.model || 'configured provider')}</p>`;
+      }
+      if (el.isConnected) el.disabled = false;
     } catch (e) { toast(e.message, true); if (el.isConnected) el.disabled = false; }
   },
   'tfa-setup': async () => {
@@ -5408,12 +5418,19 @@ async function adminAttendancePage() {
   try { shiftLocal = zonedDayAndMinute(now, shiftTz); } catch { shiftTz = localTz; shiftLocal = zonedDayAndMinute(now, shiftTz); }
   const wd = String(shiftLocal.day); const today = (myShift && myShift.days && myShift.days[wd]) || null;
   const minsNow = shiftLocal.minute;
+  const prevWd = String((shiftLocal.day + 6) % 7); const prevShift = (myShift && myShift.days && myShift.days[prevWd]) || null;
   let shiftBanner = '';
-  if (today && today.on) {
-    const start = today.start, end = today.end;
-    const to = (m) => { const [h, mm] = [Math.floor(m / 60), m % 60]; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
-    if (lastMine !== 'in' && start - minsNow > 0 && start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(start)} (${shiftTz}) — in ${start - minsNow} minute(s). Check in when you begin.`;
-    else if (lastMine === 'in' && minsNow >= start && minsNow < Math.min(end === 0 ? 1440 : end, 1440) && (end === 0 ? 1440 - minsNow : end - minsNow) <= 10 && (end === 0 ? 1440 - minsNow : end - minsNow) >= 0) shiftBanner = `⏰ Your shift ends at ${to(end)} (${shiftTz}) — ${end === 0 ? 1440 - minsNow : end - minsNow} minute(s) left. Do your handover, then Check out.`;
+  const to = (m) => { const [h, mm] = [Math.floor(m / 60), m % 60]; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
+  if (today && today.on && lastMine !== 'in' && today.start - minsNow > 0 && today.start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(today.start)} (${shiftTz}) — in ${today.start - minsNow} minute(s). Check in when you begin.`;
+  if (!shiftBanner && lastMine === 'in') {
+    const start = today?.start, end = today?.end;
+    let remaining = null, endAt = null;
+    if (today?.on && start !== end) {
+      if (end > start && minsNow >= start && minsNow < end) { remaining = end - minsNow; endAt = end; }
+      else if (end < start && minsNow >= start) { remaining = 1440 - minsNow + end; endAt = end; }
+    }
+    if (remaining === null && prevShift?.on && prevShift.end < prevShift.start && minsNow < prevShift.end) { remaining = prevShift.end - minsNow; endAt = prevShift.end; }
+    if (remaining !== null && remaining >= 0 && remaining <= 10) shiftBanner = `⏰ Your shift ends at ${to(endAt)} (${shiftTz}) — ${remaining} minute(s) left. Do your handover, then Check out.`;
   }
   if (shiftBanner && !sessionStorage.getItem('shiftBeeped')) { try { const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC(); const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.setValueAtTime(0.08, ctx.currentTime); o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.6); sessionStorage.setItem('shiftBeeped', '1'); } catch {} }
   const status = lastMine === 'in' ? 'on shift' : lastMine === 'out' ? 'off duty' : lastMine === 'break_start' ? 'on break' : 'not checked in';
@@ -5560,6 +5577,7 @@ function mktDraftHtml(d) {
 async function adminMktPage() {
   const m = await api('GET', '/api/admin/emailmkt'); const st = await api('GET', '/api/admin/emailmkt/settings');
   state.admin.mkt = m; state.admin.mktSettings = st;
+  const composer = state.admin.mktComposer || {};
   const lists = m.lists || [];
   const input = (k, val, ph) => `<input name="${k}" data-k="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}" dir="ltr" autocomplete="off">`;
   const msCard = await mailStatusCard(true);
@@ -5577,7 +5595,7 @@ async function adminMktPage() {
         <button type="submit" class="btn primary">💾 Save marketing settings</button></form></div>
     <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (one per line)</span><textarea name="text" rows="5" required placeholder="one email per line"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>${aiComposer}
       ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}" title="Delete mailing list" aria-label="Delete mailing list">🗑</button></div>`).join('')}</div>
-      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select>${state.admin.me?.locked ? `<p class="small notice" style="margin:0 0 8px">🔒 The campaign email is set by the owner / Technical Service${st.html ? '' : ' (default message for now)'}. You choose the list and send.</p>` : `<textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message.">${esc(st.html || '')}</textarea><button type="button" class="btn sm" data-act="mkt-html-save" style="margin:6px 0">💾 Save as the campaign agents send</button>`}<p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
+      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select>${state.admin.me?.locked ? `<p class="small notice" style="margin:0 0 8px">🔒 The campaign email is set by the owner / Technical Service${st.html ? '' : ' (default message for now)'}. You choose the list and send.</p>` : `<label class="field"><span>Email subject (used for an applied AI draft; editable before sending)</span><input id="mkt-subject" value="${esc(composer.subject ?? st.subjects?.[0] ?? '')}" autocomplete="off"></label><textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message.">${esc(composer.html ?? st.html ?? '')}</textarea><button type="button" class="btn sm" data-act="mkt-html-save" style="margin:6px 0">💾 Save as the campaign agents send</button>`}<p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
   </div>`;
 }
 async function adminSeoPage() {
@@ -5609,14 +5627,15 @@ async function adminFbPage() {
 Object.assign(actions, {
   'mkt-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/emailmkt/list/' + el.dataset.id); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'mkt-copy-ai': async (el) => { const d = state.admin.mktDraft || {}; const value = el.dataset.kind === 'html' ? d.emailHtml : el.dataset.kind === 'whatsapp' ? d.whatsappText : d.emailSubject; if (value) await actions['copy-text']({ dataset: { text: value } }); },
-  'mkt-ai-apply': () => { const d = state.admin.mktDraft; if (!d || state.admin.me?.locked) return; const html = $('#mkt-html'); if (html) html.value = d.emailHtml || ''; const subj = $('[name="subject0"]'); if (subj) subj.value = d.emailSubject || ''; toast('Draft filled in the campaign form. It is not saved or sent.'); },
+  'mkt-ai-apply': () => { const d = state.admin.mktDraft; if (!d || state.admin.me?.locked) return; const html = d.emailHtml || '', subject = d.emailSubject || ''; state.admin.mktComposer = { ...(state.admin.mktComposer || {}), html, subject, aiSubjectApplied: true }; const htmlField = $('#mkt-html'), subjectField = $('#mkt-subject'); if (htmlField) htmlField.value = html; if (subjectField) subjectField.value = subject; toast('Draft filled in the campaign form. It is not saved or sent.'); },
   'mkt-send': async (el) => {
     const sel = $('#mkt-list'); const listId = sel?.value; if (!listId) return toast('Upload a list first.', true);
     const l = (state.admin.mkt.lists || []).find((x) => x.id === listId); const html = ($('#mkt-html') || {}).value || '';
+    const subject = state.admin.mktComposer?.aiSubjectApplied ? String($('#mkt-subject')?.value || '').trim() : '';
     const cost = ((l?.count || 0) * Number(state.admin.mkt.costPerEmail || 0)).toFixed(2);
     if (!confirm(`Send to ${l?.count || 0} recipients?\nEstimated cost: $${cost}`)) return;
     el.disabled = true; toast('Sending…');
-    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
+    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html, ...(subject ? { subject } : {}) }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); state.admin.mktComposer = null; $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'seo-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/seo/' + el.dataset.id); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'gads-del': async (el) => { if (!confirm('Delete this campaign and its stats?')) return; try { await api('DELETE', '/api/admin/gads/campaign/' + el.dataset.id); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
