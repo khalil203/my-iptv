@@ -1,8 +1,9 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=125';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=126';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml, ensureSiteLang } from './site.js?v=123';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
+import { TIME_ZONES, timezoneOffsetLabel, zonedDayAndMinute } from './timezones.js?v=1';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS, ensureLang } from './i18n.js?v=125';
 import { openLangSheet, paintLangPill, langChip } from './lang.js?v=122';
 import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=122';
@@ -5380,7 +5381,7 @@ Object.assign(forms, {
 });
 
 // ---------------- Team: attendance, night shifts, leave, tasks, team chat, reports (spec §9) ----------------
-const TZ_OPTS = [['Europe/Paris', 'Europe/Paris (CET)'], ['Europe/Madrid', 'Europe/Madrid (CET)'], ['Europe/London', 'Europe/London (GMT/BST)'], ['Africa/Casablanca', 'Africa/Casablanca (WET)'], ['America/New_York', 'America/New_York (EST)'], ['America/Chicago', 'America/Chicago (CST)'], ['America/Los_Angeles', 'America/Los_Angeles (PST)'], ['Asia/Bangkok', 'Asia/Bangkok (ICT)']];
+const TZ_OPTS = TIME_ZONES.map((tz) => { const offset = timezoneOffsetLabel(tz); return [tz, offset ? `${tz} (${offset})` : tz]; });
 const WD = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
 const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const minOf = (v) => { const [h, mm] = String(v || '09:00').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
@@ -5391,14 +5392,16 @@ async function adminAttendancePage() {
   const me = state.admin.me; const mine = r.mine || [];
   const lastMine = mine[0]?.action;
   const myShift = shifts.find((s) => s.memberId === (me.id || 'owner'));
-  const now = new Date(); const wd = String(now.getDay()); const today = (myShift && myShift.days && myShift.days[wd]) || null;
-  const minsNow = now.getHours() * 60 + now.getMinutes();
+  const now = new Date(); const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; let shiftTz = myShift?.tz || localTz; let shiftLocal;
+  try { shiftLocal = zonedDayAndMinute(now, shiftTz); } catch { shiftTz = localTz; shiftLocal = zonedDayAndMinute(now, shiftTz); }
+  const wd = String(shiftLocal.day); const today = (myShift && myShift.days && myShift.days[wd]) || null;
+  const minsNow = shiftLocal.minute;
   let shiftBanner = '';
   if (today && today.on) {
     const start = today.start, end = today.end;
     const to = (m) => { const [h, mm] = [Math.floor(m / 60), m % 60]; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
-    if (lastMine !== 'in' && start - minsNow > 0 && start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(start)} — in ${start - minsNow} minute(s). Check in when you begin.`;
-    else if (lastMine === 'in' && minsNow >= start && minsNow < Math.min(end === 0 ? 1440 : end, 1440) && (end === 0 ? 1440 - minsNow : end - minsNow) <= 10 && (end === 0 ? 1440 - minsNow : end - minsNow) >= 0) shiftBanner = `⏰ Your shift ends at ${to(end)} — ${end === 0 ? 1440 - minsNow : end - minsNow} minute(s) left. Do your handover, then Check out.`;
+    if (lastMine !== 'in' && start - minsNow > 0 && start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(start)} (${shiftTz}) — in ${start - minsNow} minute(s). Check in when you begin.`;
+    else if (lastMine === 'in' && minsNow >= start && minsNow < Math.min(end === 0 ? 1440 : end, 1440) && (end === 0 ? 1440 - minsNow : end - minsNow) <= 10 && (end === 0 ? 1440 - minsNow : end - minsNow) >= 0) shiftBanner = `⏰ Your shift ends at ${to(end)} (${shiftTz}) — ${end === 0 ? 1440 - minsNow : end - minsNow} minute(s) left. Do your handover, then Check out.`;
   }
   if (shiftBanner && !sessionStorage.getItem('shiftBeeped')) { try { const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC(); const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.setValueAtTime(0.08, ctx.currentTime); o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.6); sessionStorage.setItem('shiftBeeped', '1'); } catch {} }
   const status = lastMine === 'in' ? 'on shift' : lastMine === 'out' ? 'off duty' : lastMine === 'break_start' ? 'on break' : 'not checked in';
@@ -5406,21 +5409,21 @@ async function adminAttendancePage() {
   const summaryRows = Object.entries(r.summary || {}).sort((a, b) => (b[1].workedMs || 0) - (a[1].workedMs || 0)).map(([id, p]) => `<tr><td>${esc(nameOf(id))}</td><td>${p.logins}</td><td>${p.ins}</td><td>${p.outs}</td><td>${Math.round((p.workedMs || 0) / 360000) / 10}h</td><td>${Math.round((p.breaksMs || 0) / 60000)}min</td></tr>`).join('');
   const clock = `<div class="chips" style="margin-bottom:10px"><a class="on tz-clock"><span class="dp-l">🇪🇺 Europe</span><b data-tz="e" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">🇺🇸 US</span><b data-tz="u" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">📍 Local</span><b data-tz="l" style="font-variant-numeric:tabular-nums">--:--:--</b></a></div>`;
   return `${shiftBanner ? `<div class="notice warning" style="margin-bottom:12px">${esc(shiftBanner)}</div>` : ''}${clock}<div class="grid2" style="gap:16px;align-items:start">
-    <div class="card"><h3>🕒 My attendance</h3><p class="small muted" style="margin-top:0">Status: <b>${esc(status)}</b></p>
+    <div class="card"><h3>🕒 My attendance</h3><p class="small muted" style="margin-top:0">Status: <b>${esc(status)}</b>${myShift ? ` · Shift time zone: <b>${esc(shiftTz)}</b>` : ''}</p>
       <div class="row" style="gap:8px"><button class="btn primary" data-act="att-in" ${status === 'on shift' ? 'disabled' : ''}>Check in</button><button class="btn" data-act="att-break-start" ${status !== 'on shift' ? 'disabled' : ''}>☕ Break</button><button class="btn" data-act="att-break-end" ${status !== 'on break' ? 'disabled' : ''}>Back</button><button class="btn danger" data-act="att-out" ${status === 'off duty' ? 'disabled' : ''}>Check out</button></div>
       <h3 style="margin-top:14px">My recent events</h3>${mine.length ? `<div style="max-height:220px;overflow:auto">${mine.slice(0, 20).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.action)}</b>${e.note ? ' · ' + esc(e.note) : ''}</span><span class="small muted">${fmtDT(e.at)}</span></div>`).join('')}</div>` : '<p class="muted small">No events yet. Check in to start your shift.</p>'}</div>
-    <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
+      <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
   </div>
   ${r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>👥 Team attendance (last 30 days)</h3>${summaryRows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Logins</th><th>Check-ins</th><th>Check-outs</th><th>Worked</th><th>Breaks</th></tr></thead><tbody>${summaryRows}</tbody></table></div>` : '<p class="muted small">No attendance recorded yet — the team checks in when they start work.</p>'}
     <div class="row" style="margin-top:14px"><h3 style="margin:0;flex:1">🧾 Team log (edit any entry)</h3><button class="btn sm primary" data-act="att-add">➕ Add entry</button></div>
     <div style="max-height:360px;overflow:auto;margin-top:8px">${(r.all || []).filter((e) => e.action !== 'login').slice(0, 80).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.name || nameOf(e.by))}</b> · ${esc({ in: '🟢 check in', out: '⚪ check out', break_start: '☕ break', break_end: '▶️ back' }[e.action] || e.action)}${e.auto ? ' <span class="badge warn">auto</span>' : ''}${e.edited ? ` <span class="badge">edited by ${esc(e.edited)}</span>` : ''}${e.note ? `<div class="small muted">${esc(e.note)}</div>` : ''}</span><span class="small muted">${fmtDT(e.at)}</span>${e.id ? `<button class="btn sm ghost" data-act="att-edit" data-id="${esc(e.id)}" data-at="${e.at}" data-action="${esc(e.action)}" data-note="${esc(e.note || '')}">✏️</button>` : ''}</div>`).join('') || '<p class="muted small">No entries.</p>'}</div></div>
-  <div class="card" style="margin-top:16px"><h3>🌙 Shifts, night shifts &amp; weekly rest days</h3><p class="small muted" style="margin-top:0">Day and night shifts across European and American time zones. Shifts past midnight (e.g. 22:00 → 06:00) are handled correctly. Rest days are never all on the same days for the whole team.</p>
-    <div id="shifts-box"><p class="small muted">Loading members…</p></div></div>
+  <div class="card" style="margin-top:16px"><h3>🌙 Shifts, night shifts &amp; weekly rest days</h3><p class="small muted" style="margin-top:0">All supported time zones are available. Each agent's schedule, reminders, and attendance warnings follow the selected zone, including daylight-saving changes. Shifts past midnight (e.g. 22:00 → 06:00) are handled correctly. Rest days are never all on the same days for the whole team.</p>
+    <datalist id="agent-timezones">${TZ_OPTS.map(([k, n]) => `<option value="${esc(k)}" label="${esc(n)}"></option>`).join('')}</datalist><div id="shifts-box"><p class="small muted">Loading members…</p></div></div>
   <div class="card" style="margin-top:16px"><h3>🗑 Leave requests (approve / reject)</h3><div id="leaves-box"><p class="small muted">Loading…</p></div></div>
   <div class="card" style="margin-top:16px"><h3>📊 Weekly performance report</h3><div id="reports-box"><p class="small muted">Loading…</p></div></div>` : ''}`;
 }
 const shiftEditorHtml = (m, sh) => { const tz = sh?.tz || 'Europe/Paris'; const days = sh?.days || {}; return `<div class="card" data-member="${esc(m.id)}" data-tz="${esc(tz)}" style="margin-bottom:10px;padding:12px"><div class="row" style="gap:8px"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1"><b>${esc(m.name)}</b><div class="small muted">@${esc(m.username)}</div></div>
-    <select data-k="tz" style="width:auto">${TZ_OPTS.map(([k, n]) => `<option value="${k}" ${tz === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <input data-k="tz" list="agent-timezones" value="${esc(tz)}" autocomplete="off" aria-label="Agent shift time zone" title="Type or select an IANA time zone" style="width:220px;max-width:100%"></div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px">${WD.map(([i, n]) => { const d = days[i] || { on: false }; return `<div style="text-align:center"><label class="toggle" style="justify-content:center"><input type="checkbox" data-day="${i}" ${d.on ? 'checked' : ''}><i></i><span>${n}</span></label>${d.on ? `<input type="time" data-start="${i}" value="${fmtMin(d.start ?? 540)}" style="margin-top:4px;width:100%"><input type="time" data-end="${i}" value="${fmtMin(d.end ?? 1080)}" style="margin-top:4px;width:100%">` : '<div class="small muted" style="margin-top:20px">rest</div>'}</div>`; }).join('')}</div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary sm" data-act="shift-save" data-id="${esc(m.id)}" data-name="${esc(m.name)}">Save shift plan</button></div></div>`; };
 async function loadShiftsAndLeaves() {

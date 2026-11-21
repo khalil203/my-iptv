@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test tests/backend.test.mjs tests/lang.test.mjs tests/i18n.test.mjs tests/ui-controls.test.mjs tests/growth.test.mjs tests/referrals.test.mjs tests/review.test.mjs"
+    "test": "node --test tests/backend.test.mjs tests/lang.test.mjs tests/i18n.test.mjs tests/ui-controls.test.mjs tests/growth.test.mjs tests/referrals.test.mjs tests/review.test.mjs tests/timezones.test.mjs"
   },
   "keywords": [],
   "author": "",

@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { createBackend, totp, totpOk, stripeSign, stripeSigOk, payUrlFor, accessEmail, orderEmail, newsletterEmail, renewalEmail, parseResellerText, parseLooseDate, parseMoney, cleanPhoneText, scrubCards, cleanRslId, TECH_ONLY, txTime, sortTxNewest, exactTimeParts, formatExactTime, normalizePayoutDays, nextPayoutDate, usBankHolidayOn, bankPayoutNote, balanceTxLink, applyTransactionInput, migrateLegacyTransactions } from '../public/core.js';
+import { zonedDayAndMinute } from '../public/timezones.js';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 function setup(hook) {
@@ -1855,8 +1856,10 @@ test('notifications: devices subscribe, instant alerts to agents, shift start, o
   await pull('owner-laptop'); await x.call('POST', '/api/admin/attendance', { action: 'in' }, mt);
   assert.ok((await pull('owner-laptop')).some((n) => /Malak started the shift/.test(n.title)));
   const team = (await x.call('GET', '/api/admin/team', {}, tok)).json; const malak = team.find((t) => t.username === 'malak');
-  const now = new Date(); const day = String(now.getUTCDay()); const min = now.getUTCHours() * 60 + now.getUTCMinutes();
-  await x.call('PUT', '/api/admin/shifts', { memberId: malak.id, memberName: 'Malak', tz: 'UTC', days: { [day]: { on: true, start: min, end: Math.min(1440, min + 480) } } }, tok);
+  const timezone = 'Pacific/Chatham'; const now = new Date(); const { day: shiftDay, minute: min } = zonedDayAndMinute(now, timezone); const day = String(shiftDay);
+  const shiftSave = await x.call('PUT', '/api/admin/shifts', { memberId: malak.id, memberName: 'Malak', tz: timezone, days: { [day]: { on: true, start: min, end: Math.min(1440, min + 480) } } }, tok);
+  assert.equal(shiftSave.status, 200); assert.equal((await x.call('GET', '/api/admin/shifts', {}, tok)).json.find((s) => s.memberId === malak.id).tz, timezone);
+  assert.equal((await x.call('PUT', '/api/admin/shifts', { memberId: malak.id, memberName: 'Malak', tz: 'Not/AZone' }, tok)).status, 400, 'invalid zone is rejected');
   await pull('malak-android'); const tk = await x.be.tick(); assert.equal(tk.reminders, 1);
   assert.ok((await pull('malak-android')).some((n) => /shift starts/.test(n.title)));
   assert.equal((await x.be.tick()).reminders, 0, 'only once a day');

@@ -4959,7 +4959,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('PUT', '/api/admin/shifts')) {
         const l = await getShifts(); const memberId = String(body.memberId || '').slice(0, 20); if (!memberId) return err(400, 'memberId required.');
         const idx = l.findIndex((x) => x.memberId === memberId);
-        const tz = String(body.tz || 'Europe/Paris').slice(0, 40);
+        const tz = String(body.tz || 'Europe/Paris').trim().slice(0, 40);
+        try { new Intl.DateTimeFormat('en', { timeZone: tz }); } catch { return err(400, 'Unknown time zone.'); }
         const days = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const d = (body.days || {})[k]; if (d && d.on) days[k] = { on: true, start: Math.max(0, Math.min(1440, Number(d.start) || 540)), end: Math.max(0, Math.min(1440, Number(d.end) || 1080)) }; else days[k] = { on: false }; }
         const rec = { memberId, memberName: String(body.memberName || memberId).slice(0, 60), tz, days, daysOff: Array.isArray(body.daysOff) ? body.daysOff.map(Number).filter((n) => n >= 0 && n <= 6) : [], updatedAt: Date.now(), by: actorName };
         if (idx >= 0) l[idx] = rec; else l.unshift(rec);
