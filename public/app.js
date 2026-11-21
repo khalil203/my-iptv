@@ -115,25 +115,28 @@ function localStore() {
   };
 }
 
+let sessionGeneration = 0;
+let marketingDraftRequestId = 0;
 async function api(method, path, body) {
+  const requestToken = state.token;
+  const requestSession = sessionGeneration;
   let status, json;
   if (state.mode === 'demo') {
     const u = new URL(path, location.href);
-    const r = await state.local.handle({ method, path: u.pathname.replace(/^.*(\/api\/)/, '/api/'), query: Object.fromEntries(u.searchParams), body: body || {}, token: state.token });
+    const r = await state.local.handle({ method, path: u.pathname.replace(/^.*(\/api\/)/, '/api/'), query: Object.fromEntries(u.searchParams), body: body || {}, token: requestToken });
     status = r.status; json = r.json;
   } else {
-    const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(state.token ? { authorization: 'Bearer ' + state.token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(requestToken ? { authorization: 'Bearer ' + requestToken } : {}) }, body: body ? JSON.stringify(body) : undefined });
     status = res.status; json = await res.json().catch(() => ({ error: 'Unexpected server response' }));
   }
   if (status === 409 && path.includes('/api/xtream')) { location.reload(); }
   if (status >= 400) {
-    if (status === 401 && state.token && !path.includes('/login')) { setSession(null); route(); }
+    if (status === 401 && requestToken && state.token === requestToken && requestSession === sessionGeneration && !path.includes('/login')) { setSession(null); route(); }
     if (status === 403 && json.error === 'checkin_required' && state.admin?.me) { state.admin.me.mustCheckIn = true; setTimeout(renderAdmin); }
     throw Object.assign(new Error(json.error || 'Error'), { status, data: json });
   }
   return json;
 }
-let sessionGeneration = 0;
 function setSession(token, role) {
   sessionGeneration += 1;
   state.token = token; state.role = role; if (!token || role !== 'user') document.getElementById('chat-fab')?.remove();
@@ -5673,14 +5676,15 @@ Object.assign(forms, {
   async 'mkt-list'(f) { const o = formToObj(f); try { const r = await api('POST', '/api/admin/emailmkt/list', { name: o.name, text: o.text }); toast(`List saved: ${r.count} emails (${r.removed} removed as bounced) ✓`); f.reset(); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); } },
   async 'mkt-ai'(f) {
     const requestSession = sessionGeneration;
+    const requestId = ++marketingDraftRequestId;
     const button = f.querySelector('button[type="submit"]'); if (button) button.disabled = true;
     try {
       const r = await api('POST', '/api/admin/ai/compose-marketing', { brief: f.brief.value, audience: f.audience.value, tone: f.tone.value });
-      if (requestSession !== sessionGeneration) return;
+      if (requestSession !== sessionGeneration || requestId !== marketingDraftRequestId) return;
       state.admin.mktDraft = r; const out = $('#mkt-ai-output'); if (out) out.innerHTML = mktDraftHtml(r);
       toast(r.source === 'ai' ? 'Drafts ready — nothing saved or sent.' : 'Template draft ready; configure an AI key for generated copy.');
-    } catch (e) { toast(e.message, true); }
-    finally { if (button) button.disabled = false; }
+    } catch (e) { if (requestSession === sessionGeneration && requestId === marketingDraftRequestId) toast(e.message, true); }
+    finally { if (button && requestSession === sessionGeneration && requestId === marketingDraftRequestId) button.disabled = false; }
   },
   async 'seo-add'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/seo', o); toast('Logged ✓'); f.reset(); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); } },
   async 'gads-campaign'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/gads/campaign', o); toast('Campaign added ✓'); f.reset(); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
