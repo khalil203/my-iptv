@@ -3,7 +3,7 @@
 // The translator hub is separate (translator.js) — it changes content, not the UI.
 
 import { APP_LANGS, flagOf, nameOf, englishOf, dirOf } from './lang-data.js?v=122';
-import { t, tIn } from './i18n.js?v=122';
+import { t, tIn, ensureLang } from './i18n.js?v=125';
 
 const RECENT_KEY = 'tvp_lang_recent';
 const $ = (s, r = document) => r.querySelector(s);
@@ -105,9 +105,13 @@ export function openLangSheet({ current = 'en', onPick, title, subtitle } = {}) 
     root.querySelectorAll('[data-opt]').forEach((x) => { x.tabIndex = x === opt ? 0 : -1; });
     state.active = opt.dataset.code;
     const pv = $('[data-ls-pv]', root); const pf = $('[data-ls-pvfoot]', root); const pl = $('[data-ls-pvlang]', root);
-    if (pv) { pv.textContent = tIn(state.active, 'tagline'); pv.dir = dirOf(state.active); }
-    if (pf) { pf.textContent = `${tIn(state.active, 'signIn')} · ${tIn(state.active, 'language')}`; pf.dir = dirOf(state.active); }
-    if (pl) pl.textContent = `${flagOf(state.active)} ${nameOf(state.active)}`;
+    const paint = () => {
+      if (pv) { pv.textContent = tIn(state.active, 'tagline'); pv.dir = dirOf(state.active); }
+      if (pf) { pf.textContent = `${tIn(state.active, 'signIn')} · ${tIn(state.active, 'language')}`; pf.dir = dirOf(state.active); }
+      if (pl) pl.textContent = `${flagOf(state.active)} ${nameOf(state.active)}`;
+    };
+    paint();
+    ensureLang(state.active).then(() => { if (state.active === opt.dataset.code) paint(); });
   });
 
   requestAnimationFrame(() => {

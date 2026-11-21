@@ -1,9 +1,9 @@
 import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=123';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
-import { siteHtml } from './site.js?v=122';
+import { siteHtml, ensureSiteLang } from './site.js?v=123';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS } from './i18n.js?v=124';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS, ensureLang } from './i18n.js?v=125';
 import { openLangSheet, paintLangPill, langChip } from './lang.js?v=122';
 import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=122';
 import { createTranslator } from './translator.js?v=123';
@@ -192,6 +192,8 @@ async function boot() {
   if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
   if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
   setLang(detectLang());
+  await ensureLang(getLang());
+  await ensureSiteLang(getLang());
   try {
     const r = await fetch('/api/config', { cache: 'no-store' });
     if (!r.ok || !(r.headers.get('content-type') || '').includes('json')) throw new Error('no server');
@@ -218,8 +220,10 @@ function paintPill() {
 function openLanguageCenter() {
   openLangSheet({ current: getLang(), onPick: applyLang, title: t('language'), subtitle: t('chooseLang') });
 }
-function applyLang(code) {
+async function applyLang(code) {
   if (!LANGS.some(([k]) => k === code)) code = 'en';
+  await ensureLang(code);
+  await ensureSiteLang(code);
   setLang(code, true);
   paintPill();
   if (state.role === 'user' && state.token && location.pathname !== '/app') renderUser(); else route();

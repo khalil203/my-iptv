@@ -1,4 +1,7 @@
-// Customer-side languages: English, French, German, Spanish and Italian. Picked automatically from the phone language.
+// Customer-side languages. The six hand-curated dictionaries live inline; the
+// other languages load a generated pack from ./langs/ on first use.
+import { LANGS as APP_LANGS, RTL_LANGS } from './lang-data.js';
+const SUPPORTED = new Set(APP_LANGS.map(([code]) => code));
 const D = {
   en: {
     ext_title: 'Watch with the app or your IPTV player', ext_text: 'On this device, channels open in an IPTV player. On Android phones and TVs, install our app to watch inside it.', ext_android: '📲 Get the Android / TV app', ext_vlc: '▶ Open playlist in VLC', ext_details: 'Your IPTV details (IPTV Smarters, TiviMate, XCIPTV…)', copied: 'Copied ✓', copyAll: '📋 Copy details', dns: 'DNS / Server',
@@ -150,25 +153,55 @@ Object.assign(D.en, { paidTitle: 'Thank you for your payment', paidText: 'Your s
 Object.assign(D.fr, { paidTitle: 'Merci pour votre paiement', paidText: 'Votre abonnement est en cours d’activation. La mise à jour prend généralement moins d’une minute ; sinon, envoyez-nous votre reçu et nous l’activons manuellement.', paidBackTitle: 'Avez-vous terminé le paiement ?', paidBackText: 'Si vous avez payé, votre abonnement se met à jour sous peu. Sinon, envoyez-nous votre reçu ici.' });
 
 
-export const LANGS = [['en', 'English'], ['fr', 'Français'], ['de', 'Deutsch'], ['es', 'Español'], ['it', 'Italiano'], ['ar', 'العربية']];
+export const LANGS = APP_LANGS;
 export function detectLang() {
   const saved = localStorage.getItem('tvp_lang');
-  if (saved && D[saved]) return saved;
+  if (saved && SUPPORTED.has(saved)) return saved;
   for (const l of navigator.languages || [navigator.language || 'en']) {
-    const k = String(l).slice(0, 2).toLowerCase();
-    if (D[k]) return k;
+    const code = String(l || '').replace('_', '-');
+    if (SUPPORTED.has(code)) return code;
+    const k = code.slice(0, 2).toLowerCase();
+    if (SUPPORTED.has(k)) return k;
+    if (k === 'zh') return 'zh-CN';
   }
   return 'en';
 }
 let lang = 'en';
+export function registerLangPack(code, strings) {
+  if (!SUPPORTED.has(code) || !strings) return;
+  D[code] = { ...(D[code] || {}), ...strings };
+}
+const packPending = {};
+export function ensureLang(code) {
+  if (!SUPPORTED.has(code) || code === 'en' || (D[code] && Object.keys(D[code]).length > 100)) return Promise.resolve(true);
+  if (packPending[code]) return packPending[code];
+  packPending[code] = (async () => {
+    try {
+      const url = new URL('langs/' + encodeURIComponent(code) + '.json', document.baseURI || location.href);
+      const r = await fetch(url, { cache: 'force-cache' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.strings) {
+          registerLangPack(code, j.strings);
+          if (code === lang && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('langready', { detail: { code } }));
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  })();
+  return packPending[code];
+}
 export function setLang(l, save) {
-  lang = D[l] ? l : 'en';
+  l = String(l || 'en');
+  lang = SUPPORTED.has(l) ? l : 'en';
   if (save) localStorage.setItem('tvp_lang', lang);
   document.documentElement.lang = lang;
-  document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  document.documentElement.dir = RTL_LANGS.has(lang.split('-')[0]) ? 'rtl' : 'ltr';
+  ensureLang(lang);
 }
 export const getLang = () => lang;
-export const locale = () => ({ fr: 'fr-FR', de: 'de-DE', es: 'es-ES', it: 'it-IT' }[lang] || 'en-GB');
+export const locale = () => ({ fr: 'fr-FR', de: 'de-DE', es: 'es-ES', it: 'it-IT', 'zh-CN': 'zh-CN' }[lang] || (lang.includes('-') ? lang : lang + '-' + lang.toUpperCase()));
 export function t(key, vars = {}) {
   const s = (D[lang] && D[lang][key]) ?? D.en[key] ?? key;
   return String(s).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');

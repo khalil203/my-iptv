@@ -1,17 +1,6 @@
 // Language metadata and pure translation helpers. No DOM here: this file is
 // imported by the browser (lang.js, translator.js) and by the Node unit tests.
 
-export const APP_LANGS = [
-  { code: 'en', native: 'English', english: 'English', flag: '🇬🇧' },
-  { code: 'fr', native: 'Français', english: 'French', flag: '🇫🇷' },
-  { code: 'de', native: 'Deutsch', english: 'German', flag: '🇩🇪' },
-  { code: 'es', native: 'Español', english: 'Spanish', flag: '🇪🇸' },
-  { code: 'it', native: 'Italiano', english: 'Italian', flag: '🇮🇹' },
-  { code: 'ar', native: 'العربية', english: 'Arabic', flag: '🇸🇦', rtl: true },
-];
-
-export const LANGS = APP_LANGS.map((l) => [l.code, l.native]);
-
 export const RTL_LANGS = new Set(['ar', 'fa', 'he', 'ur', 'ps', 'sd', 'ug', 'yi', 'dv', 'ckb']);
 
 // Target languages offered by the translator hub (the free Google endpoint).
@@ -57,6 +46,11 @@ export const TR_LANGS = [
   { code: 'so', native: 'Soomaali', english: 'Somali', flag: '🇸🇴' },
   { code: 'ha', native: 'Hausa', english: 'Hausa', flag: '🇳🇬' },
 ];
+
+// Every translator language is also an app language. The six hand-curated ones
+// keep their inline dictionaries; the rest load a generated language pack on demand.
+export const APP_LANGS = TR_LANGS.map((l) => ({ ...l, rtl: RTL_LANGS.has(l.code) }));
+export const LANGS = APP_LANGS.map((l) => [l.code, l.native]);
 
 const APP_MAP = Object.fromEntries(APP_LANGS.map((l) => [l.code, l]));
 const TR_MAP = Object.fromEntries(TR_LANGS.map((l) => [l.code, l]));

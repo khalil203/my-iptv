@@ -7,12 +7,14 @@ import {
   panelTarget, PANEL_SKIP_SELECTOR,
 } from '../public/lang-data.js';
 
-test('app languages are the six languages the customer UI supports', () => {
-  assert.deepEqual(LANGS.map((x) => x[0]), ['en', 'fr', 'de', 'es', 'it', 'ar']);
-  assert.equal(APP_LANGS.length, 6);
+test('every translator language is selectable in the customer UI', () => {
+  assert.deepEqual(LANGS.map((x) => x[0]), TR_LANGS.map((l) => l.code));
+  assert.equal(APP_LANGS.length, TR_LANGS.length);
   assert.equal(nameOf('ar'), 'العربية');
   assert.equal(flagOf('fr'), '🇫🇷');
   assert.equal(nameOf('xx'), 'English');
+  assert.equal(dirOf('fa'), 'rtl');
+  assert.equal(dirOf('th'), 'ltr');
 });
 
 test('translator offers many targets without duplicates', () => {

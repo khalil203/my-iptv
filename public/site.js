@@ -52,6 +52,24 @@ const UPDATED = '2026-11-13';
 const SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fill = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
+export function registerSitePack(code, obj) {
+  if (!code || !obj) return;
+  T[code] = { ...(T[code] || {}), ...obj };
+}
+
+export async function ensureSiteLang(code) {
+  if (!code || code === 'en' || T[code]) return true;
+  try {
+    const url = new URL('langs/site-' + encodeURIComponent(code) + '.json', document.baseURI || location.href);
+    const r = await fetch(url, { cache: 'force-cache' });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.strings) { registerSitePack(code, j.strings); return true; }
+    }
+  } catch {}
+  return false;
+}
+
 const IDS = ['features', 'devices', 'pricing', 'setup', 'faq', 'contact'];
 
 // The highlighted plan: the first one the owner gave a badge, otherwise the middle one.
