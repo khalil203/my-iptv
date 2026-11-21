@@ -11,6 +11,10 @@ test('i18n module loads with all six language dictionaries', async () => {
   assert.equal(m.tIn('en', 'searchLang'), 'Search a language…');
   assert.match(m.tIn('fr', 'savedDevice'), /identifiant/);
   assert.match(m.tIn('ar', 'noLangMatch'), /لغة/);
+  const consentEn = m.tIn('en', 'ticketAiPhotoConsent');
+  assert.match(consentEn, /configured AI provider/);
+  for (const code of ['fr', 'de', 'es', 'it', 'ar']) assert.notEqual(m.tIn(code, 'ticketAiPhotoConsent'), consentEn, `${code}: local consent translation missing`);
+  assert.match(m.tIn('fr', 'ticketAiPhotoConsent'), /fournisseur d’IA configuré/);
 });
 
 test('generated language packs cover every selectable language', async () => {
@@ -20,6 +24,7 @@ test('generated language packs cover every selectable language', async () => {
   const { APP_LANGS } = await import('../public/lang-data.js');
   const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'langs');
   const inline = new Set(['en', 'fr', 'de', 'es', 'it', 'ar']);
+  assert.equal(APP_LANGS.length, 40, 'consent wording should cover the full selectable-language set');
   for (const l of APP_LANGS) {
     if (inline.has(l.code)) continue;
     const file = path.join(dir, l.code + '.json');
@@ -27,6 +32,7 @@ test('generated language packs cover every selectable language', async () => {
     const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(pack.code, l.code);
     assert.ok(Object.keys(pack.strings).length >= 650, `${l.code}: incomplete pack`);
+    assert.ok(pack.strings.ticketAiPhotoConsent && String(pack.strings.ticketAiPhotoConsent).trim(), `${l.code}: photo consent disclosure missing`);
     m.registerLangPack(l.code, pack.strings);
     assert.ok(m.tIn(l.code, 'signIn'), `${l.code}: signIn missing`);
     const msg = m.tIn(l.code, 'waMsg', { app: 'App', u: 'user' });

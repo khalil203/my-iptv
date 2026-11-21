@@ -10,6 +10,7 @@
 - **My Details** (Account): add your own provider with Xtream Codes or an M3U playlist. The details stay on your device.
 - **Two-step sign-in** and **Verify email** (Account): extra protection for your account.
 - **Support requests** can include one picture per message.
+- **Optional AI photo troubleshooting**: when attaching a picture to a support request or reply, you may leave the opt-in unchecked or agree to let support staff send that image only to the configured AI provider. This happens only if a staff member chooses *Analyze*; a person reviews the suggestion and writes any reply. Your ticket text and account details are not sent with the image. Please do not include passwords, full playlist links, payment details or other sensitive information in a photo.
 - **Chat with support**: the round chat button opens a live conversation with us.
 
 ## Referrals, gifts & lifetime plans (20 Nov 2026 update)
