@@ -76,6 +76,27 @@ test('owner planning is scheduled through December 2027', () => {
   assert.equal(late.months[late.months.length - 1], '2027-12');
 });
 
+test('marketing drafts are cleared on session changes and late responses are ignored', () => {
+  const app = read('public/app.js');
+  const session = app.match(/function setSession\(token, role\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(session, 'setSession handler exists');
+  assert.match(session, /sessionGeneration \+= 1/);
+  assert.match(session, /state\.admin\.mktDraft = null; state\.admin\.mktComposer = null;/);
+
+  const apiAction = app.match(/async function api\(method, path, body\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(apiAction, 'API helper exists');
+  assert.match(apiAction, /const requestToken = state\.token/);
+  assert.match(apiAction, /state\.token === requestToken && requestSession === sessionGeneration/);
+
+  const draftAction = app.match(/async 'mkt-ai'\(f\) \{([\s\S]*?)\n  \},/)?.[1];
+  assert.ok(draftAction, 'marketing AI action exists');
+  assert.match(draftAction, /const requestSession = sessionGeneration/);
+  assert.match(draftAction, /const requestId = \+\+marketingDraftRequestId/);
+  const staleGuard = draftAction.indexOf('if (requestSession !== sessionGeneration || requestId !== marketingDraftRequestId) return;');
+  const draftWrite = draftAction.indexOf('state.admin.mktDraft = r;');
+  assert.ok(staleGuard >= 0 && staleGuard < draftWrite, 'stale and superseded responses are rejected before the draft is restored');
+});
+
 test('docs mention the new referral, lifetime and planning rules', () => {
   const admin = read('docs/admin-guide.md');
   const user = read('docs/user-guide.md');

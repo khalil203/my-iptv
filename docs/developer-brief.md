@@ -1,6 +1,6 @@
 # Developer Brief — INTPROTO-TV Management App & Panel
 
-**Owner:** Khalil (Technical Manager) · **Approver:** Nizar (Owner) · **Status:** Implemented — pending approval · **Last updated:** Friday, 20 November 2026, 18:58 (Asia/Bangkok)  
+**Owner:** Khalil (Technical Manager) · **Approver:** Nizar (Owner) · **Status:** AI capability update implemented locally — not yet deployed · **Last updated:** Saturday, 21 November 2026, 17:40 (Asia/Bangkok)
 **Canonical brief:** this file · **Related:** [Upgrade plan](upgrade-plan.md) · [Architecture](architecture.md) · [Engineering report](engineering-report.md)
 
 ## New upgrade — 20 Nov 2026
@@ -13,6 +13,16 @@ A newer owner request supersedes the promo details that were still open in Q2/Q3
 - **Panel & sync:** owner and agent panels share the same colours/overview and simple laptop + phone (iPhone, Samsung, tablet) layouts. The agent guide page carries all new features.
 - **Owner "My planning":** schedule extended through **December 2027**; a read-only synced overview is available to agents; all agents are notified once when the update is live, and the owner can re-notify.
 - **Verification status:** pricing constants, reward-tier table and reseller gift filtering are present in `public/core.js`; referral rewards are granted on Stripe success, receipt approval and paid admin create/renewal; the read-only agent sync view and owner re-notify action are wired in `public/app.js`.
+
+## New upgrade — 21 Nov 2026: AI capabilities
+
+Extend the shared owner/agent assistant without changing the Cloudflare Workers + KV architecture or adding dependencies:
+
+- **Planning visibility:** answer about agent Work planning and the owner’s My planning separately. The owner schedule is a sanitized, read-only projection; exclude private notes, checkoffs and API-key records.
+- **IPTV setup help:** cover Smarters Pro, XCIPTV, TiviMate, IBO Player and compatible Xtream Codes/API or M3U workflows. Never request or repeat customer credentials or full playlist URLs.
+- **Marketing drafts:** generate a safely escaped HTML email and a separate WhatsApp-ready plain-text message. Generation is draft-only; persistence and sending stay in the existing, explicit campaign workflow.
+- **Customer-photo troubleshooting:** require opt-in on the specific customer image, the owner’s feature toggle, staff ticket-view permission and a staff-initiated analysis. Send only the image and a generic prompt to the configured HTTPS provider; display a suggestion for human review, never save or send an automatic customer reply.
+- **Privacy and rollout:** AI alert context is aggregate counts without names. Keep photo-analysis rate limits and existing attachment retention. Changes remain local until pushed through the project’s feature branch/PR path and the `main` CI deployment succeeds; do not tell users the feature is live before then.
 
 ## Problem
 

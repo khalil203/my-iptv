@@ -196,7 +196,7 @@ export const DEFAULT_SETTINGS = () => ({
     { id: 'nfl', name: 'NFL — prime-time match', type: 'nfl', date: '2027-01-11', tip: 'Pass to the sports customers after the game; their streaming line stays the same.', url: '' },
   ] },
   // Shared AI assistant (owner + agents): optional LLM mode, panel answers otherwise.
-  ai: { on: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '', instructions: '', tz: 'Asia/Bangkok' },
+  ai: { on: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '', instructions: '', tz: 'Asia/Bangkok', photoAnalysis: true },
 });
 
 // IBO Players: the apps customers install on TVs, STBs and Android devices — APK download links, downloader codes and playlist logins for the IBO Player panel and the setup guide.
@@ -255,6 +255,17 @@ export function iboSetupGuide() {
     ...IBO_PLAYERS.slice(1).map((q) => `Other players: ${q.name} (code ${q.code}, APK ${q.apk}${q.playlist ? ', playlist ' + q.playlist : ''}${q.altApk ? ', listed as ' + q.altApk : ''}${q.note ? '. ' + q.note : ''}).`),
     'MAC-based devices: send us the MAC address — we activate it. More boxes can be added on the IBO Player panel.'
   ].filter(Boolean).join('\n');
+}
+// Generic setup guidance for supported IPTV player apps. Do not ask customers to share credentials.
+export function iptvSetupGuide() {
+  return [
+    'IPTV player setup (IPTV Smarters Pro, XCIPTV, TiviMate, IBO Player and other compatible apps):',
+    'A player app does not provide TV channels. Use only access details from a service you are authorized to use, and install the app from its official store or developer source.',
+    'Xtream Codes/API login: choose Add user / Add playlist / Xtream Codes API (wording varies), then enter the server or portal URL exactly as supplied (including http(s) and any port), username and password. Check capitalization and remove extra spaces.',
+    'M3U playlist: choose M3U URL / Remote playlist / Load playlist, then paste the complete M3U link exactly as supplied. Do not paste an M3U link into the Xtream server field.',
+    'IPTV Smarters Pro commonly offers Xtream Codes API and a separate M3U playlist login. TiviMate commonly adds an M3U playlist from Settings → Playlists. XCIPTV and other apps may label the same login fields differently; app menus vary by device and version.',
+    'If it does not connect: verify the login type matches the details, check the URL/port and capitalization, confirm the subscription is active and the device is online, then restart the app. If it still fails, contact your provider. Never post your username, password or full M3U link in a public message.'
+  ].join('\n');
 }
 
 const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
@@ -456,6 +467,8 @@ function permFor(method, path, body) {
   if (path === '/api/ibo/players') return null; // the IBO Player downloads: everyone signed in
   if (path === '/api/admin/ai/ask' && method === 'POST') return null; // the shared AI assistant: owner + agents
   if (path === '/api/admin/ai/config' && method === 'GET') return null; // the assistant status is visible to all
+  if (path === '/api/admin/ai/compose-marketing' && method === 'POST') return 'marketing'; // draft only; sending still uses the existing marketing flow
+  if (path === '/api/admin/ai/analyze-photo' && method === 'POST') return 'customers_view'; // only staff who can see support tickets
   if (path === '/api/admin/ai/config' || path.startsWith('/api/admin/ai/action')) return 'owner';
   if (path === '/api/admin/sports' && method === 'GET') return 'customers_view';
   if (path === '/api/admin/sports' || path.startsWith('/api/admin/sports/')) return 'marketing';
@@ -1939,6 +1952,24 @@ export function renderCampaign(s, campaign, person = null, part = 'all') {
 
 export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) {
   let sCache = null, sAt = 0;
+  const aiPhotoQuotaQueues = new Map();
+  async function reserveAiPhotoAttempt(key) {
+    const prior = aiPhotoQuotaQueues.get(key) || Promise.resolve();
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    const tail = prior.then(() => held);
+    aiPhotoQuotaQueues.set(key, tail);
+    await prior;
+    try {
+      const used = Number(await store.get(key)) || 0;
+      if (used >= 20) return false;
+      await store.put(key, used + 1, 2 * 86400);
+      return true;
+    } finally {
+      release();
+      if (aiPhotoQuotaQueues.get(key) === tail) aiPhotoQuotaQueues.delete(key);
+    }
+  }
 
   // First run: create the default admin (username "Iptv", password "Iptv"). Change it after signing in.
   async function getAdmin() {
@@ -3387,7 +3418,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const all = await getTickets(); const now = Date.now(); const list = await getCustomers(); const c = info.customerId ? list.find((x) => x.id === info.customerId) : null;
         const ref = 'SUP-' + String(now).slice(-6);
         const tk = { id: uid(5), ref, customerId: c ? c.id : '', username: c ? c.username : info.username || info.email, name: c ? c.name : info.name, guest: !c, contact: { name: info.name, email: info.email, phone: info.phone, username: info.username, orderNo: info.orderNo || c?.orderNo || '', device: info.device, lang: info.lang }, category: cat, source: 'support page',
-          subject, status: 'open', priority: cat === 'payment' || cat === 'login' ? 'high' : 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: info.name, at: now, text, ...(att ? { att } : {}) }] };
+          subject, status: 'open', priority: cat === 'payment' || cat === 'login' ? 'high' : 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: info.name, at: now, text, ...(att ? { att, ...(body.aiPhotoConsent === true ? { aiPhotoConsent: true } : {}) } : {}) }] };
         all.unshift(tk); await saveTickets(all);
         if (c && !c.email && info.email) { c.email = info.email; await saveCustomers(list); }
         await log('support', `New ticket ${ref} from the support page: ${info.name} <${info.email}> — ${subject}`);
@@ -3729,7 +3760,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           await store.put(k, n + 1, 86400);
           const all = await getTickets(); const now = Date.now();
           let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'att_bad'); }
-          const tk = { id: uid(5), customerId: c.id, username: c.username, name: c.name, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: c.name || c.username, at: now, text, ...(att ? { att } : {}) }] };
+          const tk = { id: uid(5), customerId: c.id, username: c.username, name: c.name, subject, status: 'open', priority: 'normal', createdAt: now, updatedAt: now, messages: [{ from: 'customer', by: c.name || c.username, at: now, text, ...(att ? { att, ...(body.aiPhotoConsent === true ? { aiPhotoConsent: true } : {}) } : {}) }] };
           all.unshift(tk); await saveTickets(all);
           await log('support', `New ticket from ${c.username}: ${subject}`);
           await pushAgents(s, 'tickets', { title: '🛟 New support request', body: `${c.name || c.username}: ${subject}`, tag: 'tk-' + c.id, url: '/intprototv?tab=support&open=' + tk.id });
@@ -3746,7 +3777,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const text = cleanText(body.text, 2000); if (text.length < 2) return err(400, 'ticket_short');
           if (tk.messages.length >= 40) return err(400, 'ticket_full');
           let att = ''; try { att = await saveAttachment(body.image); } catch { return err(400, 'att_bad'); }
-          tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text, ...(att ? { att } : {}) }); tk.status = 'open'; tk.updatedAt = Date.now();
+          tk.messages.push({ from: 'customer', by: c.name || c.username, at: Date.now(), text, ...(att ? { att, ...(body.aiPhotoConsent === true ? { aiPhotoConsent: true } : {}) } : {}) }); tk.status = 'open'; tk.updatedAt = Date.now();
           await saveTickets(all);
           return ok({ ok: true });
         }
@@ -4418,69 +4449,135 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       // ---------- Shared AI assistant: optional LLM mode + panel answers, for the owner and the agents ----------
       const aiIsoToday = (tz, off = 0) => { try { const now = new Date(Date.now() + off * 86400000); const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; } catch { return new Date(Date.now() + off * 86400000).toISOString().slice(0, 10); } };
       const aiWdOf = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();
+      const secureAiUrl = (value) => { try { const u = new URL(String(value || '')); return u.protocol === 'https:' && !!u.hostname && !u.username && !u.password; } catch { return false; } };
       async function aiAlertSummary() { // what the Alerts tab shows, in words
         const list = await getCustomers(); const a = { expiringDays: 7, expiredDays: 30, trialHours: 12, hide: {}, ...(s.alerts || {}) }; const now = Date.now();
-        const items = [];
+        const counts = { disabled: 0, trialEnding: 0, trialEnded: 0, expired: 0, expiring: 0 };
         for (const c of list) {
-          if (c.status === 'disabled') { items.push(`${c.name || c.username} — account disabled`); continue; }
+          if (c.status === 'disabled') { counts.disabled++; continue; }
           const expired = (c.expiresAt || 0) <= now; const isTrial = !!c.isTrial;
           const daysLeft = c.daysLeft !== undefined ? Number(c.daysLeft) : (c.expiresAt ? Math.floor((c.expiresAt - now) / 86400000) : 0);
-          if (isTrial && !expired && (c.hoursLeft || 0) <= a.trialHours) items.push(`${c.name || c.username} — trial ending in about ${Math.max(0, c.hoursLeft || 0)} h`);
-          else if (isTrial && expired && daysLeft >= -a.expiredDays) items.push(`${c.name || c.username} — trial ended, no pay link yet`);
-          else if (!isTrial && expired && daysLeft >= -a.expiredDays) items.push(`${c.name || c.username} — subscription expired (paused)`);
-          else if (!isTrial && !expired && daysLeft <= a.expiringDays) items.push(`${c.name || c.username} — subscription ends in ${daysLeft} day(s)`);
+          if (isTrial && !expired && Math.floor((Number(c.expiresAt) - now) / 3600000) <= a.trialHours) counts.trialEnding++;
+          else if (isTrial && expired && daysLeft >= -a.expiredDays) counts.trialEnded++;
+          else if (!isTrial && expired && daysLeft >= -a.expiredDays) counts.expired++;
+          else if (!isTrial && !expired && daysLeft <= a.expiringDays) counts.expiring++;
         }
-        return items.slice(0, 15).map((x) => '• ' + x).join('\n') || 'Nothing is in the alert list — everything looks on track.';
+        if (!Object.values(counts).some(Boolean)) return 'Nothing is in the alert list — everything looks on track.';
+        return [`Disabled accounts: ${counts.disabled}`, `Trials ending within ${a.trialHours} hours: ${counts.trialEnding}`, `Trials ended without a pay link (${a.expiredDays}-day window): ${counts.trialEnded}`, `Expired subscriptions (${a.expiredDays}-day window): ${counts.expired}`, `Subscriptions ending within ${a.expiringDays} days: ${counts.expiring}`, 'Counts only; open Alerts to see customer names.'].join('\n');
       }
-      async function aiPanelContext() { // what the assistant knows, from the panel itself
-        const wp = workPlanOf(s); const tz = s.ai?.tz || 'Asia/Bangkok'; const today = aiIsoToday(tz);
+      async function aiPanelContext() { // the agent work plan plus the existing read-only owner-plan overview
+        const wp = workPlanOf(s); const workTz = wp.tz || s.ai?.tz || 'Asia/Bangkok'; const today = aiIsoToday(workTz);
         const wd = aiWdOf(today); const tasks = (wp.days[wd] || {});
         const plan = wp.slots.map((sl) => `${sl.start}–${sl.end} ${sl.icon} ${sl.title}${tasks[sl.id] ? ' — ' + tasks[sl.id] : ''}`);
-        const tNext = aiWdOf(aiIsoToday(tz, 1)); const tTasks = (wp.days[tNext] || {});
+        const workTomorrow = aiIsoToday(workTz, 1); const tTasks = (wp.days[aiWdOf(workTomorrow)] || {});
         const tomorrow = wp.slots.map((sl) => `${sl.start}–${sl.end} ${sl.icon} ${sl.title}${tTasks[sl.id] ? ' — ' + tTasks[sl.id] : ''}`);
-        return { today, plan, tomorrow, rules: wp.rules, alerts: await aiAlertSummary(), players: IBO_PLAYERS.map((p) => `${p.name} (${p.code})`).join(', '), sports: (s.sports?.events || []).map((e) => `${e.name} — ${e.type}${e.date ? ' on ' + e.date : ''}${e.tip ? ': ' + e.tip : ''}`) };
+        const owner = ownerPlanOf(await store.get('ownerplan')); const ownerTz = owner.tz || 'Asia/Bangkok'; const ownerOverrides = (await store.get('ownerov')) || {};
+        const ownerToday = opLocal(ownerTz, Date.now()).date;
+        const addDate = (iso) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+        const safeOwnerDay = (date) => opDay(owner, date, ownerOverrides[date] || {}).filter((b) => !b.api).map((b) => `${b.start}–${b.end} ${String(b.icon || '•').slice(0, 4)} ${String(b.title || '').replace(/\b(?:sk|rk|re|whsec)[_-][A-Za-z0-9_-]{5,}\b/gi, '[redacted]').slice(0, 160)}`);
+        const ownerPlanning = { timezone: ownerTz, today: ownerToday, plan: safeOwnerDay(ownerToday), tomorrowDate: addDate(ownerToday), tomorrow: safeOwnerDay(addDate(ownerToday)) };
+        return { today, timezone: workTz, plan, tomorrow, workPlanning: { timezone: workTz, today, plan, tomorrowDate: workTomorrow, tomorrow }, ownerPlanning, rules: wp.rules, alerts: await aiAlertSummary(), players: IBO_PLAYERS.map((p) => `${p.name} (${p.code})`).join(', '), sports: (s.sports?.events || []).map((e) => `${e.name} — ${e.type}${e.date ? ' on ' + e.date : ''}${e.tip ? ': ' + e.tip : ''}`) };
       }
       async function aiAsk(s, member, question) {
         const ai = s.ai || {}; const q = question.toLowerCase(); const ctx = await aiPanelContext(); const wp = workPlanOf(s);
-        const tz = s.ai?.tz || 'Asia/Bangkok'; const name = (member && member.name) || 'you';
-        if (ai.on !== false && String(ai.apiKey || '').trim() && /^https?:\/\//i.test(String(ai.baseUrl || ''))) { // optional LLM mode
-          const sys = [ai.instructions || 'You are the AI assistant of INTPROTO-TV (the TVplus IPTV reseller app).', 'Answer concisely, in the language of the user. Use the panel context. Suggest actions the owner or the agents can take, with the panel links.', 'Known links: /intprototv?tab=workplan (Work planning), /intprototv?tab=ownerplan (My planning), /intprototv?tab=alerts (Alerts), /intprototv?tab=ibo (IBO Player), /intprototv?tab=promos (Promotions).'].join('\n');
+        const name = (member && member.name) || 'you';
+        if (ai.on !== false && String(ai.apiKey || '').trim() && secureAiUrl(ai.baseUrl)) { // optional HTTPS-only LLM mode
+          const sys = [ai.instructions || 'You are the AI assistant of INTPROTO-TV (the TVplus IPTV reseller app).', 'Answer concisely, in the language of the user. Use the panel context. Clearly distinguish the owner’s My planning from agents’ Work planning; the owner schedule is a read-only overview and contains no private notes, checkoffs or API-key records. Alert context contains aggregate counts only, not customer names. Never claim access to private details omitted from context.', 'For IPTV setup, explain the difference between Xtream Codes/API details and an M3U playlist, say app menu names can vary, and do not request or repeat passwords, full M3U links or other credentials. IPTV players do not provide content; advise using authorized access only.', 'Suggest actions and use panel links when helpful. Known links: /intprototv?tab=workplan (Work planning), /intprototv?tab=ownerplan (My planning), /intprototv?tab=alerts (Alerts), /intprototv?tab=ibo (IBO Player), /intprototv?tab=promos (Promotions).'].join('\n');
           const prompt = ['Panel context:\n' + JSON.stringify(ctx, null, 1), 'User question:', question].join('\n');
           try {
-            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.3, max_tokens: 900, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] }) });
+            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.3, max_tokens: 900, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] }) });
             const j = await r.json().catch(() => ({}));
             const ans = j.choices && j.choices[0] && j.choices[0].message ? String(j.choices[0].message.content || '').trim() : '';
             if (r.ok && ans) return { answer: ans.slice(0, 1500), source: 'ai', related: ['/intprototv?tab=workplan', '/intprototv?tab=alerts'] };
           } catch {}
         }
         // Deterministic panel answers — the assistant works even without an LLM key.
-        if (/tomorrow/i.test(q)) {
-          const tNext = aiWdOf(aiIsoToday(tz, 1)); const tTasks = (wp.days[tNext] || {});
-          const items = wp.slots.map((sl) => (tTasks[sl.id] ? `${sl.start}–${sl.end} ${sl.icon} ${sl.title} — ${tTasks[sl.id]}` : '')).filter(Boolean);
-          return { answer: `Tomorrow:\n${items.join('\n') || 'Nothing is scheduled for tomorrow — add activities in My planning.'}`, source: 'panel', related: ['/intprototv?tab=workplan'] };
-        }
+        const ownerPlanAsked = /my planning|owner.?s? planning|owner.?s? plan|owner plan|personal planning|personal schedule/i.test(q);
+        const workPlanAsked = /work planning|work plan|agent.?s? plan|agent work/i.test(q);
+        const planningIntent = ownerPlanAsked || workPlanAsked || /\b(?:plan|planning|schedule|schedules)\b/i.test(q);
+        const bothPlansAsked = planningIntent && /both|owner.{0,50}work planning|work planning.{0,80}(my planning|owner)|my planning.{0,80}work planning/i.test(q);
+        const ownerLines = (ctx.ownerPlanning.plan || []).join('\n') || 'Nothing is scheduled in the owner overview for this date.';
+        const workLines = (ctx.plan || []).join('\n') || 'Nothing is scheduled in agent Work planning for this date.';
+        if (bothPlansAsked && /tomorrow/i.test(q)) return { answer: `Tomorrow’s schedules:\nAgent Work planning (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}\n\nOwner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
+        if (bothPlansAsked) return { answer: `Today’s schedules (kept separate):\nAgent Work planning for ${name} (${ctx.today} · ${ctx.timezone}):\n${workLines}\n\nOwner’s My planning (${ctx.ownerPlanning.today} · ${ctx.ownerPlanning.timezone}):\n${ownerLines}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
+        if (ownerPlanAsked && !workPlanAsked && !/tomorrow/i.test(q)) return { answer: `Owner’s My planning (${ctx.ownerPlanning.today} · ${ctx.ownerPlanning.timezone}):\n${ownerLines}\n\nTomorrow (${ctx.ownerPlanning.tomorrowDate}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=ownerplan'] };
+        if (/tomorrow/i.test(q) && workPlanAsked && !ownerPlanAsked) return { answer: `Agent Work planning for ${name} (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan'] };
+        if (/tomorrow/i.test(q) && ownerPlanAsked && !workPlanAsked) return { answer: `Owner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=ownerplan'] };
+        if (workPlanAsked) return { answer: `Agent Work planning for ${name} (${ctx.today} · ${ctx.timezone}):\n${workLines}\n\nRules: ${(wp.rules || []).length ? (wp.rules || []).join(' · ') : 'none yet.'}`, source: 'panel', related: ['/intprototv?tab=workplan'] };
+        if (/tomorrow/i.test(q)) return { answer: `Tomorrow’s schedules:\nAgent Work planning (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}\n\nOwner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
         if (/alert/i.test(q)) return { answer: `Alerts:\n${await aiAlertSummary()}`, source: 'panel', related: ['/intprototv?tab=alerts'] };
+        if (/smarters|xciptv|tivimate|m3u|xtream|iptv|setup.{0,20}(app|player)|player.{0,20}setup/i.test(q)) return { answer: iptvSetupGuide(), source: 'panel', related: ['/intprototv?tab=ibo'] };
         if (/ibo|player pro|king4k|iboss|roku|stb|media box/i.test(q)) return { answer: `IBO Player setup guide:\n${iboSetupGuide()}`, source: 'panel', related: ['/intprototv?tab=ibo'] };
-        if (/plan|today|activity|next/i.test(q)) return { answer: `Today's plan for ${name} (${ctx.today}):\n${ctx.plan.join('\n') || 'Nothing is scheduled today — your day is open. Add activities in My planning.'}\n\nRules: ${(wp.rules || []).length ? (wp.rules || []).join(' · ') : 'none yet.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
-        return { answer: 'I can help with:\n• Today\'s and tomorrow\'s work planning (Work planning tab).\n• Alerts and subscriptions (Alerts tab).\n• IBO Player setup on Roku, Android TV and STBs (IBO Player tab).\n• Actions below: create a Resend API, update a sports promo, change a customer program, notify agents.', source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ibo', '/intprototv?tab=promos'] };
+        if (/plan|today|activity|next/i.test(q)) return { answer: `Today’s schedules (kept separate):\nAgent Work planning for ${name} (${ctx.today} · ${ctx.timezone}):\n${workLines}\n\nOwner’s My planning (${ctx.ownerPlanning.today} · ${ctx.ownerPlanning.timezone}):\n${ownerLines}\n\nWork-planning rules: ${(wp.rules || []).length ? (wp.rules || []).join(' · ') : 'none yet.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
+        return { answer: 'I can help with:\n• Agent Work planning and the owner’s read-only My planning overview.\n• Alerts and subscriptions (Alerts tab).\n• IPTV setup across Smarters Pro, XCIPTV, TiviMate, IBO Player and M3U/Xtream-compatible apps.\n• Campaign copy: generate separate email HTML and WhatsApp-ready plain text in the marketing composer.\n• Owner-only actions: create a Resend API, update a sports promo, change a customer program, notify agents.', source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan', '/intprototv?tab=ibo', '/intprototv?tab=promos'] };
       }
       if (R('GET', '/api/admin/ai/config')) {
         const ai = s.ai || {};
-        return ok({ on: ai.on !== false, provider: ai.provider || 'openai', baseUrl: ai.baseUrl || 'https://api.openai.com/v1', model: ai.model || 'gpt-4o-mini', apiKey: '', hasKey: !!String(ai.apiKey || '').trim(), instructions: ai.instructions || '', tz: ai.tz || 'Asia/Bangkok' });
+        return ok({ on: ai.on !== false, provider: ai.provider || 'openai', baseUrl: ai.baseUrl || 'https://api.openai.com/v1', model: ai.model || 'gpt-4o-mini', apiKey: '', hasKey: !!String(ai.apiKey || '').trim(), instructions: ai.instructions || '', tz: ai.tz || 'Asia/Bangkok', photoAnalysis: ai.photoAnalysis !== false });
       }
       if (R('PUT', '/api/admin/ai/config')) {
         if (!isOwner) return err(403, 'Only the owner configures the AI assistant.');
         const prev = s.ai || {};
-        const next = { on: body.on === undefined ? prev.on !== false : body.on === true, provider: cleanText(body.provider, 20) || 'openai', baseUrl: cleanText(body.baseUrl, 250) || 'https://api.openai.com/v1', model: cleanText(body.model, 80) || 'gpt-4o-mini', instructions: String(body.instructions || '').slice(0, 1200), tz: cleanText(body.tz, 40) || 'Asia/Bangkok', apiKey: prev.apiKey || '' };
+        const next = { on: body.on === undefined ? prev.on !== false : body.on === true, provider: cleanText(body.provider, 20) || 'openai', baseUrl: cleanText(body.baseUrl, 250) || 'https://api.openai.com/v1', model: cleanText(body.model, 80) || 'gpt-4o-mini', instructions: String(body.instructions || '').slice(0, 1200), tz: cleanText(body.tz, 40) || 'Asia/Bangkok', photoAnalysis: body.photoAnalysis === undefined ? prev.photoAnalysis !== false : body.photoAnalysis === true, apiKey: prev.apiKey || '' };
         if (typeof body.apiKey === 'string' && body.apiKey.trim()) next.apiKey = body.apiKey.trim().slice(0, 200);
         if (body.clearKey) next.apiKey = '';
-        if (!/^https?:\/\/\S+\.\S+/i.test(next.baseUrl)) return err(400, 'The AI provider URL must start with http:// or https://.');
+        if (!secureAiUrl(next.baseUrl)) return err(400, 'The AI provider URL must use HTTPS and cannot include embedded credentials.');
         await saveSettings({ ...s, ai: next }); await log('settings', 'AI assistant configured');
         return ok({ ok: true, hasKey: !!String(next.apiKey || '').trim(), on: next.on, model: next.model });
       }
       if (R('POST', '/api/admin/ai/ask')) {
         const q = cleanText(body.question, 1500); if (!q) return err(400, 'Write your question first.');
         try { return ok(await aiAsk(s, member, q)); } catch (e) { return err(500, e.message || 'The assistant could not answer right now.'); }
+      }
+      if (R('POST', '/api/admin/ai/compose-marketing')) {
+        const ai = s.ai || {}; if (ai.on === false) return err(503, 'The AI assistant is turned off.');
+        const brief = cleanText(body.brief, 1200); if (!brief) return err(400, 'Describe the campaign first.');
+        const audience = cleanText(body.audience, 180); const tone = cleanText(body.tone, 80);
+        const appName = cleanText(s.branding?.appName || 'INTPROTO-TV', 80);
+        const fallback = { emailSubject: cleanText(`A quick update from ${appName}`, 120), emailHeadline: cleanText(brief.split(/[.!?\n]/)[0] || 'A quick update', 100), emailBody: `Hello,\n\n${brief}\n\nThank you,\n${appName}`, whatsappText: `*${appName}*\n\n${brief}\n\nMessage us if you have any questions.` };
+        let draft = fallback; let source = 'template';
+        if (String(ai.apiKey || '').trim() && secureAiUrl(ai.baseUrl)) {
+          const system = 'Write a customer-friendly marketing campaign for an IPTV subscription service. Return only one JSON object with string fields emailSubject, emailHeadline, emailBody, whatsappText. Keep emailBody as plain text with paragraphs, not HTML. Write WhatsApp as plain text (optional WhatsApp *bold*, _italic_ markers), never HTML. Do not promise channels, reliability, prices, trials, or features unless the brief explicitly says them. Do not imply that the player provides content. No invented discounts or urgency. The email HTML will be built safely from the plain-text fields by the app.';
+          const prompt = JSON.stringify({ campaignBrief: brief, audience, tone, appName });
+          try {
+            const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.55, max_tokens: 800, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] }) });
+            const j = await r.json().catch(() => ({})); const raw = String(j.choices?.[0]?.message?.content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+            const a = raw.indexOf('{'); const b = raw.lastIndexOf('}');
+            if (r.ok && a >= 0 && b > a) { const parsed = JSON.parse(raw.slice(a, b + 1)); draft = { ...fallback, ...parsed }; source = 'ai'; }
+          } catch { /* a usable local draft is still returned; nothing is sent or saved */ }
+        }
+        const plain = (v, max) => cleanText(String(v || '').replace(/<[^>]*>/g, ''), max);
+        const subject = plain(draft.emailSubject, 120) || fallback.emailSubject;
+        const headline = plain(draft.emailHeadline, 100) || fallback.emailHeadline;
+        const paragraphs = plain(draft.emailBody, 2200).split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+        const emailHtml = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#f4f5f7;font-family:Arial,sans-serif;color:#222"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f5f7;padding:24px 8px"><tr><td align="center"><table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#fff;border-radius:12px"><tr><td style="padding:28px"><p style="margin:0 0 16px;color:#666;font-size:14px">${escHtml(appName)}</p><h1 style="font-size:24px;line-height:1.3;margin:0 0 20px">${escHtml(headline)}</h1>${paragraphs.map((p) => `<p style="font-size:16px;line-height:1.6;margin:0 0 16px">${escHtml(p).replace(/\n/g, '<br>')}</p>`).join('')}<p style="font-size:13px;color:#666;margin:24px 0 0">${escHtml(appName)}</p></td></tr></table></td></tr></table></body></html>`;
+        const whatsappText = plain(draft.whatsappText, 1800) || fallback.whatsappText;
+        return ok({ source, emailSubject: subject, emailHeadline: headline, emailBody: paragraphs.join('\n\n'), emailHtml, whatsappText, sent: false, saved: false });
+      }
+      if (R('POST', '/api/admin/ai/analyze-photo')) {
+        if (!isOwner && !(member?.perms || []).includes('customers_view')) return err(403, 'You need support-ticket viewing permission to analyze a customer picture.');
+        const ai = s.ai || {}; if (ai.on === false || ai.photoAnalysis === false) return err(403, 'AI picture analysis is turned off by the owner.');
+        if (!String(ai.apiKey || '').trim()) return err(400, 'The owner must configure an AI provider key first.');
+        if (!secureAiUrl(ai.baseUrl)) return err(400, 'Picture analysis requires a public HTTPS AI provider URL without embedded credentials.');
+        const ticketId = cleanText(body.ticketId, 40); const att = cleanText(body.att, 40);
+        if (!/^[0-9a-f]{6,32}$/i.test(att) || !ticketId) return err(400, 'Choose a customer picture from a support ticket.');
+        const ticket = (await getTickets()).find((x) => x.id === ticketId);
+        const message = ticket?.messages?.find((m) => m.att === att && m.from === 'customer');
+        if (!message) return err(404, 'This customer picture is not attached to that ticket.');
+        if (message.aiPhotoConsent !== true) return err(403, 'The customer did not opt in to AI analysis for this picture.');
+        const image = await store.get('att:' + att);
+        if (typeof image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) return err(404, 'This picture is no longer stored or is not supported.');
+        const rateKey = 'ai-photo-day:' + (member?.id || 'owner') + ':' + new Date().toISOString().slice(0, 10);
+        if (!(await reserveAiPhotoAttempt(rateKey))) return err(429, 'Daily AI picture-analysis attempt limit reached for this staff account.');
+        const system = 'You are a cautious technical-support assistant reviewing one customer-submitted IPTV app or device troubleshooting image. Describe only visible, relevant evidence; do not guess private credentials or transcribe passwords, QR codes, full URLs, tokens, email addresses, or account identifiers. Explain uncertainty. Give a few safe, generic next steps and ask for non-sensitive details only if needed. Do not diagnose people or claim the image proves an account or service status. A human support agent will review your suggestion before replying.';
+        const prompt = 'Inspect the attached image for a visible IPTV player/device setup or playback problem. Do not receive or infer any ticket text or customer identity. Return a concise observation, possible cause(s), and safe next troubleshooting steps. Redact or ignore credentials and personal details if visible.';
+        try {
+          const r = await fetchFn(trimSlash(String(ai.baseUrl)) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.2, max_tokens: 650, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: image, detail: 'low' } }] }] }) });
+          const j = await r.json().catch(() => ({})); const content = j.choices?.[0]?.message?.content;
+          const answer = (Array.isArray(content) ? content.filter((p) => p?.type === 'text').map((p) => p.text || '').join('\n') : String(content || '')).trim();
+          if (!r.ok || !answer) return err(502, 'The configured provider could not analyze this picture. Check that its selected model supports vision.');
+          return ok({ answer: answer.slice(0, 3000), model: ai.model || 'gpt-4o-mini', sent: true, saved: false });
+        } catch { return err(502, 'The AI provider could not be reached. No support reply was sent.'); }
       }
       if (R('POST', '/api/admin/ai/action')) {
         if (!isOwner) return err(403, 'Only the owner runs assistant actions.');
@@ -4587,7 +4684,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const doc = await getMktList(listRef.id); if (!doc) return err(404, 'List not found.');
         const bad = await getBad(); const recipients = (doc.emails || []).filter((e) => !bad[e]);
         if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
-        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const domains = mrows.map((r) => r.domain);
+        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const subjectOverride = locked ? '' : cleanText(body.subject, 150); const domains = mrows.map((r) => r.domain);
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
         const html = (locked ? String(m.html || '') : String(body.html || m.html || '')).slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
@@ -4596,7 +4693,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const bi = Math.floor(i / 100); const batch = recipients.slice(i, i + 100);
           const cands = await mailCandidates(mrows, batch.length, accts);
           if (!cands.length) { stopped = 'Every marketing key is at its plan limit or paused. Add a paid key or wait for the limit to reset.'; await log('marketing', `Marketing stopped at ${i}/${recipients.length}: ${stopped}`); break; }
-          const subject = subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`;
+          const subject = subjectOverride || (subjects.length ? subjects[bi % subjects.length] : `${app} — special offer`);
           let done = false;
           for (const row of cands.slice(0, 6)) {
           const keyIndex = mrows.indexOf(row); const key = row.key; const dom = row.domain;
@@ -4959,7 +5056,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       if (R('PUT', '/api/admin/shifts')) {
         const l = await getShifts(); const memberId = String(body.memberId || '').slice(0, 20); if (!memberId) return err(400, 'memberId required.');
         const idx = l.findIndex((x) => x.memberId === memberId);
-        const tz = String(body.tz || 'Europe/Paris').slice(0, 40);
+        const tz = String(body.tz || 'Europe/Paris').trim().slice(0, 40);
+        try { new Intl.DateTimeFormat('en', { timeZone: tz }); } catch { return err(400, 'Unknown time zone.'); }
         const days = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const d = (body.days || {})[k]; if (d && d.on) days[k] = { on: true, start: Math.max(0, Math.min(1440, Number(d.start) || 540)), end: Math.max(0, Math.min(1440, Number(d.end) || 1080)) }; else days[k] = { on: false }; }
         const rec = { memberId, memberName: String(body.memberName || memberId).slice(0, 60), tz, days, daysOff: Array.isArray(body.daysOff) ? body.daysOff.map(Number).filter((n) => n >= 0 && n <= 6) : [], updatedAt: Date.now(), by: actorName };
         if (idx >= 0) l[idx] = rec; else l.unshift(rec);
@@ -5170,6 +5268,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok(maskPanel(maskStripe({ ...s, ai: { ...(s.ai || {}), apiKey: String(s.ai?.apiKey || '').trim() ? '••••' : '' }, reseller: { ...s.reseller, baseUrl: '', apiKey: '', password: '', actions: {} }, email: { ...s.email, resendKey: '' }, finance: { ...s.finance, stripeWebhookSecrets: s.finance.stripeWebhookSecrets ? '••••' : '', stripeKey: s.finance.stripeKey ? '••••' : '' }, security: { sessionHours: s.security.sessionHours } })));
       }
       if (R('PUT', '/api/admin/settings')) {
+        if (Object.prototype.hasOwnProperty.call(body || {}, 'ai') && !isOwner) return err(403, 'Only the owner configures the AI assistant.');
         // Absolute sovereignty (spec §1): only Nizar (Owner) and Khalil (Technical Manager) may show, add, edit or update
         // IPTV panel keys, Resend keys, Stripe keys and other API credentials. Everyone else is locked out at the API level.
         const API_KEY_PATHS = [['panel', 'dino'], ['panel', 'xtream'], ['panel', 'mega'], ['reseller', 'baseUrl'], ['reseller', 'apiKey'], ['reseller', 'username'], ['reseller', 'password'], ['reseller', 'actions'], ['email', 'resendKey'], ['email', 'from'], ['finance', 'stripeKey'], ['finance', 'stripeWebhookSecrets'], ['telegram', 'botToken'], ['telegram', 'webhookSecret']];
@@ -5185,11 +5284,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (body?.reseller?.password === '••••') delete body.reseller.password;
         if (body?.reseller?.username === '••••') delete body.reseller.username;
         if (body?.reseller?.baseUrl === '••••') delete body.reseller.baseUrl;
+        if (body?.ai?.apiKey === '••••') delete body.ai.apiKey;
         if (body?.panel) for (const k of Object.keys(body.panel)) { const v = body.panel[k]; if (v && typeof v === 'object' && (v.apiKey === '••••' || v.password === '••••' || v.baseUrl === '••••')) { if (v.apiKey === '••••') delete v.apiKey; if (v.password === '••••') delete v.password; if (v.baseUrl === '••••') delete v.baseUrl; } }
         if (body?.finance?.stripeWebhookSecrets === '••••') delete body.finance.stripeWebhookSecrets;
         let newRows = null;
         if (body?.email && Array.isArray(body.email.transRows)) { if (!isTm) return err(403, 'Only the owner and the Technical Manager can change API keys.'); newRows = normRows(body.email.transRows, transRowsOf(s)); delete body.email.transRows; }
         const next = deepMerge(s, body || {});
+        if (Object.prototype.hasOwnProperty.call(body || {}, 'ai') && !secureAiUrl(next.ai?.baseUrl)) return err(400, 'The AI provider URL must use HTTPS and cannot include embedded credentials.');
         if (isObj(body.orders)) { const q = { ...(s.orders || {}), ...body.orders }; const pf = (x, d) => (/^[A-Za-z]{1,10}$/.test(String(x || '').trim()) ? String(x).trim() : d);
           next.orders = { prefix: pf(q.prefix, 'WLF'), iboPrefix: pf(q.iboPrefix, 'IBO'), rslPrefix: pf(q.rslPrefix, 'RLS'), pad: Math.max(1, Math.min(6, Number(q.pad) || 3)), devPad: 2 }; next.orders.series = [next.orders.prefix, next.orders.iboPrefix, next.orders.rslPrefix].join(','); }
         if (isObj(body.promo)) { const q = { ...(s.promo || {}), ...body.promo }; const day = (x) => (/^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) ? String(x) : '');

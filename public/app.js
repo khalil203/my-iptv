@@ -1,8 +1,9 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=125';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=128';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml, ensureSiteLang } from './site.js?v=123';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
+import { TIME_ZONES, timezoneOffsetLabel, zonedDayAndMinute } from './timezones.js?v=1';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS, ensureLang } from './i18n.js?v=125';
 import { openLangSheet, paintLangPill, langChip } from './lang.js?v=122';
 import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=122';
@@ -114,30 +115,36 @@ function localStore() {
   };
 }
 
+let sessionGeneration = 0;
+let marketingDraftRequestId = 0;
 async function api(method, path, body) {
+  const requestToken = state.token;
+  const requestSession = sessionGeneration;
   let status, json;
   if (state.mode === 'demo') {
     const u = new URL(path, location.href);
-    const r = await state.local.handle({ method, path: u.pathname.replace(/^.*(\/api\/)/, '/api/'), query: Object.fromEntries(u.searchParams), body: body || {}, token: state.token });
+    const r = await state.local.handle({ method, path: u.pathname.replace(/^.*(\/api\/)/, '/api/'), query: Object.fromEntries(u.searchParams), body: body || {}, token: requestToken });
     status = r.status; json = r.json;
   } else {
-    const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(state.token ? { authorization: 'Bearer ' + state.token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(requestToken ? { authorization: 'Bearer ' + requestToken } : {}) }, body: body ? JSON.stringify(body) : undefined });
     status = res.status; json = await res.json().catch(() => ({ error: 'Unexpected server response' }));
   }
   if (status === 409 && path.includes('/api/xtream')) { location.reload(); }
   if (status >= 400) {
-    if (status === 401 && state.token && !path.includes('/login')) { setSession(null); route(); }
+    if (status === 401 && requestToken && state.token === requestToken && requestSession === sessionGeneration && !path.includes('/login')) { setSession(null); route(); }
     if (status === 403 && json.error === 'checkin_required' && state.admin?.me) { state.admin.me.mustCheckIn = true; setTimeout(renderAdmin); }
     throw Object.assign(new Error(json.error || 'Error'), { status, data: json });
   }
   return json;
 }
 function setSession(token, role) {
+  sessionGeneration += 1;
   state.token = token; state.role = role; if (!token || role !== 'user') document.getElementById('chat-fab')?.remove();
   if (token) { localStorage.setItem('tvp_token', token); localStorage.setItem('tvp_role', role); }
   else { localStorage.removeItem('tvp_token'); localStorage.removeItem('tvp_role'); }
   state.user = { tab: 'home', me: null, cache: {}, cat: {}, q: '', limit: 120 };
   state.admin.me = null; state.admin.tab = 'overview';
+  state.admin.mktDraft = null; state.admin.mktComposer = null;
 }
 
 function applyBranding(b) {
@@ -385,6 +392,7 @@ function renderResellers() {
 // ---------------- public support page (/support) ----------------
 // Step 1 asks who the customer is (required). Only then can a ticket be opened; it lands in the agents' queue right away.
 const SUP = { step: 1, token: '', known: false, info: null, ref: '', me: null, form: {} };
+const ticketPhotoConsent = () => `<label class="field" style="flex-direction:row;align-items:flex-start;gap:9px"><input type="checkbox" name="aiPhotoConsent" style="width:auto;margin-top:3px"><span class="small">${esc(t('ticketAiPhotoConsent'))}</span></label>`;
 const supLangSel = () => langChip(getLang(), { label: t('language') });
 async function renderSupport() {
   document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
@@ -417,7 +425,7 @@ function supDraw() {
       ${field(t('sup_cat'), 'category', 'other', { type: 'select', options: cats.map((k) => [k, t('sup_cat_' + k)]) })}
       ${field(t('sup_subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}
       ${field(t('sup_msg'), 'text', '', { type: 'textarea', rows: 5, ph: t('sup_msgPh'), attrs: 'required minlength="5" maxlength="2000"' })}
-      <label class="field"><span>${esc(t('attAdd'))}</span><input type="file" name="image" accept="image/*"></label>
+      <label class="field"><span>${esc(t('attAdd'))}</span><input type="file" name="image" accept="image/*"></label>${ticketPhotoConsent()}
       <div id="sup-err"></div>
       <button class="btn primary block">${esc(t('sup_send'))}</button>
       <button type="button" class="btn ghost block" data-act="sup-back" style="margin-top:8px">${esc(t('sup_back'))}</button>
@@ -1221,8 +1229,11 @@ async function aiaSend(q) {
   catch (e) { toast(e.message, true); }
 }
 async function aiaAction(kind) {
-  if (kind === 'daily') return void (await aiaSend('What is my daily work plan? List today’s tasks from Work planning.'));
-  if (kind === 'tomorrow') return void (await aiaSend('What is tomorrow’s work plan? List tomorrow’s tasks from Work planning.'));
+  if (kind === 'daily') return void (await aiaSend('Show today’s agent Work planning.'));
+  if (kind === 'tomorrow') return void (await aiaSend('What are tomorrow’s schedules? Include agent Work planning and owner My planning separately.'));
+  if (kind === 'workplan') return void (await aiaSend('Show today’s agent Work planning.'));
+  if (kind === 'ownerplan') return void (await aiaSend('Show the owner’s My planning schedule.'));
+  if (kind === 'campaign') { state.admin.tab = 'mkt'; return renderAdmin(); }
   if (kind === 'alerts') return void (await aiaSend('What are the current alerts? Give me the list from the Alerts tab.'));
   const map = { ibo: 'ibo-setup', ad: 'update-ad', resend: 'resend-create', program: 'change-program', notify: 'notify-agents' };
   const act = map[kind]; if (!act) return;
@@ -1242,20 +1253,21 @@ async function adminAiAssist() {
   const ready = st && st.on !== false;
   const act = (kind, label) => `<button class="btn sm" data-act="aia-act" data-action="${esc(kind)}">${esc(label)}</button>`;
   const quick = [
-    ...ready ? [act('daily', '🗓 Today’s plan'), act('tomorrow', '🗓 Tomorrow’s plan'), act('alerts', '⚠ Alerts'), act('ibo', '📺 IBO Player setup (Roku TV)'), act('ad', '🏆 Update sports promo')] : [],
+    ...ready ? [act('workplan', '🗓 Agent Work planning'), act('ownerplan', '🗓 Owner My planning'), act('tomorrow', '🗓 Tomorrow · both plans'), act('alerts', '⚠ Alerts'), act('ibo', '📺 IBO Player setup'), ...(can('marketing') ? [act('campaign', '📣 Email & WhatsApp drafts')] : []), act('ad', '🏆 Update sports promo')] : [],
     ...owner ? [act('resend', '⚙️ Create Resend API'), act('program', '💾 Change customer program'), act('notify', '📣 Notify agents')] : []
   ];
   return `<div class="card" style="max-width:760px;margin:0 auto">
     <h3 style="display:flex;gap:10px;align-items:baseline"><span>🤖 AI Assistant</span><span class="small muted">${ready ? (st.hasKey ? `${esc(st.model || 'AI')} · key set` : 'Panel answers — set up an AI key to enable full chat') : 'Turned off — ask the owner to turn it on'}</span></h3>
-    <p class="small muted">Ask anything about the panel: the daily plan, the alerts, IBO Player setup on Roku, sports promos. Owner actions: create a Resend API, update a sports promo, change a customer program, notify agents.</p>
+    <p class="small muted">Ask about agent Work planning and the owner’s read-only My planning, alerts, or IPTV setup in Smarters Pro, XCIPTV, TiviMate, IBO Player and other compatible apps. Draft separate email HTML and WhatsApp-ready text in Email marketing. Support staff can ask AI to review an image only when the customer opted in; the suggestion is not sent to the customer automatically.</p>
     <div class="aia-stat"><div class="aia-val">${ready ? '✓ On' : '— Off'}</div><div class="aia-sub">${st.provider ? esc(st.provider + ' · ' + (st.model || '')) : 'Panel mode — deterministic answers from the app data'}</div></div>
     ${owner ? `<form data-form="ai-cfg" class="card" style="padding:14px;background:var(--elevated);border:1px solid var(--line2);margin-top:12px"><h4 style="margin-top:0">⚙️ AI configuration (owner)</h4>
       <div class="grid2">${field('Provider', 'provider', st.provider || 'openai', { type: 'select', options: [['openai', 'OpenAI-compatible (recommended)'], ['openrouter', 'OpenRouter']] })}${field('Model', 'model', st.model || 'gpt-4o-mini')}</div>
-      <div class="grid2">${field('API key', 'apiKey', '••••', { type: 'password', ph: 'sk-…', attrs: 'autocomplete="off"' })}${field('Time zone for “today”', 'tz', st.tz || 'Asia/Bangkok', { ph: 'Asia/Bangkok' })}</div>
-      <div class="grid2">${field('Base URL', 'baseUrl', st.baseUrl || 'https://api.openai.com/v1')}${field('System instructions for the assistant', 'instructions', st.instructions || '', { type: 'textarea', rows: 3 })}</div>
+      <div class="grid2">${field('API key', 'apiKey', '', { type: 'password', ph: st.hasKey ? 'Saved key — leave blank to keep' : 'sk-…', attrs: 'autocomplete="new-password"' })}${field('Time zone for “today”', 'tz', st.tz || 'Asia/Bangkok', { ph: 'Asia/Bangkok' })}</div>
+      <div class="grid2">${field('Base URL', 'baseUrl', st.baseUrl || 'https://api.openai.com/v1', { help: 'Use an HTTPS provider URL; HTTP is refused because prompts can contain planning information.' })}${field('System instructions for the assistant', 'instructions', st.instructions || '', { type: 'textarea', rows: 3 })}</div>
+      ${toggle('Allow staff to request consented customer-photo analysis', 'photoAnalysis', st.photoAnalysis !== false, 'Only after a customer opts in and a staff member clicks Analyze; only the image is sent to the configured provider. A human reviews the suggestion.')}
       <div class="row" style="margin-top:10px"><button type="submit" class="btn primary">💾 Save AI config</button></div></form>` : ''}
     <div class="aia-actions">${quick.join('')}</div>
-    <div class="aia-chat" id="aia-chat">${state.admin.aiChat.length ? state.admin.aiChat.map((m) => aiaBubble(m.text, m.who)).join('') : `<div class="aia-empty"><span class="ic">🤖</span><div>Ask anything — “What is today’s work plan?”, “What are the alerts?”, “Set up IBO Player on Roku”…</div></div>`}</div>
+    <div class="aia-chat" id="aia-chat">${state.admin.aiChat.length ? state.admin.aiChat.map((m) => aiaBubble(m.text, m.who)).join('') : `<div class="aia-empty"><span class="ic">🤖</span><div>Ask anything — “Show both plans”, “What are the alerts?”, “Set up Smarters Pro”, or “How do I load an M3U playlist?”</div></div>`}</div>
     <form data-form="ai-ask" class="aia-input-row" style="margin-top:12px"><input type="text" name="question" placeholder="Ask the AI…" required autocomplete="off" dir="ltr"><button type="submit" class="btn primary">Ask</button></form>
   </div>`;
 }
@@ -4086,6 +4098,9 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if ((t.id === 'mkt-html' || t.id === 'mkt-subject') && state.admin) {
+    state.admin.mktComposer = { ...(state.admin.mktComposer || {}), [t.id === 'mkt-html' ? 'html' : 'subject']: t.value };
+  }
   if (t.name === 'notice' && t.closest('[data-notice-editor]')) {
     const preview = t.closest('[data-notice-editor]').querySelector('[data-notice-preview]');
     if (preview) { preview.textContent = t.value || 'Nothing to preview yet.'; preview.classList.toggle('empty', !t.value); }
@@ -4237,12 +4252,12 @@ async function loadAccountExtras() {
   });
 }
 function ticketThread(x, admin) {
-  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${admin ? '<button type="button" class="tr-msg-btn" data-act="tr-msg" title="Translate this message" aria-label="Translate this message">🌐</button>' : ''}${admin && m.emailed ? '<div class="small muted">📧 emailed to the customer</div>' : ''}${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>` : ''}</div>`).join('')}</div>`;
+  return `<div class="thread">${x.messages.map((m) => `<div class="msg ${m.from === (admin ? 'staff' : 'customer') ? 'mine' : ''}"><div class="small muted">${esc(m.from === 'staff' ? (admin ? m.by : t('supportTeam')) : (admin ? m.by : t('you')))} · ${fmtDT(m.at)}</div><div class="msg-t">${esc(m.text)}</div>${admin ? '<button type="button" class="tr-msg-btn" data-act="tr-msg" title="Translate this message" aria-label="Translate this message">🌐</button>' : ''}${admin && m.emailed ? '<div class="small muted">📧 emailed to the customer</div>' : ''}${m.att ? `<button type="button" class="btn sm" style="margin-top:8px" data-act="att-show" data-id="${esc(m.att)}" data-admin="${admin ? 1 : ''}">📎 ${admin ? 'Show picture' : t('attShow')}</button>${admin && m.from === 'customer' && m.aiPhotoConsent === true ? `<div class="small muted" style="margin-top:6px">Customer opted in to image-only AI troubleshooting.</div><button type="button" class="btn sm" style="margin-top:6px" data-act="ai-photo-analyze" data-ticket-id="${esc(x.id)}" data-att-id="${esc(m.att)}">🔎 Analyze photo with AI</button>` : ''}` : ''}</div>`).join('')}</div>`;
 }
 function openTicket(id) {
   const x = (state.user.tickets || []).find((k) => k.id === id); if (!x) return;
   modal(esc(x.subject), `<div style="margin-bottom:10px">${tpill(x.status)}</div>${ticketThread(x, false)}
-    ${x.status === 'closed' ? '' : `<form data-form="ticket-reply" data-id="${esc(x.id)}">${field(t('reply'), 'text', '', { type: 'textarea', rows: 3, ph: t('writeReply'), attrs: 'required maxlength="2000"' })}<label class="field"><span>${t('attAdd')}</span><input type="file" name="image" accept="image/*"></label><button class="btn primary">${t('send')}</button></form>`}`);
+    ${x.status === 'closed' ? '' : `<form data-form="ticket-reply" data-id="${esc(x.id)}">${field(t('reply'), 'text', '', { type: 'textarea', rows: 3, ph: t('writeReply'), attrs: 'required maxlength="2000"' })}<label class="field"><span>${t('attAdd')}</span><input type="file" name="image" accept="image/*"></label>${ticketPhotoConsent()}<button class="btn primary">${t('send')}</button></form>`}`);
 }
 function openReceipt(id) {
   const x = (state.user.payments || []).find((k) => k.id === id); if (!x) return; const me = state.user.me;
@@ -4325,12 +4340,26 @@ Object.assign(actions, {
   'hist-clear': () => { localStorage.removeItem(histKey()); toast(t('histCleared')); renderUserTab(); },
   'pin-unlock': () => { const b = modal('🔒 ' + t('parentalT'), `<form data-form="pin-unlock">${field(t('enterPin'), 'pin', '', { type: 'password', attrs: 'required inputmode="numeric" maxlength="4" autocomplete="off" dir="ltr"' })}<button class="btn primary block">${t('unlock')}</button></form>`); b.querySelector('input').focus(); },
   'dev-remove': async (el) => { if (!confirm(t('signOutDev') + '?')) return; await api('POST', '/api/me/devices/remove', { did: el.dataset.did }); toast(t('devOut')); loadAccountExtras(); },
-  'ticket-new': () => { modal('💬 ' + t('newTicket'), `<form data-form="ticket-new">${field(t('subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}${field(t('message'), 'text', '', { type: 'textarea', rows: 5, attrs: 'required minlength="5" maxlength="2000"' })}<label class="field"><span>${t('attAdd')}</span><input type="file" name="image" accept="image/*"></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">${t('send')}</button></div></form>`); },
+  'ticket-new': () => { modal('💬 ' + t('newTicket'), `<form data-form="ticket-new">${field(t('subject'), 'subject', '', { attrs: 'required minlength="3" maxlength="120"' })}${field(t('message'), 'text', '', { type: 'textarea', rows: 5, attrs: 'required minlength="5" maxlength="2000"' })}<label class="field"><span>${t('attAdd')}</span><input type="file" name="image" accept="image/*"></label>${ticketPhotoConsent()}<div class="row" style="justify-content:flex-end"><button type="button" class="btn ghost" data-act="close-modal">${t('cancel')}</button><button class="btn primary">${t('send')}</button></div></form>`); },
   'ticket-open': (el) => openTicket(el.dataset.id),
   receipt: (el) => openReceipt(el.dataset.id),
   print: () => window.print(),
   'tk-filter': async (el) => { state.admin.tkFilter = el.dataset.f; $('#admin-body').innerHTML = await adminSupport(); },
   'tk-open': (el) => adminTicketModal(el.dataset.id),
+  'ai-photo-analyze': async (el) => {
+    const ticketModal = el.closest('.modal');
+    el.disabled = true; toast('Analyzing the consented image…');
+    try {
+      const r = await api('POST', '/api/admin/ai/analyze-photo', { ticketId: el.dataset.ticketId, att: el.dataset.attId });
+      const body = ticketModal && $('#modal-root').contains(ticketModal) ? ticketModal.querySelector('.modal-body') : null;
+      if (body) {
+        let suggestion = body.querySelector('[data-ai-photo-suggestion]');
+        if (!suggestion) { suggestion = document.createElement('div'); suggestion.dataset.aiPhotoSuggestion = ''; body.append(suggestion); }
+        suggestion.innerHTML = `<div class="notice warning small">Suggestion only — review it, verify the visible details, and write the customer reply yourself. The result was not saved or sent.</div><div style="white-space:pre-wrap;line-height:1.6">${esc(r.answer || '')}</div><p class="small muted" style="margin-bottom:0">Model: ${esc(r.model || 'configured provider')}</p>`;
+      }
+      if (el.isConnected) el.disabled = false;
+    } catch (e) { toast(e.message, true); if (el.isConnected) el.disabled = false; }
+  },
   'tfa-setup': async () => {
     const r = await api('POST', '/api/admin/2fa/setup', {});
     modal('🔐 Turn on two-step sign-in', `<ol style="padding-inline-start:18px;line-height:1.7;margin-top:0"><li>Open your authenticator app and add a new account.</li><li>On this phone, tap <a href="${esc(r.uri)}" data-keep>Add to my authenticator app</a>. On another device, choose “enter a setup key” and type this key:<div class="code" style="margin:8px 0;font-size:1rem;letter-spacing:.08em">${esc(r.secret.match(/.{1,4}/g).join(' '))}</div></li><li>Type the 6-digit code the app shows:</li></ol>
@@ -4371,7 +4400,7 @@ Object.assign(forms, {
   async 'sup-ticket'(f) {
     const b = f.querySelector('button.primary'); const box = f.querySelector('#sup-err'); b.disabled = true;
     try {
-      const r = await api('POST', '/api/support/ticket', { token: SUP.token, category: f.category.value, subject: f.subject.value, text: f.text.value, image: await pickedImage(f) });
+      const r = await api('POST', '/api/support/ticket', { token: SUP.token, category: f.category.value, subject: f.subject.value, text: f.text.value, image: await pickedImage(f), aiPhotoConsent: !!f.aiPhotoConsent?.checked });
       SUP.ref = r.ref; SUP.step = 3; supDraw();
     } catch (e) {
       if (e.message === 'sup_again') { SUP.token = ''; SUP.step = 1; supDraw(); const x = $('#sup-err'); if (x) x.innerHTML = `<div class="err-box">${esc(t('sup_again'))}</div>`; return; }
@@ -4379,11 +4408,11 @@ Object.assign(forms, {
     }
   },
   async 'ticket-new'(f) {
-    try { await api('POST', '/api/me/tickets', { subject: f.subject.value, text: f.text.value, image: await pickedImage(f) }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
+    try { await api('POST', '/api/me/tickets', { subject: f.subject.value, text: f.text.value, image: await pickedImage(f), aiPhotoConsent: !!f.aiPhotoConsent?.checked }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
     catch (e) { toast(tErr(e.message), true); }
   },
   async 'ticket-reply'(f) {
-    try { await api('POST', '/api/me/tickets/reply', { id: f.dataset.id, text: f.text.value, image: await pickedImage(f) }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
+    try { await api('POST', '/api/me/tickets/reply', { id: f.dataset.id, text: f.text.value, image: await pickedImage(f), aiPhotoConsent: !!f.aiPhotoConsent?.checked }); closeModal(); toast(t('ticketSent')); loadAccountExtras(); }
     catch (e) { toast(tErr(e.message), true); }
   },
   async 'tk-reply'(f) {
@@ -5380,7 +5409,7 @@ Object.assign(forms, {
 });
 
 // ---------------- Team: attendance, night shifts, leave, tasks, team chat, reports (spec §9) ----------------
-const TZ_OPTS = [['Europe/Paris', 'Europe/Paris (CET)'], ['Europe/Madrid', 'Europe/Madrid (CET)'], ['Europe/London', 'Europe/London (GMT/BST)'], ['Africa/Casablanca', 'Africa/Casablanca (WET)'], ['America/New_York', 'America/New_York (EST)'], ['America/Chicago', 'America/Chicago (CST)'], ['America/Los_Angeles', 'America/Los_Angeles (PST)'], ['Asia/Bangkok', 'Asia/Bangkok (ICT)']];
+const TZ_OPTS = TIME_ZONES.map((tz) => { const offset = timezoneOffsetLabel(tz); return [tz, offset ? `${tz} (${offset})` : tz]; });
 const WD = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
 const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const minOf = (v) => { const [h, mm] = String(v || '09:00').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
@@ -5391,14 +5420,23 @@ async function adminAttendancePage() {
   const me = state.admin.me; const mine = r.mine || [];
   const lastMine = mine[0]?.action;
   const myShift = shifts.find((s) => s.memberId === (me.id || 'owner'));
-  const now = new Date(); const wd = String(now.getDay()); const today = (myShift && myShift.days && myShift.days[wd]) || null;
-  const minsNow = now.getHours() * 60 + now.getMinutes();
+  const now = new Date(); const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; let shiftTz = myShift?.tz || localTz; let shiftLocal;
+  try { shiftLocal = zonedDayAndMinute(now, shiftTz); } catch { shiftTz = localTz; shiftLocal = zonedDayAndMinute(now, shiftTz); }
+  const wd = String(shiftLocal.day); const today = (myShift && myShift.days && myShift.days[wd]) || null;
+  const minsNow = shiftLocal.minute;
+  const prevWd = String((shiftLocal.day + 6) % 7); const prevShift = (myShift && myShift.days && myShift.days[prevWd]) || null;
   let shiftBanner = '';
-  if (today && today.on) {
-    const start = today.start, end = today.end;
-    const to = (m) => { const [h, mm] = [Math.floor(m / 60), m % 60]; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
-    if (lastMine !== 'in' && start - minsNow > 0 && start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(start)} — in ${start - minsNow} minute(s). Check in when you begin.`;
-    else if (lastMine === 'in' && minsNow >= start && minsNow < Math.min(end === 0 ? 1440 : end, 1440) && (end === 0 ? 1440 - minsNow : end - minsNow) <= 10 && (end === 0 ? 1440 - minsNow : end - minsNow) >= 0) shiftBanner = `⏰ Your shift ends at ${to(end)} — ${end === 0 ? 1440 - minsNow : end - minsNow} minute(s) left. Do your handover, then Check out.`;
+  const to = (m) => { const [h, mm] = [Math.floor(m / 60), m % 60]; return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
+  if (today && today.on && lastMine !== 'in' && today.start - minsNow > 0 && today.start - minsNow <= 10) shiftBanner = `⏰ Your shift starts at ${to(today.start)} (${shiftTz}) — in ${today.start - minsNow} minute(s). Check in when you begin.`;
+  if (!shiftBanner && lastMine === 'in') {
+    const start = today?.start, end = today?.end;
+    let remaining = null, endAt = null;
+    if (today?.on && start !== end) {
+      if (end > start && minsNow >= start && minsNow < end) { remaining = end - minsNow; endAt = end; }
+      else if (end < start && minsNow >= start) { remaining = 1440 - minsNow + end; endAt = end; }
+    }
+    if (remaining === null && prevShift?.on && prevShift.end < prevShift.start && minsNow < prevShift.end) { remaining = prevShift.end - minsNow; endAt = prevShift.end; }
+    if (remaining !== null && remaining >= 0 && remaining <= 10) shiftBanner = `⏰ Your shift ends at ${to(endAt)} (${shiftTz}) — ${remaining} minute(s) left. Do your handover, then Check out.`;
   }
   if (shiftBanner && !sessionStorage.getItem('shiftBeeped')) { try { const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC(); const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.setValueAtTime(0.08, ctx.currentTime); o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.6); sessionStorage.setItem('shiftBeeped', '1'); } catch {} }
   const status = lastMine === 'in' ? 'on shift' : lastMine === 'out' ? 'off duty' : lastMine === 'break_start' ? 'on break' : 'not checked in';
@@ -5406,21 +5444,21 @@ async function adminAttendancePage() {
   const summaryRows = Object.entries(r.summary || {}).sort((a, b) => (b[1].workedMs || 0) - (a[1].workedMs || 0)).map(([id, p]) => `<tr><td>${esc(nameOf(id))}</td><td>${p.logins}</td><td>${p.ins}</td><td>${p.outs}</td><td>${Math.round((p.workedMs || 0) / 360000) / 10}h</td><td>${Math.round((p.breaksMs || 0) / 60000)}min</td></tr>`).join('');
   const clock = `<div class="chips" style="margin-bottom:10px"><a class="on tz-clock"><span class="dp-l">🇪🇺 Europe</span><b data-tz="e" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">🇺🇸 US</span><b data-tz="u" style="font-variant-numeric:tabular-nums">--:--:--</b></a><a class="on tz-clock"><span class="dp-l">📍 Local</span><b data-tz="l" style="font-variant-numeric:tabular-nums">--:--:--</b></a></div>`;
   return `${shiftBanner ? `<div class="notice warning" style="margin-bottom:12px">${esc(shiftBanner)}</div>` : ''}${clock}<div class="grid2" style="gap:16px;align-items:start">
-    <div class="card"><h3>🕒 My attendance</h3><p class="small muted" style="margin-top:0">Status: <b>${esc(status)}</b></p>
+    <div class="card"><h3>🕒 My attendance</h3><p class="small muted" style="margin-top:0">Status: <b>${esc(status)}</b>${myShift ? ` · Shift time zone: <b>${esc(shiftTz)}</b>` : ''}</p>
       <div class="row" style="gap:8px"><button class="btn primary" data-act="att-in" ${status === 'on shift' ? 'disabled' : ''}>Check in</button><button class="btn" data-act="att-break-start" ${status !== 'on shift' ? 'disabled' : ''}>☕ Break</button><button class="btn" data-act="att-break-end" ${status !== 'on break' ? 'disabled' : ''}>Back</button><button class="btn danger" data-act="att-out" ${status === 'off duty' ? 'disabled' : ''}>Check out</button></div>
       <h3 style="margin-top:14px">My recent events</h3>${mine.length ? `<div style="max-height:220px;overflow:auto">${mine.slice(0, 20).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.action)}</b>${e.note ? ' · ' + esc(e.note) : ''}</span><span class="small muted">${fmtDT(e.at)}</span></div>`).join('')}</div>` : '<p class="muted small">No events yet. Check in to start your shift.</p>'}</div>
-    <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
+      <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
   </div>
   ${r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>👥 Team attendance (last 30 days)</h3>${summaryRows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Logins</th><th>Check-ins</th><th>Check-outs</th><th>Worked</th><th>Breaks</th></tr></thead><tbody>${summaryRows}</tbody></table></div>` : '<p class="muted small">No attendance recorded yet — the team checks in when they start work.</p>'}
     <div class="row" style="margin-top:14px"><h3 style="margin:0;flex:1">🧾 Team log (edit any entry)</h3><button class="btn sm primary" data-act="att-add">➕ Add entry</button></div>
     <div style="max-height:360px;overflow:auto;margin-top:8px">${(r.all || []).filter((e) => e.action !== 'login').slice(0, 80).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.name || nameOf(e.by))}</b> · ${esc({ in: '🟢 check in', out: '⚪ check out', break_start: '☕ break', break_end: '▶️ back' }[e.action] || e.action)}${e.auto ? ' <span class="badge warn">auto</span>' : ''}${e.edited ? ` <span class="badge">edited by ${esc(e.edited)}</span>` : ''}${e.note ? `<div class="small muted">${esc(e.note)}</div>` : ''}</span><span class="small muted">${fmtDT(e.at)}</span>${e.id ? `<button class="btn sm ghost" data-act="att-edit" data-id="${esc(e.id)}" data-at="${e.at}" data-action="${esc(e.action)}" data-note="${esc(e.note || '')}">✏️</button>` : ''}</div>`).join('') || '<p class="muted small">No entries.</p>'}</div></div>
-  <div class="card" style="margin-top:16px"><h3>🌙 Shifts, night shifts &amp; weekly rest days</h3><p class="small muted" style="margin-top:0">Day and night shifts across European and American time zones. Shifts past midnight (e.g. 22:00 → 06:00) are handled correctly. Rest days are never all on the same days for the whole team.</p>
-    <div id="shifts-box"><p class="small muted">Loading members…</p></div></div>
+  <div class="card" style="margin-top:16px"><h3>🌙 Shifts, night shifts &amp; weekly rest days</h3><p class="small muted" style="margin-top:0">All supported time zones are available. Each agent's schedule, reminders, and attendance warnings follow the selected zone, including daylight-saving changes. Shifts past midnight (e.g. 22:00 → 06:00) are handled correctly. Rest days are never all on the same days for the whole team.</p>
+    <datalist id="agent-timezones">${TZ_OPTS.map(([k, n]) => `<option value="${esc(k)}" label="${esc(n)}"></option>`).join('')}</datalist><div id="shifts-box"><p class="small muted">Loading members…</p></div></div>
   <div class="card" style="margin-top:16px"><h3>🗑 Leave requests (approve / reject)</h3><div id="leaves-box"><p class="small muted">Loading…</p></div></div>
   <div class="card" style="margin-top:16px"><h3>📊 Weekly performance report</h3><div id="reports-box"><p class="small muted">Loading…</p></div></div>` : ''}`;
 }
 const shiftEditorHtml = (m, sh) => { const tz = sh?.tz || 'Europe/Paris'; const days = sh?.days || {}; return `<div class="card" data-member="${esc(m.id)}" data-tz="${esc(tz)}" style="margin-bottom:10px;padding:12px"><div class="row" style="gap:8px"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1"><b>${esc(m.name)}</b><div class="small muted">@${esc(m.username)}</div></div>
-    <select data-k="tz" style="width:auto">${TZ_OPTS.map(([k, n]) => `<option value="${k}" ${tz === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <input data-k="tz" list="agent-timezones" value="${esc(tz)}" autocomplete="off" aria-label="Agent shift time zone" title="Type or select an IANA time zone" style="width:220px;max-width:100%"></div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px">${WD.map(([i, n]) => { const d = days[i] || { on: false }; return `<div style="text-align:center"><label class="toggle" style="justify-content:center"><input type="checkbox" data-day="${i}" ${d.on ? 'checked' : ''}><i></i><span>${n}</span></label>${d.on ? `<input type="time" data-start="${i}" value="${fmtMin(d.start ?? 540)}" style="margin-top:4px;width:100%"><input type="time" data-end="${i}" value="${fmtMin(d.end ?? 1080)}" style="margin-top:4px;width:100%">` : '<div class="small muted" style="margin-top:20px">rest</div>'}</div>`; }).join('')}</div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary sm" data-act="shift-save" data-id="${esc(m.id)}" data-name="${esc(m.name)}">Save shift plan</button></div></div>`; };
 async function loadShiftsAndLeaves() {
@@ -5533,12 +5571,24 @@ function adminBrowserPage(s) {
 }
 
 // ---------------- Marketing dashboards (spec §8) ----------------
+function mktDraftHtml(d) {
+  if (!d) return '';
+  const locked = !!state.admin.me?.locked;
+  return `<div class="card" style="padding:12px;margin-top:10px"><div class="small muted">${d.source === 'ai' ? 'AI draft' : 'Template fallback draft'} · not saved or sent</div>
+    <label class="field"><span>Email subject</span><textarea id="mkt-ai-subject" rows="2" readonly>${esc(d.emailSubject || '')}</textarea><button type="button" class="btn sm" data-act="mkt-copy-ai" data-kind="subject">Copy subject</button></label>
+    <label class="field"><span>Email HTML</span><textarea id="mkt-ai-html" rows="8" readonly spellcheck="false">${esc(d.emailHtml || '')}</textarea><button type="button" class="btn sm" data-act="mkt-copy-ai" data-kind="html">Copy email HTML</button></label>
+    <label class="field"><span>WhatsApp-ready text (plain text, not HTML)</span><textarea id="mkt-ai-whatsapp" rows="6" readonly>${esc(d.whatsappText || '')}</textarea><button type="button" class="btn sm" data-act="mkt-copy-ai" data-kind="whatsapp">Copy WhatsApp text</button></label>
+    ${locked ? '<p class="small muted">Your account uses locked campaign copy, so this draft is for reference only.</p>' : '<button type="button" class="btn sm primary" data-act="mkt-ai-apply">Use email HTML + subject in the campaign form (unsaved)</button>'}</div>`;
+}
 async function adminMktPage() {
   const m = await api('GET', '/api/admin/emailmkt'); const st = await api('GET', '/api/admin/emailmkt/settings');
   state.admin.mkt = m; state.admin.mktSettings = st;
   const lists = m.lists || [];
   const input = (k, val, ph) => `<input name="${k}" data-k="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}" dir="ltr" autocomplete="off">`;
   const msCard = await mailStatusCard(true);
+  const composer = state.admin.mktComposer || {};
+  const aiComposer = `<h3 style="margin-top:14px">✨ Draft Email &amp; WhatsApp messages</h3><p class="small muted">Describe the campaign without customer-specific data. Drafting does not save or send. The WhatsApp result is plain text; copy it into WhatsApp and review it before sending.</p>
+    <form data-form="mkt-ai"><div class="grid2">${field('Audience (optional)', 'audience', '', { ph: 'e.g. existing subscribers' })}${field('Tone (optional)', 'tone', '', { ph: 'e.g. warm and concise' })}</div>${field('Campaign brief', 'brief', '', { type: 'textarea', rows: 3, attrs: 'required maxlength="1200"', ph: 'What should the message say? Include only claims, prices or offers you have verified.' })}<button type="submit" class="btn">✨ Generate drafts</button></form><div id="mkt-ai-output">${mktDraftHtml(state.admin.mktDraft)}</div>`;
   return `${msCard}<p class="small muted">Marketing email lists are isolated from customer emails. Keys, sender names and subjects rotate batch by batch. Bounced/dead addresses are removed at upload and excluded at send. Sender is <b>noreply@<domain></b> — auto-generated from the domain paired with each key.</p>
   <div class="chips" style="margin-bottom:12px"><a class="on">${m.keysSet} key${m.keysSet === 1 ? '' : 's'} on · ${m.rowsTotal || 0} in total</a><a class="on">${m.senders}/5 sender names</a><a class="on">${m.subjects}/5 subject lines</a><a class="on">Today: ${m.today} sent</a><a class="on">30 days: ${m.last30} sent</a><a class="on">Total spend: $${Number(m.totalSpendUsd || 0).toFixed(2)}</a></div>
   <div class="grid2" style="gap:16px;align-items:start">
@@ -5549,9 +5599,9 @@ async function adminMktPage() {
         <h3 style="margin-top:12px">Subject lines (rotated per batch)</h3><div class="grid2">${Array.from({ length: 5 }, (_, i) => input('subject' + i, st.subjects[i] || '', 'Subject ' + (i + 1))).join('')}</div>
         <div style="margin:12px 0 10px">${field('Cost per email (USD)', 'costPerEmail', m.costPerEmail, { type: 'number', attrs: 'step="0.0001" min="0"', help: '$0.0004 = $0.40 per 1,000 emails' })}</div>
         <button type="submit" class="btn primary">💾 Save marketing settings</button></form></div>
-    <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (one per line)</span><textarea name="text" rows="5" required placeholder="one email per line"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>
+    <div class="card"><h3>📋 Lists &amp; campaign</h3><form data-form="mkt-list">${field('List name', 'name', '', { attrs: 'required' })}<label class="field"><span>Paste emails (one per line)</span><textarea name="text" rows="5" required placeholder="one email per line"></textarea></label><button type="submit" class="btn primary">Upload list</button></form>${aiComposer}
       ${lists.length ? `<div style="margin-top:12px">${lists.map((l) => `<div class="list-item"><span style="flex:1;min-width:0"><b>${esc(l.name)}</b><div class="small muted">${l.count} emails · ${fmtDate(l.createdAt)} · by ${esc(l.by || '')}</div></span><button class="btn sm danger" data-act="mkt-del" data-id="${esc(l.id)}" title="Delete mailing list" aria-label="Delete mailing list">🗑</button></div>`).join('')}</div>
-      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select>${state.admin.me?.locked ? `<p class="small notice" style="margin:0 0 8px">🔒 The campaign email is set by the owner / Technical Service${st.html ? '' : ' (default message for now)'}. You choose the list and send.</p>` : `<textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message.">${esc(st.html || '')}</textarea><button type="button" class="btn sm" data-act="mkt-html-save" style="margin:6px 0">💾 Save as the campaign agents send</button>`}<p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
+      <h3 style="margin-top:14px">🚀 Send a campaign</h3><select id="mkt-list" data-input="mkt-list" style="width:100%;margin-bottom:8px">${lists.map((l) => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count})</option>`).join('')}</select>${state.admin.me?.locked ? `<p class="small notice" style="margin:0 0 8px">🔒 The campaign email is set by the owner / Technical Service${st.html ? '' : ' (default message for now)'}. You choose the list and send.</p>` : `<label class="field"><span>Email subject (used for an applied AI draft; editable before sending)</span><input id="mkt-subject" value="${esc(composer.subject ?? st.subjects?.[0] ?? '')}" autocomplete="off"></label><textarea id="mkt-html" rows="4" placeholder="Optional: paste custom HTML content. Empty = default message.">${esc(composer.html ?? st.html ?? '')}</textarea><button type="button" class="btn sm" data-act="mkt-html-save" style="margin:6px 0">💾 Save as the campaign agents send</button>`}<p class="small muted" id="mkt-estimate"></p><button class="btn primary block" data-act="mkt-send">Send to this list</button>` : '<p class="small muted" style="margin-top:12px">Upload a list first.</p>'}</div>
   </div>`;
 }
 async function adminSeoPage() {
@@ -5582,13 +5632,17 @@ async function adminFbPage() {
 }
 Object.assign(actions, {
   'mkt-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/emailmkt/list/' + el.dataset.id); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'mkt-copy-ai': async (el) => { const d = state.admin.mktDraft || {}; const value = el.dataset.kind === 'html' ? d.emailHtml : el.dataset.kind === 'whatsapp' ? d.whatsappText : d.emailSubject; if (value) await actions['copy-text']({ dataset: { text: value } }); },
+  'mkt-ai-apply': () => { const d = state.admin.mktDraft; if (!d || state.admin.me?.locked) return; const html = d.emailHtml || '', subject = d.emailSubject || ''; state.admin.mktComposer = { ...(state.admin.mktComposer || {}), html, subject, aiSubjectApplied: true }; const htmlField = $('#mkt-html'), subjectField = $('#mkt-subject'); if (htmlField) htmlField.value = html; if (subjectField) subjectField.value = subject; toast('Draft filled in the campaign form. It is not saved or sent.'); },
   'mkt-send': async (el) => {
     const sel = $('#mkt-list'); const listId = sel?.value; if (!listId) return toast('Upload a list first.', true);
     const l = (state.admin.mkt.lists || []).find((x) => x.id === listId); const html = ($('#mkt-html') || {}).value || '';
+    const subject = state.admin.mktComposer?.aiSubjectApplied ? String($('#mkt-subject')?.value || '').trim() : '';
     const cost = ((l?.count || 0) * Number(state.admin.mkt.costPerEmail || 0)).toFixed(2);
     if (!confirm(`Send to ${l?.count || 0} recipients?\nEstimated cost: $${cost}`)) return;
+    const submittedComposer = state.admin.mktComposer;
     el.disabled = true; toast('Sending…');
-    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
+    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html, ...(subject ? { subject } : {}) }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); if (state.admin.mktComposer === submittedComposer) state.admin.mktComposer = null; $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'seo-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/seo/' + el.dataset.id); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'gads-del': async (el) => { if (!confirm('Delete this campaign and its stats?')) return; try { await api('DELETE', '/api/admin/gads/campaign/' + el.dataset.id); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
@@ -5598,6 +5652,11 @@ Object.assign(actions, {
 });
 Object.assign(forms, {
 
+  async 'ai-cfg'(f) {
+    const config = formToObj(f); if (!config.apiKey) delete config.apiKey;
+    try { await api('PUT', '/api/admin/ai/config', config); toast('AI settings saved ✓'); renderAdmin(); }
+    catch (e) { toast(e.message, true); }
+  },
   async 'trans-settings'(f) {
     const el = (n) => f.elements[n];
     const val = (n) => ((el(n) && 'value' in el(n)) ? el(n).value : '').trim();
@@ -5615,6 +5674,18 @@ Object.assign(forms, {
     toast('Saved ✓'); renderAdmin();
   },
   async 'mkt-list'(f) { const o = formToObj(f); try { const r = await api('POST', '/api/admin/emailmkt/list', { name: o.name, text: o.text }); toast(`List saved: ${r.count} emails (${r.removed} removed as bounced) ✓`); f.reset(); $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); } },
+  async 'mkt-ai'(f) {
+    const requestSession = sessionGeneration;
+    const requestId = ++marketingDraftRequestId;
+    const button = f.querySelector('button[type="submit"]'); if (button) button.disabled = true;
+    try {
+      const r = await api('POST', '/api/admin/ai/compose-marketing', { brief: f.brief.value, audience: f.audience.value, tone: f.tone.value });
+      if (requestSession !== sessionGeneration || requestId !== marketingDraftRequestId) return;
+      state.admin.mktDraft = r; const out = $('#mkt-ai-output'); if (out) out.innerHTML = mktDraftHtml(r);
+      toast(r.source === 'ai' ? 'Drafts ready — nothing saved or sent.' : 'Template draft ready; configure an AI key for generated copy.');
+    } catch (e) { if (requestSession === sessionGeneration && requestId === marketingDraftRequestId) toast(e.message, true); }
+    finally { if (button && requestSession === sessionGeneration && requestId === marketingDraftRequestId) button.disabled = false; }
+  },
   async 'seo-add'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/seo', o); toast('Logged ✓'); f.reset(); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); } },
   async 'gads-campaign'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/gads/campaign', o); toast('Campaign added ✓'); f.reset(); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },
   async 'gads-entry'(f) { try { await api('POST', '/api/admin/gads/entry', { campaignId: f.dataset.id, spend: f.spend.value, impressions: f.impressions.value, clicks: f.clicks.value, results: f.results.value }); closeModal(); toast('Logged ✓'); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },

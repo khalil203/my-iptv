@@ -65,6 +65,12 @@ The public website (home, pricing, FAQ, privacy, terms) is shown to visitors who
 - All agents are notified **once** when the updated schedule goes live. The owner can send the notice again from **My planning → Notify agents** after later changes.
 - Agents should check **Work planning** for their own tasks; the owner planning notice links there.
 
+### AI assistant updates (21 Nov 2026)
+- **Planning**: the assistant can answer about agent **Work planning** and the owner's **My planning** separately, including today and tomorrow. The owner view is read-only and contains schedule titles/times only; private notes, checkoffs and API-key records are excluded. Alert context is aggregate counts, not customer names.
+- **IPTV setup**: ask about Smarters Pro, XCIPTV, TiviMate, IBO Player, Xtream Codes/API login or M3U playlists. The assistant should not request or repeat passwords or full playlist links; app menus can vary by device/version.
+- **Email marketing**: staff with marketing permission can generate an escaped HTML email draft plus a separate WhatsApp-ready plain-text message. Copy or apply the draft to the campaign form; generation itself does not save or send anything. Sending remains in the existing campaign flow.
+- **Support photos**: the owner can turn photo analysis on/off in AI configuration. The customer must opt in on the specific image, and the staff member must have support-ticket viewing permission and click **Analyze photo with AI**. The configured HTTPS provider receives the image and a generic prompt, not the ticket text or account record. Use a vision-capable model; review the suggestion yourself before replying. AI does not save or send a reply automatically. Existing attachment retention still applies.
+
 ### Phone, tablet & laptop guidance
 - The owner and agent panels use one shared colour set and the same overview cards on every screen size. On a phone (iPhone, Samsung, Android) tap **☰ Menu** to jump between pages; buttons and tabs have full-height tap targets and the layouts reflow to one column. Tablets and laptops show the two-column version. All new panels respect dark/light themes and reduced-motion settings.
 - The in-app **Agent guide** page is updated with all of the above; send agents there first when they ask about the new referral, gift or planning rules.
