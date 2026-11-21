@@ -2561,6 +2561,10 @@ test('AI assistant: panel answers questions, the owner can configure and run act
   assert.equal(bothPlans.status, 200); assert.equal(bothPlans.json.source, 'panel');
   assert.match(bothPlans.json.answer, /Agent Work planning for/); assert.match(bothPlans.json.answer, /Owner’s My planning \(/);
   assert.match(bothPlans.json.answer, /OWNER_TODAY_EDITED/); assert.match(bothPlans.json.answer, /OWNER_TODAY_ADDED/);
+  const bothLoginMethods = await x.call('POST', '/api/admin/ai/ask', { question: 'Does Smarters Pro support both Xtream Codes and M3U?' }, tok);
+  assert.equal(bothLoginMethods.status, 200); assert.equal(bothLoginMethods.json.source, 'panel');
+  assert.match(bothLoginMethods.json.answer, /Smarters Pro commonly offers Xtream Codes API and a separate M3U playlist login/);
+  assert.doesNotMatch(bothLoginMethods.json.answer, /Agent Work planning|Owner’s My planning/);
   const ownerOnly = await x.call('POST', '/api/admin/ai/ask', { question: 'Show the owner’s My planning schedule.' }, tok);
   assert.match(ownerOnly.json.answer, /OWNER_TODAY_EDITED/); assert.match(ownerOnly.json.answer, /OWNER_TODAY_ADDED/); assert.doesNotMatch(ownerOnly.json.answer, /OWNER_API_BLOCK_SHOULD_NOT_LEAK|PRIVATE_NOTE_SHOULD_NOT_LEAK|APIKEY_RECORD_SHOULD_NOT_LEAK|CHECKOFF_SHOULD_NOT_LEAK/);
   const ownerTomorrowPlan = await x.call('POST', '/api/admin/ai/ask', { question: 'Show the owner’s My planning for tomorrow.' }, tok);
@@ -2937,4 +2941,22 @@ test('promotions: own section types are independent and settings writes are norm
   const after = (await x.call('GET', '/api/admin/promos', {}, tok)).json.campaigns;
   assert.equal(after.length, 2, 'duplicate ids are removed when settings are written directly');
   assert.ok(after.every((c) => c.id && c.title && Array.isArray(c.channels)));
+});
+
+
+test('locked marketing agents cannot override campaign subjects', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  await x.call('PUT', '/api/admin/settings', { email: { resendKey: 're_test', from: 'INTPROTO-TV <hello@example.com>', adminEmail: 'owner@example.com' } }, tok);
+  await x.call('PUT', '/api/admin/emailmkt/settings', { keys: ['re_one', 're_two', 're_three'], senders: ['INTPROTO-TV'], subjects: ['Configured A', 'Configured B'] }, tok);
+  const emails = Array.from({ length: 101 }, (_, i) => `locked${i}@example.com`).join('\n');
+  const list = await x.call('POST', '/api/admin/emailmkt/list', { name: 'Locked subject test', text: emails }, tok);
+  assert.equal(list.status, 200); assert.equal(list.json.count, 101);
+  const made = await x.call('POST', '/api/admin/team', { name: 'Marketing Agent', username: 'lockedmkt', password: 'secret12', role: 'Sales Agent', perms: ['marketing'] }, tok);
+  assert.equal(made.status, 200);
+  const login = await x.call('POST', '/api/login', { username: 'lockedmkt', password: 'secret12' }); assert.equal(login.status, 200);
+  const staff = login.json.token; await signBylaws(x, staff);
+  assert.equal((await x.call('GET', '/api/admin/me', {}, staff)).json.locked, true);
+  const sent = await x.call('POST', '/api/admin/emailmkt/send', { listId: list.json.id, subject: 'Unauthorized override' }, staff);
+  assert.equal(sent.status, 200, JSON.stringify(sent.json)); assert.equal(sent.json.sent, 101);
+  assert.deepEqual(x.mails.map((batch) => batch[0].subject), ['Configured A', 'Configured B']);
 });

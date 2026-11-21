@@ -5634,8 +5634,9 @@ Object.assign(actions, {
     const subject = state.admin.mktComposer?.aiSubjectApplied ? String($('#mkt-subject')?.value || '').trim() : '';
     const cost = ((l?.count || 0) * Number(state.admin.mkt.costPerEmail || 0)).toFixed(2);
     if (!confirm(`Send to ${l?.count || 0} recipients?\nEstimated cost: $${cost}`)) return;
+    const submittedComposer = state.admin.mktComposer;
     el.disabled = true; toast('Sending…');
-    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html, ...(subject ? { subject } : {}) }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); state.admin.mktComposer = null; $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
+    try { const r = await api('POST', '/api/admin/emailmkt/send', { listId, html, ...(subject ? { subject } : {}) }); toast(`Campaign sent: ${r.sent} delivered · $${Number(r.spendUsd || 0).toFixed(2)} spent ✓`); if (state.admin.mktComposer === submittedComposer) state.admin.mktComposer = null; $('#admin-body').innerHTML = await adminMktPage(); } catch (e) { toast(e.message, true); el.disabled = false; }
   },
   'seo-del': async (el) => { el.disabled = true; try { await api('DELETE', '/api/admin/seo/' + el.dataset.id); $('#admin-body').innerHTML = await adminSeoPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'gads-del': async (el) => { if (!confirm('Delete this campaign and its stats?')) return; try { await api('DELETE', '/api/admin/gads/campaign/' + el.dataset.id); $('#admin-body').innerHTML = await adminGadsPage(); } catch (e) { toast(e.message, true); } },

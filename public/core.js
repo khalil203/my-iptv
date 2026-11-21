@@ -4494,7 +4494,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         // Deterministic panel answers — the assistant works even without an LLM key.
         const ownerPlanAsked = /my planning|owner.?s? planning|owner.?s? plan|owner plan|personal planning|personal schedule/i.test(q);
         const workPlanAsked = /work planning|work plan|agent.?s? plan|agent work/i.test(q);
-        const bothPlansAsked = /both|owner.{0,50}work planning|work planning.{0,80}(my planning|owner)|my planning.{0,80}work planning/i.test(q);
+        const planningIntent = ownerPlanAsked || workPlanAsked || /\b(?:plan|planning|schedule|schedules)\b/i.test(q);
+        const bothPlansAsked = planningIntent && /both|owner.{0,50}work planning|work planning.{0,80}(my planning|owner)|my planning.{0,80}work planning/i.test(q);
         const ownerLines = (ctx.ownerPlanning.plan || []).join('\n') || 'Nothing is scheduled in the owner overview for this date.';
         const workLines = (ctx.plan || []).join('\n') || 'Nothing is scheduled in agent Work planning for this date.';
         if (bothPlansAsked && /tomorrow/i.test(q)) return { answer: `Tomorrow’s schedules:\nAgent Work planning (${ctx.workPlanning.tomorrowDate} · ${ctx.timezone}):\n${(ctx.workPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}\n\nOwner’s My planning (${ctx.ownerPlanning.tomorrowDate} · ${ctx.ownerPlanning.timezone}):\n${(ctx.ownerPlanning.tomorrow || []).join('\n') || 'Nothing scheduled.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
@@ -4683,7 +4684,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const doc = await getMktList(listRef.id); if (!doc) return err(404, 'List not found.');
         const bad = await getBad(); const recipients = (doc.emails || []).filter((e) => !bad[e]);
         if (!recipients.length) return err(400, 'Every email on this list bounced or was removed. Upload a fresh list.');
-        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const subjectOverride = cleanText(body.subject, 150); const domains = mrows.map((r) => r.domain);
+        const senders = (m.senders || []).filter((x) => x.trim()).map((x) => x.trim()); const subjects = (m.subjects || []).filter((x) => x.trim()).map((x) => x.trim()); const subjectOverride = locked ? '' : cleanText(body.subject, 150); const domains = mrows.map((r) => r.domain);
         const app = s.branding.appName || 'INTPROTO-TV'; const fromAddr = (String(s.email.from || '').match(/<([^>]+)>/) || [])[1] || String(s.email.from || '').trim() || 'noreply@' + (String(s.email.website || 'example.com').replace(/^https?:\/\//, '').split('/')[0] || 'example.com');
         const html = (locked ? String(m.html || '') : String(body.html || m.html || '')).slice(0, 200000) || `<div style="font-family:Arial;padding:24px"><h2>${escHtml(app)}</h2><p>${escHtml(subjects[0] || 'A message from ' + app)}</p><p><a href="${escHtml(String(s.branding.supportUrl || s.email.website || ''))}">${escHtml(app)}</a></p></div>`;
         const day = new Date().toISOString().slice(0, 10); let sentCount = 0, spent = 0; const perEmail = Number(m.costPerEmail) || 0;
