@@ -16,8 +16,9 @@ const data = { settings, customers };
 if (admin !== null) data.admin = admin;
 if (team !== null) data.team = team;
 const store = storeFrom(data);
-const be = createBackend({ store, fetchFn: async () => ({ ok:true, status:200, json: async()=>({}), text: async()=>'{}' }), mode: 'server' });
+const be = createBackend({ store, fetchFn: async () => ({ ok:true, status:200, json: async()=>({}), text: async()=>'{}' }), cacheMs: 30000, mode: 'server' });
 const call = (m,p,b,t) => be.handle({ method:m, path:p, body:b||{}, token:t, query:{} });
+try { const c = await call('GET','/api/config'); console.log('CONFIG STATUS', c.status); } catch(e){ console.log('CONFIG THREW', e && e.stack ? e.stack : e); }
 try {
   const r = await call('POST','/api/login',{ username:'Iptv', password:'Iptv' });
   console.log('LOGIN RESULT:', JSON.stringify(r));
