@@ -1,5 +1,9 @@
 name: Tail worker
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/tail.yml"]
 permissions: contents: read
 jobs:
   tail:
