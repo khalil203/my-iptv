@@ -5729,7 +5729,7 @@ async function adminIboPage() {
   const row = (x) => {
     const devs = Array.isArray(x.devices) && x.devices.length ? x.devices : (Array.isArray(x.macs) && x.macs.length ? x.macs.map((m) => ({ deviceApp: x.deviceApp || 'IBO Player', mac: m })) : (x.macAddress ? [{ deviceApp: x.deviceApp || 'IBO Player', mac: x.macAddress }] : []));
     return `<tr><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.contact || '')}</div></td><td class="small">${esc(x.username)} / ${esc(x.password)}<div class="muted">${esc(x.dns || '')}</div></td><td class="small">${devs.map((d) => `${esc(d.deviceApp || '')}<span class="muted"> · ${esc(iboNormMac(d.mac || ''))}</span>`).join('<br>')}${devs.length > 1 ? `<span class="muted small">(${devs.length} devices)</span>` : ''}</td><td class="small">${x.expiresAt ? fmtDate(x.expiresAt) : '—'}</td><td>${pillFor(x)}</td>
-      <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-mac" data-id="${esc(x.id)}" title="Add another MAC address" aria-label="Add another MAC address">➕</button><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)" aria-label="Activate or renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp" aria-label="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email" aria-label="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove" aria-label="Remove IBO device">🗑</button></div></td></tr>`; };
+      <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-act="ibo-edit" data-id="${esc(x.id)}" title="Edit client info" aria-label="Edit client info">✏️</button><button class="btn sm" data-act="ibo-mac" data-id="${esc(x.id)}" title="Add another MAC address" aria-label="Add another MAC address">➕</button><button class="btn sm" data-act="ibo-activate" data-id="${esc(x.id)}" title="Activate / renew (1 credit)" aria-label="Activate or renew (1 credit)">💳</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="whatsapp" title="Send details by WhatsApp" aria-label="Send details by WhatsApp">💬</button><button class="btn sm" data-act="ibo-send" data-id="${esc(x.id)}" data-via="email" title="Send details by email" aria-label="Send details by email">✉️</button><button class="btn sm danger" data-act="ibo-del" data-id="${esc(x.id)}" title="Remove" aria-label="Remove IBO device">🗑</button></div></td></tr>`; };
   return `<div class="ibo-page">
     ${iboPlayersCard()}
     <div class="grid2" style="gap:16px;align-items:start">
@@ -5747,6 +5747,26 @@ Object.assign(actions, {
   'ibo-dev-add': (el) => { const form = el.closest('form[data-form="ibo-add"]'); const list = form && form.querySelector('.ibo-devlist'); if (!list) return; const n = list.querySelectorAll('.ibo-devrow').length; if (n >= 8) return; list.insertAdjacentHTML('beforeend', iboDevRowHtml(n, {})); iboRowSelect(list.querySelectorAll('.ibo-devrow')[n].querySelector('select[name="deviceApp"]')); },
   'ibo-dev-del': (el) => { el.closest('.ibo-devrow').remove(); },
   'ibo-del': async (el) => { if (!confirm('Remove this IBO client?')) return; el.disabled = true; try { await api('DELETE', '/api/admin/ibo/' + el.dataset.id); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'ibo-edit': (el) => {
+    const x = (state.admin.ibo || []).find((c) => c.id === el.dataset.id); if (!x) return toast('Client not found.', true);
+    modal('✏️ Edit IBO client', `<form data-form="ibo-edit" data-id="${esc(x.id)}">
+      ${field('Name', 'name', x.name || '')}
+      ${field('Contact', 'contact', x.contact || '')}
+      ${field('DNS / server', 'dns', x.dns || '')}
+      ${field('Username', 'username', x.username || '')}
+      ${field('Password', 'password', x.password || '')}
+      ${field('Device app', 'deviceApp', x.deviceApp || 'IBO Player')}
+      ${field('Note', 'note', x.note || '', { type: 'textarea', rows: 3 })}
+      <div class="row" style="justify-content:flex-end;gap:6px;margin-top:10px"><button class="btn primary" data-act="ibo-edit-save" data-id="${esc(x.id)}">💾 Save</button></div>
+    </form>`, { wide: true });
+  },
+  'ibo-edit-save': async (el) => {
+    const f = document.querySelector(`form[data-form="ibo-edit"][data-id="${el.dataset.id}"]`); if (!f) return;
+    const o = formToObj(f);
+    el.disabled = true;
+    try { await api('PUT', '/api/admin/ibo/' + el.dataset.id, o); closeModal(); toast('Client updated ✓'); $('#admin-body').innerHTML = await adminIboPage(); }
+    catch (e) { toast(e.message, true); el.disabled = false; }
+  },
   'ibo-activate': async (el) => { el.disabled = true; try { const r = await api('POST', `/api/admin/ibo/${el.dataset.id}/activate`, {}); toast(`Activated ✓ · ${r.credits} credit${r.credits === 1 ? '' : 's'} left`); $('#admin-body').innerHTML = await adminIboPage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'ibo-send': async (el) => {
     const via = el.dataset.via; el.disabled = true;
