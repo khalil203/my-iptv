@@ -1,0 +1,24 @@
+name: CF fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cf-fix.yml']
+permissions:
+  contents: read
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disable challenge/security level
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          Z=80f50005716163bcb63efdeb39936045
+          echo "security_level:"
+          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/security_level" -d '{"value":"off"}'
+          echo
+          echo "browser_check:"
+          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/browser_check" -d '{"value":"off"}'
+          echo
+          echo "done"
