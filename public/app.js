@@ -6207,14 +6207,22 @@ Object.assign(actions, {
     if (block.rule === 'weekly' && sc?.value === 'future' && !block.days.length) return toast('Pick at least one day of the week.', true);
     try { await api('POST', '/api/admin/ownerplan/block', { op: mode, id: f.dataset.id || undefined, date: f.dataset.date, toDate: f.toDate?.value, scope: sc ? sc.value : 'day', block }); closeModal(); toast(mode === 'add' ? 'Added ✓' : mode === 'dup' ? 'Duplicated ✓' : 'Saved ✓'); if (mode === 'dup' && f.toDate?.value) { OP.date = f.toDate.value; OP.month = OP.date.slice(0, 7); } opReload(); } catch (e) { toast(e.message, true); } },
   'op-notify': () => { const n = OP.cache.notify; const blocks = OP.cache.blocks.filter((b) => b.v && !b.v.off);
+    const tg = state.admin.settings?.telegram || {};
     modal('🔔 Planning alerts', `<form data-form="op-notify" onsubmit="return false"><p class="small muted" style="margin-top:0">Alerts come ${n.pre} min before and at the start of every activity, and again if it is not checked off by its end. Sounds and banners play in the panel; push notifications reach your phone/browser (turn them on in 🔔 Notifications).</p>
-      <div class="row" style="gap:16px;flex-wrap:wrap">${toggle('Push notifications', 'push', n.push)}${toggle('Sound + banner in the panel', 'sound', n.sound)}${toggle('Telegram bot message', 'tg', n.tg, 'To the admin chat of your Telegram bot')}</div>
+      <div class="row" style="gap:16px;flex-wrap:wrap">${toggle('Push notifications', 'push', n.push)}${toggle('Sound + banner in the panel', 'sound', n.sound)}${toggle('Telegram bot message', 'tg', n.tg, 'To the chat below')}</div>
       ${field('Minutes before (0 = only at the start)', 'pre', n.pre, { type: 'number', attrs: 'min="0" max="60"' })}
+      <h4 style="margin:12px 0 6px">Telegram connection</h4>
+      <div class="grid2">${field('Bot token', 'tgBotToken', tg.botToken && tg.botToken !== '••••' ? tg.botToken : '', { type: 'password', ph: '123456:ABC…', attrs: 'autocomplete="new-password"' })}${field('Chat ID', 'tgChatId', tg.adminChat || '', { ph: '-100… or @username' })}</div>
+      <div class="row" style="gap:6px;margin-bottom:10px"><button class="btn sm" type="button" data-act="op-tg-test">🔗 Test connection</button><span class="small muted">Sends a test message to the chat above.</span></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Activity</th><th>Push</th><th>Sound</th><th>Telegram</th></tr></thead><tbody>${blocks.map((b) => { const p = n.per[b.id] || {}; return `<tr><td>${esc(b.v.icon)} ${esc(b.v.start)} · ${esc(b.v.title)}</td><td><input type="checkbox" name="p_${b.id}" ${p.push !== false ? 'checked' : ''}></td><td><input type="checkbox" name="s_${b.id}" ${p.sound !== false ? 'checked' : ''}></td><td><input type="checkbox" name="t_${b.id}" ${p.tg ? 'checked' : ''}></td></tr>`; }).join('')}</tbody></table></div>
       <div class="row" style="justify-content:flex-end;gap:6px;margin-top:10px"><button class="btn sm" data-act="op-snd-test">🔊 Test the sound</button><button class="btn primary" data-act="op-notify-save">💾 Save</button></div></form>`, { wide: true }); },
   'op-snd-test': () => opBanner({ icon: '🔔', title: 'Test alert', start: '', end: '' }, 'start', true),
   'op-notify-save': async (el) => { const f = el.closest('form'); const per = {}; for (const b of OP.cache.blocks) if (f['p_' + b.id]) per[b.id] = { push: f['p_' + b.id].checked, sound: f['s_' + b.id].checked, tg: f['t_' + b.id].checked };
-    try { await api('PUT', '/api/admin/ownerplan/notify', { push: f.push.checked, sound: f.sound.checked, tg: f.tg.checked, pre: Number(f.pre.value) || 0, per }); closeModal(); toast('Alerts saved ✓'); opReload(); } catch (e) { toast(e.message, true); } },
+    try { await api('PUT', '/api/admin/ownerplan/notify', { push: f.push.checked, sound: f.sound.checked, tg: f.tg.checked, pre: Number(f.pre.value) || 0, per, tgBotToken: f.tgBotToken.value.trim(), tgChatId: f.tgChatId.value.trim() }); closeModal(); toast('Alerts saved ✓'); opReload(); } catch (e) { toast(e.message, true); } },
+  'op-tg-test': async (el) => { const f = el.closest('form'); const btn = el; btn.disabled = true;
+    try { await api('POST', '/api/admin/telegram/test', { chat: f.tgChatId.value.trim() }); toast('✅ Telegram test sent — check your chat.'); }
+    catch (e) { toast(e.message || 'Telegram test failed.', true); }
+    btn.disabled = false; },
   'op-holiday': () => { const c = OP.cache; const list = c.holidaysCustom || [];
     modal('🏖️ Holidays', `<p class="small muted" style="margin-top:0">Official holidays (US, Europe, Islamic dates approx.) are highlighted automatically on the calendar. Add your own days here.</p>
       ${list.length ? `<div>${list.map((h) => `<div class="list-item"><div style="flex:1"><b>${esc(h.name)}</b> <span class="small muted">${esc(h.date)}</span></div><button class="btn sm ghost" data-act="op-hol-del" data-id="${esc(h.id)}">🗑</button></div>`).join('')}</div>` : ''}

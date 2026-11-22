@@ -4988,6 +4988,14 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         }
         if (R('PUT', '/api/admin/ownerplan/notify')) { const n = P.notify; for (const k of ['push', 'sound', 'tg']) if (body[k] !== undefined) n[k] = !!body[k]; if (body.pre !== undefined) n.pre = Math.min(60, Math.max(0, Math.round(Number(body.pre) || 0)));
           if (isObj(body.per)) { n.per = {}; for (const [id, x] of Object.entries(body.per).slice(0, 80)) if (isObj(x)) n.per[cleanText(id, 10)] = { push: x.push !== false, sound: x.sound !== false, tg: !!x.tg }; }
+          // Save Telegram bot token / chat id used by planning alerts (owner only).
+          if (body.tgBotToken !== undefined || body.tgChatId !== undefined) {
+            const tg = { ...(s.telegram || {}) };
+            if (body.tgBotToken !== undefined) tg.botToken = String(body.tgBotToken || '').trim().slice(0, 120);
+            if (body.tgChatId !== undefined) tg.adminChat = String(body.tgChatId || '').trim().slice(0, 80);
+            if (tg.botToken) tg.enabled = true;
+            await saveSettings({ ...s, telegram: tg });
+          }
           await savePlan(); return ok(n); }
         if (R('POST', '/api/admin/ownerplan/holiday')) { const hr = { ...HOLIDAY_REMIND_DEF, ...(s.holidayRemind || {}) }; hr.custom = [...(hr.custom || [])];
           if (body.remove) hr.custom = hr.custom.filter((c) => c.id !== String(body.remove)); else { const date = String(body.date || ''); const name = cleanText(body.name, 80); if (!ISO.test(date) || !name) return err(400, 'Give the date and the name of the holiday.'); hr.custom.push({ id: uid(5), name, date, kind: 'evergreen', region: 'Own', tip: cleanText(body.tip, 200) }); }
