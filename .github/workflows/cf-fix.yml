@@ -10,15 +10,15 @@ jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - name: Disable challenge/security level
+      - name: Set security level low and disable challenge
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           Z=80f50005716163bcb63efdeb39936045
-          echo "security_level:"
-          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/security_level" -d '{"value":"off"}'
+          echo "security_level low:"
+          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/security_level" -d '{"value":"low"}'
           echo
-          echo "browser_check:"
-          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/browser_check" -d '{"value":"off"}'
+          echo "challenge_ttl:"
+          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/challenge_ttl" -d '{"value":300}'
           echo
           echo "done"
