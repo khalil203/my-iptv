@@ -1220,6 +1220,21 @@ const iboMacForm = (id) => `<form data-form="ibo-mac" data-id="${esc(id || '')}"
 // ---------------- Shared AI assistant (owner + agents): panel answers and actions ----------------
 function aiaBubble(text, who) { return `<div class="aia-msg ${who === 'me' ? 'aia-me' : 'aia-ai'}">${esc(text)}<span class="aia-meta">${who === 'me' ? 'You' : 'AI'}</span></div>`; }
 function showAia(text) { const box = $('#aia-chat'); if (box) { box.insertAdjacentHTML('beforeend', aiaBubble(text, 'ai')); box.scrollTop = box.scrollHeight; } }
+async function aiaAnalyzePhoto(input) {
+  const file = input.files && input.files[0]; input.value = '';
+  if (!file) return;
+  if (file.size > 450000) return toast('Image is too large (max ~450 KB).', true);
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const dataUrl = String(reader.result || '');
+    const box = $('#aia-chat'); if (!box) return;
+    state.admin.aiChat.push({ who: 'me', text: '📎 Analyze this photo' });
+    box.insertAdjacentHTML('beforeend', aiaBubble('📎 Analyze this photo', 'me')); box.scrollTop = box.scrollHeight;
+    try { const r = await api('POST', '/api/admin/ai/analyze-image', { image: dataUrl }); state.admin.aiChat.push({ who: 'ai', text: r.answer || '…' }); showAia(r.answer || '…'); }
+    catch (e) { toast(e.message, true); }
+  };
+  reader.readAsDataURL(file);
+}
 async function aiaSend(q) {
   const box = $('#aia-chat'); if (!box) return;
   const text = q.trim(); if (!text) return;
@@ -1268,7 +1283,7 @@ async function adminAiAssist() {
       <div class="row" style="margin-top:10px"><button type="submit" class="btn primary">💾 Save AI config</button></div></form>` : ''}
     <div class="aia-actions">${quick.join('')}</div>
     <div class="aia-chat" id="aia-chat">${state.admin.aiChat.length ? state.admin.aiChat.map((m) => aiaBubble(m.text, m.who)).join('') : `<div class="aia-empty"><span class="ic">🤖</span><div>Ask anything — “Show both plans”, “What are the alerts?”, “Set up Smarters Pro”, or “How do I load an M3U playlist?”</div></div>`}</div>
-    <form data-form="ai-ask" class="aia-input-row" style="margin-top:12px"><input type="text" name="question" placeholder="Ask the AI…" required autocomplete="off" dir="ltr"><button type="submit" class="btn primary">Ask</button></form>
+    <form data-form="ai-ask" class="aia-input-row" style="margin-top:12px"><input type="text" name="question" placeholder="Ask the AI…" required autocomplete="off" dir="ltr"><button type="submit" class="btn primary">Ask</button><button type="button" class="btn sm" onclick="document.getElementById('aia-photo-input').click()">📎 Photo</button><input id="aia-photo-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="aiaAnalyzePhoto(this)"></form>
   </div>`;
 }
 async function adminOverview() {

@@ -469,6 +469,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/ai/config' && method === 'GET') return null; // the assistant status is visible to all
   if (path === '/api/admin/ai/compose-marketing' && method === 'POST') return 'marketing'; // draft only; sending still uses the existing marketing flow
   if (path === '/api/admin/ai/analyze-photo' && method === 'POST') return 'customers_view'; // only staff who can see support tickets
+  if (path === '/api/admin/ai/analyze-image' && method === 'POST') return 'customers_view';
   if (path === '/api/admin/ai/config' || path.startsWith('/api/admin/ai/action')) return 'owner';
   if (path === '/api/admin/sports' && method === 'GET') return 'customers_view';
   if (path === '/api/admin/sports' || path.startsWith('/api/admin/sports/')) return 'marketing';
@@ -4486,7 +4487,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const ai = s.ai || {}; const q = question.toLowerCase(); const ctx = await aiPanelContext(); const wp = workPlanOf(s);
         const name = (member && member.name) || 'you';
         if (ai.on !== false && String(ai.apiKey || '').trim() && secureAiUrl(ai.baseUrl)) { // optional HTTPS-only LLM mode
-          const sys = [ai.instructions || 'You are the AI assistant of INTPROTO-TV (the TVplus IPTV reseller app).', 'Answer concisely, in the language of the user. Use the panel context. Clearly distinguish the owner’s My planning from agents’ Work planning; the owner schedule is a read-only overview and contains no private notes, checkoffs or API-key records. Alert context contains aggregate counts only, not customer names. Never claim access to private details omitted from context.', 'For IPTV setup, explain the difference between Xtream Codes/API details and an M3U playlist, say app menu names can vary, and do not request or repeat passwords, full M3U links or other credentials. IPTV players do not provide content; advise using authorized access only.', 'Suggest actions and use panel links when helpful. Known links: /intprototv?tab=workplan (Work planning), /intprototv?tab=ownerplan (My planning), /intprototv?tab=alerts (Alerts), /intprototv?tab=ibo (IBO Player), /intprototv?tab=promos (Promotions).'].join('\n');
+          const sys = [ai.instructions || 'You are the AI assistant of INTPROTO-TV (the TVplus IPTV reseller app).', 'Answer concisely, in the language of the user. Use the panel context. Clearly distinguish the owner’s My planning from agents’ Work planning; the owner schedule is a read-only overview and contains no private notes, checkoffs or API-key records. Alert context contains aggregate counts only, not customer names. Never claim access to private details omitted from context.', 'For IPTV setup, explain the difference between Xtream Codes/API details and an M3U playlist, say app menu names can vary, and do not request or repeat passwords, full M3U links or other credentials. IPTV players do not provide content; advise using authorized access only.', 'When asked for marketing copy, you may draft a complete HTML email (subject, headline, body, footer) and a WhatsApp-ready plain-text message with *bold* and _italic_ markers; keep them separate. Never invent prices, discounts, or features.', 'Suggest actions and use panel links when helpful. Known links: /intprototv?tab=workplan (Work planning), /intprototv?tab=ownerplan (My planning), /intprototv?tab=alerts (Alerts), /intprototv?tab=ibo (IBO Player), /intprototv?tab=promos (Promotions).'].join('\n');
           const prompt = ['Panel context:\n' + JSON.stringify(ctx, null, 1), 'User question:', question].join('\n');
           try {
             const r = await fetchFn(trimSlash(ai.baseUrl) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.3, max_tokens: 900, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] }) });
@@ -4513,7 +4514,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (/smarters|xciptv|tivimate|m3u|xtream|iptv|setup.{0,20}(app|player)|player.{0,20}setup/i.test(q)) return { answer: iptvSetupGuide(), source: 'panel', related: ['/intprototv?tab=ibo'] };
         if (/ibo|player pro|king4k|iboss|roku|stb|media box/i.test(q)) return { answer: `IBO Player setup guide:\n${iboSetupGuide()}`, source: 'panel', related: ['/intprototv?tab=ibo'] };
         if (/plan|today|activity|next/i.test(q)) return { answer: `Today’s schedules (kept separate):\nAgent Work planning for ${name} (${ctx.today} · ${ctx.timezone}):\n${workLines}\n\nOwner’s My planning (${ctx.ownerPlanning.today} · ${ctx.ownerPlanning.timezone}):\n${ownerLines}\n\nWork-planning rules: ${(wp.rules || []).length ? (wp.rules || []).join(' · ') : 'none yet.'}`, source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan'] };
-        return { answer: 'I can help with:\n• Agent Work planning and the owner’s read-only My planning overview.\n• Alerts and subscriptions (Alerts tab).\n• IPTV setup across Smarters Pro, XCIPTV, TiviMate, IBO Player and M3U/Xtream-compatible apps.\n• Campaign copy: generate separate email HTML and WhatsApp-ready plain text in the marketing composer.\n• Owner-only actions: create a Resend API, update a sports promo, change a customer program, notify agents.', source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan', '/intprototv?tab=ibo', '/intprototv?tab=promos'] };
+        return { answer: 'I can help with:\n• Agent Work planning and the owner’s read-only My planning overview (both shown together).\n• Alerts and subscriptions (Alerts tab).\n• IPTV setup across Smarters Pro, XCIPTV, TiviMate, IBO Player and M3U/Xtream-compatible apps.\n• Campaign copy: generate separate email HTML and WhatsApp-ready plain text.\n• Customer problem photos: upload a photo in this chat for AI troubleshooting.\n• Owner-only actions: create a Resend API, update a sports promo, change a customer program, notify agents.', source: 'panel', related: ['/intprototv?tab=workplan', '/intprototv?tab=ownerplan', '/intprototv?tab=ibo', '/intprototv?tab=promos'] };
       }
       if (R('GET', '/api/admin/ai/config')) {
         const ai = s.ai || {};
@@ -4582,6 +4583,24 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!r.ok || !answer) return err(502, 'The configured provider could not analyze this picture. Check that its selected model supports vision.');
           return ok({ answer: answer.slice(0, 3000), model: ai.model || 'gpt-4o-mini', sent: true, saved: false });
         } catch { return err(502, 'The AI provider could not be reached. No support reply was sent.'); }
+      }
+      if (R('POST', '/api/admin/ai/analyze-image')) {
+        const ai = s.ai || {}; if (ai.on === false || ai.photoAnalysis === false) return err(403, 'AI picture analysis is turned off by the owner.');
+        if (!String(ai.apiKey || '').trim()) return err(400, 'The owner must configure an AI provider key first.');
+        if (!secureAiUrl(ai.baseUrl)) return err(400, 'Picture analysis requires a public HTTPS AI provider URL without embedded credentials.');
+        const image = String(body.image || '');
+        if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 600000) return err(400, 'Upload a JPEG, PNG or WebP image (max ~450 KB).');
+        const rateKey = 'ai-photo-day:' + (member?.id || 'owner') + ':' + new Date().toISOString().slice(0, 10);
+        if (!(await reserveAiPhotoAttempt(rateKey))) return err(429, 'Daily AI picture-analysis attempt limit reached for this staff account.');
+        const system = 'You are a cautious technical-support assistant reviewing one customer-submitted IPTV app or device troubleshooting image. Describe only visible, relevant evidence; do not guess private credentials or transcribe passwords, QR codes, full URLs, tokens, email addresses, or account identifiers. Explain uncertainty. Give a few safe, generic next steps and ask for non-sensitive details only if needed. Do not diagnose people or claim the image proves an account or service status. A human support agent will review your suggestion before replying.';
+        const prompt = 'Inspect the attached image for a visible IPTV player/device setup or playback problem. Do not receive or infer any ticket text or customer identity. Return a concise observation, possible cause(s), and safe next troubleshooting steps. Redact or ignore credentials and personal details if visible.';
+        try {
+          const r = await fetchFn(trimSlash(String(ai.baseUrl)) + '/chat/completions', { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + String(ai.apiKey).trim() }, body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', temperature: 0.2, max_tokens: 650, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: image, detail: 'low' } }] }] }) });
+          const j = await r.json().catch(() => ({})); const content = j.choices?.[0]?.message?.content;
+          const answer = (Array.isArray(content) ? content.filter((p) => p?.type === 'text').map((p) => p.text || '').join('\n') : String(content || '')).trim();
+          if (!r.ok || !answer) return err(502, 'The configured provider could not analyze this picture. Check that its selected model supports vision.');
+          return ok({ answer: answer.slice(0, 3000), model: ai.model || 'gpt-4o-mini' });
+        } catch { return err(502, 'The AI provider could not be reached.'); }
       }
       if (R('POST', '/api/admin/ai/action')) {
         if (!isOwner) return err(403, 'Only the owner runs assistant actions.');
