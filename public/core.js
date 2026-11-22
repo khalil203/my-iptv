@@ -470,6 +470,7 @@ function permFor(method, path, body) {
   if (path === '/api/admin/ai/compose-marketing' && method === 'POST') return 'marketing'; // draft only; sending still uses the existing marketing flow
   if (path === '/api/admin/ai/analyze-photo' && method === 'POST') return 'customers_view'; // only staff who can see support tickets
   if (path === '/api/admin/ai/analyze-image' && method === 'POST') return 'customers_view';
+  if (path === '/api/admin/security/screenshot-attempt' && method === 'POST') return null;
   if (path === '/api/admin/ai/config' || path.startsWith('/api/admin/ai/action')) return 'owner';
   if (path === '/api/admin/sports' && method === 'GET') return 'customers_view';
   if (path === '/api/admin/sports' || path.startsWith('/api/admin/sports/')) return 'marketing';
@@ -4599,6 +4600,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (!r.ok || !answer) return err(502, 'The configured provider could not analyze this picture. Check that its selected model supports vision.');
           return ok({ answer: answer.slice(0, 3000), model: ai.model || 'gpt-4o-mini' });
         } catch { return err(502, 'The AI provider could not be reached.'); }
+      }
+      if (R('POST', '/api/admin/security/screenshot-attempt')) {
+        const who = (me && (me.name || me.username)) || 'an agent';
+        await log('security', `${who} attempted a screenshot in the panel`);
+        try { await pushOwner(s, { title: 'Screenshot attempt', body: `${who} attempted a screenshot in the panel.`, url: '/intprototv', tag: 'screenshot-' + Date.now() }); } catch {}
+        if (tgOn(s) && s.telegram.adminChat) await tgSend(s, s.telegram.adminChat, `📸 Screenshot attempt by ${who}`).catch(() => {});
+        return ok({ ok: true });
       }
       if (R('POST', '/api/admin/ai/action')) {
         if (!isOwner) return err(403, 'Only the owner runs assistant actions.');

@@ -6295,3 +6295,10 @@ document.addEventListener('change', (e) => {
   const today = OP.cache?.today || ''; OP.date = today.startsWith(OP.month) ? today : OP.month + '-01';
   renderAdmin();
 });
+
+// Screenshot attempt alert (owner only): notify the owner when an agent presses Print Screen.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'PrintScreen' || e.key === 'Snapshot') {
+    try { api('POST', '/api/admin/security/screenshot-attempt', {}).catch(() => {}); } catch {}
+  }
+});
