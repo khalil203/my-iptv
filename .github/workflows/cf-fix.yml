@@ -10,15 +10,9 @@ jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - name: Disable bot fight mode
+      - name: List settings
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           Z=80f50005716163bcb63efdeb39936045
-          echo "bot_fight_mode:"
-          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/bot_fight_mode" -d '{"value":"off"}'
-          echo
-          echo "super_bot_fight_mode:"
-          curl -s -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$Z/settings/super_bot_fight_mode" -d '{"value":{"enabled":false}}'
-          echo
-          echo "done"
+          curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/$Z/settings" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const d=JSON.parse(s);for(const r of d.result||[]) console.log(r.id, '=', r.value)})" | grep -i "bot\|fight\|security\|challenge\|ua"
