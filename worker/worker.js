@@ -117,6 +117,8 @@ async function proxy(request, url) {
     }
     break;
   }
+  // If the hop budget is exhausted while the upstream still wants to redirect, fail cleanly instead of streaming a redirect body.
+  if (res.status >= 300 && res.status < 400 && res.headers.get('location')) return new Response('Too many redirects', { status: 502, headers: CORS });
 
   const ct = res.headers.get('content-type') || '';
   const finalPath = new URL(res.url || tu.toString()).pathname;

@@ -39,4 +39,12 @@ self.addEventListener('notificationclick', (e) => {
     return self.clients.openWindow(url);
   })());
 });
-self.addEventListener('pushsubscriptionchange', (e) => { /* the app re-subscribes on next open */ });
+// The browser may rotate the push subscription while the app is closed. Ask any open client
+// (or wake one) to re-subscribe immediately instead of silently dropping notifications.
+self.addEventListener('pushsubscriptionchange', (e) => {
+  e.waitUntil((async () => {
+    let all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (!all.length) all = await self.clients.matchAll({ type: 'window' });
+    for (const c of all) c.postMessage({ type: 'resubscribe-push' });
+  })());
+});

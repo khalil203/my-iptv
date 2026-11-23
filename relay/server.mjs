@@ -12,6 +12,19 @@ const deadHosts = new Map();  // host -> until  (logo servers that are down)
 const failCount = new Map();  // host -> consecutive failures
 const isImg = (u) => /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(u);
 
+// Only allow public hosts (same SSRF protection as the Cloudflare worker's /proxy).
+function publicHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!h || h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return false;
+  if (/^(metadata|metadata\.google\.internal|instance-data)$/.test(h)) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
+    const p = h.split('.').map(Number);
+    if (p[0] === 10 || p[0] === 127 || p[0] === 0 || p[0] >= 224 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127)) return false;
+  }
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return false;
+  return true;
+}
+
 async function checkToken(t) {
   const c = tokenCache.get(t);
   if (c && c.until > Date.now()) return c;
@@ -60,13 +73,16 @@ http.createServer(async (req, res) => {
   const t = url.searchParams.get('t') || '';
   const target = url.searchParams.get('u') || '';
   if (!/^https?:\/\//.test(target)) { res.writeHead(400, CORS); return res.end('bad url'); }
+  let tu;
+  try { tu = new URL(target); } catch { res.writeHead(400, CORS); return res.end('bad url'); }
+  if (!publicHost(tu.hostname)) { res.writeHead(400, CORS); return res.end('bad url'); }
   const tok = await checkToken(t);
   if (!tok.ok) { res.writeHead(403, CORS); return res.end('forbidden'); }
   const headers = { 'User-Agent': tok.ua, Accept: '*/*' };
   if (req.headers.range) headers.Range = req.headers.range;
   // Logos: serve from memory, fail fast for logo servers that are down
   if (isImg(target)) {
-    const host = new URL(target).host;
+    const host = tu.host;
     const hit = imgCache.get(target);
     if (hit) { res.writeHead(200, { 'content-type': hit.type, 'cache-control': 'public, max-age=604800', ...CORS }); return res.end(hit.buf); }
     if ((deadHosts.get(host) || 0) > Date.now()) { res.writeHead(504, CORS); return res.end(); }
@@ -89,7 +105,8 @@ http.createServer(async (req, res) => {
     up.setEncoding('utf8');
     up.on('data', (d) => { body += d; });
     up.on('end', () => {
-      const self = `${req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')}://${req.headers.host}`;
+      // The relay always sits behind a TLS terminator in production; only trust http:// when x-forwarded-proto says so.
+      const self = `${(req.headers['x-forwarded-proto'] || 'http').toString().split(',')[0].trim()}://${req.headers.host}`;
       const wrap = (abs) => `${self}/x?u=${encodeURIComponent(abs)}&t=${encodeURIComponent(t)}`;
       res.writeHead(up.statusCode, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store', ...CORS });
       res.end(rewrite(body, up.finalUrl, wrap));

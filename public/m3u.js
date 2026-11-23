@@ -2,6 +2,11 @@
 // Tolerates messy files: missing header, extra blank lines, unknown tags, names with commas.
 const VOD = /\.(mp4|mkv|avi|mov|m4v|wmv|flv)(\?|$)/i;
 
+// Filenames may contain malformed percent-escapes; never let one bad entry abort the parse.
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 export function parseM3U(text, max = 20000) {
   const out = []; let cur = null;
   for (const raw of String(text || '').split(/\r?\n/)) {
@@ -19,7 +24,7 @@ export function parseM3U(text, max = 20000) {
     } else if (line[0] !== '#') {
       if (/^(https?|rtmp|rtsp|udp|rtp|mms):\/\//i.test(line)) {
         const c = cur || { name: '', logo: '', group: '', tid: '' };
-        const name = c.name || decodeURIComponent(line.split('?')[0].split('/').pop() || 'Channel').replace(/\.\w{2,4}$/, '');
+        const name = c.name || safeDecode(line.split('?')[0].split('/').pop() || 'Channel').replace(/\.\w{2,4}$/, '');
         out.push({ name, logo: /^https?:/i.test(c.logo) ? c.logo : '', group: c.group || '', tid: c.tid || '', url: line, vod: VOD.test(line) || /\/(movie|series)\//i.test(line) });
         if (out.length >= max) break;
       }
