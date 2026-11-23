@@ -2,8 +2,8 @@
 // language of the app (login, site footer, support, reseller, account).
 // The translator hub is separate (translator.js) — it changes content, not the UI.
 
-import { APP_LANGS, flagOf, nameOf, englishOf, dirOf } from './lang-data.js?v=122';
-import { t, tIn, ensureLang } from './i18n.js?v=126';
+import { APP_LANGS, flagOf, nameOf, englishOf, dirOf, langSearchText } from './lang-data.js?v=123';
+import { t, tIn, ensureLang } from './i18n.js?v=127';
 
 const RECENT_KEY = 'tvp_lang_recent';
 const $ = (s, r = document) => r.querySelector(s);
@@ -20,11 +20,16 @@ function remember(code) {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([code, ...recents().filter((c) => c !== code)].slice(0, 3))); } catch {}
 }
 function suggested() {
-  const list = navigator.languages || [navigator.language || 'en'];
+  let list = ['en'];
+  try { if (typeof navigator !== 'undefined') list = navigator.languages || [navigator.language || 'en']; } catch {}
   for (const raw of list) {
-    const two = String(raw || '').toLowerCase().split('-')[0];
+    const tag = String(raw || '').toLowerCase().replace('_', '-');
+    const exact = APP_LANGS.find((l) => l.code.toLowerCase() === tag);
+    if (exact) return exact.code;
+    const two = tag.split('-')[0];
     const hit = APP_LANGS.find((l) => l.code === two);
     if (hit) return hit.code;
+    if (two === 'zh') return 'zh-CN';
   }
   return '';
 }
@@ -41,8 +46,8 @@ export function openLangSheet({ current = 'en', onPick, title, subtitle } = {}) 
   root.innerHTML = `<div class="ls-bg" data-ls-close></div>
     <section class="ls-sheet" role="dialog" aria-modal="true" aria-labelledby="ls-title">
       <div class="ls-grip" aria-hidden="true"></div>
-      <header class="ls-head"><span class="ls-badge" aria-hidden="true">🌐</span><div class="ls-titles"><h2 id="ls-title">${esc(title || 'Language')}</h2><p>${esc(subtitle || 'Choose the language of the app. You can change it at any time.')}</p></div><button type="button" class="ls-x" data-ls-close aria-label="${esc(t('close'))}">×</button></header>
-      <label class="ls-search"><span aria-hidden="true">🔎</span><input type="search" autocomplete="off" placeholder="${esc(t('searchLang'))}" aria-label="${esc(t('searchLang'))}" data-ls-q></label>
+      <header class="ls-head"><span class="ls-badge" aria-hidden="true">🌐</span><div class="ls-titles"><h2 id="ls-title">${esc(title || t('language'))}</h2><p>${esc(subtitle || t('chooseLang'))}</p></div><button type="button" class="ls-x" data-ls-close aria-label="${esc(t('close'))}">×</button></header>
+      <label class="ls-search"><span aria-hidden="true">🔎</span><input type="search" dir="auto" autocomplete="off" placeholder="${esc(t('searchLang'))}" aria-label="${esc(t('searchLang'))}" data-ls-q></label>
       <div class="ls-extra" data-ls-extra>${sugg && sugg !== current ? `<span class="ls-label">${esc(t('suggestedLang'))}</span><button type="button" class="ls-chip" data-code="${sugg}"><span>${flagOf(sugg)}</span>${esc(nameOf(sugg))}</button>` : ''}${recent.length ? `<span class="ls-label">${esc(t('recentLang'))}</span><div class="ls-recents">${recent.map((c) => `<button type="button" class="ls-chip" data-code="${c}"><span>${flagOf(c)}</span>${esc(nameOf(c))}</button>`).join('')}</div>` : ''}</div>
       <div class="ls-list" role="listbox" aria-label="${esc(t('language'))}" data-ls-list>${listHtml(current)}</div>
       <p class="ls-empty" data-ls-empty hidden>${esc(t('noLangMatch'))}</p>
@@ -65,12 +70,18 @@ export function openLangSheet({ current = 'en', onPick, title, subtitle } = {}) 
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
         return;
       }
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        const opts = [...root.querySelectorAll('[data-opt]')];
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(e.key)) {
+        const opts = [...root.querySelectorAll('[data-opt]')].filter((el) => !el.hidden);
         if (!opts.length) return;
         e.preventDefault();
         const i = opts.indexOf(document.activeElement);
-        const next = e.key === 'ArrowDown' ? (i < 0 ? 0 : (i + 1) % opts.length) : (i <= 0 ? opts.length - 1 : i - 1);
+        let next;
+        if (e.key === 'ArrowDown') next = i < 0 ? 0 : (i + 1) % opts.length;
+        else if (e.key === 'ArrowUp') next = i <= 0 ? opts.length - 1 : i - 1;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = opts.length - 1;
+        else if (e.key === 'PageDown') next = Math.min(opts.length - 1, Math.max(0, i) + 6);
+        else next = Math.max(0, (i < 0 ? 0 : i) - 6);
         opts[next].focus();
       }
     },
@@ -94,6 +105,10 @@ export function openLangSheet({ current = 'en', onPick, title, subtitle } = {}) 
     if (!e.target.matches('[data-ls-q]')) return;
     state.query = e.target.value.trim().toLowerCase();
     filter(state);
+    if (state.query) {
+      const first = root.querySelector('[data-opt]:not([hidden])');
+      root.querySelectorAll('[data-opt]').forEach((x) => { x.tabIndex = x === first ? 0 : -1; });
+    }
   });
   root.addEventListener('keydown', (e) => {
     state.key(e);
@@ -117,8 +132,10 @@ export function openLangSheet({ current = 'en', onPick, title, subtitle } = {}) 
   requestAnimationFrame(() => {
     root.classList.add('open');
     const q = $('[data-ls-q]', root);
+    const currentOpt = root.querySelector('[data-opt].on');
+    if (currentOpt) try { currentOpt.scrollIntoView({ block: 'nearest' }); } catch {}
     if (q && window.matchMedia('(min-width: 721px)').matches) q.focus();
-    else root.querySelector('[data-opt].on')?.focus({ preventScroll: true });
+    else currentOpt?.focus({ preventScroll: true });
   });
   return root;
 }
@@ -137,7 +154,7 @@ function filter(state) {
   if (!list) return;
   let shown = 0;
   APP_LANGS.forEach((l) => {
-    const hay = `${l.native} ${l.english} ${l.code}`.toLowerCase();
+    const hay = langSearchText(l);
     const hit = !query || hay.includes(query);
     const el = list.querySelector(`[data-opt][data-code="${l.code}"]`);
     if (el) { el.hidden = !hit; if (hit) shown++; }
@@ -146,6 +163,14 @@ function filter(state) {
   if (empty) empty.hidden = shown > 0;
   const extra = $('[data-ls-extra]', root);
   if (extra) extra.hidden = !!query;
+  let first = null;
+  APP_LANGS.forEach((l) => {
+    const el = list.querySelector(`[data-opt][data-code="${l.code}"]`);
+    if (!el || el.hidden) return;
+    if (!first) first = el;
+    el.tabIndex = query ? -1 : (l.code === state.current ? 0 : -1);
+  });
+  if (first && query) first.tabIndex = 0;
 }
 
 export function closeLangSheet(instant) {

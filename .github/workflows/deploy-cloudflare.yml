@@ -56,7 +56,7 @@ jobs:
           name: apk
           path: public/apk
       - name: Run the automated checks (a failed check stops the deploy)
-        run: node --test tests/backend.test.mjs tests/lang.test.mjs tests/i18n.test.mjs tests/ui-controls.test.mjs tests/growth.test.mjs tests/referrals.test.mjs tests/review.test.mjs
+        run: node --test tests/*.test.mjs
       - name: Refresh the channel logo index (keeps the saved one if this fails)
         continue-on-error: true
         run: node tools/build-logos.mjs

@@ -1,12 +1,12 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=128';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=129';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
-import { siteHtml, ensureSiteLang } from './site.js?v=123';
+import { siteHtml, ensureSiteLang } from './site.js?v=124';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
 import { TIME_ZONES, timezoneOffsetLabel, zonedDayAndMinute } from './timezones.js?v=1';
-import { t, tErr, setLang, getLang, detectLang, locale, LANGS, ensureLang } from './i18n.js?v=126';
-import { openLangSheet, paintLangPill, langChip } from './lang.js?v=122';
-import { flagOf as langFlag, nameOf as langName } from './lang-data.js?v=122';
+import { t, tErr, setLang, getLang, detectLang, locale, LANGS, ensureLang } from './i18n.js?v=127';
+import { openLangSheet, paintLangPill, langChip } from './lang.js?v=123';
+import { flagOf as langFlag, nameOf as langName, dirOf } from './lang-data.js?v=123';
 import { createTranslator } from './translator.js?v=123';
 import { esc as escHtml, categoryClass, refreshControlHtml, refreshMetaHtml, importantNoticeHtml, noticeEditorHtml, markRefreshBusy } from './ui-controls.js?v=123';
 import { PROMOS, REFERRAL_TIERS, LIFETIME_PLANS, promoEligibility, applyPromoToReseller, adsTemplates, adsPanelHtml, resellerSampleHtml, domainAccountHtml, agentPermissionPreset } from './growth.js?v=123';
@@ -199,6 +199,7 @@ async function boot() {
   if (hp.get('s') && location.protocol === 'https:') localStorage.setItem('tvp_nohttp', '1');
   if (hp.get('s')) { setSession(hp.get('s'), 'user'); if (hp.get('tab')) state.user.tab = hp.get('tab'); if (hp.get('lang')) setLang(hp.get('lang'), true); history.replaceState(null, '', location.pathname); }
   setLang(detectLang());
+  applyI18nChrome();
   await ensureLang(getLang());
   await ensureSiteLang(getLang());
   try {
@@ -218,6 +219,13 @@ async function boot() {
   if (state.resetToken && !state.token) showReset();
 }
 
+// Chrome-level strings outside the app's render tree (skip link).
+function applyI18nChrome() {
+  const sk = document.getElementById('skip-link');
+  if (sk) sk.textContent = t('skipToContent');
+}
+if (typeof window !== 'undefined') window.addEventListener('langchange', applyI18nChrome);
+
 // One language control on every customer / reseller / public page: a small
 // pill that opens the Language Center sheet.
 function paintPill() {
@@ -232,6 +240,7 @@ async function applyLang(code) {
   await ensureLang(code);
   await ensureSiteLang(code);
   setLang(code, true);
+  applyI18nChrome();
   paintPill();
   if (state.role === 'user' && state.token && location.pathname !== '/app') renderUser(); else route();
   toast(`${langFlag(code)} ${langName(code)} ✓`);
@@ -395,7 +404,7 @@ const SUP = { step: 1, token: '', known: false, info: null, ref: '', me: null, f
 const ticketPhotoConsent = () => `<label class="field" style="flex-direction:row;align-items:flex-start;gap:9px"><input type="checkbox" name="aiPhotoConsent" style="width:auto;margin-top:3px"><span class="small">${esc(t('ticketAiPhotoConsent'))}</span></label>`;
 const supLangSel = () => langChip(getLang(), { label: t('language') });
 async function renderSupport() {
-  document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
+  document.documentElement.dir = dirOf(getLang());
   const b = state.config.branding || {};
   if (!SUP.info) { try { SUP.info = await api('GET', '/api/support/info'); } catch { SUP.info = { email: 'contact@intproto-tv.com', whatsapp: waNum(b) }; } }
   if (state.token && state.role === 'user' && !SUP.me) { try { SUP.me = (await api('GET', '/api/me')).user; } catch { SUP.me = {}; } }
@@ -458,7 +467,7 @@ const RSL = { d: null, tab: 'home', q: '' };
 const rslLangSel = () => langChip(getLang(), { label: t('language') });
 async function renderRsl() {
   goAfterRender();
-  document.documentElement.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
+  document.documentElement.dir = dirOf(getLang());
   if (state.role !== 'reseller') {
     $('#app').innerHTML = `<div class="login-wrap"><div class="login-card"><h2>🤝 ${esc(t('rsl_title'))}</h2><p class="muted">${esc(t('rsl_custAcc'))}</p><a class="btn primary block" data-act="logout">${esc(t('logout'))}</a><div class="login-foot"><a href="/">← ${esc(state.config.branding.appName || t('home'))}</a></div></div></div>`; return;
   }
@@ -4836,17 +4845,17 @@ async function adminTemplates() {
   let body;
   if (own) {
     body = `<p class="small muted">Your own WhatsApp messages. They appear in the message list when you tap 💬 on a customer. You can use: {name} {fullname} {app} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {appUrl}</p>
-      ${d.waCustom.map((x, i) => `<div class="tpl-f"><div class="row"><input style="flex:1" value="${esc(x.name)}" data-own="${i}" data-k="name" placeholder="Name of this message" maxlength="40"><button type="button" class="btn sm danger" data-act="tp-own-del" data-perm="templates_edit" data-i="${i}">Delete</button></div><textarea rows="5" data-own="${i}" data-k="text" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}" placeholder="Message in ${LANG3.find((l) => l[0] === ui.lang)[1]}">${esc(x.text[ui.lang] || '')}</textarea></div>`).join('') || '<p class="muted small">No messages of your own yet.</p>'}
+      ${d.waCustom.map((x, i) => `<div class="tpl-f"><div class="row"><input style="flex:1" value="${esc(x.name)}" data-own="${i}" data-k="name" placeholder="Name of this message" maxlength="40"><button type="button" class="btn sm danger" data-act="tp-own-del" data-perm="templates_edit" data-i="${i}">Delete</button></div><textarea rows="5" data-own="${i}" data-k="text" dir="${dirOf(ui.lang)}" placeholder="Message in ${LANG3.find((l) => l[0] === ui.lang)[1]}">${esc(x.text[ui.lang] || '')}</textarea></div>`).join('') || '<p class="muted small">No messages of your own yet.</p>'}
       <button type="button" class="btn" data-act="tp-own-add" data-perm="templates_edit">＋ Add a message</button>`;
   } else if (wa) {
     body = `<p class="small muted">The ready-made WhatsApp messages. You can use: {name} {fullname} {app} {package} {price} {days} {devices} {link} {username} {password} {dns} {m3u} {expires} {appUrl}</p>
-      ${Object.keys(d.waDefaults).map((ty) => { const cur = (d.wa[ty] || {})[ui.lang]; return `<div class="tpl-f"><label><b>${WA_NAMES[ty] || nice(ty)}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label><textarea rows="9" data-wa="${ty}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || d.waDefaults[ty][ui.lang] || '')}</textarea>${cur ? `<button type="button" class="btn sm" data-act="tp-wa-reset" data-perm="templates_edit" data-ty="${ty}">Back to the original</button>` : ''}</div>`; }).join('')}`;
+      ${Object.keys(d.waDefaults).map((ty) => { const cur = (d.wa[ty] || {})[ui.lang]; return `<div class="tpl-f"><label><b>${WA_NAMES[ty] || nice(ty)}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label><textarea rows="9" data-wa="${ty}" dir="${dirOf(ui.lang)}">${esc(cur || d.waDefaults[ty][ui.lang] || '')}</textarea>${cur ? `<button type="button" class="btn sm" data-act="tp-wa-reset" data-perm="templates_edit" data-ty="${ty}">Back to the original</button>` : ''}</div>`; }).join('')}`;
   } else {
     const keys = Object.keys(d.defaults[ui.g][ui.lang]).filter((k) => k !== 'dir').filter((k) => (!ui.only || edits[k]) && (!q || (k + ' ' + (edits[k] || d.defaults[ui.g][ui.lang][k])).toLowerCase().includes(q)));
     body = `<p class="small muted">${grp[3]} You can use: <span dir="ltr">${grp[4]}</span>. Simple formatting like &lt;b&gt;bold&lt;/b&gt; works.</p>
       <div class="row" style="margin-bottom:10px"><input style="flex:1;min-width:160px" type="search" placeholder="🔎 Find a text…" value="${esc(ui.q)}" data-input="tp-search"><label class="toggle" style="margin:0"><input type="checkbox" data-act="tp-only" ${ui.only ? 'checked' : ''}><i></i><span>Only changed</span></label></div>
       ${keys.map((k) => { const def = d.defaults[ui.g][ui.lang][k]; const cur = edits[k]; const long = (cur || def).length > 70;
-        return `<div class="tpl-f"><label><b>${esc(nice(k))}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label>${long ? `<textarea rows="${Math.min(8, Math.ceil((cur || def).length / 60) + 1)}" data-tk="${k}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">${esc(cur || def)}</textarea>` : `<input data-tk="${k}" value="${esc(cur || def)}" dir="${ui.lang === 'ar' ? 'rtl' : 'ltr'}">`}${cur ? `<button type="button" class="btn sm" data-act="tp-reset" data-perm="templates_edit" data-k="${k}">Back to the original</button>` : ''}</div>`; }).join('') || '<p class="muted small">Nothing matches.</p>'}`;
+        return `<div class="tpl-f"><label><b>${esc(nice(k))}</b>${cur ? ' <span class="pill st-open">changed</span>' : ''}</label>${long ? `<textarea rows="${Math.min(8, Math.ceil((cur || def).length / 60) + 1)}" data-tk="${k}" dir="${dirOf(ui.lang)}">${esc(cur || def)}</textarea>` : `<input data-tk="${k}" value="${esc(cur || def)}" dir="${dirOf(ui.lang)}">`}${cur ? `<button type="button" class="btn sm" data-act="tp-reset" data-perm="templates_edit" data-k="${k}">Back to the original</button>` : ''}</div>`; }).join('') || '<p class="muted small">Nothing matches.</p>'}`;
   }
   const promo = await promoCard();
   return promo + `<div class="chips">${TPL_GROUPS.map(([g, , n]) => `<a class="${ui.g === g ? 'on' : ''}" data-act="tp-g" data-g="${g}">${n}${changedCount(g) ? ' · ' + changedCount(g) : ''}</a>`).join('')}<a class="${wa ? 'on' : ''}" data-act="tp-g" data-g="WA">💬 WhatsApp messages${changedCount('WA') ? ' · ' + changedCount('WA') : ''}</a><a class="${own ? 'on' : ''}" data-act="tp-g" data-g="OWN">✍️ My own WhatsApp messages · ${d.waCustom.length}</a></div>
@@ -5972,7 +5981,7 @@ const GUIDE = {
      ['🤝', 'الإحالة والهدايا والتخطيط', ['العميل الذي يحيل صديقاً يحصل على أيام مجانية له هو، وليس خصماً على المشتري: 30 يوماً لخطة سنة واحدة، و90 يوماً لخطة جهازين/سنة (109.99$)، و180 يوماً لخطة 4 أجهزة/سنة (139.99$).', 'يرى العملاء هدايا 1/3/6 أشهر مجانية أو خصم 10%/20%. يرى الوكلاء خصم 10%/20% فقط على حزم الرصيد — ولا أشهر مجانية.', 'أسعار Lifetime ثابتة: Lifetime Standard · جهاز واحد 499.95$ وLifetime VIP · 4 أجهزة 999.95$.', 'تخطيط المالك متزامن حتى ديسمبر 2027. استخدم <b>Planning overview</b> لقراءة الجدول المشترك، ويمكن للمالك الضغط على <b>📣 Notify agents</b> لإعادة إرسال الإشعار.'], ''],
      ['🔐', 'القواعد', ['لا تشارك بيانات العملاء أبداً. نسخ النصوص من اللوحة معطّل للموظفين.', 'مفاتيح API والتسويق بالبريد ورفع القوائم وأسماء المرسل وSEO والإعلانات: للمالك والخدمة التقنية فقط.', 'مشكلة؟ اضغط <b>🐞 Report</b> في الأعلى.'], ''] ] } };
 function agentGuide() {
-  const me = state.admin.me || {}; const lang = GUIDE[me.lang] ? me.lang : 'en'; const G = GUIDE[lang]; const rtl = lang === 'ar';
+  const me = state.admin.me || {}; const lang = GUIDE[me.lang] ? me.lang : 'en'; const G = GUIDE[lang]; const rtl = dirOf(lang) === 'rtl';
   const tabs = Object.keys(GUIDE).map((k) => `<a data-act="guide-lang" data-l="${k}" class="${k === lang ? 'on' : ''}">${{ en: '🇬🇧 English', fr: '🇫🇷 Français', ar: '🇸🇦 العربية' }[k]}</a>`).join('');
   return `<div dir="${rtl ? 'rtl' : 'ltr'}" class="guide"><div class="card"><h2 style="margin-top:0">🎓 ${esc(G.title)}</h2><p class="muted">${esc(G.intro)}</p><div class="chips">${tabs}</div>
     <div class="chips" style="margin-top:10px;flex-wrap:wrap">${G.sec.map(([ic, h], i) => `<a href="#g${i}" class="allow-copy">${ic} ${esc(h)}</a>`).join('')}</div></div>

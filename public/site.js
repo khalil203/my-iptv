@@ -3,7 +3,7 @@
 // Prices come from the packages set in the admin dashboard. No invented reviews, numbers or claims.
 
 import { ic } from './icons.js?v=102';
-import { flagOf, nameOf } from './lang-data.js?v=122';
+import { flagOf, nameOf } from './lang-data.js?v=123';
 
 const T = {
   en: {
@@ -51,23 +51,51 @@ T.it = {"hl": "TV in diretta", "start": "Inizia", "inc": "TV in diretta, film e 
 const UPDATED = '2026-11-13';
 const SIGN = { EUR: '€', USD: '$', USDT: '₮', MAD: 'MAD ' };
 const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fill = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
-export function registerSitePack(code, obj) {
-  if (!code || !obj) return;
-  T[code] = { ...(T[code] || {}), ...obj };
+const fill = (s, v) => String(s).replace(/\{(\w+)\}/g, (m, k) => (v && v[k] != null ? String(v[k]) : m));
+export const SITE_PACK_VERSION = '127';
+const sitePending = Object.create(null);
+export function siteStrings(code) {
+  return T[code] || T.en;
 }
 
-export async function ensureSiteLang(code) {
-  if (!code || code === 'en' || T[code]) return true;
-  try {
-    const url = new URL('langs/site-' + encodeURIComponent(code) + '.json', document.baseURI || location.href);
-    const r = await fetch(url, { cache: 'force-cache' });
-    if (r.ok) {
-      const j = await r.json();
-      if (j && j.strings) { registerSitePack(code, j.strings); return true; }
+export function registerSitePack(code, obj) {
+  if (!code || !obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const clean = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (!k || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (v == null) continue;
+    if (typeof v === 'string' && !v.trim()) continue;
+    clean[k] = v;
+  }
+  if (!Object.keys(clean).length) return false;
+  T[code] = { ...(T[code] || {}), ...clean };
+  return true;
+}
+
+export function ensureSiteLang(code) {
+  if (!code || code === 'en' || T[code]) return Promise.resolve(true);
+  if (sitePending[code]) return sitePending[code];
+  const task = (async () => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const base = (typeof document !== 'undefined' && document.baseURI) || (typeof location !== 'undefined' && location.href) || 'https://example.test/';
+        const url = new URL('langs/site-' + encodeURIComponent(code) + '.json', base);
+        url.searchParams.set('v', SITE_PACK_VERSION);
+        const r = await fetch(url, { cache: 'force-cache', credentials: 'omit' });
+        if (!r || !r.ok) throw new Error('HTTP ' + (r ? r.status : '0'));
+        const j = await r.json();
+        if (!j || typeof j !== 'object' || !j.strings) throw new Error('Malformed site pack');
+        if (j.code && j.code !== code) throw new Error('Site pack does not match ' + code);
+        if (registerSitePack(code, j.strings)) return true;
+        throw new Error('Empty site pack');
+      } catch {
+        if (attempt < 2) await new Promise((res) => setTimeout(res, 250));
+      }
     }
-  } catch {}
-  return false;
+    return false;
+  })().finally(() => { delete sitePending[code]; });
+  sitePending[code] = task;
+  return task;
 }
 
 const IDS = ['features', 'devices', 'pricing', 'setup', 'faq', 'contact'];

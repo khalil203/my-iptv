@@ -58,11 +58,32 @@ const TR_MAP = Object.fromEntries(TR_LANGS.map((l) => [l.code, l]));
 export const appLang = (code) => APP_MAP[code] || APP_MAP.en;
 export const trLang = (code) => TR_MAP[code] || TR_MAP.en;
 export const flagOf = (code) => appLang(code).flag;
-export const dirOf = (code) => (RTL_LANGS.has(String(code || '').split('-')[0]) ? 'rtl' : 'ltr');
+export const dirOf = (code) => (RTL_LANGS.has(String(code || '').split('-')[0].toLowerCase()) ? 'rtl' : 'ltr');
 export const isRtl = (code) => dirOf(code) === 'rtl';
 export const nameOf = (code) => appLang(code).native;
 export const englishOf = (code) => appLang(code).english;
 export const trNameOf = (code) => trLang(code).native;
+
+// BCP-47 locales used for Intl (numbers, dates, money, plurals). A bare
+// language code is valid for Intl and picks the CLDR default region; region
+// variants such as zh-CN are kept as they are.
+const LOCALE_MAP = {
+  en: 'en-US', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', it: 'it-IT',
+  ar: 'ar-SA', fa: 'fa-IR', he: 'he-IL', ur: 'ur-PK', hi: 'hi-IN',
+  bn: 'bn-BD', 'zh-CN': 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', pt: 'pt-PT', nl: 'nl-NL',
+  no: 'nb-NO', tl: 'fil-PH', sw: 'sw-KE', am: 'am-ET', ha: 'ha-NG',
+  id: 'id-ID', ms: 'ms-MY', th: 'th-TH', vi: 'vi-VN', tr: 'tr-TR',
+  ru: 'ru-RU', uk: 'uk-UA', pl: 'pl-PL', ro: 'ro-RO', el: 'el-GR',
+  sv: 'sv-SE', da: 'da-DK', fi: 'fi-FI', cs: 'cs-CZ', hu: 'hu-HU',
+  bg: 'bg-BG', sr: 'sr-RS', hr: 'hr-HR', so: 'so-SO',
+};
+export const localeOf = (code) => {
+  const c = String(code || 'en');
+  return LOCALE_MAP[c] || c;
+};
+
+// Searchable haystack for the language picker (native name, English name, code).
+export const langSearchText = (l) => `${l.native} ${l.english} ${l.code}`.toLowerCase();
 
 // A public web-page reader: Google's translate proxy keeps the page's layout and
 // rewrites links so the visitor can keep browsing in the same language.

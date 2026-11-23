@@ -1,6 +1,7 @@
 // core.js — shared backend logic.
 // Runs inside the Cloudflare Worker (real mode) and inside the browser (demo mode).
 import { PROMO_TEMPLATES, PROMO_CATEGORIES, promoTemplate } from './promo-templates.js';
+import { dirOf } from './lang-data.js';
 
 const enc = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -1206,7 +1207,7 @@ const MAIL = {
 };
 const mt = (lang, k, v = {}) => String((MAIL[lang] || MAIL.en)[k] || MAIL.en[k]).replace(/\{(\w+)\}/g, (_, x) => v[x] ?? '');
 function mailHtml(s, lang, rows, intro, name) {
-  const b = s.branding; const dir = lang === 'ar' ? 'rtl' : 'ltr';
+  const b = s.branding; const dir = dirOf(lang);
   const url = s.email.appUrl;
   return `<div dir="${dir}" style="font-family:Arial,Tahoma,sans-serif;background:#0b0d17;padding:24px"><div style="max-width:480px;margin:auto;background:#141726;border-radius:16px;padding:24px;color:#eef0fa">
   <h2 style="margin:0 0 4px;color:#fff">${escHtml(b.appName)}</h2><p style="color:#9aa0b8;margin:0 0 18px">${escHtml(b.tagline)}</p>
@@ -1641,7 +1642,7 @@ export function newsletterEmail(s, c, camp, appUrl, unsubUrl) {
   const pick = (l) => { const x = camp.content?.[l] || {}; return x.subject || x.title || x.body ? x : null; };
   const lang = (camp.split && pick(c?.lang) ? c.lang : (camp.split ? (pick('en') ? 'en' : LANG_CODES.find(pick) || 'en') : okLang(camp.lang)));
   const C = (camp.split ? pick(lang) : camp.content?.all || camp.content?.[lang]) || {}; const L = NL[camp.split ? lang : (camp.lang || 'en')] || NL.en;
-  const dir = (camp.split ? lang : camp.lang) === 'ar' ? 'rtl' : 'ltr'; const al = dir === 'rtl' ? 'right' : 'left'; const e = escHtml;
+  const dir = dirOf(camp.split ? lang : camp.lang); const al = dir === 'rtl' ? 'right' : 'left'; const e = escHtml;
   const app = s.branding.appName || 'IPTV'; const first = (c?.name || '').split(' ')[0];
   const fillTxt = (t) => String(t || '').replace(/\{name\}/g, first || '').replace(/\{app\}/g, app);
   const linkify = (h) => h.replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)]/g, (u) => `<a href="${u}" style="color:#0284c7;font-weight:600">${u}</a>`).replace(/(^|[\s>(])([a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})/gi, (m0, pre, m) => `${pre}<a href="mailto:${m}" style="color:#0284c7;font-weight:600">${m}</a>`);
@@ -3451,7 +3452,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
             const L = { en: ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'], fr: ['Réinitialiser votre mot de passe', 'Appuyez sur le bouton pour choisir un nouveau mot de passe. Le lien est valable 30 minutes.', 'Choisir un nouveau mot de passe', "Si vous n'avez rien demandé, ignorez cet e-mail."] }[ml(c)] || null;
             const T = L || ['Reset your password', 'Tap the button to choose a new password. The link works for 30 minutes.', 'Choose a new password', 'If you did not ask for this, ignore this email.'];
             const app = escHtml(s.branding.appName || 'IPTV');
-            const html = `<div dir="${ml(c) === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p style="font-size:16px"><b>${T[0]}</b></p><p>${T[1]}</p><p style="margin:24px 0"><a href="${base}/#reset=${tk}" style="background:#8065FF;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold;display:inline-block">${T[2]}</a></p><p style="color:#5A6478;font-size:13px">${T[3]}</p></div>`;
+            const html = `<div dir="${dirOf(ml(c))}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p style="font-size:16px"><b>${T[0]}</b></p><p>${T[1]}</p><p style="margin:24px 0"><a href="${base}/#reset=${tk}" style="background:#8065FF;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:bold;display:inline-block">${T[2]}</a></p><p style="color:#5A6478;font-size:13px">${T[3]}</p></div>`;
             const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
             await log('customer', `Password reset link for ${c.username}${r.ok ? ' sent' : ' NOT sent: ' + (r.error || '')}`);
           }
@@ -3828,7 +3829,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           c.emailCode = { hash: await sha256(code + c.salt), exp: Date.now() + 15 * 60000, tries: 0 }; await saveCustomers(list);
           const app = escHtml(s.branding.appName || 'IPTV');
           const T = { fr: ['Votre code de vérification', 'Saisissez ce code dans l’application. Il est valable 15 minutes.'] }[ml(c)] || ['Your verification code', 'Enter this code in the app. It works for 15 minutes.'];
-          const html = `<div dir="${ml(c) === 'ar' ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p><b>${T[0]}</b></p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;margin:16px 0" dir="ltr">${code}</p><p style="color:#5A6478">${T[1]}</p></div>`;
+          const html = `<div dir="${dirOf(ml(c))}" style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#121726"><h2 style="margin:0 0 12px">${app}</h2><p><b>${T[0]}</b></p><p style="font-size:32px;letter-spacing:6px;font-weight:bold;margin:16px 0" dir="ltr">${code}</p><p style="color:#5A6478">${T[1]}</p></div>`;
           const r = await sendEmail(s, to, `${s.branding.appName || 'IPTV'} — ${T[0]}`, html);
           if (!r.ok) return err(502, 'em_fail');
           return ok({ ok: true });

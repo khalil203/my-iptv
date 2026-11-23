@@ -10,7 +10,7 @@ import {
   TR_LANGS, trLang, flagOf, nameOf, dirOf, isRtl, buildReadUrl,
   shield, unshield, shouldSkipText, splitLong, translateEndpoint, parseTranslateResponse,
   glossaryOf, DEFAULT_GLOSSARY, panelTarget, PANEL_SKIP_SELECTOR,
-} from './lang-data.js?v=122';
+} from './lang-data.js?v=123';
 
 const LS = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },

@@ -1,6 +1,6 @@
 // Customer-side languages. The six hand-curated dictionaries live inline; the
 // other languages load a generated pack from ./langs/ on first use.
-import { LANGS as APP_LANGS, RTL_LANGS } from './lang-data.js';
+import { LANGS as APP_LANGS, dirOf, localeOf } from './lang-data.js?v=123';
 const SUPPORTED = new Set(APP_LANGS.map(([code]) => code));
 const D = {
   en: {
@@ -154,85 +154,305 @@ Object.assign(D.fr, { paidTitle: 'Merci pour votre paiement', paidText: 'Votre a
 
 
 export const LANGS = APP_LANGS;
+const LANG_KEY = 'tvp_lang';
+const BASE_LANG = new Map();
+for (const [code] of LANGS) {
+  const base = String(code).toLowerCase().split('-')[0];
+  if (!BASE_LANG.has(base)) BASE_LANG.set(base, code);
+}
+const LEGACY = { iw: 'he', in: 'id', ji: 'yi', fil: 'tl', nb: 'no', nn: 'no' };
+
+// Map a browser tag or user input to a supported app language. Returns '' when
+// nothing matches, so callers can try the next preference.
+function matchLang(input) {
+  const raw = String(input ?? '').trim().replace(/_/g, '-');
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  for (const [code] of LANGS) if (code.toLowerCase() === lower) return code;
+  const base = lower.split('-')[0];
+  if (BASE_LANG.has(base)) return BASE_LANG.get(base);
+  if (LEGACY[base]) return LEGACY[base];
+  if (base === 'zh') return 'zh-CN'; // the only Chinese variant we ship
+  return '';
+}
+export function resolveLang(input) { return matchLang(input) || 'en'; }
+function savedLang() {
+  try { return (typeof localStorage !== 'undefined') ? localStorage.getItem(LANG_KEY) : ''; } catch { return ''; }
+}
 export function detectLang() {
-  try {
-    const saved = (typeof localStorage !== 'undefined') ? localStorage.getItem('tvp_lang') : null;
-    if (saved && SUPPORTED.has(saved)) return saved;
-  } catch {}
+  const saved = matchLang(savedLang());
+  if (saved) return saved;
   const navLangs = (typeof navigator !== 'undefined') ? (navigator.languages || [navigator.language || 'en']) : ['en'];
   for (const l of navLangs) {
-    const code = String(l || '').replace('_', '-');
-    if (SUPPORTED.has(code)) return code;
-    const k = code.slice(0, 2).toLowerCase();
-    if (SUPPORTED.has(k)) return k;
-    if (k === 'zh') return 'zh-CN';
+    const hit = matchLang(l);
+    if (hit) return hit;
   }
   return 'en';
 }
-let lang = 'en';
+let lang = matchLang(savedLang()) || 'en';
+const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+// Register a generated pack. Invalid packs are rejected as a whole so one bad
+// file can never replace a working dictionary with blanks.
 export function registerLangPack(code, strings) {
-  if (!SUPPORTED.has(code) || !strings || typeof strings !== 'object' || Array.isArray(strings)) return false;
+  const target = matchLang(code);
+  if (!target || !strings || typeof strings !== 'object' || Array.isArray(strings)) return false;
   const clean = {};
-  for (const [k, v] of Object.entries(strings)) if (typeof k === 'string' && k && v != null) clean[k] = v;
+  for (const [k, v] of Object.entries(strings)) {
+    if (typeof k !== 'string' || !k || BLOCKED_KEYS.has(k)) continue;
+    if (typeof v !== 'string' || !v.trim()) continue;
+    clean[k] = v;
+  }
   if (!Object.keys(clean).length) return false;
-  D[code] = { ...(D[code] || {}), ...clean };
+  D[target] = { ...(D[target] || {}), ...clean };
+  if (target === 'en') EN_REVERSE = null;
   return true;
 }
-const packPending = {};
-const PACK_VERSION = '126';
+
+export const PACK_VERSION = '127';
+const packPending = Object.create(null);
+const loadedPacks = new Set();
+let lastPackError = null;
+export const packError = () => lastPackError;
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+function packUrl(code) {
+  const base = (typeof document !== 'undefined' && document.baseURI)
+    || (typeof location !== 'undefined' && location.href)
+    || 'https://example.test/';
+  const url = new URL('langs/' + encodeURIComponent(code) + '.json', base);
+  url.searchParams.set('v', PACK_VERSION);
+  return url.toString();
+}
+
+async function fetchPack(url) {
+  const opts = { cache: 'force-cache', credentials: 'omit' };
+  if (typeof AbortController !== 'function') {
+    const r = await fetch(url, opts);
+    if (!r || !r.ok) throw new Error('HTTP ' + (r ? r.status : '0'));
+    return r.json();
+  }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctl.signal });
+    if (!r || !r.ok) throw new Error('HTTP ' + (r ? r.status : '0'));
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
 export function ensureLang(code) {
-  if (!SUPPORTED.has(code) || code === 'en' || (D[code] && Object.keys(D[code]).length > 100)) return Promise.resolve(true);
-  if (packPending[code]) return packPending[code];
-  packPending[code] = (async () => {
-    let attempt = 0;
-    while (attempt < 2) {
-      attempt++;
+  const target = code ? resolveLang(code) : lang;
+  if (target === 'en' || loadedPacks.has(target) || (D[target] && Object.keys(D[target]).length > 100)) return Promise.resolve(true);
+  if (packPending[target]) return packPending[target];
+  const task = (async () => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof location !== 'undefined' ? location.href : 'https://example.test/');
-        const url = new URL('langs/' + encodeURIComponent(code) + '.json', base);
-        url.searchParams.set('v', PACK_VERSION);
-        const r = await fetch(url, { cache: 'force-cache' });
-        if (r && r.ok) {
-          const j = await r.json();
-          if (j && j.strings && registerLangPack(code, j.strings)) {
-            if (code === lang && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('langready', { detail: { code } }));
-            delete packPending[code];
-            return true;
-          }
-        }
-      } catch {}
-      await new Promise((res) => setTimeout(res, 200 * attempt));
+        const j = await fetchPack(packUrl(target));
+        if (!j || typeof j !== 'object' || !j.strings) throw new Error('Malformed language pack');
+        if (j.code && resolveLang(j.code) !== target) throw new Error('Language pack does not match ' + target);
+        if (!registerLangPack(target, j.strings)) throw new Error('Empty language pack');
+        loadedPacks.add(target);
+        lastPackError = null;
+        if (target === lang) emit('langready', { code: target });
+        return true;
+      } catch (err) {
+        lastPackError = err;
+        if (attempt < 2) await sleep(250);
+      }
     }
-    delete packPending[code];
     return false;
-  })();
-  return packPending[code];
+  })().finally(() => { delete packPending[target]; });
+  packPending[target] = task;
+  return task;
+}
+
+function emit(name, detail) {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+  try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch {}
+}
+export function applyDocumentLang(code = lang) {
+  const l = resolveLang(code);
+  try {
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.lang = l;
+      document.documentElement.dir = dirOf(l);
+    }
+  } catch {}
+  return l;
 }
 export function setLang(l, save) {
-  l = String(l || 'en');
-  lang = SUPPORTED.has(l) ? l : 'en';
-  try { if (save && typeof localStorage !== 'undefined') localStorage.setItem('tvp_lang', lang); } catch {}
-  try { if (typeof document !== 'undefined') { document.documentElement.lang = lang; document.documentElement.dir = RTL_LANGS.has(lang.split('-')[0]) ? 'rtl' : 'ltr'; } } catch {}
+  const next = resolveLang(l);
+  const changed = next !== lang;
+  lang = next;
+  try { if (save && typeof localStorage !== 'undefined') localStorage.setItem(LANG_KEY, lang); } catch {}
+  applyDocumentLang(lang);
   ensureLang(lang);
-  try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('langchange', { detail: { code: lang } })); } catch {}
+  if (changed) emit('langchange', { code: lang });
+  return changed;
 }
 export const getLang = () => lang;
-export const locale = () => ({ fr: 'fr-FR', de: 'de-DE', es: 'es-ES', it: 'it-IT', 'zh-CN': 'zh-CN' }[lang] || (lang.includes('-') ? lang : lang + '-' + lang.toUpperCase()));
+export const localeFor = localeOf;
+export const locale = () => localeOf(lang);
+export const dir = () => dirOf(lang);
+
+function lookupString(code, key) {
+  const dict = D[code];
+  if (!dict || !Object.hasOwn(dict, key)) return undefined;
+  const v = dict[key];
+  if (v == null || (typeof v === 'string' && !v.trim())) return undefined;
+  return v;
+}
+function lookupWithFallback(code, key) {
+  let v = lookupString(code, key);
+  if (v !== undefined) return v;
+  const base = String(code).toLowerCase().split('-')[0];
+  if (base !== code) {
+    v = lookupString(base, key);
+    if (v !== undefined) return v;
+  }
+  return lookupString('en', key);
+}
+const PH_RE = /\{(\w+)\}/g;
+export function interpolate(template, vars = {}) {
+  return String(template).replace(PH_RE, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
+}
 export function t(key, vars = {}) {
-  const s = (D[lang] && D[lang][key]) ?? D.en[key] ?? key;
-  return String(s).replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : '{' + k + '}'));
+  const k = String(key ?? '');
+  return interpolate(lookupWithFallback(lang, k) ?? k, vars || {});
 }
 // A string in a specific language, without changing the current one. Used by
 // the Language Center's live preview.
 export function tIn(code, key, vars = {}) {
-  const s = (D[code] && D[code][key]) ?? D.en[key] ?? key;
-  return String(s).replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : '{' + k + '}'));
+  const k = String(key ?? '');
+  return interpolate(lookupWithFallback(resolveLang(code), k) ?? k, vars || {});
 }
-// Map English server messages to the current language
+// Contextual variant: looks for key_context, then key_other, then key.
+export function tc(key, context, vars = {}) {
+  for (const suffix of [context, 'other']) {
+    const v = lookupWithFallback(lang, key + '_' + suffix);
+    if (v !== undefined) return interpolate(v, vars || {});
+  }
+  return t(key, vars);
+}
+// Plural-aware variant: key_zero/one/two/few/many/other, then key.
+const pluralCache = new Map();
+function pluralCategory(n) {
+  const loc = locale();
+  let rules = pluralCache.get(loc);
+  if (rules === undefined) {
+    try { rules = new Intl.PluralRules(loc); } catch { rules = null; }
+    pluralCache.set(loc, rules);
+  }
+  if (!rules) return n === 1 ? 'one' : 'other';
+  try { return rules.select(n); } catch { return 'other'; }
+}
+export function tn(key, n, vars = {}) {
+  const num = typeof n === 'number' ? n : Number(n);
+  const count = Number.isFinite(num) ? num : 0;
+  const cat = pluralCategory(count);
+  for (const name of [key + '_' + cat, key + '_other', key]) {
+    const v = lookupWithFallback(lang, name);
+    if (v !== undefined) return interpolate(v, { ...vars, n: count });
+  }
+  return String(key);
+}
+// Reverse lookup so English API errors can be shown in the user's language.
+let EN_REVERSE = null;
+function enReverse() {
+  if (EN_REVERSE) return EN_REVERSE;
+  EN_REVERSE = new Map();
+  for (const [k, v] of Object.entries(D.en)) {
+    if (typeof v === 'string' && v.trim() && !EN_REVERSE.has(v)) EN_REVERSE.set(v, k);
+  }
+  return EN_REVERSE;
+}
+function matchError(msg) {
+  if (lookupString('en', msg)) return { key: msg, vars: {} };
+  const exact = enReverse().get(msg);
+  if (exact) return { key: exact, vars: {} };
+  for (const [key, val] of Object.entries(D.en)) {
+    if (typeof val !== 'string' || !val.includes('{')) continue;
+    const names = [];
+    const src = val.split(/(\{\w+\})/g).map((part) => {
+      const m = /^\{(\w+)\}$/.exec(part);
+      if (m) { names.push(m[1]); return '(.+?)'; }
+      return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }).join('');
+    const hit = new RegExp('^' + src + '$').exec(msg);
+    if (hit) {
+      const vars = {};
+      names.forEach((name, i) => { vars[name] = hit[i + 1]; });
+      return { key, vars };
+    }
+  }
+  return null;
+}
 export function tErr(msg) {
-  const map = { 'Wrong username or password.': 'wrongLogin', 'This account is disabled. Please contact support.': 'disabled' };
-  if (D.en[msg]) return t(msg);
-  return map[msg] ? t(map[msg]) : msg;
+  const s = String(msg ?? '').trim();
+  if (!s) return s;
+  const hit = matchError(s);
+  return hit ? t(hit.key, hit.vars) : msg;
+}
+export function hasKey(key, code = lang) {
+  return lookupWithFallback(resolveLang(code), String(key ?? '')) !== undefined;
+}
+export function dictKeys(code = lang) {
+  return Object.keys(D[resolveLang(code)] || {});
+}
+export function missingKeys(code = lang, limit = Infinity) {
+  const have = new Set(dictKeys(code));
+  const out = [];
+  for (const k of Object.keys(D.en)) {
+    if (!have.has(k) && out.length < limit) out.push(k);
+  }
+  return out;
+}
+export function translationStats(code = lang) {
+  const target = resolveLang(code);
+  const total = Object.keys(D.en).length;
+  const translated = dictKeys(target).filter((k) => lookupString(target, k) !== undefined).length;
+  return { code: target, total, translated, coverage: total ? translated / total : 1 };
+}
+function intlOr(fn, fallback) { try { return fn(); } catch { return fallback; } }
+export function formatNumber(value, options) {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return String(value ?? '');
+  return intlOr(() => new Intl.NumberFormat(locale(), options).format(n), String(n));
+}
+export function formatDate(value, options) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return intlOr(
+    () => new Intl.DateTimeFormat(locale(), options || { year: 'numeric', month: 'short', day: 'numeric' }).format(d),
+    d.toISOString().slice(0, 10),
+  );
+}
+export function formatTime(value, options) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return intlOr(
+    () => new Intl.DateTimeFormat(locale(), options || { hour: '2-digit', minute: '2-digit' }).format(d),
+    d.toTimeString().slice(0, 5),
+  );
+}
+export function formatCurrency(value, currency = 'EUR', options) {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return String(value ?? '');
+  const code = String(currency || 'EUR').toUpperCase();
+  return intlOr(
+    () => new Intl.NumberFormat(locale(), { style: 'currency', currency: code, ...(options || {}) }).format(n),
+    `${formatNumber(n, { maximumFractionDigits: 2 })} ${code}`,
+  );
+}
+export function formatList(items, options) {
+  const list = Array.isArray(items) ? items.map((x) => String(x)) : [];
+  return intlOr(() => new Intl.ListFormat(locale(), options || { type: 'conjunction' }).format(list), list.join(', '));
+}
+export function formatRelative(value, unit = 'day') {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return String(value ?? '');
+  return intlOr(() => new Intl.RelativeTimeFormat(locale(), { numeric: 'auto' }).format(n, unit), `${n} ${unit}`);
 }
 Object.assign(D.en, { trialQueued: 'Your request is received ✅ An agent will process your trial and email you your login shortly.', trialQueuedSub: 'We sent a confirmation to {email}. If you do not hear from us within a few minutes, contact support.' });
 Object.assign(D.fr, { trialQueued: 'Votre demande est reçue ✅ Un agent traitera votre essai et vous enverra vos identifiants par e-mail.', trialQueuedSub: 'Nous avons envoyé une confirmation à {email}. Sans nouvelles dans quelques minutes, contactez l’assistance.' });
@@ -593,4 +813,12 @@ Object.assign(D.ar, { giftsTitle: 'الهدايا والعروض', giftsText: '�
 Object.assign(D.de, { ticketAiPhotoConsent: 'Optional: Ich bin damit einverstanden, dass Supportmitarbeiter zur Fehlerbehebung nur dieses Bild an den konfigurierten KI-Anbieter senden dürfen. Mein Tickettext und meine Kontodaten werden nicht gesendet. Das Personal muss „Analysieren“ wählen und eine Person überprüft das Ergebnis.' });
 Object.assign(D.es, { ticketAiPhotoConsent: 'Opcional: Acepto que el personal de soporte pueda enviar solo esta imagen al proveedor de IA configurado para solucionar problemas. No se enviará el texto de mi ticket ni los detalles de mi cuenta. El personal debe elegir Analizar y una persona revisa el resultado.' });
 Object.assign(D.it, { ticketAiPhotoConsent: 'Facoltativo: acconsento che il personale di supporto invii solo questa immagine al fornitore di IA configurato per la risoluzione del problema. Il testo della mia richiesta di assistenza e i dati del mio account non verranno inviati. Il personale deve scegliere «Analizza» e una persona esamina il risultato.' });
+// Chrome-level accessibility strings, translated for the hand-curated languages.
+Object.assign(D.en, { skipToContent: 'Skip to content' });
+Object.assign(D.fr, { skipToContent: 'Aller au contenu' });
+Object.assign(D.de, { skipToContent: 'Zum Inhalt springen', waAbbrev: 'WA' });
+Object.assign(D.es, { skipToContent: 'Ir al contenido', waAbbrev: 'WA' });
+Object.assign(D.it, { skipToContent: 'Vai al contenuto', waAbbrev: 'WA' });
+Object.assign(D.ar, { skipToContent: 'انتقل إلى المحتوى' });
+
 Object.assign(D.ar, { ticketAiPhotoConsent: 'اختياري: أوافق على أنه يجوز لفريق الدعم إرسال هذه الصورة فقط إلى موفر الذكاء الاصطناعي الذي تم تكوينه لاستكشاف الأخطاء وإصلاحها. لن يتم إرسال نص تذكرتي وتفاصيل حسابي. يجب على فريق العمل اختيار تحليل، وسيقوم شخص بمراجعة النتيجة.' });
