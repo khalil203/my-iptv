@@ -3,7 +3,7 @@
 // The translator hub is separate (translator.js) — it changes content, not the UI.
 
 import { APP_LANGS, flagOf, nameOf, englishOf, dirOf } from './lang-data.js?v=122';
-import { t, tIn, ensureLang } from './i18n.js?v=125';
+import { t, tIn, ensureLang } from './i18n.js?v=126';
 
 const RECENT_KEY = 'tvp_lang_recent';
 const $ = (s, r = document) => r.querySelector(s);

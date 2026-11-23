@@ -155,9 +155,12 @@ Object.assign(D.fr, { paidTitle: 'Merci pour votre paiement', paidText: 'Votre a
 
 export const LANGS = APP_LANGS;
 export function detectLang() {
-  const saved = localStorage.getItem('tvp_lang');
-  if (saved && SUPPORTED.has(saved)) return saved;
-  for (const l of navigator.languages || [navigator.language || 'en']) {
+  try {
+    const saved = (typeof localStorage !== 'undefined') ? localStorage.getItem('tvp_lang') : null;
+    if (saved && SUPPORTED.has(saved)) return saved;
+  } catch {}
+  const navLangs = (typeof navigator !== 'undefined') ? (navigator.languages || [navigator.language || 'en']) : ['en'];
+  for (const l of navLangs) {
     const code = String(l || '').replace('_', '-');
     if (SUPPORTED.has(code)) return code;
     const k = code.slice(0, 2).toLowerCase();
@@ -168,27 +171,39 @@ export function detectLang() {
 }
 let lang = 'en';
 export function registerLangPack(code, strings) {
-  if (!SUPPORTED.has(code) || !strings) return;
-  D[code] = { ...(D[code] || {}), ...strings };
+  if (!SUPPORTED.has(code) || !strings || typeof strings !== 'object' || Array.isArray(strings)) return false;
+  const clean = {};
+  for (const [k, v] of Object.entries(strings)) if (typeof k === 'string' && k && v != null) clean[k] = v;
+  if (!Object.keys(clean).length) return false;
+  D[code] = { ...(D[code] || {}), ...clean };
+  return true;
 }
 const packPending = {};
+const PACK_VERSION = '126';
 export function ensureLang(code) {
   if (!SUPPORTED.has(code) || code === 'en' || (D[code] && Object.keys(D[code]).length > 100)) return Promise.resolve(true);
   if (packPending[code]) return packPending[code];
   packPending[code] = (async () => {
-    try {
-      const url = new URL('langs/' + encodeURIComponent(code) + '.json', document.baseURI || location.href);
-      url.searchParams.set('v', '126');
-      const r = await fetch(url, { cache: 'force-cache' });
-      if (r.ok) {
-        const j = await r.json();
-        if (j && j.strings) {
-          registerLangPack(code, j.strings);
-          if (code === lang && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('langready', { detail: { code } }));
-          return true;
+    let attempt = 0;
+    while (attempt < 2) {
+      attempt++;
+      try {
+        const base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof location !== 'undefined' ? location.href : 'https://example.test/');
+        const url = new URL('langs/' + encodeURIComponent(code) + '.json', base);
+        url.searchParams.set('v', PACK_VERSION);
+        const r = await fetch(url, { cache: 'force-cache' });
+        if (r && r.ok) {
+          const j = await r.json();
+          if (j && j.strings && registerLangPack(code, j.strings)) {
+            if (code === lang && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('langready', { detail: { code } }));
+            delete packPending[code];
+            return true;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+      await new Promise((res) => setTimeout(res, 200 * attempt));
+    }
+    delete packPending[code];
     return false;
   })();
   return packPending[code];
@@ -196,22 +211,22 @@ export function ensureLang(code) {
 export function setLang(l, save) {
   l = String(l || 'en');
   lang = SUPPORTED.has(l) ? l : 'en';
-  if (save) localStorage.setItem('tvp_lang', lang);
-  document.documentElement.lang = lang;
-  document.documentElement.dir = RTL_LANGS.has(lang.split('-')[0]) ? 'rtl' : 'ltr';
+  try { if (save && typeof localStorage !== 'undefined') localStorage.setItem('tvp_lang', lang); } catch {}
+  try { if (typeof document !== 'undefined') { document.documentElement.lang = lang; document.documentElement.dir = RTL_LANGS.has(lang.split('-')[0]) ? 'rtl' : 'ltr'; } } catch {}
   ensureLang(lang);
+  try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('langchange', { detail: { code: lang } })); } catch {}
 }
 export const getLang = () => lang;
 export const locale = () => ({ fr: 'fr-FR', de: 'de-DE', es: 'es-ES', it: 'it-IT', 'zh-CN': 'zh-CN' }[lang] || (lang.includes('-') ? lang : lang + '-' + lang.toUpperCase()));
 export function t(key, vars = {}) {
   const s = (D[lang] && D[lang][key]) ?? D.en[key] ?? key;
-  return String(s).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+  return String(s).replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : '{' + k + '}'));
 }
 // A string in a specific language, without changing the current one. Used by
 // the Language Center's live preview.
 export function tIn(code, key, vars = {}) {
   const s = (D[code] && D[code][key]) ?? D.en[key] ?? key;
-  return String(s).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+  return String(s).replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : '{' + k + '}'));
 }
 // Map English server messages to the current language
 export function tErr(msg) {
