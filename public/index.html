@@ -14,15 +14,15 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=133">
+  <link rel="stylesheet" href="styles.css?v=125">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800;900&display=swap" rel="stylesheet">
-  <script>/* pick day/night before anything shows (auto = follow the OS) */try{var m=localStorage.getItem("tvp_theme")||"auto";document.documentElement.dataset.theme=m==="auto"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):m}catch(e){}</script>
+  <script>/* pick day/night before anything shows */try{var m=localStorage.getItem("tvp_theme")||"auto",hr=new Date().getHours();document.documentElement.dataset.theme=m==="auto"?(hr>=6&&hr<18?"light":"dark"):m}catch(e){}</script>
 </head>
 <body>
   <nav aria-label="Skip to content"><a class="skip-link" href="#main">Skip to content</a></nav>
-  <div id="app"><div class="boot" role="status" aria-live="polite" aria-label="INTPROTO-TV is loading">
+  <div id="app"><div class="boot">
     <div class="boot-nebula"></div>
     <div class="boot-stage">
       <div class="boot-ring r1"></div>
@@ -53,7 +53,7 @@
 </style></div>
   <div id="modal-root"></div>
   <div id="toast"></div>
-  <noscript><div style="padding:24px;font-family:Inter,system-ui,sans-serif;color:#CFFAFE">INTPROTO-TV needs JavaScript to run. Please enable JavaScript in your browser settings.</div></noscript>
+  <script type="module" src="instant-translate.js?v=1"></script>
   <script type="module" src="app.js?v=133"></script>
 </body>
 </html>
