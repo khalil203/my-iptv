@@ -841,6 +841,45 @@ test('team: attendance flow, leave approval, task assign/update (owner vs staff)
   assert.ok(chat.json.some((m) => m.text.includes('Handover')));
 });
 
+test('team: role tags, time zones, schedule presets and end-of-shift handovers', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  const khalil = await x.call('POST', '/api/admin/team', { name: 'Khalil', username: 'khalil', password: 'secret12', role: 'Technical Manager', roleTag: 'Tech', timezone: 'Asia/Bangkok', perms: ['attendance'] }, tok);
+  assert.equal(khalil.status, 200, JSON.stringify(khalil.json));
+  assert.equal(khalil.json.roleTag, 'Tech'); assert.equal(khalil.json.timezone, 'Asia/Bangkok');
+  const mano = await x.call('POST', '/api/admin/team', { name: 'MANO', username: 'mano', password: 'secret12', role: 'Support Agent', roleTag: 'Support', timezone: 'Europe/Madrid', perms: ['attendance'] }, tok);
+  assert.equal(mano.status, 200, JSON.stringify(mano.json));
+  assert.equal(mano.json.roleTag, 'Support'); assert.equal(mano.json.timezone, 'Europe/Madrid');
+  assert.equal((await x.call('PUT', `/api/admin/team/${mano.json.id}`, { timezone: 'Not/AZone' }, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/team', {}, tok)).json.find((m) => m.id === mano.json.id).timezone, 'Europe/Madrid', 'bad time zones are rejected');
+
+  const kToken = (await x.call('POST', '/api/login', { username: 'khalil', password: 'secret12' })).json.token;
+  const mToken = (await x.call('POST', '/api/login', { username: 'mano', password: 'secret12' })).json.token;
+  await signBylaws(x, kToken); await signBylaws(x, mToken);
+  const kMe = await x.call('GET', '/api/admin/me', {}, kToken);
+  assert.equal(kMe.json.roleTag, 'Tech'); assert.equal(kMe.json.timezone, 'Asia/Bangkok');
+
+  const preset = await x.call('POST', '/api/admin/shifts/preset', { memberId: khalil.json.id, preset: 'tech' }, tok);
+  assert.equal(preset.status, 200, JSON.stringify(preset.json));
+  assert.equal(preset.json.shift.tz, 'Asia/Bangkok');
+  assert.equal(preset.json.shift.days['1'].start, 14 * 60); assert.equal(preset.json.shift.days['1'].end, 21 * 60);
+  assert.equal((await x.call('POST', '/api/admin/shifts/preset', { memberId: mano.json.id, preset: 'support' }, kToken)).status, 403, 'agents cannot rewrite schedules');
+  const supportPreset = await x.call('POST', '/api/admin/shifts/preset', { memberId: mano.json.id, preset: 'support' }, tok);
+  assert.equal(supportPreset.json.shift.days['1'].start, 15 * 60 + 15); assert.equal(supportPreset.json.shift.days['1'].end, 22 * 60);
+
+  const h1 = await x.call('POST', '/api/admin/handovers', { shiftDate: '2026-11-24', items: { chatsTrials: true, technicalPanel: true, accountsApis: false }, notes: 'APIs pending' }, kToken);
+  assert.equal(h1.status, 200, JSON.stringify(h1.json));
+  const h2 = await x.call('POST', '/api/admin/handovers', { shiftDate: '2026-11-24', items: { chatsTrials: true, technicalPanel: false, accountsApis: true }, notes: 'APIs ready' }, kToken);
+  assert.equal(h2.status, 200);
+  const kList = await x.call('GET', '/api/admin/handovers', {}, kToken);
+  assert.equal(kList.json.list.length, 1, 'one checklist per agent per shift date');
+  assert.equal(kList.json.list[0].notes, 'APIs ready'); assert.equal(kList.json.list[0].roleTag, 'Tech'); assert.equal(kList.json.list[0].timezone, 'Asia/Bangkok');
+  const mList = await x.call('GET', '/api/admin/handovers', {}, mToken);
+  assert.equal(mList.json.list.length, 0, 'agents only see their own handovers');
+  const all = await x.call('GET', '/api/admin/handovers', {}, tok);
+  assert.equal(all.json.list.length, 1); assert.equal(all.json.list[0].name, 'Khalil');
+  assert.equal((await x.call('POST', '/api/admin/handovers', { items: {} }, kToken)).status, 400);
+});
+
 // ---- 2026 spec additions: mandatory 2FA, captcha, contact checkboxes, dual email, trainees, templates lock, aliases ----
 
 test('mandatory two-factor: after it is turned on, the dashboard refuses until 2FA is set up', async () => {

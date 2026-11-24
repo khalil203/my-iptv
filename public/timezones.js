@@ -623,3 +623,35 @@ export function zonedDayAndMinute(at, timeZone) {
   if (day < 0 || !Number.isFinite(minute)) throw new RangeError('Could not read local time for ' + timeZone);
   return { day, minute };
 }
+
+export function formatInZone(at, timeZone, options = {}) {
+  try { return new Intl.DateTimeFormat('en-GB', { ...options, timeZone }).format(new Date(at)); } catch { return new Date(at).toLocaleString(); }
+}
+
+export function localMinuteToUtc(dateISO, minute, timeZone) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateISO || ''));
+  if (!m) throw new RangeError('Expected a YYYY-MM-DD date');
+  const [y, mo, d] = m.slice(1).map(Number);
+  const wall = Date.UTC(y, mo - 1, d) + Number(minute) * 60000;
+  if (!Number.isFinite(wall)) throw new RangeError('Bad shift time');
+  let guess = wall;
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  for (let i = 0; i < 4; i++) {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+    const actual = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second || 0));
+    const delta = actual - wall;
+    if (!delta) break;
+    guess -= delta;
+  }
+  return guess;
+}
+
+export function shiftRangeUtc(shift, dateISO, timeZone) {
+  const start = localMinuteToUtc(dateISO, shift.start, timeZone);
+  const endDay = shift.end < shift.start ? new Date(Date.parse(dateISO + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10) : dateISO;
+  const end = localMinuteToUtc(endDay, shift.end, timeZone);
+  return { start, end };
+}

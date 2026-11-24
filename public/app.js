@@ -1,9 +1,9 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS } from './core.js?v=129';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS, SCHEDULE_PRESETS } from './core.js?v=130';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml, ensureSiteLang } from './site.js?v=124';
 import { ic } from './icons.js?v=102';
 import { parseM3U, m3uAnswer } from './m3u.js?v=83';
-import { TIME_ZONES, timezoneOffsetLabel, zonedDayAndMinute } from './timezones.js?v=1';
+import { TIME_ZONES, timezoneOffsetLabel, zonedDayAndMinute, formatInZone, shiftRangeUtc } from './timezones.js?v=2';
 import { t, tErr, setLang, getLang, detectLang, locale, LANGS, ensureLang } from './i18n.js?v=127';
 import { openLangSheet, paintLangPill, langChip } from './lang.js?v=123';
 import { flagOf as langFlag, nameOf as langName, dirOf } from './lang-data.js?v=123';
@@ -21,6 +21,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = escHtml;
 const fmtDate = (x) => (x ? new Date(x).toLocaleDateString(isAdminUI() ? undefined : locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtDT = (x) => (x ? new Date(x).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+const viewerZone = () => state.admin?.me?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const fmtDTz = (x, tz = viewerZone()) => (x ? formatInZone(x, tz, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 const usd = (n) => `${Number(n) < 0 ? '−' : ''}$${Math.abs(Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const mad = (n) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 const num = (n, cur) => `${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur || ''}`;
@@ -2098,6 +2100,7 @@ async function adminTeam() {
   return `<div class="row" style="margin-bottom:14px"><p class="muted" style="margin:0;flex:1">Give your team their own login. They sign in on the same page, and only see what you allow. Every action is logged with their name.</p><button class="btn primary" data-act="new-member">＋ Add team member</button></div>
   ${team.length ? `<div class="team-grid">${team.map((m) => `<div class="tm ${m.status === 'disabled' ? 'off' : ''}">
     <div class="row"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1;min-width:0"><b>${esc(m.name)}</b><div class="small muted">${esc(m.role || 'Staff')} · @${esc(m.username)}</div></div>${pill(m.status === 'disabled' ? 'disabled' : 'active')}</div>
+    <div class="small muted">🏷 ${esc(m.roleTag || (/technical|technique|panel manager/i.test(m.role || '') ? 'Tech' : 'Support'))} · 🌍 ${esc(m.timezone || 'Asia/Bangkok')}</div>
     <div class="perm-tags">${(m.perms || []).map((p) => `<span class="tagp">${esc((all.find((x) => x[0] === p) || [p, p])[1])}</span>`).join('') || '<span class="small muted">No permissions</span>'}</div>
     ${m.alias ? `<div class="small muted">✍️ Alias for customers: <b>${esc(m.alias)}</b></div>` : ''}
     ${m.bank && m.bankDetails ? `<div class="small muted">💳 ${esc(m.bank)} · <code>•••• ${esc(String(m.bankDetails).slice(-4))}</code></div>` : ''}
@@ -2120,6 +2123,8 @@ function memberForm(m) {
   }).join('');
   return `<form data-form="member" data-id="${m.id || ''}">
     <div class="grid2">${field('Name', 'name', m.name || '', { attrs: 'required' })}${field('Function', 'role', m.role || '', { ph: 'e.g. Technical Manager' })}</div>
+    <div class="grid2">${field('Role tag', 'roleTag', m.roleTag || (/technical|technique|panel manager/i.test(m.role || '') ? 'Tech' : 'Support'), { type: 'select', options: [['Support', 'Support'], ['Tech', 'Tech']] })}${field('Agent time zone', 'timezone', m.timezone || 'Asia/Bangkok', { attrs: 'list="member-timezones" autocomplete="off"', ph: 'Asia/Bangkok' })}</div>
+    <datalist id="member-timezones">${TZ_OPTS.map(([k, n]) => `<option value="${esc(k)}" label="${esc(n)}"></option>`).join('')}</datalist>
     <div class="grid2">${field('Username', 'username', m.username || '', { attrs: (isNew ? 'required minlength="3"' : 'disabled') + ' autocapitalize="none"' })}${field(isNew ? 'Password' : 'New password (optional)', 'password', '', { type: 'password', attrs: isNew ? 'required minlength="6"' : '' })}</div>
     <div class="grid2">${field('Western alias (shown to customers)', 'alias', m.alias || '', { ph: 'e.g. Mark, Simon, Jasmin' })}${field('Payroll bank', 'bank', m.bank || '', { type: 'select', options: [['', '—'], ['CIH', 'CIH (MAD)'], ['IBAN', 'European IBAN'], ['US', 'US bank'], ['other', 'Other']] })}</div>
     ${field('Agent language (guide & alerts)', 'lang', m.lang || 'en', { type: 'select', options: [['en', '🇬🇧 English'], ['fr', '🇫🇷 Français'], ['de', '🇩🇪 Deutsch'], ['es', '🇪🇸 Español'], ['it', '🇮🇹 Italiano'], ['ar', '🇸🇦 العربية']] })}
@@ -5442,6 +5447,12 @@ async function adminAttendancePage() {
   try { team = await api('GET', '/api/admin/team'); } catch { team = []; } // staff managers can't list the team; owner can
   try { shifts = await api('GET', '/api/admin/shifts'); } catch { shifts = []; }
   const me = state.admin.me; const mine = r.mine || [];
+  let handoverList = [];
+  try { handoverList = (await api('GET', '/api/admin/handovers')).list || []; } catch {}
+  const viewerTz = me.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const todayKey = new Intl.DateTimeFormat('en-CA', { timeZone: viewerTz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const myHandover = handoverList.find((x) => x.by === me.id && x.shiftDate === todayKey);
+  const handoverRows = handoverList.slice(0, 8).map((h) => `<div class="list-item"><span style="flex:1"><b>${esc(h.name)}</b> · ${esc(h.shiftDate)}<div class="small muted">${[h.items?.chatsTrials && 'chats/trials', h.items?.technicalPanel && 'tech/panel', h.items?.accountsApis && 'accounts/APIs'].filter(Boolean).join(' · ') || '—'}${h.notes ? ' · ' + esc(h.notes) : ''}</div></span><span class="small muted">${fmtDTz(h.at, viewerTz)}</span></div>`).join('');
   const lastMine = mine[0]?.action;
   const myShift = shifts.find((s) => s.memberId === (me.id || 'owner'));
   const now = new Date(); const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; let shiftTz = myShift?.tz || localTz; let shiftLocal;
@@ -5472,6 +5483,16 @@ async function adminAttendancePage() {
       <div class="row" style="gap:8px"><button class="btn primary" data-act="att-in" ${status === 'on shift' ? 'disabled' : ''}>Check in</button><button class="btn" data-act="att-break-start" ${status !== 'on shift' ? 'disabled' : ''}>☕ Break</button><button class="btn" data-act="att-break-end" ${status !== 'on break' ? 'disabled' : ''}>Back</button><button class="btn danger" data-act="att-out" ${status === 'off duty' ? 'disabled' : ''}>Check out</button></div>
       <h3 style="margin-top:14px">My recent events</h3>${mine.length ? `<div style="max-height:220px;overflow:auto">${mine.slice(0, 20).map((e) => `<div class="list-item"><span style="flex:1"><b>${esc(e.action)}</b>${e.note ? ' · ' + esc(e.note) : ''}</span><span class="small muted">${fmtDT(e.at)}</span></div>`).join('')}</div>` : '<p class="muted small">No events yet. Check in to start your shift.</p>'}</div>
       <div class="card"><h3>🌴 Leave request</h3><form data-form="leave-request">${field('Type', 'kind', 'vacation', { type: 'select', options: [['vacation', 'Vacation'], ['sick', 'Sick leave'], ['emergency', 'Emergency'], ['other', 'Other']] })}<div class="grid2">${field('From', 'from', '', { type: 'date', attrs: 'required' })}${field('To', 'to', '', { type: 'date', attrs: 'required' })}</div>${field('Reason', 'reason', '', { type: 'textarea', rows: 2 })}<button type="submit" class="btn primary">Send for approval</button></form></div>
+      <div class="card" style="margin-top:16px"><h3>🤝 End-of-shift handover</h3><p class="small muted" style="margin-top:0">One checklist per agent per day. Times are stored in UTC and shown in your time zone (<b>${esc(viewerTz)}</b>).</p>
+        <form data-form="handover-save"><input type="hidden" name="shiftDate" value="${esc(todayKey)}">
+          <label class="toggle"><input type="checkbox" name="items.chatsTrials" ${myHandover?.items?.chatsTrials ? 'checked' : ''}><i></i><span>Open customer chats &amp; trials</span></label>
+          <label class="toggle"><input type="checkbox" name="items.technicalPanel" ${myHandover?.items?.technicalPanel ? 'checked' : ''}><i></i><span>Technical / panel issues</span></label>
+          <label class="toggle"><input type="checkbox" name="items.accountsApis" ${myHandover?.items?.accountsApis ? 'checked' : ''}><i></i><span>Accounts / APIs ready for next shift</span></label>
+          ${field('Notes for the next shift', 'notes', myHandover?.notes || '', { type: 'textarea', rows: 2, ph: 'What must the next agent know?' })}
+          <button type="submit" class="btn primary">${myHandover ? 'Update handover' : 'Save handover'}</button>
+        </form>
+        ${handoverRows ? `<h3 style="margin-top:14px">Latest handovers</h3><div style="max-height:220px;overflow:auto">${handoverRows}</div>` : ''}
+      </div>
   </div>
   ${r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>👥 Team attendance (last 30 days)</h3>${summaryRows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Member</th><th>Logins</th><th>Check-ins</th><th>Check-outs</th><th>Worked</th><th>Breaks</th></tr></thead><tbody>${summaryRows}</tbody></table></div>` : '<p class="muted small">No attendance recorded yet — the team checks in when they start work.</p>'}
     <div class="row" style="margin-top:14px"><h3 style="margin:0;flex:1">🧾 Team log (edit any entry)</h3><button class="btn sm primary" data-act="att-add">➕ Add entry</button></div>
@@ -5481,8 +5502,9 @@ async function adminAttendancePage() {
   <div class="card" style="margin-top:16px"><h3>🗑 Leave requests (approve / reject)</h3><div id="leaves-box"><p class="small muted">Loading…</p></div></div>
   <div class="card" style="margin-top:16px"><h3>📊 Weekly performance report</h3><div id="reports-box"><p class="small muted">Loading…</p></div></div>` : ''}`;
 }
-const shiftEditorHtml = (m, sh) => { const tz = sh?.tz || 'Europe/Paris'; const days = sh?.days || {}; return `<div class="card" data-member="${esc(m.id)}" data-tz="${esc(tz)}" style="margin-bottom:10px;padding:12px"><div class="row" style="gap:8px"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1"><b>${esc(m.name)}</b><div class="small muted">@${esc(m.username)}</div></div>
+const shiftEditorHtml = (m, sh) => { const tz = sh?.tz || m.timezone || 'Europe/Paris'; const days = sh?.days || {}; const tag = m.roleTag || (/technical|technique|panel manager/i.test(m.role || '') ? 'Tech' : 'Support'); const viewerTz = viewerZone(); const shiftDay = String(zonedDayAndMinute(Date.now(), tz).day); const day = days[shiftDay]; const shiftDateISO = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); const range = day?.on ? shiftRangeUtc(day, shiftDateISO, tz) : null; const converted = range ? `${formatInZone(range.start, viewerTz, { hour: '2-digit', minute: '2-digit' })}–${formatInZone(range.end, viewerTz, { hour: '2-digit', minute: '2-digit' })} (${viewerTz})` : ''; return `<div class="card" data-member="${esc(m.id)}" data-tz="${esc(tz)}" style="margin-bottom:10px;padding:12px"><div class="row" style="gap:8px"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1"><b>${esc(m.name)}</b><div class="small muted">@${esc(m.username)} · 🏷 ${esc(tag)}${converted ? ` · today ${esc(converted)}` : ''}</div></div>
     <input data-k="tz" list="agent-timezones" value="${esc(tz)}" autocomplete="off" aria-label="Agent shift time zone" title="Type or select an IANA time zone" style="width:220px;max-width:100%"></div>
+    <div class="chips" style="margin-top:8px">${Object.entries(SCHEDULE_PRESETS).map(([k, p]) => `<a data-act="shift-preset" data-preset="${esc(k)}" title="${esc(p.note)}">${esc(p.label)}</a>`).join('')}</div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px">${WD.map(([i, n]) => { const d = days[i] || { on: false }; return `<div style="text-align:center"><label class="toggle" style="justify-content:center"><input type="checkbox" data-day="${i}" ${d.on ? 'checked' : ''}><i></i><span>${n}</span></label>${d.on ? `<input type="time" data-start="${i}" value="${fmtMin(d.start ?? 540)}" style="margin-top:4px;width:100%"><input type="time" data-end="${i}" value="${fmtMin(d.end ?? 1080)}" style="margin-top:4px;width:100%">` : '<div class="small muted" style="margin-top:20px">rest</div>'}</div>`; }).join('')}</div>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary sm" data-act="shift-save" data-id="${esc(m.id)}" data-name="${esc(m.name)}">Save shift plan</button></div></div>`; };
 async function loadShiftsAndLeaves() {
@@ -5495,14 +5517,14 @@ async function loadShiftsAndLeaves() {
 }
 const startTzClock = () => { if (window.__tzIv) return; const tick = () => { const now = new Date(); const o = { hour: '2-digit', minute: '2-digit', second: '2-digit' }; const e = now.toLocaleTimeString('en-GB', { ...o, timeZone: 'Europe/Paris' }); const us = now.toLocaleTimeString('en-US', { ...o, timeZone: 'America/New_York' }); const l = now.toLocaleTimeString('en-GB', o); document.querySelectorAll('[data-tz=e]').forEach((x) => { x.textContent = e; }); document.querySelectorAll('[data-tz=u]').forEach((x) => { x.textContent = us; }); document.querySelectorAll('[data-tz=l]').forEach((x) => { x.textContent = l; }); }; window.__tzIv = setInterval(tick, 1000); tick(); };
 async function adminTasksPage() {
-  const r = await api('GET', '/api/admin/tasks'); const list = r.list || []; const mine = r.mine || [];
+  const r = await api('GET', '/api/admin/tasks'); const list = r.list || []; const mine = r.mine || []; const viewerTz = viewerZone();
   const canAssign = r.scopeAll;
   let team = []; if (canAssign) { try { team = await api('GET', '/api/admin/team'); } catch {} }
   const assigneeOpts = [['owner', 'Owner'], ...team.filter((m) => m.status !== 'disabled').map((m) => [m.id, m.name])];
   const opts = assigneeOpts.map(([v, n]) => `<option value="${esc(v)}">${esc(n)}</option>`).join('');
   const sts = ['not_started', 'in_progress', 'completed', 'delayed', 'blocked'];
   const pill = { not_started: 'st-open', in_progress: 'st-expiring', completed: 'st-active', delayed: 'st-expired', blocked: 'st-expired' };
-  const row = (t, own) => `<tr><td><b>${esc(t.name)}</b> <span class="tagp" title="Task ID">${esc(t.id)}</span>${t.desc ? `<div class="small muted">${esc(t.desc)}</div>` : ''}<div class="small muted">${t.deadline ? 'Deadline ' + fmtDate(t.deadline) : ''}${t.doneAt ? ' · done ' + fmtDT(t.doneAt) : ''}${t.priority === 'high' ? ' · <b style="color:var(--bad)">high</b>' : ''}</div></td><td class="small">${esc(t.assigneeName)}</td><td><select data-task="${esc(t.id)}" style="width:auto">${sts.map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}</select></td><td>${r.scopeAll ? `<button class="btn sm danger" data-act="task-del" data-id="${esc(t.id)}" title="Delete task" aria-label="Delete task">🗑</button>` : ''}</td></tr>`;
+  const row = (t, own) => `<tr><td><b>${esc(t.name)}</b> <span class="tagp" title="Task ID">${esc(t.id)}</span>${t.desc ? `<div class="small muted">${esc(t.desc)}</div>` : ''}<div class="small muted">${t.deadline ? 'Deadline ' + fmtDTz(t.deadline, viewerTz) + ' (' + viewerTz + ')' : ''}${t.doneAt ? ' · done ' + fmtDTz(t.doneAt, viewerTz) : ''}${t.priority === 'high' ? ' · <b style="color:var(--bad)">high</b>' : ''}</div></td><td class="small">${esc(t.assigneeName)}</td><td><select data-task="${esc(t.id)}" style="width:auto">${sts.map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}</select></td><td>${r.scopeAll ? `<button class="btn sm danger" data-act="task-del" data-id="${esc(t.id)}" title="Delete task" aria-label="Delete task">🗑</button>` : ''}</td></tr>`;
   const byMember = {}; if (r.scopeAll) for (const t of list) (byMember[t.assignee] ||= []).push(t);
   const plan = r.scopeAll ? `<div class="card" style="margin-top:16px"><h3>📅 Weekly plan</h3>${Object.entries(byMember).map(([id, ts]) => `<div style="margin-bottom:10px"><b>${esc(assigneeOpts.find(([v]) => v === id)?.[1] || id)}</b><ul style="margin:4px 0 0 16px">${ts.filter((t) => t.status !== 'completed').slice(0, 10).map((t) => `<li class="small">${esc(t.name)}${t.deadline ? ' — ' + fmtDate(t.deadline) : ''}</li>`).join('') || '<li class="small muted">All done 🎉</li>'}</ul></div>`).join('')}</div>` : '';
   return `${canAssign ? `<form data-form="task-add" class="card"><h3>＋ Assign a task</h3><div class="grid2">${field('Task', 'name', '', { attrs: 'required maxlength="160"', ph: 'What needs to be done' })}${field('Assign to', 'assignee', 'owner', { type: 'select', options: assigneeOpts.map(([v, n]) => [v, n]) })}</div>${field('Details', 'desc', '', { type: 'textarea', rows: 2 })}<div class="grid3">${field('Start', 'start', new Date().toISOString().slice(0, 10), { type: 'date' })}${field('Deadline', 'deadline', '', { type: 'date' })}${field('Priority', 'priority', 'normal', { type: 'select', options: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']] })}</div><button type="submit" class="btn primary">Assign task</button></form>` : ''}
@@ -5522,6 +5544,10 @@ Object.assign(actions, {
   'att-break-end': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/attendance', { action: 'break_end' }); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'leave-approve': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/leaves/decide', { id: el.dataset.id, action: 'approved' }); await loadShiftsAndLeaves(); } catch (e) { toast(e.message, true); el.disabled = false; } },
   'leave-reject': async (el) => { el.disabled = true; try { await api('POST', '/api/admin/leaves/decide', { id: el.dataset.id, action: 'rejected' }); await loadShiftsAndLeaves(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+  'shift-preset': async (el) => {
+    el.disabled = true; const card = el.closest('[data-member]');
+    try { await api('POST', '/api/admin/shifts/preset', { memberId: card.dataset.member, preset: el.dataset.preset }); toast('Schedule preset applied ✓'); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); el.disabled = false; }
+  },
   'shift-save': async (el) => {
     el.disabled = true; const card = el.closest('[data-member]'); const g = (k) => card.querySelector(`[data-k=${k}]`).value;
     const days = {}; card.querySelectorAll('[data-day]').forEach((cb) => { const i = cb.dataset.day; days[i] = { on: cb.checked, start: minOf(card.querySelector(`[data-start="${i}"]`)?.value) || 540, end: minOf(card.querySelector(`[data-end="${i}"]`)?.value) || 1080 }; });
@@ -5532,6 +5558,7 @@ Object.assign(actions, {
 });
 Object.assign(forms, {
   async 'leave-request'(f) { try { await api('POST', '/api/admin/leaves', formToObj(f)); toast('Sent for approval ✓'); f.reset(); } catch (e) { toast(e.message, true); } },
+  async 'handover-save'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/handovers', o); toast('Handover saved ✓'); $('#admin-body').innerHTML = await adminAttendancePage(); } catch (e) { toast(e.message, true); } },
   async 'task-add'(f) { const o = formToObj(f); try { await api('POST', '/api/admin/tasks', o); toast('Task assigned ✓'); f.reset(); $('#admin-body').innerHTML = await adminTasksPage(); } catch (e) { toast(e.message, true); } },
   async 'teamchat-send'(f) { const t = f.text.value.trim(); if (!t) return; try { await api('POST', '/api/admin/teamchat', { text: t }); f.text.value = ''; $('#tc-thread').innerHTML = (await api('GET', '/api/admin/teamchat')).map((m) => `<div class="msg ${m.name === state.admin.me?.name ? 'mine' : ''}"><b class="small">${esc(m.name)}</b><div class="msg-t">${esc(m.text)}</div><div class="small muted" style="margin-top:3px">${fmtDT(m.at)}</div></div>`).join(''); const th = $('#tc-thread'); th.scrollTop = th.scrollHeight; } catch (e) { toast(e.message, true); } },
 });

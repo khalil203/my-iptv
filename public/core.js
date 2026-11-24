@@ -410,6 +410,14 @@ const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
 // Agents can SEND email marketing, newsletters, promotions and renewal emails, but always with the saved texts and the automatic payment links.
 export const TECH_ONLY = ['secrets', 'templates_edit', 'seo'];
 export const isTechRole = (role) => /technical|technique|panel manager/i.test(String(role || ''));
+const validTz = (tz) => { const t = String(tz || '').trim(); if (!t) return ''; try { new Intl.DateTimeFormat('en', { timeZone: t }); return t; } catch { return ''; } };
+const validRoleTag = (tag) => (['Support', 'Tech'].includes(String(tag || '')) ? String(tag) : '');
+
+// Ready-made weekly schedules. Times are wall-clock minutes in each agent's own time zone.
+export const SCHEDULE_PRESETS = {
+  tech: { label: 'Khalil · Technical Service', roleTag: 'Tech', timezone: 'Asia/Bangkok', start: 14 * 60, end: 21 * 60, note: '08:00–15:00 Europe/Madrid' },
+  support: { label: 'MANO · Customer Support', roleTag: 'Support', timezone: 'Europe/Madrid', start: 15 * 60 + 15, end: 22 * 60, note: '21:15–04:00(+1) Asia/Bangkok' },
+};
 
 // Ready-made roles. 'Full access' means every grantable permission (owner-only stays with the owner).
 export const ROLE_PRESETS = {
@@ -484,6 +492,7 @@ function permFor(method, path, body) {
   if (path.startsWith('/api/admin/ownerplan')) return 'owner'; // the owner's personal & business planning: owner only, never agents
   if (path.startsWith('/api/admin/workplan')) return null; // everyone on the team (agents check off, owner edits)
   if (path.startsWith('/api/admin/shifts')) return method === 'GET' ? 'attendance' : 'attendance_all';
+  if (path.startsWith('/api/admin/handovers')) return 'attendance';
   if (path.startsWith('/api/admin/leaves')) return method === 'POST' && (path === '/api/admin/leaves' || path.startsWith('/api/admin/leaves/submit')) ? 'attendance' : 'attendance_all';
   if (path.startsWith('/api/admin/tasks')) return 'tasks';
   if (path.startsWith('/api/admin/reports')) return 'attendance_all';
@@ -3942,8 +3951,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa === true };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
         meta.sessionExp = ses.exp || 0; meta.staffHours = Number(s.security.staffHours) || 6; meta.mustCheckIn = !checkedIn; meta.noCopy = !isOwner && !tech && s.security.noCopy !== false; meta.lang = (member && member.lang) || 'en';
-        if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
-        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: [...new Set([...perms.filter((p) => !TECH_ONLY.includes(p)), ...(tech ? TECH_ONLY : []), ...(can('marketing') ? ['marketing'] : [])])], tech, locked, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
+        if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, roleTag: 'Owner', timezone: validTz(a.timezone) || 'Asia/Bangkok', isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
+        return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', roleTag: member.roleTag || (isTechRole(member.role) ? 'Tech' : 'Support'), timezone: validTz(member.timezone) || 'Asia/Bangkok', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: [...new Set([...perms.filter((p) => !TECH_ONLY.includes(p)), ...(tech ? TECH_ONLY : []), ...(can('marketing') ? ['marketing'] : [])])], tech, locked, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
@@ -4812,6 +4821,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const getShifts = async () => (await store.get('shifts')) || [];
       const getLeaves = async () => (await store.get('leaves')) || [];
       const getTasks = async () => (await store.get('tasks')) || [];
+      const getHandovers = async () => (await store.get('handovers')) || [];
       const attSummary = (events, since) => {
         const per = {}; // by id
         const add = (id, k, v) => { (per[id] ||= { logins: 0, ins: 0, outs: 0, breaksMs: 0, workedMs: 0, events: 0 })[k] += v || 1; };
@@ -5102,6 +5112,34 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await store.put('shifts', l.slice(0, 200)); await log('team', `Shift plan updated for ${rec.memberName}`);
         return ok({ ok: true });
       }
+      if (R('POST', '/api/admin/shifts/preset')) {
+        const preset = SCHEDULE_PRESETS[String(body.preset || '')];
+        if (!preset) return err(400, 'Unknown schedule preset.');
+        const team = await getTeam(); const m = team.find((x) => x.id === String(body.memberId || ''));
+        if (!m) return err(400, 'Choose an existing agent.');
+        m.roleTag = preset.roleTag; m.timezone = preset.timezone; await store.put('team', team);
+        const days = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) days[k] = { on: true, start: preset.start, end: preset.end };
+        const rec = { memberId: m.id, memberName: m.name, tz: preset.timezone, days, daysOff: [], updatedAt: Date.now(), by: actorName, preset: String(body.preset) };
+        const l = await getShifts(); const idx = l.findIndex((x) => x.memberId === m.id); if (idx >= 0) l[idx] = rec; else l.unshift(rec);
+        await store.put('shifts', l.slice(0, 200)); await log('team', `Applied ${preset.label} schedule to ${m.name}`);
+        const { salt, hash, ...pub } = m; return ok({ ok: true, shift: rec, member: pub });
+      }
+      if (R('GET', '/api/admin/handovers')) {
+        const all = isOwner || can('attendance_all'); const me = meWorks();
+        const list = (await getHandovers()).sort((a, b) => b.at - a.at).slice(0, 200);
+        return ok({ list: all ? list : list.filter((x) => x.by === me.id), scopeAll: all, mineId: me.id });
+      }
+      if (R('POST', '/api/admin/handovers')) {
+        const me = meWorks(); const team = await getTeam(); const member = team.find((x) => x.id === me.id);
+        const shiftDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.shiftDate || '')) ? String(body.shiftDate) : new Date().toISOString().slice(0, 10);
+        const items = { chatsTrials: !!body.items?.chatsTrials, technicalPanel: !!body.items?.technicalPanel, accountsApis: !!body.items?.accountsApis };
+        if (!items.chatsTrials && !items.technicalPanel && !items.accountsApis) return err(400, 'Tick at least one handover item.');
+        const l = await getHandovers(); const idx = l.findIndex((x) => x.by === me.id && x.shiftDate === shiftDate);
+        const rec = { id: idx >= 0 ? l[idx].id : uid(6), by: me.id, name: me.name, roleTag: isOwner ? 'Owner' : (member?.roleTag || (isTechRole(member?.role) ? 'Tech' : 'Support')), timezone: validTz(member?.timezone) || 'Asia/Bangkok', at: idx >= 0 ? l[idx].at : Date.now(), updatedAt: Date.now(), shiftDate, items, notes: cleanText(body.notes || '', 1000), byName: actorName };
+        if (idx >= 0) l[idx] = rec; else l.unshift(rec);
+        await store.put('handovers', l.slice(0, 300)); await log('team', `Handover checklist saved by ${rec.name} for ${shiftDate}`);
+        return ok({ ok: true, handover: rec });
+      }
       if (R('GET', '/api/admin/leaves')) {
         const l = (await getLeaves()).sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || b.createdAt - a.createdAt);
         const mine = isOwner || can('attendance_all');
@@ -5258,7 +5296,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const taken = team.some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getCustomers()).some((x) => x.username.toLowerCase() === username.toLowerCase()) || (await getAdmin()).username.toLowerCase() === username.toLowerCase();
         if (taken) return err(400, 'This username is already used.');
         const salt = uid(8);
-        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', alias: String(body.alias || '').slice(0, 40), bank: ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '', bankDetails: String(body.bankDetails || '').slice(0, 120), lang: ['en', 'fr', 'de', 'es', 'it', 'ar'].includes(body.lang) ? body.lang : 'en', notifyEmail: String(body.notifyEmail || '').slice(0, 120), traineeUntil: body.trainee ? Date.now() + 14 * DAY : (Number(body.traineeUntil) || 0), createdAt: Date.now(), lastLogin: null };
+        const roleTag = validRoleTag(body.roleTag) || (isTechRole(body.role) ? 'Tech' : 'Support');
+        const timezone = validTz(body.timezone) || 'Asia/Bangkok';
+        const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), roleTag, timezone, salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', alias: String(body.alias || '').slice(0, 40), bank: ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '', bankDetails: String(body.bankDetails || '').slice(0, 120), lang: ['en', 'fr', 'de', 'es', 'it', 'ar'].includes(body.lang) ? body.lang : 'en', notifyEmail: String(body.notifyEmail || '').slice(0, 120), traineeUntil: body.trainee ? Date.now() + 14 * DAY : (Number(body.traineeUntil) || 0), createdAt: Date.now(), lastLogin: null };
         team.push(m); await store.put('team', team);
         await log('team', `Added team member ${m.name} (${username})`);
         const { salt: _s, hash: _h, ...pub } = m; return ok(pub);
@@ -5271,6 +5311,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (method === 'PUT') {
           if (body.name !== undefined) m.name = String(body.name).slice(0, 80);
           if (body.role !== undefined) m.role = String(body.role).slice(0, 60);
+          if (body.roleTag !== undefined) m.roleTag = validRoleTag(body.roleTag) || (isTechRole(m.role) ? 'Tech' : 'Support');
+          if (body.timezone !== undefined) m.timezone = validTz(body.timezone) || m.timezone || 'Asia/Bangkok';
           if (body.alias !== undefined) m.alias = String(body.alias).slice(0, 40);
           if (body.bank !== undefined) m.bank = ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '';
           if (body.bankDetails !== undefined) m.bankDetails = String(body.bankDetails).slice(0, 120);
