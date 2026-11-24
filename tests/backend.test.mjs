@@ -849,7 +849,9 @@ test('team: role tags, time zones, schedule presets and end-of-shift handovers',
   const mano = await x.call('POST', '/api/admin/team', { name: 'MANO', username: 'mano', password: 'secret12', role: 'Support Agent', roleTag: 'Support', timezone: 'Europe/Madrid', perms: ['attendance'] }, tok);
   assert.equal(mano.status, 200, JSON.stringify(mano.json));
   assert.equal(mano.json.roleTag, 'Support'); assert.equal(mano.json.timezone, 'Europe/Madrid');
-  assert.equal((await x.call('PUT', `/api/admin/team/${mano.json.id}`, { timezone: 'Not/AZone' }, tok)).status, 200);
+  assert.equal((await x.call('PUT', `/api/admin/team/${mano.json.id}`, { timezone: 'Not/AZone' }, tok)).status, 400, 'a wrong zone is refused with a message, not silently ignored');
+  assert.equal((await x.call('PUT', `/api/admin/team/${mano.json.id}`, { timezone: 'new york' }, tok)).status, 200); assert.equal((await x.call('GET', '/api/admin/team', {}, tok)).json.find((m) => m.id === mano.json.id).timezone, 'America/New_York', 'city names are understood');
+  assert.equal((await x.call('PUT', `/api/admin/team/${mano.json.id}`, { timezone: 'Europe/Madrid' }, tok)).status, 200);
   assert.equal((await x.call('GET', '/api/admin/team', {}, tok)).json.find((m) => m.id === mano.json.id).timezone, 'Europe/Madrid', 'bad time zones are rejected');
 
   const kToken = (await x.call('POST', '/api/login', { username: 'khalil', password: 'secret12' })).json.token;
@@ -2997,4 +2999,33 @@ test('locked marketing agents cannot override campaign subjects', async () => {
   const sent = await x.call('POST', '/api/admin/emailmkt/send', { listId: list.json.id, subject: 'Unauthorized override' }, staff);
   assert.equal(sent.status, 200, JSON.stringify(sent.json)); assert.equal(sent.json.sent, 101);
   assert.deepEqual(x.mails.map((batch) => batch[0].subject), ['Configured A', 'Configured B']);
+});
+
+test('work planning: several schedules in their own time zones, each agent in their own time zone, reminders only to the agents of each schedule', async () => {
+  const pushes = []; const x = setup(); const tok = await adminToken(x);
+  const mk = async (name, username, role) => { await x.call('POST', '/api/admin/team', { name, username, password: 'secret12', role, perms: ['customers_view', 'attendance'] }, tok); const t = (await x.call('POST', '/api/login', { username, password: 'secret12' })).json.token; await signBylaws(x, t).catch(() => {}); return t; };
+  const tMano = await mk('Mano', 'mano', 'Sales Agent'); const tKh = await mk('Khalil T', 'khalilt', 'Technical Manager'); const tDoha = await mk('Doha', 'doha', 'Sales Agent');
+  const team = (await x.call('GET', '/api/admin/team', {}, tok)).json; const id = (u) => team.find((m) => m.username === u).id;
+  let o = (await x.call('GET', '/api/admin/workplan', {}, tok)).json; assert.deepEqual(o.plans.map((p) => p.id), ['main', 'tech', 'support']);
+  // owner assigns schedules and each agent's time zone in one save
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { assign: { [id('mano')]: { plan: 'support', tz: 'Europe/Madrid' }, [id('khalilt')]: { plan: 'tech', tz: 'Asia/Bangkok', roleTag: 'Tech' }, [id('doha')]: { tz: 'Africa/Casablanca' } } }, tok)).status, 200);
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { assign: { [id('doha')]: { tz: 'Mars/Base' } } }, tok)).status, 400, 'unknown zone');
+  const m = (await x.call('GET', '/api/admin/workplan', {}, tMano)).json; assert.equal(m.plan.planId, 'support'); assert.equal(m.plan.tz, 'Europe/Madrid'); assert.equal(m.plans.length, 1); assert.equal(m.plan.slots[0].start, '15:15');
+  // 15:15 Madrid is 21:15 or 22:15 in Bangkok depending on DST: the UTC moment is given for every slot
+  const u = m.utc[m.today].m1; const bkk = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(u.start)); assert.ok(['21:15', '22:15'].includes(bkk), bkk);
+  const k = (await x.call('GET', '/api/admin/workplan', {}, tKh)).json; assert.equal(k.plan.planId, 'tech'); assert.equal(k.plan.slots[1].start, '15:30');
+  const d = (await x.call('GET', '/api/admin/workplan', {}, tDoha)).json; assert.equal(d.plan.planId, 'main');
+  assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: m.today, slot: 'm2' }, tMano)).status, 200);
+  assert.equal((await x.call('POST', '/api/admin/workplan/check', { date: m.today, slot: 's2' }, tMano)).status, 400, 'not a task of her schedule');
+  o = (await x.call('GET', '/api/admin/workplan', {}, tok, { plan: 'support' })).json; assert.deepEqual(o.who.map((w) => w.name), ['Mano']); assert.ok(o.checks[m.today][id('mano')].m2);
+  assert.equal(o.team.find((t) => t.name === 'Doha').tz, 'Africa/Casablanca'); assert.ok(o.zones.includes('Europe/Madrid') && o.zones.includes('Asia/Bangkok'));
+  // owner edits the Madrid schedule, creates and deletes a New York one
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { plan: 'support', slots: [...m.plan.slots.map((s) => (s.id === 'm1' ? { ...s, start: '15:00' } : s))] }, tok)).status, 200);
+  const r = (await x.call('PUT', '/api/admin/workplan', { newPlan: { name: 'Support New York', tz: 'America/New_York', copy: 'support' } }, tok)).json; assert.ok(r.created);
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { assign: { [id('doha')]: { plan: r.created } } }, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/workplan', {}, tDoha)).json.plan.tz, 'America/New_York');
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { deletePlan: r.created }, tok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/workplan', {}, tDoha)).json.plan.planId, 'main', 'back to the main schedule');
+  assert.equal((await x.call('GET', '/api/admin/workplan', {}, tMano)).json.plan.slots[0].start, '15:00');
+  assert.equal((await x.call('PUT', '/api/admin/workplan', { assign: {} }, tMano)).status, 403);
 });

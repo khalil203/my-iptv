@@ -2,6 +2,7 @@
 // Runs inside the Cloudflare Worker (real mode) and inside the browser (demo mode).
 import { PROMO_TEMPLATES, PROMO_CATEGORIES, promoTemplate } from './promo-templates.js';
 import { dirOf } from './lang-data.js';
+import { localMinuteToUtc, TIME_ZONES } from './timezones.js';
 
 const enc = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -410,7 +411,11 @@ const isOwnerOnly = (p) => OWNER_ONLY.includes(p);
 // Agents can SEND email marketing, newsletters, promotions and renewal emails, but always with the saved texts and the automatic payment links.
 export const TECH_ONLY = ['secrets', 'templates_edit', 'seo'];
 export const isTechRole = (role) => /technical|technique|panel manager/i.test(String(role || ''));
-const validTz = (tz) => { const t = String(tz || '').trim(); if (!t) return ''; try { new Intl.DateTimeFormat('en', { timeZone: t }); return t; } catch { return ''; } };
+const validTz0 = (t) => { try { new Intl.DateTimeFormat('en', { timeZone: t }); return t; } catch { return ''; } };
+// accepts "Europe/Madrid", "madrid", "Asia/Bangkok (UTC+7)", "new york"… and returns the real zone name, or '' when unknown
+export const validTz = (tz) => { let t = String(tz || '').trim().replace(/\s*\(.*\)\s*$/, ''); if (!t) return ''; if (validTz0(t)) return t;
+  const k = t.toLowerCase().replace(/[\s-]+/g, '_'); const hit = TIME_ZONES.find((z) => z.toLowerCase() === k) || TIME_ZONES.find((z) => z.toLowerCase().split('/').pop() === k) || TIME_ZONES.find((z) => z.toLowerCase().endsWith('/' + k));
+  return hit && validTz0(hit) ? hit : ''; };
 const validRoleTag = (tag) => (['Support', 'Tech'].includes(String(tag || '')) ? String(tag) : '');
 
 // Ready-made weekly schedules. Times are wall-clock minutes in each agent's own time zone.
@@ -1381,9 +1386,33 @@ export const WORKPLAN_DEF = {
     'Reminders & meetings: follow the automatic reminders for shift check-ins and holidays, and join the Management Meet Party once a month.',
   ],
   meet: { on: true, dom: 29, weekday: 6, nth: 1, time: '20:00', title: 'Management Meet Party' },
+  // more schedules for agents who work another shift or in another country (each in its own time zone; times are converted for every viewer)
+  extra: [
+    { id: 'tech', name: 'Technical Service (Khalil)', role: 'Tech', tz: 'Asia/Bangkok', slots: [
+      { id: 't1', start: '14:00', end: '15:30', title: 'System & stream quality check · IPTV panel status · pending technical tickets', icon: '🛠️', tab: 'support' },
+      { id: 't2', start: '15:30', end: '17:30', title: 'Create 10 Outlook accounts (passwords saved securely), provision Resend accounts, link domains, collect API keys', icon: '🔑', tab: 'accounts' },
+      { id: 't3', start: '17:30', end: '18:30', title: 'Break', icon: '☕', noCheck: true },
+      { id: 't4', start: '18:30', end: '20:45', title: 'Technical maintenance, APK/app updates, fresh sending domains/accounts for the support outreach', icon: '🧰', tab: 'appupdate' },
+      { id: 't5', start: '20:45', end: '21:00', title: 'Technical handover to Customer Support — post ready APIs, domains and panel status', icon: '🤝', tab: 'attendance' },
+    ] },
+    { id: 'support', name: 'Customer Support (MANO · Madrid)', role: 'Support', tz: 'Europe/Madrid', slots: [
+      { id: 'm1', start: '15:15', end: '15:30', title: 'Check-in & panel login · review the technical handover note', icon: '🟢', tab: 'attendance' },
+      { id: 'm2', start: '15:30', end: '17:00', title: 'IPTV customer support, order checks, renewal emails & client follow-ups', icon: '🛟', tab: 'support' },
+      { id: 'm3', start: '17:00', end: '18:00', title: 'WhatsApp & Telegram customer messaging and trial activations', icon: '💬', tab: 'customers' },
+      { id: 'm4', start: '18:00', end: '19:00', title: 'Break / shift handover check', icon: '☕', noCheck: true },
+      { id: 'm5', start: '19:00', end: '22:00', title: 'US outreach campaigns (emails, newsletters, [FB] anti-buffering tips) & end-of-shift support log', icon: '🚀', tab: 'promos' },
+    ] },
+  ],
   sheetUrl: '',
 };
-export const workPlanOf = (s) => { const w = s.workPlan || {}; return { ...WORKPLAN_DEF, ...w, meet: { ...WORKPLAN_DEF.meet, ...(w.meet || {}) }, slots: w.slots && w.slots.length ? w.slots : WORKPLAN_DEF.slots, days: w.days || WORKPLAN_DEF.days, info: w.info || WORKPLAN_DEF.info, rules: w.rules && w.rules.length ? w.rules : WORKPLAN_DEF.rules }; };
+export const workPlanOf = (s) => { const w = s.workPlan || {}; return { ...WORKPLAN_DEF, ...w, meet: { ...WORKPLAN_DEF.meet, ...(w.meet || {}) }, slots: w.slots && w.slots.length ? w.slots : WORKPLAN_DEF.slots, days: w.days || WORKPLAN_DEF.days, info: w.info || WORKPLAN_DEF.info, rules: w.rules && w.rules.length ? w.rules : WORKPLAN_DEF.rules, extra: Array.isArray(w.extra) ? w.extra : WORKPLAN_DEF.extra }; };
+// every schedule of the work planning: the main one + the extra ones, each with its own time zone
+export const planList = (wp) => [{ id: 'main', name: 'Daily agent plan', role: 'Support', tz: wp.tz, slots: wp.slots, days: wp.days, info: wp.info }, ...(wp.extra || []).map((p) => ({ days: {}, info: {}, ...p }))];
+// which schedule an agent follows: chosen by the owner, else the preset of their shift, else the main one
+export const planIdOf = (m, wp, shifts = []) => { const ids = planList(wp).map((p) => p.id); if (m && ids.includes(m.workPlan)) return m.workPlan; const pr = (shifts.find((x) => x.memberId === m?.id) || {}).preset; return ids.includes(pr) ? pr : 'main'; };
+export const hmMin = (x) => { const [h, mi] = String(x || '0:0').split(':').map(Number); return h * 60 + (mi || 0); };
+// the real moments (UTC) of a slot on a date of its own time zone; a slot ending before it starts ends the next day
+export const slotUtc = (date, sl, tz) => { const a = hmMin(sl.start), b = hmMin(sl.end); const start = localMinuteToUtc(date, a, tz); const nd = b <= a ? new Date(Date.parse(date + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10) : date; return { start, end: localMinuteToUtc(nd, b, tz) }; };
 export function meetDate(meet, y, m) { if (Number(meet.dom)) { const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); return new Date(Date.UTC(y, m, Math.min(last, Number(meet.dom)))).toISOString().slice(0, 10); } const d = new Date(Date.UTC(y, m, 1)); const wd = Number(meet.weekday); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (Math.max(1, Number(meet.nth) || 1) - 1) * 7); return d.toISOString().slice(0, 10); }
 // ---- Owner personal & business planning (owner only): recurring blocks with dated versions, day-only changes, monthly events ----
 // A block: { id, v: [{ from: '' | 'YYYY-MM-DD', start, end, title, icon, rule: 'weekly' | 'monthly', days: [0-6], dom, off }] }.
@@ -2853,10 +2882,12 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     const out = { reminders: 0, late: 0, woken: 0 }; const s = await getSettings(); const cfg = notifyCfg(s);
     try { out.ibo = await iboSendDue(s); } catch {}
     try { out.ownerplanSync = (await notifyOwnerPlanSync(s)).sent; } catch {}
-    try { // work planning: a reminder when each activity starts, and the monthly Management Meet Party
-      const wp = workPlanOf(s); const L = localNow(wp.tz); const wd = Number(L.day); const toMin = (x) => { const [h, m] = String(x).split(':').map(Number); return h * 60 + m; };
-      for (const sl of wp.slots) { const since = L.min - toMin(sl.start); if (since < 0 || since >= 15) continue; const k = `planrem:${L.date}:${sl.id}`; if (await store.get(k)) continue; await store.put(k, 1, 2 * 86400);
-        const task = (wp.days[wd] || {})[sl.id]; const inf = (wp.info[wd] || {})[sl.id]; await pushAgents(s, 'plan', { title: `${sl.icon || '⏰'} ${sl.start} · ${sl.title}`, body: (task ? task + ' · ' : '') + (inf ? `${inf[0]} — ${inf[2]}. ` : '') + (sl.noCheck ? 'Hand over to the next shift.' : 'Check it off in Work planning when done.'), url: '/intprototv?tab=workplan', tag: 'plan-' + sl.id }).catch(() => {}); out.plan = (out.plan || 0) + 1; }
+    try { // work planning: a reminder when each activity starts — for each schedule, in its own time zone, to the agents who follow it
+      const wp = workPlanOf(s); const team = (await getTeam()).filter((m) => m.status !== 'disabled'); const shifts = (await store.get('shifts')) || []; const toMin = hmMin;
+      for (const P of planList(wp)) { const who = team.filter((m) => planIdOf(m, wp, shifts) === P.id).map((m) => 'm:' + m.id); if (!who.length) continue; const L0 = localNow(P.tz); const wd0 = Number(L0.day);
+        for (const sl of P.slots) { const since = L0.min - toMin(sl.start); if (since < 0 || since >= 15) continue; const k = `planrem:${L0.date}:${P.id}:${sl.id}`; if (await store.get(k)) continue; await store.put(k, 1, 2 * 86400);
+          const task = (P.days[wd0] || {})[sl.id]; const inf = (P.info[wd0] || {})[sl.id]; if (notifyCfg(s).plan !== false) await pushTo(s, who, { kind: 'plan', title: `${sl.icon || '⏰'} ${sl.start} · ${sl.title}`, body: (task ? task + ' · ' : '') + (inf ? `${inf[0]} — ${inf[2]}. ` : '') + (sl.noCheck ? 'Hand over to the next shift.' : 'Check it off in Work planning when done.'), url: '/intprototv?tab=workplan', tag: 'plan-' + P.id + '-' + sl.id }).catch(() => {}); out.plan = (out.plan || 0) + 1; } }
+      const L = localNow(wp.tz);
       if (wp.meet.on) { const md = meetDate(wp.meet, Number(L.date.slice(0, 4)), Number(L.date.slice(5, 7)) - 1); const dl = Math.round((new Date(md + 'T00:00:00Z') - new Date(L.date + 'T00:00:00Z')) / DAYMS);
         if ((dl === 3 || dl === 0) && L.min >= 9 * 60) { const k = `meetrem:${md}:${dl}`; if (!(await store.get(k))) { await store.put(k, 1, 10 * 86400); const msg = { title: `🎉 ${wp.meet.title} ${dl === 0 ? 'today' : 'in 3 days'} · ${wp.meet.time}`, body: `Monthly team meeting on ${md} at ${wp.meet.time} (${wp.tz}). Attendance is mandatory.`, url: '/intprototv?tab=workplan', tag: 'meet-' + md }; await pushAgents(s, 'plan', msg).catch(() => {}); await pushOwner(s, msg).catch(() => {}); out.meet = 1; } } }
     } catch {}
@@ -5040,45 +5071,66 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return err(404, 'Not found');
       }
       if (path.startsWith('/api/admin/workplan')) {
-        const wp = workPlanOf(s); const team = await getTeam(); const me0 = member;
-        const dayKey = (ms) => { const L = localNow(wp.tz); void L; const d = new Date(ms); const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: wp.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
-        const wdOf = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();
+        const wp = workPlanOf(s); const team = await getTeam(); const me0 = member; const shifts = await getShifts(); const plans = planList(wp);
+        const dayKey = (ms, tz = wp.tz) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+        const wdOf = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay(); const active = team.filter((m) => m.status !== 'disabled');
+        const planOf = (m) => plans.find((p) => p.id === planIdOf(m, wp, shifts)) || plans[0]; const seeAll = isOwner || can('attendance_all');
+        const minOf = (tz) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value])); return Number(p.hour) * 60 + Number(p.minute); };
         if (R('GET', '/api/admin/workplan')) {
-          const today = dayKey(Date.now()); const ref = /^\d{4}-\d{2}-\d{2}$/.test(String(query.week || '')) ? query.week : today; const r0 = new Date(ref + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS);
+          const P = seeAll ? plans.find((p) => p.id === query.plan) || (me0 ? planOf(me0) : plans[0]) : planOf(me0);
+          const today = dayKey(Date.now(), P.tz); const ref = /^\d{4}-\d{2}-\d{2}$/.test(String(query.week || '')) ? query.week : today; const r0 = new Date(ref + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS);
           const week = Array.from({ length: 7 }, (_, i) => new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10));
           const checks = {}; for (const d of week) checks[d] = (await store.get('plancheck:' + d)) || {};
-          const who = isOwner || can('attendance_all') ? team.filter((m) => m.status !== 'disabled').map((m) => ({ id: m.id, name: m.name || m.username })) : [{ id: me0.id, name: me0.name }];
-          const mine = (d) => (isOwner || can('attendance_all') ? checks[d] : { [me0.id]: checks[d][me0.id] || {} });
-          const now = new Date(); const L = localNow(wp.tz); const meets = [0, 1].map((k) => meetDate(wp.meet, now.getUTCFullYear(), now.getUTCMonth() + k)).filter((d) => d >= today);
-          return ok({ plan: wp, week, today, nowMin: L.min, checks: Object.fromEntries(week.map((d) => [d, mine(d)])), who, canEdit: isOwner, nextMeet: wp.meet.on ? meets[0] || null : null, me: me0 ? me0.id : 'owner' });
+          const members = active.filter((m) => planOf(m).id === P.id);
+          const who = seeAll ? members.map((m) => ({ id: m.id, name: m.name || m.username, tz: m.timezone || '' })) : [{ id: me0.id, name: me0.name, tz: me0.timezone || '' }];
+          const mine = (d) => (seeAll ? checks[d] : { [me0.id]: checks[d][me0.id] || {} });
+          const now = new Date(); const meets = [0, 1].map((k) => meetDate(wp.meet, now.getUTCFullYear(), now.getUTCMonth() + k)).filter((d) => d >= dayKey(Date.now(), wp.tz));
+          const utc = Object.fromEntries(week.map((d) => [d, Object.fromEntries(P.slots.map((sl) => [sl.id, slotUtc(d, sl, P.tz)]))]));
+          const zones = [...new Set([P.tz, wp.tz, ...plans.map((p) => p.tz), ...active.map((m) => m.timezone).filter(Boolean)])];
+          const planCards = plans.map((p) => ({ id: p.id, name: p.name, role: p.role, tz: p.tz, slots: p.slots.length, agents: active.filter((m) => planOf(m).id === p.id).map((m) => m.name || m.username) }));
+          return ok({ plan: { ...wp, ...P, planId: P.id }, plans: seeAll ? planCards : planCards.filter((p) => p.id === P.id), week, today, nowMin: minOf(P.tz), checks: Object.fromEntries(week.map((d) => [d, mine(d)])), who, canEdit: isOwner, nextMeet: wp.meet.on ? meets[0] || null : null, meetTz: wp.tz, meetUtc: wp.meet.on && meets[0] ? localMinuteToUtc(meets[0], hmMin(wp.meet.time), wp.tz) : null, me: me0 ? me0.id : 'owner', utc, zones,
+            team: isOwner ? active.map((m) => ({ id: m.id, name: m.name || m.username, role: m.role || '', roleTag: m.roleTag || (isTechRole(m.role) ? 'Tech' : 'Support'), tz: m.timezone || 'Asia/Bangkok', plan: planOf(m).id })) : undefined });
         }
-        const wpSheetPush = async (url) => { // this week's planning + every agent's check-offs, one row per agent and time slot
-          const today = dayKey(Date.now()); const r0 = new Date(today + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS); const rows = [];
-          for (let i = 0; i < 7; i++) { const d = new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10); const c = (await store.get('plancheck:' + d)) || {}; const wd = wdOf(d);
-            for (const sl of wp.slots) for (const m of team.filter((x) => x.status !== 'disabled')) { const k = (c[m.id] || {})[sl.id]; rows.push([d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wd], sl.start + '–' + sl.end, sl.title, (wp.days[wd] || {})[sl.id] || '', m.name || m.username, sl.noCheck ? '—' : k ? 'YES' : 'NO', k ? new Date(k.at).toISOString() : '', k?.note || '']); } }
-          const r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at', 'Note'], rows }) });
+        const wpSheetPush = async (url) => { // this week's planning + every agent's check-offs, one row per agent and time slot (each in their own schedule and time zone)
+          const rows = [];
+          for (const m of active) { const P = planOf(m); const today = dayKey(Date.now(), P.tz); const r0 = new Date(today + 'T12:00:00Z'); const mon = new Date(r0.getTime() - ((r0.getUTCDay() + 6) % 7) * DAYMS);
+            for (let i = 0; i < 7; i++) { const d = new Date(mon.getTime() + i * DAYMS).toISOString().slice(0, 10); const c = (await store.get('plancheck:' + d)) || {}; const wd = wdOf(d);
+              for (const sl of P.slots) { const k = (c[m.id] || {})[sl.id]; rows.push([d, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][wd], `${sl.start}–${sl.end} ${P.tz}`, sl.title, (P.days[wd] || {})[sl.id] || '', m.name || m.username, sl.noCheck ? '—' : k ? 'YES' : 'NO', k ? new Date(k.at).toISOString() : '', k?.note || '', P.name]); } } }
+          const r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ sheet: 'Agent Work Planning', header: ['Date', 'Day', 'Time', 'Activity', 'Task', 'Agent', 'Done', 'Checked at (UTC)', 'Note', 'Schedule'], rows }) });
           return { ok: r.ok, status: r.status, rows: rows.length };
         };
-        if (R('POST', '/api/admin/workplan/check')) { // an agent checks off one of today's tasks (or yesterday's, if forgotten)
-          if (!me0) return err(400, 'The owner does not check off tasks.'); const d = String(body.date || ''); const today = dayKey(Date.now()); const yest = dayKey(Date.now() - DAYMS);
-          if (d !== today && d !== yest) return err(400, 'You can check off today’s tasks (or yesterday’s).'); const sl = wp.slots.find((x) => x.id === body.slot); if (!sl || sl.noCheck) return err(400, 'Unknown task.');
+        if (R('POST', '/api/admin/workplan/check')) { // an agent checks off one of today's tasks (or yesterday's, if forgotten) — "today" in the time zone of their schedule
+          if (!me0) return err(400, 'The owner does not check off tasks.'); const P = planOf(me0); const d = String(body.date || ''); const today = dayKey(Date.now(), P.tz); const yest = dayKey(Date.now() - DAYMS, P.tz);
+          if (d !== today && d !== yest) return err(400, 'You can check off today’s tasks (or yesterday’s).'); const sl = P.slots.find((x) => x.id === body.slot); if (!sl || sl.noCheck) return err(400, 'Unknown task.');
           const c = (await store.get('plancheck:' + d)) || {}; c[me0.id] = c[me0.id] || {};
           if (body.done === false) delete c[me0.id][sl.id]; else c[me0.id][sl.id] = { at: Date.now(), note: cleanText(body.note, 200) };
           await store.put('plancheck:' + d, c, 400 * 86400);
           const url = wp.sheetUrl || s.accountsSheet; if (url) await wpSheetPush(url).catch(() => {}); // the whole week is rewritten, so the tab always matches the panel
           return ok({ ok: true, done: body.done !== false });
         }
-        if (R('PUT', '/api/admin/workplan')) { // owner only: the schedule structure, tasks per day, rules, meeting, time zone, Google Sheet
+        if (R('PUT', '/api/admin/workplan')) { // owner only: schedules (slots, tasks, time zone), who follows which schedule, rules, meeting, Google Sheet
           if (!isOwner) return err(403, 'Only the owner edits the work planning.');
-          const w = workPlanOf(s); const hm = (x) => (/^\d{2}:\d{2}$/.test(String(x || '')) ? x : null);
-          if (Array.isArray(body.slots)) { const sl = body.slots.slice(0, 16).map((x, i) => ({ id: cleanText(x.id, 8) || 's' + uid(3), start: hm(x.start) || '09:00', end: hm(x.end) || '10:00', title: cleanText(x.title, 120), icon: cleanText(x.icon, 4) || '•', tab: cleanText(x.tab, 20), noCheck: !!x.noCheck })).filter((x) => x.title); if (sl.length) w.slots = sl; }
-          if (isObj(body.days)) { const dd = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.days[k] || {}; dd[k] = Object.fromEntries(Object.entries(v).slice(0, 16).map(([a, b]) => [cleanText(a, 8), cleanText(b, 200)]).filter(([, b]) => b)); } w.days = dd; }
-          if (isObj(body.info)) { const ii = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.info[k] || {}; ii[k] = Object.fromEntries(Object.entries(v).slice(0, 16).filter(([, b]) => Array.isArray(b)).map(([a, b]) => [cleanText(a, 8), b.slice(0, 3).map((t) => cleanText(t, 160))])); } w.info = ii; }
+          const w = workPlanOf(s); const hm = (x) => (/^\d{2}:\d{2}$/.test(String(x || '')) ? x : null); const okTz = (tz) => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } };
+          const pid = String(body.plan || 'main'); let ex = null;
+          if (body.newPlan) { const np = body.newPlan; const tz = String(np.tz || 'Asia/Bangkok'); if (!okTz(tz)) return err(400, 'Unknown time zone.'); const src = planList(w).find((p) => p.id === np.copy) || planList(w)[0];
+            ex = { id: 'p' + uid(4), name: cleanText(np.name, 60) || 'New schedule', role: ['Support', 'Tech'].includes(np.role) ? np.role : 'Support', tz, slots: src.slots.map((x) => ({ ...x, id: 'x' + uid(4) })) }; w.extra = [...(w.extra || []), ex].slice(0, 12); }
+          if (body.deletePlan) { const d = String(body.deletePlan); if (d === 'main') return err(400, 'The main schedule cannot be deleted.'); w.extra = (w.extra || []).filter((p) => p.id !== d); const t = await getTeam(); for (const m of t) if (m.workPlan === d) m.workPlan = 'main'; await store.put('team', t); }
+          const target = ex ? null : pid === 'main' ? w : (w.extra || []).find((p) => p.id === pid); if (!ex && !body.deletePlan && !target) return err(404, 'Unknown schedule.');
+          if (target) {
+            if (Array.isArray(body.slots)) { const sl = body.slots.slice(0, 16).map((x, i) => ({ id: cleanText(x.id, 8) || (pid === 'main' ? 's' : 'x') + uid(3), start: hm(x.start) || '09:00', end: hm(x.end) || '10:00', title: cleanText(x.title, 160), icon: cleanText(x.icon, 4) || '•', tab: cleanText(x.tab, 20), noCheck: !!x.noCheck })).filter((x) => x.title); if (sl.length) target.slots = sl; }
+            if (isObj(body.days)) { const dd = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.days[k] || {}; dd[k] = Object.fromEntries(Object.entries(v).slice(0, 16).map(([a, b]) => [cleanText(a, 8), cleanText(b, 200)]).filter(([, b]) => b)); } target.days = dd; }
+            if (isObj(body.info) && pid === 'main') { const ii = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) { const v = body.info[k] || {}; ii[k] = Object.fromEntries(Object.entries(v).slice(0, 16).filter(([, b]) => Array.isArray(b)).map(([a, b]) => [cleanText(a, 8), b.slice(0, 3).map((t) => cleanText(t, 160))])); } w.info = ii; }
+            if (body.tz) { const z = validTz(body.tz); if (!z) return err(400, 'Unknown time zone.'); target.tz = z; }
+            if (pid !== 'main') { if (body.name !== undefined) target.name = cleanText(body.name, 60) || target.name; if (['Support', 'Tech'].includes(body.role)) target.role = body.role; }
+          }
           if (Array.isArray(body.rules)) w.rules = body.rules.map((x) => cleanText(x, 400)).filter(Boolean).slice(0, 12);
           if (isObj(body.meet)) w.meet = { on: body.meet.on !== false, dom: Math.min(31, Math.max(0, Math.round(Number(body.meet.dom) || 0))), weekday: Math.min(6, Math.max(0, Number(body.meet.weekday) || 0)), nth: Math.min(4, Math.max(1, Number(body.meet.nth) || 1)), time: hm(body.meet.time) || '20:00', title: cleanText(body.meet.title, 80) || 'Management Meet Party' };
-          if (body.tz) { try { new Intl.DateTimeFormat('en', { timeZone: body.tz }); w.tz = body.tz; } catch { return err(400, 'Unknown time zone.'); } }
           if (body.sheetUrl !== undefined) { const u = String(body.sheetUrl || '').trim(); if (u && !/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) return err(400, 'Paste the Apps Script web app link (https://script.google.com/macros/s/…/exec).'); w.sheetUrl = u; }
-          await saveSettings({ ...s, workPlan: w }); await log('team', 'Work planning updated by the owner'); return ok(w);
+          if (isObj(body.assign)) { // who follows which schedule + each agent's own time zone
+            const t = await getTeam(); const ids = planList(w).map((p) => p.id);
+            for (const [mid, a] of Object.entries(body.assign).slice(0, 100)) { const m = t.find((x) => x.id === mid); if (!m || !isObj(a)) continue; if (ids.includes(a.plan)) m.workPlan = a.plan; if (a.tz !== undefined) { const z = validTz(a.tz); if (!z) return err(400, `${m.name}: unknown time zone "${cleanText(a.tz, 40)}".`); m.timezone = z; } if (['Support', 'Tech'].includes(a.roleTag)) m.roleTag = a.roleTag; }
+            await store.put('team', t); }
+          await saveSettings({ ...s, workPlan: w }); await log('team', 'Work planning updated by the owner'); return ok({ ...w, created: ex ? ex.id : undefined });
         }
         if (R('POST', '/api/admin/workplan/sheet')) { // owner: send the planning + this week's check-offs to Google Sheets
           if (!isOwner) return err(403, 'Owner only.'); const url = wp.sheetUrl || s.accountsSheet; if (!url) return err(400, 'Add your Google Sheets (Apps Script) link first.');
@@ -5117,7 +5169,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (!preset) return err(400, 'Unknown schedule preset.');
         const team = await getTeam(); const m = team.find((x) => x.id === String(body.memberId || ''));
         if (!m) return err(400, 'Choose an existing agent.');
-        m.roleTag = preset.roleTag; m.timezone = preset.timezone; await store.put('team', team);
+        m.roleTag = preset.roleTag; m.timezone = preset.timezone; m.workPlan = String(body.preset); await store.put('team', team);
         const days = {}; for (const k of ['0', '1', '2', '3', '4', '5', '6']) days[k] = { on: true, start: preset.start, end: preset.end };
         const rec = { memberId: m.id, memberName: m.name, tz: preset.timezone, days, daysOff: [], updatedAt: Date.now(), by: actorName, preset: String(body.preset) };
         const l = await getShifts(); const idx = l.findIndex((x) => x.memberId === m.id); if (idx >= 0) l[idx] = rec; else l.unshift(rec);
@@ -5297,6 +5349,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (taken) return err(400, 'This username is already used.');
         const salt = uid(8);
         const roleTag = validRoleTag(body.roleTag) || (isTechRole(body.role) ? 'Tech' : 'Support');
+        if (String(body.timezone || '').trim() && !validTz(body.timezone)) return err(400, `Unknown time zone "${cleanText(body.timezone, 40)}" — pick one from the list.`);
         const timezone = validTz(body.timezone) || 'Asia/Bangkok';
         const m = { id: uid(6), name: String(body.name || username), username, role: String(body.role || 'Staff'), roleTag, timezone, salt, hash: await hashPassword(body.password, salt), perms: (body.perms || []).filter((p) => GRANTABLE_KEYS.includes(p)), status: 'active', alias: String(body.alias || '').slice(0, 40), bank: ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '', bankDetails: String(body.bankDetails || '').slice(0, 120), lang: ['en', 'fr', 'de', 'es', 'it', 'ar'].includes(body.lang) ? body.lang : 'en', notifyEmail: String(body.notifyEmail || '').slice(0, 120), traineeUntil: body.trainee ? Date.now() + 14 * DAY : (Number(body.traineeUntil) || 0), createdAt: Date.now(), lastLogin: null };
         team.push(m); await store.put('team', team);
@@ -5312,7 +5365,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           if (body.name !== undefined) m.name = String(body.name).slice(0, 80);
           if (body.role !== undefined) m.role = String(body.role).slice(0, 60);
           if (body.roleTag !== undefined) m.roleTag = validRoleTag(body.roleTag) || (isTechRole(m.role) ? 'Tech' : 'Support');
-          if (body.timezone !== undefined) m.timezone = validTz(body.timezone) || m.timezone || 'Asia/Bangkok';
+          if (body.timezone !== undefined && String(body.timezone).trim()) { const tz = validTz(body.timezone); if (!tz) return err(400, `Unknown time zone "${cleanText(body.timezone, 40)}" — pick one from the list (e.g. Europe/Madrid, Asia/Bangkok, America/New_York).`); m.timezone = tz; }
           if (body.alias !== undefined) m.alias = String(body.alias).slice(0, 40);
           if (body.bank !== undefined) m.bank = ['CIH', 'IBAN', 'US', 'other'].includes(body.bank) ? body.bank : '';
           if (body.bankDetails !== undefined) m.bankDetails = String(body.bankDetails).slice(0, 120);

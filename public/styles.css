@@ -1578,3 +1578,15 @@ html.translated-rtl #admin-body [dir=ltr], html.translated-rtl #admin-body input
   .pc-tab { flex: 1 1 auto; text-align: center; }
   .pc-head .btn { width: 100%; }
 }
+
+/* work planning: several schedules + time zones */
+.wp-plans { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; }
+.wp-plan { flex: none; display: grid; gap: 2px; text-align: start; padding: 10px 14px; border-radius: 14px; border: 1px solid rgba(127,127,127,.25); background: var(--card, transparent); color: inherit; cursor: pointer; min-width: 200px; max-width: 280px; }
+.wp-plan small { opacity: .75; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-plan.on { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary) inset; }
+.wp-plan.add { border-style: dashed; align-content: center; }
+.wp-clocks { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.wp-clock { display: inline-flex; gap: 6px; align-items: baseline; padding: 5px 10px; border-radius: 99px; background: rgba(127,127,127,.12); font-size: 13px; }
+.wp-clock small { opacity: .7; font-size: 11px; } .wp-clock.me { background: rgba(34,197,94,.18); } .wp-clock.plan { outline: 1px solid var(--primary); }
+.wp-mine { color: #16a34a; font-weight: 600; } .wp-mine sup { font-size: 10px; }
+.wp-assign select { min-width: 120px; } .wp-assign .tz-select { min-width: 230px; }
