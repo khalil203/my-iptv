@@ -3,7 +3,11 @@
 # 2) Actions → "Owner recovery" → Run workflow
 # 3) Sign in with that login, then delete both secrets.
 name: Owner recovery
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['tools/owner-reset.json']
 permissions:
   contents: read
 jobs:
