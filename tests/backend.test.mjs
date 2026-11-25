@@ -3029,3 +3029,41 @@ test('work planning: several schedules in their own time zones, each agent in th
   assert.equal((await x.call('GET', '/api/admin/workplan', {}, tMano)).json.plan.slots[0].start, '15:00');
   assert.equal((await x.call('PUT', '/api/admin/workplan', { assign: {} }, tMano)).status, 403);
 });
+
+test('co-owner: a second full-control owner account — add, login, full access, logged by name, change own password, remove', async () => {
+  const x = setup(); const tok = await adminToken(x);
+  // only the owner can see/add owners
+  assert.equal((await x.call('GET', '/api/admin/owners', {}, '')).status, 401);
+  let o = (await x.call('GET', '/api/admin/owners', {}, tok)).json; assert.equal(o.owners.length, 1); assert.ok(o.owners[0].isPrimary && o.owners[0].you);
+  // validation
+  assert.equal((await x.call('POST', '/api/admin/owners', { username: 'Khalil', password: '123' }, tok)).status, 400);
+  assert.equal((await x.call('POST', '/api/admin/owners', { username: 'Iptv', password: 'longpass' }, tok)).status, 409, 'username already the primary owner');
+  // add Khalil
+  const add = await x.call('POST', '/api/admin/owners', { username: 'Khalil', password: 'khalilStrong1', timezone: 'Asia/Bangkok' }, tok); assert.equal(add.status, 200);
+  assert.equal((await x.call('POST', '/api/admin/owners', { username: 'khalil', password: 'another1' }, tok)).status, 409, 'case-insensitive duplicate');
+  o = (await x.call('GET', '/api/admin/owners', {}, tok)).json; assert.equal(o.owners.length, 2); const kha = o.owners.find((w) => w.username === 'Khalil'); assert.ok(kha && !kha.isPrimary); assert.ok(!JSON.stringify(o).includes('hash'));
+  // Khalil logs in and is a full owner
+  const kl = await x.call('POST', '/api/login', { username: 'Khalil', password: 'khalilStrong1' }); assert.equal(kl.status, 200); assert.equal(kl.json.role, 'admin'); const ktok = kl.json.token;
+  const me = (await x.call('GET', '/api/admin/me', {}, ktok)).json; assert.equal(me.role, 'owner'); assert.equal(me.username, 'Khalil'); assert.ok(me.coOwner); assert.ok(me.perms.includes('secrets') && me.perms.includes('exports') && me.perms.includes('settings'), 'has all perms incl owner-only');
+  // owner-only things work for the co-owner: My planning, security settings, team, exports-level listing
+  assert.equal((await x.call('GET', '/api/admin/ownerplan', {}, ktok)).status, 200);
+  assert.equal((await x.call('PUT', '/api/admin/settings', { security: { requireCheckIn: true } }, ktok)).status, 200);
+  assert.equal((await x.call('GET', '/api/admin/owners', {}, ktok)).status, 200, 'co-owner can manage owners too');
+  // actions are logged under Khalil's name, not the primary owner
+  const logs = (await x.call('GET', '/api/admin/log', {}, tok)).json; assert.ok(logs.some((l) => /Khalil \(owner\)|"Khalil"/.test(JSON.stringify(l))));
+  // Khalil changes his own password via Account & backup, and it does not touch the primary
+  assert.equal((await x.call('POST', '/api/admin/account', { currentPassword: 'khalilStrong1', newPassword: 'khalilStrong2' }, ktok)).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: 'Khalil', password: 'khalilStrong1' })).status, 401);
+  assert.equal((await x.call('POST', '/api/login', { username: 'Khalil', password: 'khalilStrong2' })).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: 'Iptv', password: 'Iptv' })).status, 200, 'primary owner password unchanged');
+  // owner resets Khalil's password
+  assert.equal((await x.call('POST', `/api/admin/owners/${add.json.id}/password`, { password: 'resetByBoss1' }, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: 'Khalil', password: 'resetByBoss1' })).status, 200);
+  // cannot remove yourself or the primary; owner removes Khalil
+  const ktok2 = (await x.call('POST', '/api/login', { username: 'Khalil', password: 'resetByBoss1' })).json.token;
+  assert.equal((await x.call('DELETE', `/api/admin/owners/${add.json.id}`, {}, ktok2)).status, 400, 'cannot remove the account you are signed in with');
+  assert.equal((await x.call('DELETE', '/api/admin/owners/admin', {}, tok)).status, 400, 'cannot remove the primary');
+  assert.equal((await x.call('DELETE', `/api/admin/owners/${add.json.id}`, {}, tok)).status, 200);
+  assert.equal((await x.call('POST', '/api/login', { username: 'Khalil', password: 'resetByBoss1' })).status, 401, 'removed owner can no longer log in');
+  assert.equal((await x.call('GET', '/api/admin/owners', {}, tok)).json.owners.length, 1);
+});

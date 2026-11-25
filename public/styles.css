@@ -1590,3 +1590,8 @@ html.translated-rtl #admin-body [dir=ltr], html.translated-rtl #admin-body input
 .wp-clock small { opacity: .7; font-size: 11px; } .wp-clock.me { background: rgba(34,197,94,.18); } .wp-clock.plan { outline: 1px solid var(--primary); }
 .wp-mine { color: #16a34a; font-weight: 600; } .wp-mine sup { font-size: 10px; }
 .wp-assign select { min-width: 120px; } .wp-assign .tz-select { min-width: 230px; }
+
+/* owners / full control */
+.owners-card { border: 1px solid rgba(234,179,8,.4); }
+.owners-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.owners-list .tm { border: 1px solid rgba(127,127,127,.22); border-radius: 12px; padding: 10px; }

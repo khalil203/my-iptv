@@ -1,4 +1,4 @@
-import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS, SCHEDULE_PRESETS } from './core.js?v=131';
+import { createBackend, holidayCalendar, parseLineLink, parseResellerText, parseOrderNo, orderCompare, orderDevices, orderAt, orderRanks, txTime, sortTxNewest, applyTransactionInput, migrateLegacyTransactions, bankPayoutNote, normalizePayoutDays, formatExactTime, balanceTxLink, IBO_PLAYERS, SCHEDULE_PRESETS } from './core.js?v=132';
 import { loadLogos, logosReady, findLogo } from './logos.js?v=83';
 import { siteHtml, ensureSiteLang } from './site.js?v=124';
 import { ic } from './icons.js?v=102';
@@ -2095,9 +2095,14 @@ async function adminTeam() {
   state.admin.team = team;
   const all = state.admin.me.allPerms;
   const me = state.admin.me;
-  let sigs = [];
-  if (me.role === 'owner') { try { sigs = (await api('GET', '/api/admin/bylaws')).list || []; } catch {} }
-  return `<div class="row" style="margin-bottom:14px"><p class="muted" style="margin:0;flex:1">Give your team their own login. They sign in on the same page, and only see what you allow. Every action is logged with their name.</p><button class="btn primary" data-act="new-member">＋ Add team member</button></div>
+  let sigs = [], owners = null;
+  if (me.role === 'owner') { try { sigs = (await api('GET', '/api/admin/bylaws')).list || []; } catch {}
+    try { owners = (await api('GET', '/api/admin/owners')).owners; } catch {} }
+  const ownersCard = owners ? `<div class="card owners-card" style="margin-bottom:16px"><div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;flex:1">👑 Owners · full control</h3><button class="btn sm primary" data-act="owner-add">＋ Add owner</button></div>
+    <p class="small muted">Owner accounts have <b>full control</b> — every page, settings, API keys, exports, everything. Each one signs in under their own name and every action is logged. Use this only for the real owners (you and Nizar).</p>
+    <div class="owners-list">${owners.map((o) => `<div class="tm"><div class="row" style="align-items:center"><div class="avatar">${esc(initials(o.username))}</div><div style="flex:1;min-width:0"><b>${esc(o.username)}</b>${o.isPrimary ? ' <span class="badge">primary</span>' : ''}${o.you ? ' <span class="badge ok">you</span>' : ''}<div class="small muted">🌍 ${esc(o.timezone)}${o.twoFactor ? ' · 🔐 2FA on' : ''}${o.addedBy ? ' · added by ' + esc(o.addedBy) : ''}${o.lastLogin ? ' · last sign-in ' + fmtDT(o.lastLogin) : o.isPrimary ? '' : ' · never signed in'}</div></div></div>
+      ${!o.isPrimary ? `<div class="row" style="margin-top:8px;gap:6px"><button class="btn sm" data-act="owner-pw" data-id="${esc(o.id)}" data-name="${esc(o.username)}">Reset password</button>${o.you ? '' : `<button class="btn sm danger" data-act="owner-del" data-id="${esc(o.id)}" data-name="${esc(o.username)}">Remove</button>`}</div>` : '<div class="small muted" style="margin-top:8px">Change this login in ⚙️ Settings → Account &amp; backup.</div>'}</div>`).join('')}</div></div>` : '';
+  return ownersCard + `<div class="row" style="margin-bottom:14px"><p class="muted" style="margin:0;flex:1">Give your team their own login. They sign in on the same page, and only see what you allow. Every action is logged with their name.</p><button class="btn primary" data-act="new-member">＋ Add team member</button></div>
   ${team.length ? `<div class="team-grid">${team.map((m) => `<div class="tm ${m.status === 'disabled' ? 'off' : ''}">
     <div class="row"><div class="avatar">${esc(initials(m.name))}</div><div style="flex:1;min-width:0"><b>${esc(m.name)}</b><div class="small muted">${esc(m.role || 'Staff')} · @${esc(m.username)}</div></div>${pill(m.status === 'disabled' ? 'disabled' : 'active')}</div>
     <div class="small muted">🏷 ${esc(m.roleTag || (/technical|technique|panel manager/i.test(m.role || '') ? 'Tech' : 'Support'))} · 🌍 ${esc(m.timezone || 'Asia/Bangkok')}</div>
@@ -3477,6 +3482,20 @@ function doGet(e){var sh=SpreadsheetApp.getActive().getSheetByName((e.parameter|
   'new-member': () => modal('Add team member', memberForm(null), { wide: true }),
 'promote-member': async (el) => { try { await api('PUT', '/api/admin/team/' + el.dataset.id, { promote: true }); toast(t('promotedToActive')); $('#admin-body').innerHTML = await adminTeam(); } catch (e) { toast(e.message, true); } },
 'edit-member': (el) => modal('Edit team member', memberForm(state.admin.team.find((x) => x.id === el.dataset.id)), { wide: true }),
+'owner-add': () => modal('👑 Add owner · full control', `<form data-form="owner-add" onsubmit="return false"><p class="small muted" style="margin-top:0">This account will have <b>full control</b> of everything and is logged under its own name. Pick a strong password — not the username.</p>
+  ${field('Username', 'username', '', { attrs: 'required autocapitalize="none" autocomplete="off"', ph: 'e.g. Khalil' })}
+  ${field('Password', 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"', ph: 'at least 6 characters' })}
+  ${tzSelect('timezone', 'Asia/Bangkok', 'Time zone')}
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary" data-act="owner-add-ok">Create owner</button></div></form>`),
+'owner-add-ok': async (el) => { const f = el.closest('form'); const username = f.elements.username.value.trim(); const password = f.elements.password.value;
+  if (username.length < 3) return toast('Username needs 3+ characters.', true); if (password.length < 6) return toast('Password needs 6+ characters.', true);
+  el.disabled = true; try { await api('POST', '/api/admin/owners', { username, password, timezone: f.elements.timezone.value }); closeModal(); toast(`Owner "${username}" created ✓ — they can sign in now`); renderAdmin(); } catch (e) { toast(e.message, true); el.disabled = false; } },
+'owner-pw': (el) => { const id = el.dataset.id, name = el.dataset.name;
+  modal('Reset password · ' + name, `<form data-form="owner-pw" onsubmit="return false">${field('New password', 'password', '', { type: 'password', attrs: 'required minlength="6" autocomplete="new-password"' })}<div class="row" style="justify-content:flex-end"><button class="btn primary" data-act="owner-pw-ok" data-id="${esc(id)}">Save</button></div></form>`); },
+'owner-pw-ok': async (el) => { const f = el.closest('form'); const password = f.elements.password.value; if (password.length < 6) return toast('Password needs 6+ characters.', true);
+  el.disabled = true; try { await api('POST', `/api/admin/owners/${el.dataset.id}/password`, { password }); closeModal(); toast('Password reset ✓'); } catch (e) { toast(e.message, true); el.disabled = false; } },
+'owner-del': async (el) => { if (!confirm(`Remove owner "${el.dataset.name}"? They lose all access immediately.`)) return;
+  try { await api('DELETE', `/api/admin/owners/${el.dataset.id}`); toast('Owner removed'); renderAdmin(); } catch (e) { toast(e.message, true); } },
 'toggle-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); await api('PUT', '/api/admin/team/' + m.id, { status: m.status === 'disabled' ? 'active' : 'disabled' }); toast(t('updated')); renderAdmin(); },
 'del-member': async (el) => { const m = state.admin.team.find((x) => x.id === el.dataset.id); if (!confirm(`Remove ${m.name}? They will no longer be able to sign in.`)) return; await api('DELETE', '/api/admin/team/' + m.id); toast(t('deleted')); renderAdmin(); },
 preset: (el) => { const roles = { ...(state.admin.me.allRoles || PRESETS), 'Ads agent': agentPermissionPreset() }; const p = roles[el.dataset.p]; document.querySelectorAll('[data-perm-cb]').forEach((cb) => { cb.checked = !p || p.includes(cb.value); }); const r = $('form[data-form=member] [name=role]'); if (r && el.dataset.p !== 'Full access') r.value = el.dataset.p; },

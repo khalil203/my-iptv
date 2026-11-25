@@ -2022,6 +2022,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
     }
     return a;
   }
+  // Additional full-control owner accounts (co-owners). The primary owner stays in 'admin'; these are stored together here.
+  async function getOwners() { return (await store.get('owners')) || []; }
 
   async function getSettings() {
     if (sCache && Date.now() - sAt < cacheMs) return sCache;
@@ -3543,6 +3545,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           const st = await second(admin); if (st) return st;
           return ok({ token: await newSession('admin', 'admin', s, meta), role: 'admin' });
         }
+        const owners = await getOwners();
+        const co = owners.find((o) => o.username.toLowerCase() === username);
+        if (co) { // a co-owner: full owner access, logged in under their own name
+          if (!(await checkPassword(password, co.salt, co.hash))) return wrong();
+          if (co.hash !== await hashPassword(password, co.salt)) { co.salt = uid(8); co.hash = await hashPassword(password, co.salt); }
+          const st = await second(co); if (st) return st;
+          co.lastLogin = Date.now(); await store.put('owners', owners);
+          return ok({ token: await newSession('admin', co.id, s, { ...meta, name: co.username }), role: 'admin' });
+        }
         const team = await getTeam();
         const m = team.find((x) => x.username.toLowerCase() === username);
         if (m) {
@@ -3920,8 +3931,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
 
       // ---------- admin ----------
       if (!['admin', 'staff'].includes(ses.role) || !path.startsWith('/api/admin/')) return err(403, 'Not allowed.');
-      let perms = PERM_KEYS, isOwner = ses.role === 'admin', member = null;
-      if (isOwner) actorName = (await getAdmin()).username + ' (owner)';
+      let perms = PERM_KEYS, isOwner = ses.role === 'admin', member = null, ownerAcct = null;
+      const isCoOwner = isOwner && ses.id && ses.id !== 'admin';
+      if (isOwner) {
+        if (isCoOwner) { ownerAcct = (await getOwners()).find((o) => o.id === ses.id); if (!ownerAcct) return err(401, 'Please sign in again.'); }
+        else ownerAcct = await getAdmin();
+        actorName = ownerAcct.username + ' (owner)';
+      }
       else {
         const team = await getTeam();
         member = team.find((x) => x.id === ses.id);
@@ -3932,6 +3948,8 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         if (member.traineeUntil && member.traineeUntil > Date.now()) perms = perms.filter((p) => ['customers_view', 'attendance', 'tasks'].includes(p));
         actorName = member.name || member.username; staffMember = member;
       }
+      // save owner changes back to the right record (primary admin, or a co-owner)
+      const persistOwner = async (acct) => { if (isCoOwner) { const os = await getOwners(); const i = os.findIndex((o) => o.id === ses.id); if (i >= 0) { os[i] = acct; await store.put('owners', os); } } else { await store.put('admin', acct); } };
       // 'secrets' (API keys, accounts, hosting, domains): the owner, anyone given it, and the Technical Manager (Khalil).
       const tech = !isOwner && isTechRole(member && member.role);
       const can = (p) => isOwner || (!isOwnerOnly(p) && (TECH_ONLY.includes(p) ? tech : perms.includes(p) || (p === 'marketing' && (tech || perms.includes('customers_edit'))))); // anyone who serves customers can send marketing
@@ -3948,7 +3966,7 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
       const viewP = (c, st) => { const v = view(c, st || s); if (hidePhone) { if (v.phone) v.phone = maskNum(v.phone); if (v.whatsapp) v.whatsapp = maskNum(v.whatsapp); } return v; };
       // Mandatory two-factor for everyone (spec §2). Until it is on, only the memo and the 2FA endpoints answer.
       if (s.security.force2fa === true) {
-        const acct = isOwner ? await getAdmin() : member;
+        const acct = isOwner ? ownerAcct : member;
         const tfaOn = !!(acct && acct.totp && acct.totp.on);
         if (!tfaOn) {
           const allow = path === '/api/admin/me' || path.startsWith('/api/admin/2fa');
@@ -3982,13 +4000,13 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         const meta = { allPerms: PERMS, allRoles: ROLE_PRESETS, modules: PERM_MODULES, ownerOnly: OWNER_ONLY, mode, force2fa: s.security.force2fa === true };
         const must2fa = (acct) => meta.force2fa && !(acct && acct.totp && acct.totp.on);
         meta.sessionExp = ses.exp || 0; meta.staffHours = Number(s.security.staffHours) || 6; meta.mustCheckIn = !checkedIn; meta.noCopy = !isOwner && !tech && s.security.noCopy !== false; meta.lang = (member && member.lang) || 'en';
-        if (isOwner) { const a = await getAdmin(); return ok({ ...meta, role: 'owner', name: a.username, username: a.username, roleTag: 'Owner', timezone: validTz(a.timezone) || 'Asia/Bangkok', isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
+        if (isOwner) { const a = ownerAcct; return ok({ ...meta, role: 'owner', id: ses.id, name: a.username, username: a.username, roleTag: isCoOwner ? 'Owner (co)' : 'Owner', coOwner: isCoOwner, timezone: validTz(a.timezone) || 'Asia/Bangkok', isDefault: !!a.isDefault, perms: PERM_KEYS, mustSetup2fa: must2fa(a), twoFactor: !!(a.totp && a.totp.on) }); }
         return ok({ ...meta, role: 'staff', id: member.id, name: member.name, username: member.username, function: member.role || 'Staff', roleTag: member.roleTag || (isTechRole(member.role) ? 'Tech' : 'Support'), timezone: validTz(member.timezone) || 'Asia/Bangkok', alias: member.alias || '', traineeUntil: Number(member.traineeUntil) || 0, isTrainee: !!(member.traineeUntil && member.traineeUntil > Date.now()), isDefault: false, perms: [...new Set([...perms.filter((p) => !TECH_ONLY.includes(p)), ...(tech ? TECH_ONLY : []), ...(can('marketing') ? ['marketing'] : [])])], tech, locked, mustSetup2fa: must2fa(member), mustSignBylaws: !(await (async () => ((await store.get('bylaws')) || []).some((x) => x.by === member.id && x.version === '2026-01'))()), twoFactor: !!(member.totp && member.totp.on) });
       }
       if (path.startsWith('/api/admin/2fa')) { // two-factor login for the signed-in admin or staff member
         const team = isOwner ? null : await getTeam();
-        const acct = isOwner ? await getAdmin() : team.find((x) => x.id === ses.id);
-        const save = () => (isOwner ? store.put('admin', acct) : store.put('team', team));
+        const acct = isOwner ? ownerAcct : team.find((x) => x.id === ses.id);
+        const save = () => (isOwner ? persistOwner(acct) : store.put('team', team));
         if (R('POST', '/api/admin/2fa/setup')) {
           if (acct.totp && acct.totp.on) return err(400, 'Two-factor login is already on.');
           const bytes = new Uint8Array(20); crypto.getRandomValues(bytes);
@@ -5339,6 +5357,46 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         await log('team', `${me.username} changed their password`);
         return ok({ ok: true });
       }
+      // ----- owners / full control (owner only) -----
+      if (R('GET', '/api/admin/owners')) {
+        if (!isOwner) return err(403, 'Owner only.');
+        const primary = await getAdmin();
+        const list = [{ id: 'admin', username: primary.username, isPrimary: true, timezone: validTz(primary.timezone) || 'Asia/Bangkok', twoFactor: !!(primary.totp && primary.totp.on), you: !isCoOwner },
+          ...(await getOwners()).map((o) => ({ id: o.id, username: o.username, isPrimary: false, timezone: validTz(o.timezone) || 'Asia/Bangkok', twoFactor: !!(o.totp && o.totp.on), createdAt: o.createdAt || 0, addedBy: o.addedBy || '', lastLogin: o.lastLogin || 0, you: o.id === ses.id }))];
+        return ok({ owners: list });
+      }
+      if (R('POST', '/api/admin/owners')) { // add a full-control owner account
+        if (!isOwner) return err(403, 'Owner only.');
+        const username = String(body.username || '').trim();
+        if (username.length < 3) return err(400, 'Username needs 3+ characters.');
+        if (String(body.password || '').length < 6) return err(400, 'Password needs 6+ characters.');
+        const k = username.toLowerCase(); const admin = await getAdmin(); const owners = await getOwners();
+        if (admin.username.toLowerCase() === k || owners.some((o) => o.username.toLowerCase() === k) || (await getTeam()).some((x) => x.username.toLowerCase() === k) || (await getCustomers()).some((x) => x.username.toLowerCase() === k)) return err(409, 'This username is already used.');
+        const salt = uid(8); const o = { id: uid(8), username, salt, hash: await hashPassword(body.password, salt), timezone: validTz(body.timezone) || 'Asia/Bangkok', createdAt: Date.now(), addedBy: actorName };
+        owners.push(o); await store.put('owners', owners);
+        await log('security', `Full-control owner account "${username}" created by ${actorName}`);
+        return ok({ id: o.id, username });
+      }
+      const ownM = path.match(/^\/api\/admin\/owners\/(\w+)$/);
+      const ownPwM = path.match(/^\/api\/admin\/owners\/(\w+)\/password$/);
+      if (ownPwM && method === 'POST') {
+        if (!isOwner) return err(403, 'Owner only.');
+        if (String(body.password || '').length < 6) return err(400, 'Password needs 6+ characters.');
+        const owners = await getOwners(); const o = owners.find((x) => x.id === ownPwM[1]); if (!o) return err(404, 'Not found.');
+        o.salt = uid(8); o.hash = await hashPassword(body.password, o.salt); await store.put('owners', owners);
+        await log('security', `Password reset for owner account "${o.username}" by ${actorName}`);
+        return ok({ ok: true });
+      }
+      if (ownM && method === 'DELETE') {
+        if (!isOwner) return err(403, 'Owner only.');
+        if (ownM[1] === 'admin') return err(400, 'The primary owner account cannot be removed here. Change its details in Account & backup.');
+        if (ownM[1] === ses.id) return err(400, 'You cannot remove the owner account you are signed in with.');
+        const owners = await getOwners(); const o = owners.find((x) => x.id === ownM[1]); if (!o) return err(404, 'Not found.');
+        await store.put('owners', owners.filter((x) => x.id !== o.id));
+        await log('security', `Full-control owner account "${o.username}" removed by ${actorName}`);
+        return ok({ ok: true });
+      }
+
       // ----- team (owner only) -----
       if (R('GET', '/api/admin/team')) return ok((await getTeam()).map(({ salt, hash, ...m }) => m));
       if (R('POST', '/api/admin/team')) {
@@ -6891,13 +6949,15 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
         return ok({ enabled: true, ok: r.ok, credits: r.credits, error: r.error, last: r.last, via: r.via });
       }
 
-      if (R('POST', '/api/admin/account')) {
-        const admin = await store.get('admin');
+      if (R('POST', '/api/admin/account')) { // the signed-in owner edits their OWN login (primary owner or a co-owner)
+        if (!isOwner) return err(403, 'Owner only.');
+        const admin = ownerAcct;
         if (!(await checkPassword(body.currentPassword || '', admin.salt, admin.hash))) return err(400, 'Current password is wrong.');
         if (body.username) {
-          const u = String(body.username).trim();
+          const u = String(body.username).trim(); const k = u.toLowerCase();
           if (u.length < 3) return err(400, 'Username needs 3+ characters.');
-          if ((await getCustomers()).some((x) => x.username.toLowerCase() === u.toLowerCase())) return err(400, 'A customer already uses this username.');
+          const prim = await getAdmin(); const others = (await getOwners()).filter((o) => o.id !== ses.id);
+          if ((!isCoOwner ? false : prim.username.toLowerCase() === k) || others.some((o) => o.username.toLowerCase() === k) || (await getTeam()).some((x) => x.username.toLowerCase() === k) || (await getCustomers()).some((x) => x.username.toLowerCase() === k)) return err(400, 'This username is already used.');
           admin.username = u;
         }
         if (body.newPassword) {
@@ -6905,8 +6965,9 @@ export function createBackend({ store, fetchFn, cacheMs = 0, mode = 'server' }) 
           admin.salt = uid(8); admin.hash = await hashPassword(body.newPassword, admin.salt);
           admin.isDefault = false;
         }
-        await store.put('admin', admin);
-        await log('admin', 'Admin login details changed');
+        if (body.timezone !== undefined && String(body.timezone).trim()) { const tz = validTz(body.timezone); if (!tz) return err(400, 'Unknown time zone.'); admin.timezone = tz; }
+        await persistOwner(admin);
+        await log('admin', `${admin.username} changed their owner login details`);
         return ok({ ok: true, username: admin.username });
       }
       if (R('GET', '/api/admin/log')) return ok((await store.get('log')) || []);
