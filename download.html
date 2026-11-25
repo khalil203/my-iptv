@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Get the app · INTPROTO-TV</title>
+  <meta name="description" content="Download the INTPROTO-TV app for Android, iOS, Windows, macOS and Smart TV.">
+  <meta name="theme-color" content="#07081A">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=126">
+  <script>try{var m=localStorage.getItem("tvp_theme")||"auto",hr=new Date().getHours();document.documentElement.dataset.theme=m==="auto"?(hr>=6&&hr<18?"light":"dark"):m}catch(e){}</script>
+  <style>
+    .dl { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; }
+    .dl .hero { margin: 10px 0 26px; }
+    .plats { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .plat { background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.015)); border: 1px solid var(--line); border-radius: 18px; padding: 18px; animation: fadeUp .5s var(--ease) both; }
+    .plat.me { border-color: var(--primary); box-shadow: var(--glow); }
+    .plat h3 { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .plat h3 .ic { font-size: 26px; }
+    .plat ol { margin: 8px 0 0; padding-inline-start: 20px; color: var(--muted); font-size: .9rem; line-height: 1.6; }
+    .plat ol b { color: var(--text); }
+    .badge-me { font-size: .7rem; background: var(--primary); color: #fff; padding: 3px 8px; border-radius: 99px; margin-inline-start: auto; font-family: Inter, sans-serif; }
+    .auto { margin-top: 22px; text-align: center; color: var(--muted); font-size: .9rem; }
+    .code-url { font-family: ui-monospace, Menlo, monospace; background: rgba(0,0,0,.4); padding: 3px 8px; border-radius: 8px; color: var(--accent); }
+  </style>
+</head>
+<body>
+<div class="dl">
+  <div class="row" style="justify-content:space-between"><a class="btn sm ghost" href="./" id="back">←</a><div class="lang-sw small" id="langs"></div></div>
+  <div class="hero"><div class="hero-logo"><i></i><img src="logo.png" alt=""></div><h1 class="brand-name xl" style="margin:0">INTPROTO-TV</h1><p class="muted" id="intro"></p></div>
+  <div class="plats" id="plats"></div>
+  <p class="auto" id="auto"></p>
+</div>
+<script type="module">
+const T = {
+  en: { winDl: '⬇ Download for Windows', macDl: '⬇ Download for Mac', wSteps2: ['Click <b>Download for Windows</b> and open the file.', 'If Windows warns you, click <b>More info → Run anyway</b>.', 'INTPROTO-TV opens and gets a desktop shortcut. It updates by itself.'], mSteps2: ['Click <b>Download for Mac</b>, open the file and drag <b>INTPROTO-TV</b> into Applications.', 'The first time: right-click the app → <b>Open</b> (or System Settings → Privacy & Security → <b>Open Anyway</b>).', 'It updates by itself.'], intro: 'Install the app on any device. It updates by itself — you never need to download it again.', back: '← Back',
+    android: 'Android phone & tablet', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone & iPad', windows: 'Windows PC', mac: 'Mac', you: 'Your device',
+    apk: '⬇ Download for Android (APK)', install: '⬇ Install the app', open: 'Open in browser',
+    aSteps: ['Tap <b>Download for Android</b>.', 'Open the downloaded file and tap <b>Install</b> (allow “Install unknown apps” if asked).', 'Or tap <b>Install the app</b> to add the web app from Chrome.'],
+    tvSteps: ['On your TV, install the free app <b>Downloader</b> from the Play Store / App Store.', 'Open Downloader and type: <span class="code-url">{tv}</span>', 'Install, then open <b>INTPROTO-TV</b> from your apps. Use the remote arrows and OK.'],
+    iSteps: ['Tap <b>Copy link</b>, open <b>Safari</b> and paste it (links opened inside Gmail, Outlook or WhatsApp can’t install the app).', 'Tap the <b>Share</b> button (square with arrow).', 'Tap <b>Add to Home Screen</b>, then <b>Add</b>.'],
+    wSteps: ['Open this page in <b>Chrome</b> or <b>Edge</b>.', 'Click <b>Install the app</b> (or the install icon in the address bar).', 'It opens in its own window and appears in the Start menu.'],
+    mSteps: ['In <b>Chrome</b> or <b>Edge</b>: click <b>Install the app</b> or the install icon in the address bar.', 'In <b>Safari</b>: menu <b>File → Add to Dock</b>.', 'Open it from the Dock or Launchpad.'],
+    auto: '✨ All versions update automatically. New features appear the next time you open the app.', ab: '“Unknown app blocked”? Settings → <b>Security and privacy → Auto Blocker</b> → turn it off, open the file again and tap <b>Install</b>. You can turn it back on after.', copySafari: 'Copy link for Safari', safMac: 'Safari: File → Add to Dock', copied: 'Link copied ✓ Now open Safari and paste it.' },
+  fr: { winDl: '⬇ Télécharger pour Windows', macDl: '⬇ Télécharger pour Mac', wSteps2: ['Cliquez sur <b>Télécharger pour Windows</b> et ouvrez le fichier.', 'Si Windows vous avertit : <b>Informations complémentaires → Exécuter quand même</b>.', "INTPROTO-TV s'ouvre avec un raccourci sur le bureau. Mise à jour automatique."], mSteps2: ['Cliquez sur <b>Télécharger pour Mac</b>, ouvrez le fichier et glissez <b>INTPROTO-TV</b> dans Applications.', 'La première fois : clic droit sur l’app → <b>Ouvrir</b> (ou Réglages → Confidentialité et sécurité → <b>Ouvrir quand même</b>).', 'Mise à jour automatique.'], intro: "Installez l'application sur n'importe quel appareil. Elle se met à jour toute seule — plus besoin de la retélécharger.", back: '← Retour',
+    android: 'Téléphone & tablette Android', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone & iPad', windows: 'PC Windows', mac: 'Mac', you: 'Votre appareil',
+    apk: '⬇ Télécharger pour Android (APK)', install: "⬇ Installer l'application", open: 'Ouvrir dans le navigateur',
+    aSteps: ['Appuyez sur <b>Télécharger pour Android</b>.', 'Ouvrez le fichier et appuyez sur <b>Installer</b> (autorisez « sources inconnues » si demandé).', "Ou appuyez sur <b>Installer l'application</b> depuis Chrome."],
+    tvSteps: ["Sur votre TV, installez l'app gratuite <b>Downloader</b>.", 'Ouvrez Downloader et tapez : <span class="code-url">{tv}</span>', 'Installez, puis ouvrez <b>INTPROTO-TV</b>. Utilisez les flèches et OK de la télécommande.'],
+    iSteps: ['Touchez <b>Copier le lien</b>, ouvrez <b>Safari</b> et collez-le (un lien ouvert dans Gmail, Outlook ou WhatsApp ne peut pas installer l’app).', 'Touchez le bouton <b>Partager</b>.', "Touchez <b>Sur l'écran d'accueil</b>, puis <b>Ajouter</b>."],
+    wSteps: ['Ouvrez cette page dans <b>Chrome</b> ou <b>Edge</b>.', "Cliquez sur <b>Installer l'application</b> (ou l'icône dans la barre d'adresse).", 'Elle s’ouvre dans sa propre fenêtre et apparaît dans le menu Démarrer.'],
+    mSteps: ["Dans <b>Chrome</b> ou <b>Edge</b> : cliquez sur <b>Installer l'application</b>.", 'Dans <b>Safari</b> : menu <b>Fichier → Ajouter au Dock</b>.', 'Ouvrez-la depuis le Dock ou le Launchpad.'],
+    auto: "✨ Toutes les versions se mettent à jour automatiquement à la prochaine ouverture." , ab: '« Application inconnue bloquée » ? Paramètres → <b>Sécurité et confidentialité → Bloqueur automatique</b> → désactivez-le, rouvrez le fichier et touchez <b>Installer</b>. Vous pourrez le réactiver après.', copySafari: 'Copier le lien pour Safari', safMac: 'Safari : Fichier → Ajouter au Dock', copied: 'Lien copié ✓ Ouvrez Safari et collez-le.' },
+  de: { winDl: '⬇ Für Windows laden', macDl: '⬇ Für Mac laden', wSteps2: ['Klicken Sie auf <b>Für Windows laden</b> und öffnen Sie die Datei.', 'Bei einer Windows-Warnung: <b>Weitere Informationen → Trotzdem ausführen</b>.', 'INTPROTO-TV öffnet sich mit Desktop-Verknüpfung. Aktualisiert sich selbst.'], mSteps2: ['Klicken Sie auf <b>Für Mac laden</b>, öffnen Sie die Datei und ziehen Sie <b>INTPROTO-TV</b> in Programme.', 'Beim ersten Mal: Rechtsklick auf die App → <b>Öffnen</b> (oder Systemeinstellungen → Datenschutz & Sicherheit → <b>Dennoch öffnen</b>).', 'Aktualisiert sich selbst.'], intro: 'Installieren Sie die App auf jedem Gerät. Sie aktualisiert sich selbst.', back: '← Zurück',
+    android: 'Android-Handy & -Tablet', androidTV: 'Android TV · TV-Box · Fire TV', iphone: 'iPhone & iPad', windows: 'Windows-PC', mac: 'Mac', you: 'Ihr Gerät',
+    apk: '⬇ Für Android laden (APK)', install: '⬇ App installieren', open: 'Im Browser öffnen',
+    aSteps: ['Tippen Sie auf <b>Für Android laden</b>.', 'Öffnen Sie die Datei und tippen Sie auf <b>Installieren</b> (ggf. „Unbekannte Apps installieren“ erlauben).', 'Oder tippen Sie auf <b>App installieren</b>, um die Web-App aus Chrome hinzuzufügen.'],
+    tvSteps: ['Installieren Sie auf dem TV die kostenlose App <b>Downloader</b>.', 'Öffnen Sie Downloader und geben Sie ein: <span class="code-url">{tv}</span>', 'Installieren und dann <b>INTPROTO-TV</b> aus Ihren Apps öffnen.'],
+    iSteps: ['Tippen Sie auf <b>Link kopieren</b>, öffnen Sie <b>Safari</b> und fügen Sie ihn ein (Links in Gmail, Outlook oder WhatsApp können die App nicht installieren).', 'Tippen Sie auf <b>Teilen</b> (Quadrat mit Pfeil).', 'Tippen Sie auf <b>Zum Home-Bildschirm</b>, dann <b>Hinzufügen</b>.'],
+    wSteps: ['Öffnen Sie diese Seite in <b>Chrome</b> oder <b>Edge</b>.', 'Klicken Sie auf <b>App installieren</b>.', 'Sie öffnet sich im eigenen Fenster.'],
+    mSteps: ['In <b>Chrome</b> oder <b>Edge</b>: <b>App installieren</b>.', 'In <b>Safari</b>: <b>Ablage → Zum Dock hinzufügen</b>.', 'Öffnen Sie sie aus dem Dock.'],
+    auto: '✨ Alle Versionen aktualisieren sich automatisch.', ab: '„Unbekannte App blockiert“? Einstellungen → <b>Sicherheit und Datenschutz → Auto Blocker</b> → ausschalten, Datei erneut öffnen und <b>Installieren</b> tippen. Danach wieder einschaltbar.', copySafari: 'Link für Safari kopieren', safMac: 'Safari: Ablage → Zum Dock hinzufügen', copied: 'Link kopiert ✓ Jetzt Safari öffnen und einfügen.' },
+  es: { winDl: '⬇ Descargar para Windows', macDl: '⬇ Descargar para Mac', wSteps2: ['Haz clic en <b>Descargar para Windows</b> y abre el archivo.', 'Si Windows avisa: <b>Más información → Ejecutar de todas formas</b>.', 'INTPROTO-TV se abre con acceso directo. Se actualiza solo.'], mSteps2: ['Haz clic en <b>Descargar para Mac</b>, abre el archivo y arrastra <b>INTPROTO-TV</b> a Aplicaciones.', 'La primera vez: clic derecho en la app → <b>Abrir</b> (o Ajustes del Sistema → Privacidad y seguridad → <b>Abrir igualmente</b>).', 'Se actualiza solo.'], intro: 'Instala la app en cualquier dispositivo. Se actualiza sola.', back: '← Volver',
+    android: 'Móvil y tableta Android', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone y iPad', windows: 'PC Windows', mac: 'Mac', you: 'Tu dispositivo',
+    apk: '⬇ Descargar para Android (APK)', install: '⬇ Instalar la app', open: 'Abrir en el navegador',
+    aSteps: ['Toca <b>Descargar para Android</b>.', 'Abre el archivo y toca <b>Instalar</b> (permite «instalar apps desconocidas» si lo pide).', 'O toca <b>Instalar la app</b> para añadir la app web desde Chrome.'],
+    tvSteps: ['En tu TV instala la app gratuita <b>Downloader</b>.', 'Abre Downloader y escribe: <span class="code-url">{tv}</span>', 'Instala y abre <b>INTPROTO-TV</b> desde tus apps.'],
+    iSteps: ['Toca <b>Copiar enlace</b>, abre <b>Safari</b> y pégalo (los enlaces abiertos en Gmail, Outlook o WhatsApp no instalan la app).', 'Toca <b>Compartir</b> (cuadrado con flecha).', 'Toca <b>Añadir a pantalla de inicio</b> y luego <b>Añadir</b>.'],
+    wSteps: ['Abre esta página en <b>Chrome</b> o <b>Edge</b>.', 'Haz clic en <b>Instalar la app</b>.', 'Se abre en su propia ventana.'],
+    mSteps: ['En <b>Chrome</b> o <b>Edge</b>: <b>Instalar la app</b>.', 'En <b>Safari</b>: <b>Archivo → Añadir al Dock</b>.', 'Ábrela desde el Dock.'],
+    auto: '✨ Todas las versiones se actualizan solas.', ab: '¿«App desconocida bloqueada»? Ajustes → <b>Seguridad y privacidad → Bloqueador automático</b> → desactívalo, abre el archivo otra vez y toca <b>Instalar</b>. Luego puedes reactivarlo.', copySafari: 'Copiar enlace para Safari', safMac: 'Safari: Archivo → Añadir al Dock', copied: 'Enlace copiado ✓ Abre Safari y pégalo.' },
+  it: { winDl: '⬇ Scarica per Windows', macDl: '⬇ Scarica per Mac', wSteps2: ['Clicca <b>Scarica per Windows</b> e apri il file.', 'Se Windows avvisa: <b>Ulteriori informazioni → Esegui comunque</b>.', 'INTPROTO-TV si apre con un collegamento sul desktop. Si aggiorna da solo.'], mSteps2: ['Clicca <b>Scarica per Mac</b>, apri il file e trascina <b>INTPROTO-TV</b> in Applicazioni.', 'La prima volta: clic destro sull’app → <b>Apri</b> (o Impostazioni di Sistema → Privacy e sicurezza → <b>Apri comunque</b>).', 'Si aggiorna da solo.'], intro: 'Installa l’app su qualsiasi dispositivo. Si aggiorna da sola.', back: '← Indietro',
+    android: 'Telefono e tablet Android', androidTV: 'Android TV · TV Box · Fire TV', iphone: 'iPhone e iPad', windows: 'PC Windows', mac: 'Mac', you: 'Il tuo dispositivo',
+    apk: '⬇ Scarica per Android (APK)', install: '⬇ Installa l’app', open: 'Apri nel browser',
+    aSteps: ['Tocca <b>Scarica per Android</b>.', 'Apri il file e tocca <b>Installa</b> (consenti «installa app sconosciute» se richiesto).', 'Oppure tocca <b>Installa l’app</b> per aggiungere la web app da Chrome.'],
+    tvSteps: ['Sulla TV installa l’app gratuita <b>Downloader</b>.', 'Apri Downloader e scrivi: <span class="code-url">{tv}</span>', 'Installa e apri <b>INTPROTO-TV</b> dalle tue app.'],
+    iSteps: ['Tocca <b>Copia link</b>, apri <b>Safari</b> e incollalo (i link aperti in Gmail, Outlook o WhatsApp non installano l’app).', 'Tocca <b>Condividi</b> (quadrato con freccia).', 'Tocca <b>Aggiungi alla schermata Home</b>, poi <b>Aggiungi</b>.'],
+    wSteps: ['Apri questa pagina in <b>Chrome</b> o <b>Edge</b>.', 'Clicca <b>Installa l’app</b>.', 'Si apre in una finestra propria.'],
+    mSteps: ['In <b>Chrome</b> o <b>Edge</b>: <b>Installa l’app</b>.', 'In <b>Safari</b>: <b>File → Aggiungi al Dock</b>.', 'Aprila dal Dock.'],
+    auto: '✨ Tutte le versioni si aggiornano da sole.', ab: '«App sconosciuta bloccata»? Impostazioni → <b>Sicurezza e privacy → Blocco automatico</b> → disattivalo, riapri il file e tocca <b>Installa</b>. Poi puoi riattivarlo.', copySafari: 'Copia link per Safari', safMac: 'Safari: File → Aggiungi al Dock', copied: 'Link copiato ✓ Ora apri Safari e incollalo.' },
+};
+let lang = localStorage.getItem('tvp_lang') || (navigator.languages || [navigator.language]).map((l) => String(l).slice(0, 2)).find((l) => T[l]) || 'en';
+const ua = navigator.userAgent;
+const isTV = /Android/.test(ua) && /(TV|AFT|BRAVIA|SMART|Box|MiBOX|SHIELD)/i.test(ua);
+const isAndroid = /Android/.test(ua) && !isTV;
+const isIOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const isMac = /Macintosh/.test(ua) && !isIOS;
+const isWin = /Windows/.test(ua);
+const me = isTV ? 'tv' : isAndroid ? 'android' : isIOS ? 'ios' : isMac ? 'mac' : isWin ? 'win' : '';
+const apkUrl = 'apk/INTPROTO-TV.apk';
+const REL = 'https://github.com/khalil203/my-iptv/releases/download/desktop/';
+const tvShort = location.host + '/tv';
+let deferred = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; render(); });
+window.copyLink = async () => { const l = location.origin + '/app'; try { await navigator.clipboard.writeText(l); } catch { prompt('Copy:', l); return; } alert(({ ...T.en, ...(T[lang] || {}) }).copied); };
+window.installApp = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; render(); } else alert((T[lang] || T.en).wSteps[1].replace(/<[^>]+>/g, '')); };
+let apkOk = null;
+fetch(apkUrl, { method: 'HEAD' }).then((r) => { apkOk = r.ok; render(); }).catch(() => { apkOk = false; render(); });
+function render() {
+  const L = { ...T.en, ...(T[lang] || {}) }; // any saved language (de, es, it, th…) falls back to English instead of a blank page
+  document.documentElement.lang = T[lang] ? lang : 'en'; document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  document.getElementById('intro').textContent = L.intro;
+  document.getElementById('auto').textContent = L.auto;
+  document.getElementById('back').textContent = L.back;
+  document.getElementById('langs').innerHTML = [['en', '🇬🇧 English'], ['fr', '🇫🇷 Français'], ['de', '🇩🇪 Deutsch'], ['es', '🇪🇸 Español'], ['it', '🇮🇹 Italiano']].map(([k, n]) => `<a class="${k === lang ? 'on' : ''}" data-l="${k}" tabindex="0">${n}</a>`).join(' · ');
+  const apkBtn = apkOk === false ? `<a class="btn primary block" href="https://github.com/khalil203/my-iptv/releases/latest">${L.apk}</a>` : `<a class="btn primary block" href="${apkUrl}" download>${L.apk}</a>`;
+  const installBtn = `<button class="btn block" onclick="installApp()" style="margin-top:8px">${L.install}</button>`;
+  const card = (id, ic, title, steps, btns) => `<div id="${id}" class="plat ${me === id ? 'me' : ''}" style="order:${me === id ? 0 : 1}"><h3><span class="ic">${ic}</span>${title}${me === id ? `<span class="badge-me">${L.you}</span>` : ''}</h3>${btns}<ol>${steps.map((s) => `<li>${s.replace('{tv}', tvShort)}</li>`).join('')}</ol></div>`;
+  document.getElementById('plats').innerHTML = [
+    card('android', '🤖', L.android, L.aSteps.concat([L.ab]), apkBtn + installBtn),
+    card('tv', '📺', L.androidTV, L.tvSteps, apkBtn),
+    card('ios', '📱', L.iphone, L.iSteps, `<button class="btn primary block" onclick="copyLink()">📋 ${L.copySafari}</button><p class="small" style="margin:6px 0 0"><span class="code-url">${location.origin}/app</span></p>`),
+    card('win', '🪟', L.windows, L.wSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Windows-Setup.exe">${L.winDl}</a>`),
+    card('mac', '💻', L.mac, L.mSteps2, `<a class="btn primary block" href="${REL}INTPROTO-TV-Mac-arm64.dmg">${L.macDl} · Apple M1–M4</a><a class="btn block" style="margin-top:8px" href="${REL}INTPROTO-TV-Mac-x64.dmg">${L.macDl} · Intel</a><button class="btn block" style="margin-top:8px" onclick="copyLink()">📋 ${L.copySafari}</button><p class="small muted" style="margin:6px 0 0">${L.safMac} · <span class="code-url">${location.origin}/app</span></p>`),
+  ].join('');
+}
+document.addEventListener('click', (e) => { const a = e.target.closest('[data-l]'); if (a) { lang = a.dataset.l; localStorage.setItem('tvp_lang', lang); render(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && document.activeElement?.dataset.l) document.activeElement.click(); });
+if ('serviceWorker' in navigator && !location.hostname.endsWith('github.io')) navigator.serviceWorker.register('sw.js').catch(() => {});
+render();
+if (location.hash) setTimeout(() => { const el = document.querySelector(location.hash); if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('me'); } }, 300);
+</script>
+</body>
+</html>

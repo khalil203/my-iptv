@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="IBO XPlayer">
+  <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4C1D95"/><stop offset="100%" stop-color="#DDD6F3"/></linearGradient></defs>
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="url(#g)"/>
+  <text x="50%" y="40" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="26" font-weight="800" fill="#fff">XP</text>
+</svg>
