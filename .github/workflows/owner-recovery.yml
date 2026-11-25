@@ -1,0 +1,33 @@
+# Owner recovery: resets the primary owner login of the live app.
+# 1) Settings → Secrets and variables → Actions → add OWNER_RECOVERY_USER and OWNER_RECOVERY_PASSWORD
+# 2) Actions → "Owner recovery" → Run workflow
+# 3) Sign in with that login, then delete both secrets.
+name: Owner recovery
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Reset primary owner login
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEW_USER: ${{ secrets.OWNER_RECOVERY_USER }}
+          NEW_PASS: ${{ secrets.OWNER_RECOVERY_PASSWORD }}
+        run: |
+          mkdir -p /tmp/rec
+          ID=$(npx wrangler kv namespace list | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const l=JSON.parse(s);const n=l.find(x=>x.title==='my-iptv-db')||l.find(x=>/my-iptv/.test(x.title));console.log(n?n.id:'')})")
+          test -n "$ID" || { echo "storage not found"; exit 1; }
+          npx wrangler kv key get admin --namespace-id "$ID" --remote > /tmp/rec/admin.json 2>/dev/null || echo "null" > /tmp/rec/admin.json
+          node tools/owner-recovery.mjs
+          npx wrangler kv key put admin --path /tmp/rec/admin.new.json --namespace-id "$ID" --remote > /dev/null
+          echo "Done. Sign in with the login from your recovery secrets, then delete those secrets."
+      - name: Remove temporary files
+        if: always()
+        run: rm -rf /tmp/rec
